@@ -137,7 +137,7 @@ test("fresh state dir renders an empty board and an empty sidebar hint", async (
     window.locator('[data-testid^="sidebar-task-row-"]'),
   ).toHaveCount(0);
   await expect(window.getByTestId("workspace-empty-hint")).toBeVisible();
-  await expect(window.getByTestId("board-view")).toHaveCount(0);
+  await expect(window.getByTestId("board-view")).toBeHidden();
 
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
@@ -176,6 +176,30 @@ test("a terminal panel appears for the focused task and receives pty output", as
   });
 });
 
+test("terminals survive a board round-trip without respawning", async () => {
+  const panel = window.getByTestId("terminal-panel").first();
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute("data-received-output", "true", {
+    timeout: 20_000,
+  });
+
+  // Plant a marker in the live shell, round-trip through the board view, and
+  // assert the same terminal still shows it: proof the pty was never killed.
+  await panel.click();
+  await window.keyboard.type("echo berth-$((40+2))");
+  await window.keyboard.press("Enter");
+  await expect(panel).toContainText("berth-42", { timeout: 10_000 });
+
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await window.getByTestId("workspace-button").click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+
+  await expect(window.getByTestId("terminal-panel").first()).toContainText(
+    "berth-42",
+  );
+});
+
 test('"+ terminal" adds a second dockview terminal panel', async () => {
   const before = await window.getByTestId("terminal-panel").count();
   await window.getByTestId("add-terminal-button").click();
@@ -190,7 +214,7 @@ test("the Board button switches to the kanban board with all four columns", asyn
   await window.getByTestId("board-button").click();
 
   await expect(window.getByTestId("board-view")).toBeVisible();
-  await expect(window.getByTestId("workspace-view")).toHaveCount(0);
+  await expect(window.getByTestId("workspace-view")).toBeHidden();
 
   for (const id of ["backlog", "dev", "awaiting", "done"]) {
     await expect(window.getByTestId(`column-${id}`)).toBeVisible();
@@ -204,7 +228,7 @@ test("the board's Workspace button returns to the workspace view", async () => {
 
   await window.getByTestId("workspace-button").click();
   await expect(window.getByTestId("workspace-view")).toBeVisible();
-  await expect(window.getByTestId("board-view")).toHaveCount(0);
+  await expect(window.getByTestId("board-view")).toBeHidden();
 });
 
 test("clicking a card returns to the workspace view, focused on that task", async () => {
@@ -220,7 +244,7 @@ test("clicking a card returns to the workspace view, focused on that task", asyn
   await card.click();
 
   await expect(window.getByTestId("workspace-view")).toBeVisible();
-  await expect(window.getByTestId("board-view")).toHaveCount(0);
+  await expect(window.getByTestId("board-view")).toBeHidden();
   await expect(window.getByTestId(`task-workspace-${taskId}`)).toBeVisible();
   await expect(
     window.getByTestId(`sidebar-task-row-${taskId}`),
