@@ -1,0 +1,89 @@
+// Service interfaces — the call-chain boundary between Manager/Engine and
+// Resource Access (see /ai/prds/architecture.md). Managers and Engines only
+// ever see these interfaces; concrete file-backed implementations live in
+// access/.
+
+import type {
+  GlobalConfig,
+  PresenceMode,
+  PresenceRecord,
+  Task,
+  WorkspaceBinding,
+} from "./model.js";
+
+/**
+ * Durable task storage. Exposes atomic business verbs over the task list,
+ * not raw CRUD — callers never read-modify-write the array themselves.
+ */
+export interface TaskStateAccess {
+  listTasks(): Promise<Task[]>;
+  getTask(id: string): Promise<Task | undefined>;
+  createTask(task: Task): Promise<void>;
+  /** Replace a task's persisted fields entirely; the id must already exist. */
+  replaceTask(task: Task): Promise<void>;
+  removeTask(id: string): Promise<void>;
+}
+
+/**
+ * Workspace-binding storage (phase 2 seam). Phase 1 round-trips bindings but
+ * nothing in the command API creates them yet.
+ */
+export interface WorkspaceBindingAccess {
+  listBindings(): Promise<WorkspaceBinding[]>;
+  getBindingForTask(taskId: string): Promise<WorkspaceBinding | undefined>;
+  attachBinding(binding: WorkspaceBinding): Promise<void>;
+  replaceBinding(binding: WorkspaceBinding): Promise<void>;
+  removeBinding(taskId: string): Promise<void>;
+}
+
+export interface RegisterPresenceInput {
+  taskId: string;
+  sessionPath: string;
+  pid: number;
+  mode: PresenceMode;
+  at: string;
+  logPath?: string;
+}
+
+/**
+ * Liveness and outcome registry for task-attached agent processes. Ported
+ * from pi-home's presence access with the cmux location field dropped;
+ * semantics (pid-scoped mutations from superseded processes are ignored)
+ * carry over unchanged.
+ */
+export interface PresenceAccess {
+  register(input: RegisterPresenceInput): Promise<void>;
+  heartbeat(taskId: string, pid: number, at: string): Promise<void>;
+  setTurnActive(
+    taskId: string,
+    pid: number,
+    running: boolean,
+    at: string,
+  ): Promise<void>;
+  reportOutcome(
+    taskId: string,
+    pid: number,
+    status: "done" | "blocked",
+    note: string | undefined,
+    at: string,
+  ): Promise<void>;
+  end(taskId: string, pid: number, at: string): Promise<void>;
+  read(taskId: string): Promise<PresenceRecord | undefined>;
+  list(): Promise<PresenceRecord[]>;
+  acknowledge(taskId: string): Promise<void>;
+  markNotified(taskId: string): Promise<void>;
+  clear(taskId: string): Promise<void>;
+}
+
+/** Per-user global configuration storage. */
+export interface ConfigAccess {
+  load(): Promise<GlobalConfig>;
+  save(config: GlobalConfig): Promise<void>;
+}
+
+export interface Clock {
+  now(): Date;
+}
+export interface IdGenerator {
+  next(): string;
+}
