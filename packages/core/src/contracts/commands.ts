@@ -81,4 +81,28 @@ export interface CoreCommands {
   /** Patch a task's non-state fields (title, prompt, error) without moving it. */
   updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
   deleteTask(id: string, options?: DeleteTaskOptions): Promise<void>;
+  /**
+   * Push the task's branch, create or reuse its pull request (draft→ready
+   * reuse semantics: an existing draft is marked ready, otherwise a fresh PR
+   * is opened), store `task.pr`, and move the task to `awaiting` /
+   * `{ kind: "review" }`. Requires a repository-backed task with a bound
+   * worktree and branch.
+   */
+  toReview(taskId: string): Promise<Task>;
+  /**
+   * Move a task to `done`. Attempts the safe cleanup path first (remove the
+   * worktree if clean, delete the branch if its PR is merged); any refusal
+   * (dirty worktree, unmerged branch, missing repository) never blocks the
+   * move — the task still lands in `done` and the refusal surfaces as
+   * `warning` in the result instead of throwing.
+   */
+  toDone(taskId: string): Promise<{ task: Task; warning?: string }>;
+  /**
+   * Re-fetch PR status for every repository-backed task with an open PR,
+   * update `task.pr`, and — when `config.automation` is true — let the
+   * configured movers propose at most one board move per task. Also flags
+   * `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
+   * `board-changed` when anything changed. This is what the app polls.
+   */
+  refresh(): Promise<{ warnings: string[] }>;
 }

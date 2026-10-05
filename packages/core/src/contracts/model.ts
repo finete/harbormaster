@@ -22,6 +22,56 @@ export type AwaitingKind =
   | { kind: "slack"; permalink?: string }
   | { kind: "deploy"; stageId: string; stageLabel: string };
 
+/**
+ * Pull-request linkage and GitHub review/merge snapshot for a task, as
+ * refreshed by `CoreCommands.refresh()`. Ported and pruned from pi-home's
+ * richer `PullRequestMeta` (src/contracts/model.ts): no Slack-thread or
+ * cmux-specific fields, but the review/merge signal the movers need
+ * (reviewDecision, head-tracking flags, merge commit) carries over.
+ */
+export interface TaskPullRequest {
+  number: number;
+  url?: string;
+  state: "draft" | "open" | "merged" | "closed";
+  reviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
+  /** Whether an outstanding changes-requested review targets the current PR head. */
+  changesRequestedOnHead?: boolean;
+  /** Whether a human reviewer submitted feedback (COMMENTED or CHANGES_REQUESTED) on the current PR head. */
+  humanFeedbackOnHead?: boolean;
+  reviewRequested?: boolean;
+  reviewSubmitted?: boolean;
+  headRefOid?: string;
+  /** The exact squash/merge commit that entered the destination branch, once merged. */
+  mergeCommit?: { oid: string; targetBranch: string };
+}
+
+/**
+ * One configured deployment-pipeline stage for a repository. A stage without
+ * a hook is a manual gate: movers enter it but never advance past it on
+ * their own. Ported from pi-home's `DeploymentStageConfig`.
+ */
+export interface DeploymentStageConfig {
+  id: string;
+  label: string;
+  /** Registry name of the built-in stage hook that decides when this stage's wait is over. */
+  hook?: string;
+  /** Opaque options passed to the hook (e.g. `{ url, hotfixScan, hotfixDepth }`). */
+  options?: Record<string, unknown>;
+}
+
+/** Declarative deployment pipeline for one repository, from the global config. */
+export interface DeploymentPipeline {
+  /** Display template with `{major}`/`{minor}`/`{patch}` placeholders; stored but not yet interpreted in this phase. */
+  releaseBranch?: string;
+  /** Ordered stages; a merged PR enters the first and lands (done) after the last. */
+  stages: DeploymentStageConfig[];
+}
+
+/** Per-repository settings from the global config, keyed by normalized repository id. */
+export interface RepositoryConfig {
+  deployment?: DeploymentPipeline;
+}
+
 /** Ordered list of board columns; the source of truth for board layout. */
 export const TASK_STATES: readonly TaskState[] = [
   "backlog",
@@ -49,8 +99,8 @@ export interface Task {
   branch?: string;
   /** Branch this task's work will land on (e.g. "main"). */
   targetBranch?: string;
-  /** Pull-request linkage, once opened. */
-  pr?: { number: number; state: "draft" | "open" | "merged" | "closed" };
+  /** Pull-request linkage, once opened; kept current by `CoreCommands.refresh()`. */
+  pr?: TaskPullRequest;
   /** Opaque reference to a tracked issue (Beads/GitHub), resolved in a later phase. */
   issueRef?: string;
   /** Set only while `state === "awaiting"`; cleared on any move out of it. */
@@ -144,6 +194,8 @@ export interface GlobalConfig {
   codeRoot?: string;
   /** Git namespace for new task branches (e.g. "alice/"); may be empty. */
   branchPrefix?: string;
+  /** Per-repository settings (deployment pipelines today), keyed by normalized repository id. */
+  repositories?: Record<string, RepositoryConfig>;
 }
 
 export const defaultGlobalConfig = (): GlobalConfig => ({

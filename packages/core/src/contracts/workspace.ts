@@ -87,6 +87,13 @@ export interface GitWorktreeAccess {
     branch: string,
     force?: boolean,
   ): Promise<void>;
+  /**
+   * Push `branch` from the worktree at `path` to `origin`, setting upstream
+   * tracking. The only git-write verb the GitHub lifecycle commands need;
+   * kept here (not in GithubPrAccess) because all git I/O stays in git
+   * access per the accessor-separation rule.
+   */
+  pushBranch(path: string, branch: string): Promise<void>;
 }
 
 // Ambient augmentation (not a textual edit of contracts/model.ts, which is

@@ -8,7 +8,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { GlobalConfig } from "../contracts/model.js";
+import type {
+  DeploymentPipeline,
+  DeploymentStageConfig,
+  GlobalConfig,
+  RepositoryConfig,
+} from "../contracts/model.js";
 import { defaultGlobalConfig } from "../contracts/model.js";
 import type { ConfigAccess } from "../contracts/services.js";
 // Imported for its side-effecting declare-module augmentation of
@@ -48,11 +53,13 @@ export class JsonConfigAccess implements ConfigAccess {
     }
     if (!isRecord(raw)) throw this.invalid();
     try {
+      const repositories = normalizeRepositories(raw.repositories);
       return {
         automation: normalizeAutomation(raw.automation),
         movers: normalizeMovers(raw.movers),
         codeRoot: normalizeCodeRoot(raw.codeRoot),
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
+        ...(repositories ? { repositories } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
@@ -71,6 +78,100 @@ export class JsonConfigAccess implements ConfigAccess {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Per-repository settings, keyed by normalized repository id. Validated
+ * leniently: only the `deployment` shape this phase reads is checked;
+ * unrecognized keys on a repository entry (and opaque per-stage `options`)
+ * round-trip untouched so a later phase (or a user hand-editing the file)
+ * can add fields without this loader rejecting the whole config.
+ */
+function normalizeRepositories(
+  value: unknown,
+): Record<string, RepositoryConfig> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error("repositories must be an object keyed by repository id");
+  }
+  const repositories: Record<string, RepositoryConfig> = {};
+  for (const [repositoryId, entry] of Object.entries(value)) {
+    if (!repositoryId.trim()) {
+      throw new Error("repositories keys must be non-empty repository ids");
+    }
+    if (!isRecord(entry)) {
+      throw new Error(`repositories.${repositoryId} must be an object`);
+    }
+    const config: RepositoryConfig = { ...entry };
+    if (entry.deployment !== undefined) {
+      config.deployment = normalizeDeployment(repositoryId, entry.deployment);
+    }
+    repositories[repositoryId] = config;
+  }
+  return repositories;
+}
+
+function normalizeDeployment(
+  repositoryId: string,
+  value: unknown,
+): DeploymentPipeline {
+  const at = `repositories.${repositoryId}.deployment`;
+  if (!isRecord(value)) throw new Error(`${at} must be an object`);
+  if (
+    value.releaseBranch !== undefined &&
+    (typeof value.releaseBranch !== "string" || !value.releaseBranch.trim())
+  ) {
+    throw new Error(`${at}.releaseBranch must be a non-empty string`);
+  }
+  if (!Array.isArray(value.stages) || value.stages.length === 0) {
+    throw new Error(`${at}.stages must be a non-empty array`);
+  }
+  const seen = new Set<string>();
+  const stages = value.stages.map((stage, index): DeploymentStageConfig => {
+    const stageAt = `${at}.stages[${index}]`;
+    if (!isRecord(stage)) throw new Error(`${stageAt} must be an object`);
+    if (
+      typeof stage.id !== "string" ||
+      !/^[a-z0-9][a-z0-9_-]*$/i.test(stage.id)
+    ) {
+      throw new Error(`${stageAt}.id must be an alphanumeric identifier`);
+    }
+    if (seen.has(stage.id)) {
+      throw new Error(`${at}.stages has a duplicate id "${stage.id}"`);
+    }
+    seen.add(stage.id);
+    if (
+      stage.label !== undefined &&
+      (typeof stage.label !== "string" || !stage.label.trim())
+    ) {
+      throw new Error(`${stageAt}.label must be a non-empty string`);
+    }
+    if (
+      stage.hook !== undefined &&
+      (typeof stage.hook !== "string" || !stage.hook.trim())
+    ) {
+      throw new Error(`${stageAt}.hook must be a hook name`);
+    }
+    if (stage.options !== undefined && !isRecord(stage.options)) {
+      throw new Error(`${stageAt}.options must be an object`);
+    }
+    return {
+      id: stage.id,
+      label: typeof stage.label === "string" ? stage.label.trim() : stage.id,
+      ...(stage.hook ? { hook: stage.hook } : {}),
+      // Opaque per-stage options (e.g. version-endpoint's url/hotfixScan/
+      // hotfixDepth) are preserved verbatim: hooks own their own validation.
+      ...(stage.options
+        ? { options: stage.options as Record<string, unknown> }
+        : {}),
+    };
+  });
+  return {
+    ...(value.releaseBranch
+      ? { releaseBranch: value.releaseBranch.trim() }
+      : {}),
+    stages,
+  };
 }
 
 function normalizeAutomation(value: unknown): boolean {

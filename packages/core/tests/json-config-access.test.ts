@@ -62,4 +62,109 @@ describe("JsonConfigAccess", () => {
     const access = new JsonConfigAccess(path);
     await expect(access.load()).rejects.toThrow("Invalid Harbormaster config");
   });
+
+  it("round-trips a per-repository deployment pipeline, preserving opaque stage options", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: {
+          "github.com/acme/widgets": {
+            deployment: {
+              releaseBranch: "releases/v{major}.{minor}.0",
+              stages: [
+                {
+                  id: "pre",
+                  label: "Preprod",
+                  hook: "version-endpoint",
+                  options: {
+                    url: "https://pre.example/version",
+                    hotfixDepth: 25,
+                  },
+                },
+                { id: "prod", label: "Production" },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    const access = new JsonConfigAccess(path);
+    const config = await access.load();
+    expect(config.repositories?.["github.com/acme/widgets"]).toEqual({
+      deployment: {
+        releaseBranch: "releases/v{major}.{minor}.0",
+        stages: [
+          {
+            id: "pre",
+            label: "Preprod",
+            hook: "version-endpoint",
+            options: { url: "https://pre.example/version", hotfixDepth: 25 },
+          },
+          { id: "prod", label: "Production" },
+        ],
+      },
+    });
+  });
+
+  it("defaults a stage label to its id and leaves manual (hookless) stages alone", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: {
+          "github.com/acme/widgets": {
+            deployment: { stages: [{ id: "prod" }] },
+          },
+        },
+      }),
+    );
+    const config = await new JsonConfigAccess(path).load();
+    expect(
+      config.repositories?.["github.com/acme/widgets"]?.deployment?.stages,
+    ).toEqual([{ id: "prod", label: "prod" }]);
+  });
+
+  it("preserves unknown keys on a repository entry", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: {
+          "github.com/acme/widgets": {
+            futureField: "kept",
+            deployment: { stages: [{ id: "prod" }] },
+          },
+        },
+      }),
+    );
+    const config = await new JsonConfigAccess(path).load();
+    const repository = config.repositories?.[
+      "github.com/acme/widgets"
+    ] as unknown as Record<string, unknown> | undefined;
+    expect(repository?.futureField).toBe("kept");
+  });
+
+  it("rejects an empty stages array and duplicate stage ids", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: { "github.com/acme/x": { deployment: { stages: [] } } },
+      }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "Invalid Harbormaster config",
+    );
+
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: {
+          "github.com/acme/x": {
+            deployment: { stages: [{ id: "a" }, { id: "a" }] },
+          },
+        },
+      }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "Invalid Harbormaster config",
+    );
+  });
 });

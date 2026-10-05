@@ -107,6 +107,10 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     await run("git", ["branch", force ? "-D" : "-d", branch], repo.root);
   }
 
+  async pushBranch(path: string, branch: string): Promise<void> {
+    await run("git", ["push", "--set-upstream", "origin", branch], path);
+  }
+
   private async inspect(path: string): Promise<WorktreeInfo> {
     const branch = await tryRun("git", ["branch", "--show-current"], path);
     const head = await run("git", ["rev-parse", "HEAD"], path);
