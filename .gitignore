@@ -2,7 +2,11 @@ node_modules/
 dist/
 out/
 *.log
+*.tsbuildinfo
 .DS_Store
 .env
 .env.*
 coverage/
+test-results/
+playwright-report/
+blob-report/
