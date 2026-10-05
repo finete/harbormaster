@@ -1,15 +1,37 @@
 import type { JSX } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { RepositoryInfo } from "../../../preload/api";
 import { Button } from "./ui/button";
 import { Dialog, DialogFooter } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
+const SCRATCH_VALUE = "";
+
 /**
- * "+ New task" dialog: title (required) and repositoryId (optional, plain
- * text for now — repo picking/validation is a later phase). Always creates
- * into the backlog column via `createTask` (the only state `createTask`
- * ever puts a task in).
+ * Lowercase, hyphenated preview slug — mirrors (but does not need to match
+ * byte-for-byte) @harbormaster/core's `engines/task-workspace.ts
+ * slugify()`: the real branch name (prefix + slug + first 6 id chars) is
+ * only known once `createTask` assigns the task its id, so this is a
+ * best-effort preview, not the authoritative value.
+ */
+function previewSlug(title: string): string {
+  const slug = title
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || "task";
+}
+
+/**
+ * "+ New task" dialog: title (required) and a repository picker populated
+ * from `core.listRepositories()` (plus a "None / scratch" option for
+ * repository-less work). Picking a repository previews the branch
+ * `createTask` will derive for it. Always creates into the backlog column
+ * via `createTask` (the only state `createTask` ever puts a task in).
  */
 export function NewTaskDialog({
   open,
@@ -21,11 +43,17 @@ export function NewTaskDialog({
   onCreate: (input: { title: string; repositoryId?: string }) => void;
 }): JSX.Element {
   const [title, setTitle] = useState("");
-  const [repositoryId, setRepositoryId] = useState("");
+  const [repositoryId, setRepositoryId] = useState(SCRATCH_VALUE);
+  const [repositories, setRepositories] = useState<RepositoryInfo[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    void window.harbormaster.core.listRepositories().then(setRepositories);
+  }, [open]);
 
   function reset(): void {
     setTitle("");
-    setRepositoryId("");
+    setRepositoryId(SCRATCH_VALUE);
   }
 
   function handleCancel(): void {
@@ -36,14 +64,19 @@ export function NewTaskDialog({
   function handleSubmit(): void {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
-    const trimmedRepo = repositoryId.trim();
     onCreate({
       title: trimmedTitle,
-      ...(trimmedRepo ? { repositoryId: trimmedRepo } : {}),
+      ...(repositoryId ? { repositoryId } : {}),
     });
     reset();
     onOpenChange(false);
   }
+
+  const selectedRepo = repositories.find((repo) => repo.id === repositoryId);
+  const branchPreview =
+    selectedRepo && title.trim()
+      ? `${previewSlug(title)}-\u2026 \u2192 ${selectedRepo.defaultBranch}`
+      : undefined;
 
   return (
     <Dialog
@@ -71,17 +104,33 @@ export function NewTaskDialog({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label htmlFor="new-task-repo">Repository (optional)</Label>
-          <Input
+          <Label htmlFor="new-task-repo">Repository</Label>
+          <select
             id="new-task-repo"
-            data-testid="new-task-repo-input"
+            data-testid="new-task-repo-select"
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
             value={repositoryId}
             onChange={(event) => setRepositoryId(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") handleSubmit();
-            }}
-            placeholder="github.com/org/repo"
-          />
+          >
+            <option value={SCRATCH_VALUE}>None / scratch</option>
+            {repositories.map((repo) => (
+              <option
+                key={repo.id}
+                value={repo.id}
+                data-testid="new-task-repo-option"
+              >
+                {repo.id}
+              </option>
+            ))}
+          </select>
+          {branchPreview && (
+            <p
+              className="font-mono text-[11px] text-muted-foreground"
+              data-testid="new-task-branch-preview"
+            >
+              {branchPreview}
+            </p>
+          )}
         </div>
       </div>
       <DialogFooter>

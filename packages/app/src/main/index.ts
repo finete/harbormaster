@@ -87,6 +87,12 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:createTask", (_event, input: CreateTaskInput) =>
     core.commands.createTask(input),
   );
+  ipcMain.handle("core:listRepositories", () =>
+    core.commands.listRepositories(),
+  );
+  ipcMain.handle("core:getTaskWorkspace", (_event, taskId: string) =>
+    core.commands.getTaskWorkspace(taskId),
+  );
   ipcMain.handle(
     "core:moveTask",
     (
@@ -112,13 +118,18 @@ function registerPtyIpc(): void {
     "pty:create",
     (event, options: TerminalCreateOptions): TerminalCreateResult => {
       const sender = event.sender;
-      const { id } = createSession(options.cols, options.rows, {
-        onData: (data) => safeSend(sender, "pty:data", { id, data }),
-        onExit: (exitCode) => {
-          safeSend(sender, "pty:exit", { id, exitCode });
-          untrackSession(sender.id, id);
+      const { id } = createSession(
+        options.cols,
+        options.rows,
+        {
+          onData: (data) => safeSend(sender, "pty:data", { id, data }),
+          onExit: (exitCode) => {
+            safeSend(sender, "pty:exit", { id, exitCode });
+            untrackSession(sender.id, id);
+          },
         },
-      });
+        options.cwd ? { cwd: options.cwd } : undefined,
+      );
       trackSession(sender.id, id);
 
       // Belt-and-suspenders: if this webContents is torn down before the

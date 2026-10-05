@@ -30,10 +30,16 @@ function defaultShell(): string {
   return process.env.SHELL ?? "/bin/bash";
 }
 
+export interface PtySessionOptions {
+  /** Spawn cwd override (e.g. a task's worktree path); defaults to the app's own cwd. */
+  cwd?: string;
+}
+
 export function createSession(
   cols: number,
   rows: number,
   callbacks: PtySessionCallbacks,
+  options?: PtySessionOptions,
 ): { id: string } {
   const id = randomUUID();
   const shell = defaultShell();
@@ -41,7 +47,7 @@ export function createSession(
     name: "xterm-256color",
     cols,
     rows,
-    cwd: process.cwd(),
+    cwd: options?.cwd || process.cwd(),
     env: process.env as Record<string, string>,
   });
 

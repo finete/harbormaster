@@ -9,6 +9,8 @@ import {
   JsonConfigAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
+  LocalGitRepositoryAccess,
+  LocalGitWorktreeAccess,
   SessionPresenceAccess,
 } from "./access/index.js";
 import type { CoreCommands } from "./contracts/commands.js";
@@ -49,23 +51,32 @@ export function createCore(options: CoreOptions = {}): Core {
     paths.tasksFile,
     paths.tasksLockFile,
   );
-  // Phase 2 seams: constructed and ready for the Manager to grow into, but
-  // nothing in the phase 1 command surface reads or writes them yet.
   const workspaceBindings = new JsonWorkspaceBindingAccess(
     paths.workspaceBindingsFile,
     paths.workspaceBindingsLockFile,
   );
+  // Presence is a phase-2 seam: constructed and ready to grow into, but
+  // nothing in the command surface reads or writes it yet.
   const presence = new SessionPresenceAccess(paths.presenceDir);
-  const config = new JsonConfigAccess(paths.configFile);
-  void workspaceBindings;
   void presence;
-  void config;
+  const config = new JsonConfigAccess(paths.configFile);
+  const repositories = new LocalGitRepositoryAccess();
+  const worktrees = new LocalGitWorktreeAccess();
 
   const clock = options.clock ?? new SystemClock();
   const ids = options.ids ?? new UuidGenerator();
   const events = new CoreEventBus();
 
-  const commands = new CoreManager({ tasks: taskState, clock, ids, events });
+  const commands = new CoreManager({
+    tasks: taskState,
+    clock,
+    ids,
+    events,
+    config,
+    repositories,
+    worktrees,
+    bindings: workspaceBindings,
+  });
 
   return { commands, events };
 }

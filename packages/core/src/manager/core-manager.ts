@@ -6,18 +6,32 @@
 import type {
   CoreCommands,
   CreateTaskInput,
+  DeleteTaskOptions,
   MoveTaskOptions,
   UpdateTaskInput,
 } from "../contracts/commands.js";
-import type { BoardColumn, Task, TaskState } from "../contracts/model.js";
+import type {
+  BoardColumn,
+  Task,
+  TaskState,
+  WorkspaceBinding,
+} from "../contracts/model.js";
 import { TASK_STATES } from "../contracts/model.js";
 import type {
   Clock,
+  ConfigAccess,
   IdGenerator,
   TaskStateAccess,
+  WorkspaceBindingAccess,
 } from "../contracts/services.js";
+import type {
+  GitRepositoryAccess,
+  GitWorktreeAccess,
+  RepositoryInfo,
+} from "../contracts/workspace.js";
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { assertAllowedTransition } from "../engines/task-transitions.js";
+import { deriveTaskBranch } from "../engines/task-workspace.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 
 export interface CoreManagerDependencies {
@@ -25,6 +39,10 @@ export interface CoreManagerDependencies {
   clock: Clock;
   ids: IdGenerator;
   events: CoreEventBus;
+  config: ConfigAccess;
+  repositories: GitRepositoryAccess;
+  worktrees: GitWorktreeAccess;
+  bindings: WorkspaceBindingAccess;
 }
 
 const COLUMN_TITLES: Record<TaskState, string> = {
@@ -53,10 +71,51 @@ export class CoreManager implements CoreCommands {
     return this.deps.tasks.getTask(id);
   }
 
+  async listRepositories(): Promise<RepositoryInfo[]> {
+    const config = await this.deps.config.load();
+    return this.deps.repositories.discoverRepositories(config.codeRoot ?? "");
+  }
+
+  async getTaskWorkspace(
+    taskId: string,
+  ): Promise<WorkspaceBinding | undefined> {
+    return this.deps.bindings.getBindingForTask(taskId);
+  }
+
   async createTask(input: CreateTaskInput): Promise<Task> {
     const now = this.deps.clock.now().toISOString();
+    const id = this.deps.ids.next();
+
+    let repo: RepositoryInfo | undefined;
+    let branch = input.branch;
+    let targetBranch = input.targetBranch;
+    let worktreePath: string | undefined;
+
+    if (input.repositoryId !== undefined) {
+      const config = await this.deps.config.load();
+      const repos = await this.deps.repositories.discoverRepositories(
+        config.codeRoot ?? "",
+      );
+      repo = repos.find((candidate) => candidate.id === input.repositoryId);
+      if (!repo) {
+        throw new Error(`Repository not found: ${input.repositoryId}`);
+      }
+      branch ??= deriveTaskBranch(input.title, id, config.branchPrefix ?? "");
+      targetBranch ??= repo.defaultBranch;
+      // Any failure here (branch collision, dirty baseRef, missing repo,
+      // ...) must leave no task and no orphan worktree — createTaskWorktree
+      // itself guarantees no leftover directory/bookkeeping on failure, so
+      // there is nothing to clean up on this path beyond rethrowing.
+      const worktree = await this.deps.worktrees.createTaskWorktree(
+        repo,
+        branch,
+        repo.defaultBranch,
+      );
+      worktreePath = worktree.path;
+    }
+
     const task: Task = {
-      id: this.deps.ids.next(),
+      id,
       kind: input.kind ?? "task",
       state: "backlog",
       title: input.title,
@@ -64,15 +123,47 @@ export class CoreManager implements CoreCommands {
       ...(input.repositoryId !== undefined
         ? { repositoryId: input.repositoryId }
         : {}),
-      ...(input.branch !== undefined ? { branch: input.branch } : {}),
-      ...(input.targetBranch !== undefined
-        ? { targetBranch: input.targetBranch }
-        : {}),
+      ...(branch !== undefined ? { branch } : {}),
+      ...(targetBranch !== undefined ? { targetBranch } : {}),
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
     };
-    await this.deps.tasks.createTask(task);
+
+    try {
+      await this.deps.tasks.createTask(task);
+    } catch (error) {
+      if (repo && worktreePath) {
+        await this.deps.worktrees
+          .removeWorktree(repo, worktreePath, true)
+          .catch(() => {});
+      }
+      throw error;
+    }
+
+    if (repo && worktreePath && branch) {
+      const binding: WorkspaceBinding = {
+        id: this.deps.ids.next(),
+        taskId: id,
+        worktreePath,
+        branch,
+        detached: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      try {
+        await this.deps.bindings.attachBinding(binding);
+      } catch (error) {
+        // Roll back the task and the worktree: no task may exist without a
+        // consistent binding once a repository was involved.
+        await this.deps.tasks.removeTask(id).catch(() => {});
+        await this.deps.worktrees
+          .removeWorktree(repo, worktreePath, true)
+          .catch(() => {});
+        throw error;
+      }
+    }
+
     await this.publishTaskChange(task);
     return task;
   }
@@ -117,8 +208,27 @@ export class CoreManager implements CoreCommands {
     return next;
   }
 
-  async deleteTask(id: string): Promise<void> {
-    await this.requireTask(id);
+  async deleteTask(id: string, options?: DeleteTaskOptions): Promise<void> {
+    const task = await this.requireTask(id);
+    if (options?.removeWorkspace) {
+      const binding = await this.deps.bindings.getBindingForTask(id);
+      if (binding?.worktreePath && task.repositoryId) {
+        const config = await this.deps.config.load();
+        const repos = await this.deps.repositories.discoverRepositories(
+          config.codeRoot ?? "",
+        );
+        const repo = repos.find(
+          (candidate) => candidate.id === task.repositoryId,
+        );
+        if (repo) {
+          // Dirty-refusal (see GitWorktreeAccess.removeWorktree) propagates
+          // as-is: the task is left intact rather than deleted out from
+          // under an unremoved worktree.
+          await this.deps.worktrees.removeWorktree(repo, binding.worktreePath);
+        }
+      }
+    }
+    await this.deps.bindings.removeBinding(id).catch(() => {});
     await this.deps.tasks.removeTask(id);
     await this.publishBoard();
   }
