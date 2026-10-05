@@ -1,0 +1,6 @@
+{
+  "name": "@harbormaster/extension",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Slim Pi extension: adoption commands, temp write-guard, frozen TUI board."
+}

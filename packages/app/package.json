@@ -1,0 +1,6 @@
+{
+  "name": "@harbormaster/app",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Electron desktop app: kanban board + session panes."
+}
