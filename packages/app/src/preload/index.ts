@@ -8,12 +8,14 @@ import type {
   CreateTaskInput,
   HarbormasterApi,
   MoveTaskOptions,
+  RepositoryInfo,
   Task,
   TaskState,
   TerminalCreateOptions,
   TerminalCreateResult,
   TerminalDataEvent,
   TerminalExitEvent,
+  WorkspaceBinding,
 } from "./api";
 
 const api: HarbormasterApi = {
@@ -50,6 +52,10 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:listBoard"),
     getTask: (id: string): Promise<Task | undefined> =>
       ipcRenderer.invoke("core:getTask", id),
+    listRepositories: (): Promise<RepositoryInfo[]> =>
+      ipcRenderer.invoke("core:listRepositories"),
+    getTaskWorkspace: (taskId: string): Promise<WorkspaceBinding | undefined> =>
+      ipcRenderer.invoke("core:getTaskWorkspace", taskId),
     createTask: (input: CreateTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:createTask", input),
     moveTask: (

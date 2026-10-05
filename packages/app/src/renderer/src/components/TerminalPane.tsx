@@ -16,6 +16,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   // without depending on xterm's canvas-rendered internals.
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
 
+  // Mount-only: this pty is spawned exactly once for this panel's
+  // lifetime, with the cwd dockview assigned it at creation time (see
+  // TaskWorkspace.tsx) — a panel's params never change after that.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect, see comment above.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -24,6 +28,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       convertEol: true,
       cursorBlink: true,
       fontSize: 13,
+      // Keeps an accessible text mirror of the terminal's rendered rows in
+      // the DOM alongside the canvas paint, so e2e tests can assert on
+      // terminal contents (shell output, prompts) via plain text matchers.
+      screenReaderMode: true,
       theme: {
         background: "#0b0f14",
         foreground: "#d7dde3",
@@ -39,8 +47,13 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeExit: (() => void) | undefined;
 
+    const cwd = (props.params as { cwd?: string } | undefined)?.cwd;
     void window.harbormaster.terminal
-      .create({ cols: terminal.cols, rows: terminal.rows })
+      .create({
+        cols: terminal.cols,
+        rows: terminal.rows,
+        ...(cwd ? { cwd } : {}),
+      })
       .then(({ id }) => {
         if (disposed) {
           void window.harbormaster.terminal.dispose(id);

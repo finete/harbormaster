@@ -141,18 +141,28 @@ describe("createCore", () => {
     });
   });
 
-  it("createTask accepts repositoryId, branch, and targetBranch", async () => {
+  it("createTask with no repositoryId leaves branch/targetBranch unset", async () => {
     const task = await core.commands.createTask({
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
-      repositoryId: "github.com/org/repo",
-      branch: "feature/x",
-      targetBranch: "main",
     });
 
-    expect(task.repositoryId).toBe("github.com/org/repo");
-    expect(task.branch).toBe("feature/x");
-    expect(task.targetBranch).toBe("main");
+    expect(task.repositoryId).toBeUndefined();
+    expect(task.branch).toBeUndefined();
+    expect(task.targetBranch).toBeUndefined();
+  });
+
+  it("createTask rejects an unknown repositoryId (no git fixture discoverable under this temp codeRoot) and creates no task", async () => {
+    await expect(
+      core.commands.createTask({
+        title: "Ship phase 1",
+        initialPrompt: "Port pi-home core",
+        repositoryId: "github.com/org/repo",
+      }),
+    ).rejects.toThrow("Repository not found");
+
+    const columns = await core.commands.listBoard();
+    expect(columns.every((c) => columnTasks(c).length === 0)).toBe(true);
   });
 
   it("updateTaskState patches fields without moving columns", async () => {

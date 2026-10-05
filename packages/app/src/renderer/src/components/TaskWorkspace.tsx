@@ -4,7 +4,7 @@ import {
   type DockviewReadyEvent,
 } from "dockview-react";
 import type { JSX } from "react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
 import { Plus } from "lucide-react";
 import { TerminalPane } from "./TerminalPane";
@@ -23,25 +23,54 @@ let nextPanelId = 1;
  * so ptys and dockview layout survive switching between tasks/views.
  */
 export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
-  const apiRef = useRef<DockviewApi | null>(null);
+  // Dockview's own api is state (not a ref): the initial-panel effect below
+  // needs to re-run once it becomes available, same as it re-runs once the
+  // workspace binding resolves — whichever of the two happens last.
+  const [api, setApi] = useState<DockviewApi | null>(null);
+  const initialPanelCreatedRef = useRef(false);
+  // Resolved once per task: the worktree path a repository-backed task's
+  // terminals should spawn into (undefined for scratch tasks, falling back
+  // to the app's own cwd — see TerminalPane/ptySessions.ts). `cwdLoaded`
+  // distinguishes "still loading" from "loaded, no binding" so the initial
+  // panel never spawns early with the wrong cwd.
+  const [cwd, setCwd] = useState<string | undefined>(undefined);
+  const [cwdLoaded, setCwdLoaded] = useState(false);
 
-  function onReady(event: DockviewReadyEvent): void {
-    apiRef.current = event.api;
-    event.api.addPanel({
+  useEffect(() => {
+    let cancelled = false;
+    void window.harbormaster.core.getTaskWorkspace(taskId).then((binding) => {
+      if (cancelled) return;
+      setCwd(binding?.worktreePath);
+      setCwdLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!api || !cwdLoaded || initialPanelCreatedRef.current) return;
+    initialPanelCreatedRef.current = true;
+    api.addPanel({
       id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
       title: "Shell",
+      params: { cwd },
     });
+  }, [api, cwdLoaded, cwd, taskId]);
+
+  function onReady(event: DockviewReadyEvent): void {
+    setApi(event.api);
   }
 
   function addTerminal(): void {
-    const api = apiRef.current;
     if (!api) return;
     const activePanel = api.activePanel;
     api.addPanel({
       id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
       title: "Shell",
+      params: { cwd },
       ...(activePanel
         ? {
             position: {

@@ -11,8 +11,10 @@ import type {
   BoardColumn,
   CreateTaskInput,
   MoveTaskOptions,
+  RepositoryInfo,
   Task,
   TaskState,
+  WorkspaceBinding,
 } from "@harbormaster/core";
 
 export type {
@@ -22,13 +24,17 @@ export type {
   BoardGroup,
   CreateTaskInput,
   MoveTaskOptions,
+  RepositoryInfo,
   Task,
   TaskState,
+  WorkspaceBinding,
 } from "@harbormaster/core";
 
 export interface TerminalCreateOptions {
   cols: number;
   rows: number;
+  /** Spawn cwd override (e.g. a task's worktree path); falls back to the app's cwd. */
+  cwd?: string;
 }
 
 export interface TerminalCreateResult {
@@ -57,6 +63,8 @@ export interface HarbormasterApi {
   core: {
     listBoard(): Promise<BoardColumn[]>;
     getTask(id: string): Promise<Task | undefined>;
+    listRepositories(): Promise<RepositoryInfo[]>;
+    getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
     createTask(input: CreateTaskInput): Promise<Task>;
     moveTask(
       id: string,

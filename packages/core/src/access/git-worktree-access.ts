@@ -5,7 +5,7 @@
 // supplied path, and with explicit dirty-refusal / safe-branch-delete
 // semantics called out as separate, testable verbs.
 
-import { access as fsAccess, mkdir } from "node:fs/promises";
+import { access as fsAccess, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   GitWorktreeAccess,
@@ -35,11 +35,29 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
   ): Promise<WorktreeInfo> {
     const path = taskWorktreePath(repo, branch);
     await mkdir(dirname(path), { recursive: true });
-    await run(
-      "git",
-      ["worktree", "add", "-b", branch, path, baseRef],
-      repo.root,
+    const preExisted = await fsAccess(path).then(
+      () => true,
+      () => false,
     );
+    try {
+      await run(
+        "git",
+        ["worktree", "add", "-b", branch, path, baseRef],
+        repo.root,
+      );
+    } catch (error) {
+      // Leave no orphan from *this* failed attempt (branch collision, dirty
+      // baseRef, etc): git may have already created the target directory
+      // and/or registered it in its worktree bookkeeping before failing.
+      // Never remove a directory this call didn't create "- a path
+      // collision with an already-live worktree must surface as-is, not
+      // destroy the survivor.
+      if (!preExisted) {
+        await rm(path, { recursive: true, force: true }).catch(() => {});
+      }
+      await run("git", ["worktree", "prune"], repo.root).catch(() => {});
+      throw error;
+    }
     return this.inspect(path);
   }
 
