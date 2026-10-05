@@ -1,3 +1,5 @@
+export * from "./git-repository-access.js";
+export * from "./git-worktree-access.js";
 export * from "./json-config-access.js";
 export * from "./json-task-state-access.js";
 export * from "./json-workspace-binding-access.js";
