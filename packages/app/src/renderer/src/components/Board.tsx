@@ -34,6 +34,9 @@ export function Board({
     taskId: string;
   } | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  // Done-column-only toggle (see BoardColumn.tsx); archived tasks are hidden
+  // by default, sidebar excludes them always regardless of this.
+  const [showArchived, setShowArchived] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -115,6 +118,8 @@ export function Board({
               column={column}
               presence={presence}
               onSelectTask={handleSelectTask}
+              showArchived={showArchived}
+              onToggleArchived={() => setShowArchived((prev) => !prev)}
             />
           ))}
         </div>

@@ -112,6 +112,17 @@ function registerCoreIpc(): void {
       options: MoveTaskOptions | undefined,
     ) => core.commands.moveTask(id, state, options),
   );
+  ipcMain.handle("core:toReview", (_event, taskId: string) =>
+    core.commands.toReview(taskId),
+  );
+  ipcMain.handle("core:toDone", (_event, taskId: string) =>
+    core.commands.toDone(taskId),
+  );
+  // Funnels through the same warning-push path the 30s automation timer
+  // uses (see performRefresh below) so a manually-triggered refresh (tests,
+  // a future "refresh now" control) surfaces warnings identically instead
+  // of only returning them to this one caller.
+  ipcMain.handle("core:refresh", () => performRefresh());
   ipcMain.handle(
     "core:presence",
     async (_event, taskId: string): Promise<PresenceSnapshot> => {
@@ -183,6 +194,60 @@ function stopPresencePolling(): void {
   if (!presencePollTimer) return;
   clearInterval(presencePollTimer);
   presencePollTimer = undefined;
+}
+
+let refreshTimer: ReturnType<typeof setInterval> | undefined;
+// Last warning string pushed to windows, so an unbroken run of identical
+// failures (gh missing, network down) never spams the same banner every
+// tick -- only a changed (or newly-cleared) warning is pushed again.
+let lastPushedRefreshWarning: string | undefined;
+
+function pushRefreshWarning(warning: string | undefined): void {
+  if (warning === lastPushedRefreshWarning) return;
+  lastPushedRefreshWarning = warning;
+  if (warning === undefined) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "core:refresh-warning", warning);
+  }
+}
+
+// One refresh: calls the core's refresh() (PR status + movers + archive
+// sweep; see CoreCommands.refresh) and pushes any warning to every open
+// window, deduped against the immediately preceding push. refresh() itself
+// never throws on a single task's PR failure (folded into its warnings
+// array instead), but a harder failure (gh entirely missing, config load
+// failure, ...) can still reject the promise -- caught here so the single
+// automation timer (see /AGENTS.md "Movers tick only in the app") never
+// dies and keeps ticking regardless. Shared by the 30s timer and the
+// `core:refresh` IPC handler, so a manually-triggered refresh pushes (and
+// returns) warnings exactly the same way.
+async function performRefresh(): Promise<{ warnings: string[] }> {
+  try {
+    const result = await core.commands.refresh();
+    pushRefreshWarning(
+      result.warnings.length > 0 ? result.warnings.join("; ") : undefined,
+    );
+    return result;
+  } catch (error) {
+    console.error("[main] refresh failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    pushRefreshWarning(message);
+    return { warnings: [message] };
+  }
+}
+
+function startRefreshLoop(): void {
+  if (refreshTimer) return;
+  refreshTimer = setInterval(() => {
+    void performRefresh();
+  }, 30_000);
+  void performRefresh();
+}
+
+function stopRefreshLoop(): void {
+  if (!refreshTimer) return;
+  clearInterval(refreshTimer);
+  refreshTimer = undefined;
 }
 
 function registerPtyIpc(): void {
@@ -299,16 +364,19 @@ registerPtyIpc();
 app.whenReady().then(() => {
   createWindow();
   startPresencePolling();
+  startRefreshLoop();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
     startPresencePolling();
+    startRefreshLoop();
   });
 });
 
 app.on("window-all-closed", () => {
   disposeAllSessions();
   stopPresencePolling();
+  stopRefreshLoop();
   if (process.platform !== "darwin") app.quit();
 });
 

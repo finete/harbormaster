@@ -39,6 +39,9 @@ export type Execute = (
   cwd?: string,
 ) => Promise<string>;
 
+/** Overrides the `gh` binary (and only `gh`) for e2e: a tiny fake CLI stands in for a real GitHub login. Mirrors `HARBORMASTER_PI_COMMAND` (see `harness/pi-adapter.ts`). */
+const GH_COMMAND_ENV = "HARBORMASTER_GH_COMMAND";
+
 /** `gh`-CLI-shelling-out implementation of {@link PullRequestAccess}. */
 export class GithubPrAccess implements PullRequestAccess {
   /** Ancestry between two fixed commits never changes, so results memoize forever. */
@@ -48,7 +51,11 @@ export class GithubPrAccess implements PullRequestAccess {
 
   constructor(
     private readonly execute: Execute = (command, args, cwd) =>
-      run(command, args, cwd),
+      run(
+        command === "gh" ? process.env[GH_COMMAND_ENV] || "gh" : command,
+        args,
+        cwd,
+      ),
   ) {}
 
   async containsCommit(
