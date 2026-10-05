@@ -38,6 +38,7 @@ control the other:
 | 12 | Terminals | @xterm/xterm + node-pty (lift pi-gui's `terminal-service.ts` wiring). Pane↔process lifecycle glue is ours. |
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
+| 15 | Internal architecture | Volatility-based layering per `ai/prds/architecture.md` (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
 
 ## Verified facts the design rests on
 
