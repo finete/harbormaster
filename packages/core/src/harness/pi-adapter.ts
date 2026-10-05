@@ -28,7 +28,11 @@ export interface PiHarnessAdapterOptions {
   /** Inject a presence access directly (tests, or a non-default layout). */
   presence?: PresenceAccess;
   clock?: Clock;
-  /** Optional process-liveness probe forwarded to the presence heuristic. */
+  /**
+   * Optional process-liveness probe forwarded to the presence heuristic.
+   * Defaults to a real `process.kill(pid, 0)` probe (see `defaultIsAlive`
+   * below) — tests that register fake pids should override this.
+   */
   isAlive?: (pid: number) => boolean;
 }
 
@@ -36,6 +40,25 @@ export interface PiHarnessAdapterOptions {
 const MARKER_ENV = "HARBORMASTER";
 const TASK_ID_ENV = "HARBORMASTER_TASK_ID";
 const STATE_DIR_ENV = "HARBORMASTER_STATE_DIR";
+/** Overrides the launched command (and only the command) for e2e: a tiny fake binary stands in for `pi`. */
+const PI_COMMAND_ENV = "HARBORMASTER_PI_COMMAND";
+
+/**
+ * Real-world default pid probe: a process that no longer exists cannot be
+ * working. This is process introspection, not spawning — acceptable in the
+ * harness layer (accessor separation guards resource I/O, not `kill(pid,
+ * 0)`). `process.kill(pid, 0)` sends no signal; it only checks existence
+ * (ESRCH -> dead) versus a permission error (EPERM -> alive, owned by
+ * another user).
+ */
+function defaultIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
 
 export class PiHarnessAdapter implements HarnessAdapter {
   private readonly presenceAccess: PresenceAccess;
@@ -49,7 +72,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
         resolveStatePaths(options.stateDir).presenceDir,
       );
     this.clock = options.clock ?? new SystemClock();
-    this.livenessOptions = options.isAlive ? { isAlive: options.isAlive } : {};
+    this.livenessOptions = { isAlive: options.isAlive ?? defaultIsAlive };
   }
 
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec {
@@ -59,7 +82,9 @@ export class PiHarnessAdapter implements HarnessAdapter {
       [STATE_DIR_ENV]: input.stateDir,
     };
     return {
-      command: "pi",
+      // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
+      // instead of a real `pi` install; unset (the normal case) runs `pi`.
+      command: process.env[PI_COMMAND_ENV] || "pi",
       args: input.initialPrompt ? [input.initialPrompt] : [],
       cwd: input.workspacePath,
       env,

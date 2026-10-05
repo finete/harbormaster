@@ -41,6 +41,23 @@ describe("PiHarnessAdapter", () => {
       });
       expect(spec.args).toEqual(["Fix the thing"]);
     });
+
+    it("honors HARBORMASTER_PI_COMMAND as a command override (e2e fake binaries)", () => {
+      const previous = process.env.HARBORMASTER_PI_COMMAND;
+      process.env.HARBORMASTER_PI_COMMAND = "/tmp/fake-pi";
+      try {
+        const adapter = new PiHarnessAdapter({ stateDir: "/state" });
+        const spec = adapter.buildLaunchSpec({
+          taskId: "task-1",
+          workspacePath: "/work/task-1",
+          stateDir: "/state",
+        });
+        expect(spec.command).toBe("/tmp/fake-pi");
+      } finally {
+        if (previous === undefined) delete process.env.HARBORMASTER_PI_COMMAND;
+        else process.env.HARBORMASTER_PI_COMMAND = previous;
+      }
+    });
   });
 
   describe("presence", () => {
@@ -65,7 +82,10 @@ describe("PiHarnessAdapter", () => {
       await presence.register({
         taskId: "task-1",
         sessionPath: "/sessions/task-1.jsonl",
-        pid: 123,
+        // The default pid probe (`process.kill(pid, 0)`) runs unless a test
+        // overrides `isAlive`; use this process's own real pid so it reads
+        // as alive.
+        pid: process.pid,
         mode: "interactive",
         at: new Date().toISOString(),
       });
@@ -74,6 +94,25 @@ describe("PiHarnessAdapter", () => {
       const status = await adapter.presence("task-1");
       expect(status.live).toBe(true);
       expect(status.record?.taskId).toBe("task-1");
+    });
+
+    it("reports not-live when the recorded pid is dead, even with a fresh heartbeat (default pid probe)", async () => {
+      const presence = new SessionPresenceAccess(join(dir, "presence"));
+      // A pid astronomically unlikely to be in use; the default
+      // `process.kill(pid, 0)` probe reads it as dead (ESRCH).
+      const deadPid = 2_147_483_647;
+      await presence.register({
+        taskId: "task-1",
+        sessionPath: "/sessions/task-1.jsonl",
+        pid: deadPid,
+        mode: "interactive",
+        at: new Date().toISOString(),
+      });
+
+      const adapter = new PiHarnessAdapter({ presence });
+      const status = await adapter.presence("task-1");
+      expect(status.live).toBe(false);
+      expect(status.runningTurn).toBe(false);
     });
 
     it("reports not-live once the heartbeat is stale, using the injected clock", async () => {
@@ -99,13 +138,13 @@ describe("PiHarnessAdapter", () => {
       await presence.register({
         taskId: "task-1",
         sessionPath: "/sessions/task-1.jsonl",
-        pid: 123,
+        pid: process.pid,
         mode: "interactive",
         at: new Date().toISOString(),
       });
       await presence.setTurnActive(
         "task-1",
-        123,
+        process.pid,
         true,
         new Date().toISOString(),
       );

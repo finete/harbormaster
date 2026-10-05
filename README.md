@@ -18,6 +18,20 @@ panes, instead of a TUI inside a cmux workspace.
 | `packages/app` | Electron desktop app: kanban board (React + Tailwind + shadcn/ui + dnd-kit), dockview tabs/splits, xterm + node-pty session panes. The only mover host. |
 | `packages/extension` | Slim Pi extension: `/totask` / `/totemptask` adoption, temp write-guard, and the frozen TUI board as emergency/SSH fallback. |
 
+## Running a task's terminal pane
+
+A task workspace's first terminal panel runs `pi` (the rest, and any
+scratch/unbound task's panels, run a plain `$SHELL`). That pane needs the
+presence-reporting extension installed into your `pi` once:
+
+```sh
+npm run install-extension
+```
+
+(runs `pi install <repo>/packages/extension`). Without it, panes still open
+(falling back to a plain shell with a dismissible warning if `pi` itself
+isn't on PATH), but presence/running badges have nothing to report.
+
 ## Status
 
 Pre-alpha. See `docs/design-decisions.md` for the full design record and

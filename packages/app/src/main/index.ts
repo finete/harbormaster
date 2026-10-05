@@ -7,14 +7,21 @@ import type {
   MoveTaskOptions,
   TaskState,
 } from "@harbormaster/core";
-import { createCore } from "@harbormaster/core";
+import {
+  createCore,
+  DEFAULT_STATE_DIR,
+  PiHarnessAdapter,
+} from "@harbormaster/core";
 import type { WebContents } from "electron";
 import { app, BrowserWindow, ipcMain } from "electron";
 import type {
+  PresenceChangedPayload,
+  PresenceSnapshot,
   TerminalCreateOptions,
   TerminalCreateResult,
 } from "../preload/api";
 import {
+  activeSessionPids,
   createSession,
   disposeAllSessions,
   disposeSession,
@@ -73,11 +80,14 @@ function safeSend(
 // e2e tests point this at a fresh tmpdir per run instead of the real
 // per-user state dir; unset in normal app use, where `createCore` falls back
 // to its own default (`~/.harbormaster`).
-const core = createCore(
-  process.env.HARBORMASTER_STATE_DIR
-    ? { stateDir: process.env.HARBORMASTER_STATE_DIR }
-    : {},
-);
+const activeStateDir = process.env.HARBORMASTER_STATE_DIR ?? DEFAULT_STATE_DIR;
+const core = createCore({ stateDir: activeStateDir });
+
+// The Pi harness adapter: builds pane launch specs and reads presence. Core
+// never spawns processes itself (accessor separation) — this is the only
+// place main talks to it, and it only ever calls `buildLaunchSpec`/
+// `presence`, never the presence access layer directly.
+const harness = new PiHarnessAdapter({ stateDir: activeStateDir });
 
 function registerCoreIpc(): void {
   ipcMain.handle("core:listBoard", () => core.commands.listBoard());
@@ -102,6 +112,21 @@ function registerCoreIpc(): void {
       options: MoveTaskOptions | undefined,
     ) => core.commands.moveTask(id, state, options),
   );
+  ipcMain.handle(
+    "core:presence",
+    async (_event, taskId: string): Promise<PresenceSnapshot> => {
+      const status = await harness.presence(taskId);
+      const ownedByApp = status.record
+        ? activeSessionPids().has(status.record.pid)
+        : false;
+      return {
+        live: status.live,
+        runningTurn: status.runningTurn,
+        ...(status.record ? { record: status.record } : {}),
+        ownedByApp,
+      };
+    },
+  );
 
   // Push channel: forward every core event to every live window. `safeSend`
   // guards against sending to a webContents destroyed mid-flight (window
@@ -113,12 +138,82 @@ function registerCoreIpc(): void {
   });
 }
 
+let presencePollTimer: ReturnType<typeof setInterval> | undefined;
+
+/**
+ * One poll tick: presence for every non-done task, pushed as a single
+ * taskId -> {live, runningTurn} map to every open window. Stops itself (and
+ * is restarted by `startPresencePolling`) once no window is left open, so
+ * exactly one timer ever runs regardless of window count.
+ */
+async function pollPresenceOnce(): Promise<void> {
+  const windows = BrowserWindow.getAllWindows();
+  if (windows.length === 0) {
+    stopPresencePolling();
+    return;
+  }
+  const columns = await core.commands.listBoard();
+  const tasks = columns
+    .filter((column) => column.state !== "done")
+    .flatMap((column) => column.groups.flatMap((group) => group.tasks));
+  const entries = await Promise.all(
+    tasks.map(async (task) => {
+      const status = await harness.presence(task.id);
+      return [
+        task.id,
+        { live: status.live, runningTurn: status.runningTurn },
+      ] as const;
+    }),
+  );
+  const payload: PresenceChangedPayload = Object.fromEntries(entries);
+  for (const win of windows) {
+    safeSend(win.webContents, "core:presence-changed", payload);
+  }
+}
+
+function startPresencePolling(): void {
+  if (presencePollTimer) return;
+  presencePollTimer = setInterval(() => {
+    void pollPresenceOnce();
+  }, 5_000);
+  void pollPresenceOnce();
+}
+
+function stopPresencePolling(): void {
+  if (!presencePollTimer) return;
+  clearInterval(presencePollTimer);
+  presencePollTimer = undefined;
+}
+
 function registerPtyIpc(): void {
   ipcMain.handle(
     "pty:create",
-    (event, options: TerminalCreateOptions): TerminalCreateResult => {
+    async (
+      event,
+      options: TerminalCreateOptions,
+    ): Promise<TerminalCreateResult> => {
       const sender = event.sender;
-      const { id } = createSession(
+
+      // Only a task workspace's first ("primary") panel ever runs pi, and
+      // only when the task has a workspace binding (a worktree to run it
+      // in); "+ terminal" panels and scratch tasks always get a plain
+      // `$SHELL` in the same cwd (see AGENTS.md: harnesses are adapters,
+      // core only ever hands back a launch spec "-" this is the one place
+      // that spec is turned into a pty).
+      const binding =
+        options.primary && options.taskId
+          ? await core.commands.getTaskWorkspace(options.taskId)
+          : undefined;
+      const spec =
+        binding?.worktreePath && options.taskId
+          ? harness.buildLaunchSpec({
+              taskId: options.taskId,
+              workspacePath: binding.worktreePath,
+              stateDir: activeStateDir,
+            })
+          : undefined;
+
+      const { id, fellBackToShell } = createSession(
         options.cols,
         options.rows,
         {
@@ -128,7 +223,10 @@ function registerPtyIpc(): void {
             untrackSession(sender.id, id);
           },
         },
-        options.cwd ? { cwd: options.cwd } : undefined,
+        {
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(spec ? { spec } : {}),
+        },
       );
       trackSession(sender.id, id);
 
@@ -141,7 +239,7 @@ function registerPtyIpc(): void {
         disposeSession(id);
       });
 
-      return { id };
+      return { id, fellBackToShell };
     },
   );
 
@@ -200,14 +298,17 @@ registerPtyIpc();
 
 app.whenReady().then(() => {
   createWindow();
+  startPresencePolling();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    startPresencePolling();
   });
 });
 
 app.on("window-all-closed", () => {
   disposeAllSessions();
+  stopPresencePolling();
   if (process.platform !== "darwin") app.quit();
 });
 

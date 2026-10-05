@@ -14,19 +14,14 @@ const prVariant = {
   closed: "closed",
 } as const;
 
-// TODO(presence): always false until the Pi harness presence adapter lands
-// (see /docs/design-decisions.md item 13). Kept as a named flag, not
-// inlined, so the spinner rendering path + its testid stay alive and the
-// only change needed later is this function's body.
-function isRunning(_task: Task): boolean {
-  return false;
-}
-
 export function TaskCard({
   task,
+  presence,
   onSelect,
 }: {
   task: Task;
+  /** Live/runningTurn snapshot from the ~5s presence poll; absent task ids are treated as not-present. */
+  presence?: { live: boolean; runningTurn: boolean } | undefined;
   onSelect?: (taskId: string) => void;
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -38,7 +33,8 @@ export function TaskCard({
     ? { transform: CSS.Translate.toString(transform) }
     : undefined;
 
-  const running = isRunning(task);
+  const running = !!presence?.runningTurn;
+  const attached = !!presence?.live && !running;
 
   return (
     <Card
@@ -76,6 +72,15 @@ export function TaskCard({
           >
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
             running
+          </Badge>
+        )}
+        {attached && (
+          <Badge
+            variant="outline"
+            className="gap-1 opacity-75"
+            data-testid="badge-attached"
+          >
+            attached
           </Badge>
         )}
         {task.pr && (

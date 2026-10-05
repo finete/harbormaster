@@ -54,8 +54,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
     api.addPanel({
       id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
-      title: "Shell",
-      params: { cwd },
+      // The first panel in a bound task's workspace runs pi (see
+      // TerminalPane.tsx / main/index.ts's pty:create handler); scratch
+      // tasks (no `cwd`, no binding) keep the plain-shell title/behavior.
+      title: cwd ? "Pi" : "Shell",
+      params: { cwd, taskId, primary: true },
     });
   }, [api, cwdLoaded, cwd, taskId]);
 
@@ -70,7 +73,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
       id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
       title: "Shell",
-      params: { cwd },
+      params: { cwd, taskId, primary: false },
       ...(activePanel
         ? {
             position: {

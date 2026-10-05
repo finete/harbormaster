@@ -6,7 +6,9 @@
 // once sessions are wired through the command API. For now this proves the
 // xterm <-> node-pty <-> IPC plumbing with a plain `$SHELL` process.
 import { randomUUID } from "node:crypto";
+import { accessSync, constants as fsConstants } from "node:fs";
 import os from "node:os";
+import path, { join } from "node:path";
 import * as pty from "node-pty";
 
 export interface PtySessionCallbacks {
@@ -30,9 +32,48 @@ function defaultShell(): string {
   return process.env.SHELL ?? "/bin/bash";
 }
 
+/** The spec a harness adapter hands a frontend for its launch command (see `@harbormaster/core`'s `LaunchSpec`). Declared locally (not imported) to keep this module's dependency on core to types only. */
+export interface LaunchSpecLike {
+  command: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+}
+
 export interface PtySessionOptions {
   /** Spawn cwd override (e.g. a task's worktree path); defaults to the app's own cwd. */
   cwd?: string;
+  /**
+   * A harness launch spec to try first (e.g. a Pi pane). If its command
+   * cannot be found on PATH, this session falls back to a plain `$SHELL` in
+   * the same cwd and `fellBackToShell` is `true` in the result.
+   */
+  spec?: LaunchSpecLike;
+}
+
+/**
+ * Whether `command` resolves to an existing, executable file — a plain file
+ * existence check (PATH lookup for bare names, direct check for paths),
+ * not a spawn attempt. node-pty's `spawn` doesn't synchronously throw for a
+ * missing binary (the fork succeeds; exec fails inside the child), so this
+ * is checked up front instead of relying on a thrown error.
+ */
+function commandExists(command: string): boolean {
+  const candidates =
+    command.includes("/") || command.startsWith("~")
+      ? [command]
+      : (process.env.PATH ?? "")
+          .split(path.delimiter)
+          .map((dir) => join(dir, command));
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      return true;
+    } catch {
+      // Not on this PATH entry — keep looking.
+    }
+  }
+  return false;
 }
 
 export function createSession(
@@ -40,16 +81,28 @@ export function createSession(
   rows: number,
   callbacks: PtySessionCallbacks,
   options?: PtySessionOptions,
-): { id: string } {
+): { id: string; pid: number; fellBackToShell: boolean } {
   const id = randomUUID();
-  const shell = defaultShell();
-  const ptyProcess = pty.spawn(shell, [], {
-    name: "xterm-256color",
-    cols,
-    rows,
-    cwd: options?.cwd || process.cwd(),
-    env: process.env as Record<string, string>,
-  });
+  const cwd = options?.cwd || process.cwd();
+  const spec = options?.spec;
+  const useSpec = !!spec && commandExists(spec.command);
+  const fellBackToShell = !!spec && !useSpec;
+
+  const ptyProcess = useSpec
+    ? pty.spawn(spec.command, spec.args, {
+        name: "xterm-256color",
+        cols,
+        rows,
+        cwd: spec.cwd || cwd,
+        env: { ...(process.env as Record<string, string>), ...spec.env },
+      })
+    : pty.spawn(defaultShell(), [], {
+        name: "xterm-256color",
+        cols,
+        rows,
+        cwd,
+        env: process.env as Record<string, string>,
+      });
 
   // Subscriptions are owned by the session record so `disposeSession` can
   // unsubscribe them explicitly — killing the process alone doesn't
@@ -62,7 +115,7 @@ export function createSession(
   );
 
   sessions.set(id, { id, process: ptyProcess, dataDisposable, exitDisposable });
-  return { id };
+  return { id, pid: ptyProcess.pid, fellBackToShell };
 }
 
 export function getSession(id: string): PtySessionRecord | undefined {
@@ -97,6 +150,19 @@ export function disposeAllSessions(): void {
   for (const id of [...sessions.keys()]) {
     disposeSession(id);
   }
+}
+
+/**
+ * Pids this process itself spawned, right now. Used by the takeover guard
+ * (see main/index.ts) to tell "live in one of our own panes" apart from
+ * "live somewhere else" without the renderer ever touching a pid directly.
+ */
+export function activeSessionPids(): Set<number> {
+  return new Set(
+    [...sessions.values()]
+      .map((session) => session.process.pid)
+      .filter((pid): pid is number => typeof pid === "number"),
+  );
 }
 
 export function hostShellLabel(): string {

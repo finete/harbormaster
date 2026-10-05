@@ -1,8 +1,8 @@
 import { LayoutGrid, Loader2 } from "lucide-react";
 import type { JSX } from "react";
 import { useState } from "react";
-import type { Task, TaskState } from "../../../preload/api";
-import { flattenBoard, useBoard } from "../core-client";
+import type { TaskState } from "../../../preload/api";
+import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
 import { cn } from "../lib/utils";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { Badge } from "./ui/badge";
@@ -21,13 +21,6 @@ const prVariant = {
   merged: "merged",
   closed: "closed",
 } as const;
-
-// TODO(presence): always false until the Pi harness presence adapter lands
-// (see /docs/design-decisions.md item 13). Kept as a named flag, not
-// inlined, so the spinner rendering path + its testid stay alive.
-function isRunning(_task: Task): boolean {
-  return false;
-}
 
 /**
  * Narrow task list for the workspace view: every task on the live board,
@@ -48,6 +41,7 @@ export function Sidebar({
 }): JSX.Element {
   const columns = useBoard();
   const rows = flattenBoard(columns);
+  const presence = usePresenceMap();
   const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   return (
@@ -91,7 +85,8 @@ export function Sidebar({
         )}
         {rows.map(({ task, state }) => {
           const selected = focusedTaskId === task.id;
-          const running = isRunning(task);
+          const running = !!presence[task.id]?.runningTurn;
+          const attached = !!presence[task.id]?.live && !running;
           return (
             <button
               key={task.id}
@@ -110,6 +105,12 @@ export function Sidebar({
                     className="h-2.5 w-2.5 shrink-0 animate-spin text-blue-400"
                     aria-hidden
                     data-testid="sidebar-row-spinner"
+                  />
+                ) : attached ? (
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-blue-400/50 ring-1 ring-blue-400/70"
+                    aria-hidden
+                    data-testid="sidebar-row-attached-dot"
                   />
                 ) : (
                   <span

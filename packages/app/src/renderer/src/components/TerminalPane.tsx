@@ -15,6 +15,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   // data attribute so e2e tests can assert on "pty is alive and talking"
   // without depending on xterm's canvas-rendered internals.
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
+  // Set when this panel tried to launch pi and fell back to a plain shell
+  // (pi not installed/found on PATH); renders a dismissible warning strip.
+  const [fellBackToShell, setFellBackToShell] = useState(false);
+  const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Mount-only: this pty is spawned exactly once for this panel's
   // lifetime, with the cwd dockview assigned it at creation time (see
@@ -47,19 +51,25 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeExit: (() => void) | undefined;
 
-    const cwd = (props.params as { cwd?: string } | undefined)?.cwd;
+    const params = props.params as
+      | { cwd?: string; taskId?: string; primary?: boolean }
+      | undefined;
+    const cwd = params?.cwd;
     void window.harbormaster.terminal
       .create({
         cols: terminal.cols,
         rows: terminal.rows,
         ...(cwd ? { cwd } : {}),
+        ...(params?.taskId ? { taskId: params.taskId } : {}),
+        ...(params?.primary ? { primary: true } : {}),
       })
-      .then(({ id }) => {
+      .then(({ id, fellBackToShell: fellBack }) => {
         if (disposed) {
           void window.harbormaster.terminal.dispose(id);
           return;
         }
         sessionId = id;
+        if (fellBack) setFellBackToShell(true);
 
         unsubscribeData = window.harbormaster.terminal.onData((event) => {
           if (event.id === id) {
@@ -103,12 +113,30 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   }, []);
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="terminal-panel"
-      data-panel-id={props.api.id}
-      data-received-output={hasReceivedOutput}
-      className="h-full w-full p-1"
-    />
+    <div className="flex h-full w-full flex-col">
+      {fellBackToShell && !warningDismissed && (
+        <div
+          data-testid="pi-fallback-warning"
+          className="flex items-center justify-between gap-2 bg-amber-900/60 px-2 py-1 text-xs text-amber-200"
+        >
+          <span>pi not found — opened a plain shell</span>
+          <button
+            type="button"
+            data-testid="pi-fallback-warning-dismiss"
+            onClick={() => setWarningDismissed(true)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-800/60"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        data-testid="terminal-panel"
+        data-panel-id={props.api.id}
+        data-received-output={hasReceivedOutput}
+        className="min-h-0 flex-1 p-1"
+      />
+    </div>
   );
 }

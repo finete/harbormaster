@@ -8,7 +8,7 @@ import {
 import type { JSX } from "react";
 import { useRef, useState } from "react";
 import type { AwaitingKind, TaskState } from "../../../preload/api";
-import { flattenBoard, useBoard } from "../core-client";
+import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
 import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
 import { NewTaskDialog } from "./NewTaskDialog";
@@ -29,6 +29,7 @@ export function Board({
   onSelectTask: (taskId: string) => void;
 }): JSX.Element {
   const columns = useBoard();
+  const presence = usePresenceMap();
   const [pendingDrop, setPendingDrop] = useState<{
     taskId: string;
   } | null>(null);
@@ -112,6 +113,7 @@ export function Board({
             <BoardColumn
               key={column.state}
               column={column}
+              presence={presence}
               onSelectTask={handleSelectTask}
             />
           ))}

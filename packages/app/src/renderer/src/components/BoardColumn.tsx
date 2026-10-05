@@ -1,14 +1,19 @@
 import { useDroppable } from "@dnd-kit/core";
 import type { JSX } from "react";
-import type { BoardColumn as BoardColumnData } from "../../../preload/api";
+import type {
+  BoardColumn as BoardColumnData,
+  PresenceChangedPayload,
+} from "../../../preload/api";
 import { cn } from "../lib/utils";
 import { TaskCard } from "./TaskCard";
 
 export function BoardColumn({
   column,
+  presence,
   onSelectTask,
 }: {
   column: BoardColumnData;
+  presence: PresenceChangedPayload;
   onSelectTask: (taskId: string) => void;
 }): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: column.state });
@@ -64,7 +69,12 @@ export function BoardColumn({
             )}
             <div className="flex flex-col gap-2">
               {group.tasks.map((task) => (
-                <TaskCard key={task.id} task={task} onSelect={onSelectTask} />
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  presence={presence[task.id]}
+                  onSelect={onSelectTask}
+                />
               ))}
             </div>
           </div>
