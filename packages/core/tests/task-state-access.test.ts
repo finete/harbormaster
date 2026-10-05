@@ -81,4 +81,26 @@ describe("JsonTaskStateAccess", () => {
 
     expect(await access.listTasks()).toEqual([]);
   });
+
+  it("round-trips the phase-2a fields (repository/branch/pr/issue/awaiting)", async () => {
+    const task = makeTask({
+      repositoryId: "github.com/org/repo",
+      branch: "feature/x",
+      targetBranch: "main",
+      pr: { number: 42, state: "open" },
+      issueRef: "org/repo#7",
+      state: "awaiting",
+      awaiting: {
+        kind: "deploy",
+        stageId: "staging",
+        stageLabel: "Staging",
+      },
+    });
+    await access.createTask(task);
+
+    expect(await access.getTask(task.id)).toEqual(task);
+
+    const reopened = new JsonTaskStateAccess(access.statePath);
+    expect(await reopened.listTasks()).toEqual([task]);
+  });
 });

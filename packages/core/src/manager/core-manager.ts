@@ -6,6 +6,7 @@
 import type {
   CoreCommands,
   CreateTaskInput,
+  MoveTaskOptions,
   UpdateTaskInput,
 } from "../contracts/commands.js";
 import type { BoardColumn, Task, TaskState } from "../contracts/model.js";
@@ -15,6 +16,7 @@ import type {
   IdGenerator,
   TaskStateAccess,
 } from "../contracts/services.js";
+import { groupColumnTasks } from "../engines/board-grouping.js";
 import { assertAllowedTransition } from "../engines/task-transitions.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 
@@ -37,13 +39,14 @@ export class CoreManager implements CoreCommands {
 
   async listBoard(): Promise<BoardColumn[]> {
     const tasks = await this.deps.tasks.listTasks();
-    return TASK_STATES.map((state) => ({
-      state,
-      title: COLUMN_TITLES[state],
-      tasks: tasks
-        .filter((task) => task.state === state)
-        .sort((a, b) => a.stateChangedAt.localeCompare(b.stateChangedAt)),
-    }));
+    return TASK_STATES.map((state) => {
+      const columnTasks = tasks.filter((task) => task.state === state);
+      return {
+        state,
+        title: COLUMN_TITLES[state],
+        groups: groupColumnTasks(state, columnTasks),
+      };
+    });
   }
 
   async getTask(id: string): Promise<Task | undefined> {
@@ -61,6 +64,10 @@ export class CoreManager implements CoreCommands {
       ...(input.repositoryId !== undefined
         ? { repositoryId: input.repositoryId }
         : {}),
+      ...(input.branch !== undefined ? { branch: input.branch } : {}),
+      ...(input.targetBranch !== undefined
+        ? { targetBranch: input.targetBranch }
+        : {}),
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
@@ -70,9 +77,18 @@ export class CoreManager implements CoreCommands {
     return task;
   }
 
-  async moveTask(id: string, state: TaskState): Promise<Task> {
+  async moveTask(
+    id: string,
+    state: TaskState,
+    options?: MoveTaskOptions,
+  ): Promise<Task> {
     const task = await this.requireTask(id);
     assertAllowedTransition(task.state, state);
+    if (state === "awaiting" && !options?.awaiting) {
+      throw new Error(
+        'Moving a task to "awaiting" requires an awaiting reason',
+      );
+    }
     const now = this.deps.clock.now().toISOString();
     const stateChanged = task.state !== state;
     const next: Task = {
@@ -82,6 +98,11 @@ export class CoreManager implements CoreCommands {
       stateChangedAt: stateChanged ? now : task.stateChangedAt,
       ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
     };
+    if (state === "awaiting" && options?.awaiting) {
+      next.awaiting = options.awaiting;
+    } else {
+      delete next.awaiting;
+    }
     await this.deps.tasks.replaceTask(next);
     await this.publishTaskChange(next);
     return next;

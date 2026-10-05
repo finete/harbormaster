@@ -11,6 +11,17 @@ export type TaskKind = "task" | "temp_task";
 /** Board column a task currently sits in. */
 export type TaskState = "backlog" | "dev" | "awaiting" | "done";
 
+/**
+ * Why a task sitting in the "awaiting" column is blocked. Ported from
+ * pi-home's richer AwaitingContext, pruned to the board-grouping fields this
+ * phase needs: no PR metadata, Slack thread state, or deployment-pipeline
+ * wiring yet (those return once git/GitHub access is ported).
+ */
+export type AwaitingKind =
+  | { kind: "review" }
+  | { kind: "slack"; permalink?: string }
+  | { kind: "deploy"; stageId: string; stageLabel: string };
+
 /** Ordered list of board columns; the source of truth for board layout. */
 export const TASK_STATES: readonly TaskState[] = [
   "backlog",
@@ -32,8 +43,18 @@ export interface Task {
   state: TaskState;
   title: string;
   initialPrompt: string;
-  /** Opaque repository identity; resolved against git access in a later phase. */
+  /** Opaque repository identity; resolved against git access in a later phase. Normalized like "github.com/org/repo". */
   repositoryId?: string;
+  /** Working branch for this task's worktree, once bound. */
+  branch?: string;
+  /** Branch this task's work will land on (e.g. "main"). */
+  targetBranch?: string;
+  /** Pull-request linkage, once opened. */
+  pr?: { number: number; state: "draft" | "open" | "merged" | "closed" };
+  /** Opaque reference to a tracked issue (Beads/GitHub), resolved in a later phase. */
+  issueRef?: string;
+  /** Set only while `state === "awaiting"`; cleared on any move out of it. */
+  awaiting?: AwaitingKind;
   createdAt: string;
   updatedAt: string;
   stateChangedAt: string;
@@ -42,11 +63,24 @@ export interface Task {
   lastError?: string;
 }
 
-/** Manager-composed, never persisted: one board column and its tasks in order. */
+/**
+ * One cluster of tasks within a board column, grouped by the rules in
+ * `engines/board-grouping.ts`. Manager-composed, never persisted.
+ */
+export interface BoardGroup {
+  id: string;
+  /** Awaiting-reason heading ("Review", "Slack response", a deploy stage label); unset outside the awaiting column. */
+  primaryLabel?: string;
+  /** Short repository name (last path segment), or "scratch" for repository-less tasks. */
+  repoLabel?: string;
+  tasks: Task[];
+}
+
+/** Manager-composed, never persisted: one board column and its grouped tasks in order. */
 export interface BoardColumn {
   state: TaskState;
   title: string;
-  tasks: Task[];
+  groups: BoardGroup[];
 }
 
 /**

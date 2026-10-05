@@ -108,6 +108,28 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
+function isValidPr(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.number === "number" &&
+    (["draft", "open", "merged", "closed"] as const).includes(
+      value.state as never,
+    )
+  );
+}
+
+function isValidAwaiting(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  if (value.kind === "review") return true;
+  if (value.kind === "slack") return isOptionalString(value.permalink);
+  if (value.kind === "deploy") {
+    return isString(value.stageId) && isString(value.stageLabel);
+  }
+  return false;
+}
+
 function validTask(value: unknown): value is Task {
   if (!isRecord(value)) return false;
   return (
@@ -117,6 +139,11 @@ function validTask(value: unknown): value is Task {
     isString(value.title) &&
     typeof value.initialPrompt === "string" &&
     isOptionalString(value.repositoryId) &&
+    isOptionalString(value.branch) &&
+    isOptionalString(value.targetBranch) &&
+    isOptionalString(value.issueRef) &&
+    isValidPr(value.pr) &&
+    isValidAwaiting(value.awaiting) &&
     isString(value.createdAt) &&
     isString(value.updatedAt) &&
     isString(value.stateChangedAt) &&

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { BoardColumn, Clock } from "../src/contracts/index.js";
+import type { BoardColumn, Clock, Task } from "../src/contracts/index.js";
 import { type Core, createCore } from "../src/index.js";
 
 class FixedClock implements Clock {
@@ -17,6 +17,9 @@ class FixedClock implements Clock {
 
 let counter = 0;
 const sequentialIds = { next: () => `id-${++counter}` };
+
+const columnTasks = (column: BoardColumn): Task[] =>
+  column.groups.flatMap((group) => group.tasks);
 
 describe("createCore", () => {
   let dir: string;
@@ -42,7 +45,7 @@ describe("createCore", () => {
       "awaiting",
       "done",
     ]);
-    expect(columns.every((c) => c.tasks.length === 0)).toBe(true);
+    expect(columns.every((c) => columnTasks(c).length === 0)).toBe(true);
   });
 
   it("createTask adds the task to the backlog column and getTask finds it", async () => {
@@ -56,7 +59,7 @@ describe("createCore", () => {
 
     const columns = await core.commands.listBoard();
     const backlog = columns.find((c) => c.state === "backlog") as BoardColumn;
-    expect(backlog.tasks).toEqual([task]);
+    expect(columnTasks(backlog)).toEqual([task]);
 
     expect(await core.commands.getTask(task.id)).toEqual(task);
   });
@@ -73,8 +76,12 @@ describe("createCore", () => {
     expect(moved.stateChangedAt).not.toBe(task.stateChangedAt);
 
     const columns = await core.commands.listBoard();
-    expect(columns.find((c) => c.state === "backlog")!.tasks).toEqual([]);
-    expect(columns.find((c) => c.state === "dev")!.tasks).toEqual([moved]);
+    expect(columnTasks(columns.find((c) => c.state === "backlog")!)).toEqual(
+      [],
+    );
+    expect(columnTasks(columns.find((c) => c.state === "dev")!)).toEqual([
+      moved,
+    ]);
   });
 
   it("moveTask rejects an illegal transition", async () => {
@@ -85,6 +92,67 @@ describe("createCore", () => {
     await expect(core.commands.moveTask(task.id, "done")).rejects.toThrow(
       /Cannot move/,
     );
+  });
+
+  it("moveTask to awaiting requires an awaiting reason", async () => {
+    const task = await core.commands.createTask({
+      title: "Ship phase 1",
+      initialPrompt: "Port pi-home core",
+    });
+    await core.commands.moveTask(task.id, "dev");
+
+    await expect(core.commands.moveTask(task.id, "awaiting")).rejects.toThrow(
+      /awaiting reason/,
+    );
+  });
+
+  it("moveTask to awaiting stores the awaiting reason and clears it on exit", async () => {
+    const task = await core.commands.createTask({
+      title: "Ship phase 1",
+      initialPrompt: "Port pi-home core",
+    });
+    await core.commands.moveTask(task.id, "dev");
+
+    const awaiting = await core.commands.moveTask(task.id, "awaiting", {
+      awaiting: { kind: "review" },
+    });
+    expect(awaiting.awaiting).toEqual({ kind: "review" });
+
+    const backToDev = await core.commands.moveTask(task.id, "dev");
+    expect(backToDev.awaiting).toBeUndefined();
+  });
+
+  it("moveTask within awaiting updates the stored reason", async () => {
+    const task = await core.commands.createTask({
+      title: "Ship phase 1",
+      initialPrompt: "Port pi-home core",
+    });
+    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "awaiting", {
+      awaiting: { kind: "review" },
+    });
+
+    const updated = await core.commands.moveTask(task.id, "awaiting", {
+      awaiting: { kind: "slack", permalink: "https://acme.slack.com/p1" },
+    });
+    expect(updated.awaiting).toEqual({
+      kind: "slack",
+      permalink: "https://acme.slack.com/p1",
+    });
+  });
+
+  it("createTask accepts repositoryId, branch, and targetBranch", async () => {
+    const task = await core.commands.createTask({
+      title: "Ship phase 1",
+      initialPrompt: "Port pi-home core",
+      repositoryId: "github.com/org/repo",
+      branch: "feature/x",
+      targetBranch: "main",
+    });
+
+    expect(task.repositoryId).toBe("github.com/org/repo");
+    expect(task.branch).toBe("feature/x");
+    expect(task.targetBranch).toBe("main");
   });
 
   it("updateTaskState patches fields without moving columns", async () => {
@@ -109,7 +177,7 @@ describe("createCore", () => {
 
     expect(await core.commands.getTask(task.id)).toBeUndefined();
     const columns = await core.commands.listBoard();
-    expect(columns.every((c) => c.tasks.length === 0)).toBe(true);
+    expect(columns.every((c) => columnTasks(c).length === 0)).toBe(true);
   });
 
   it("emits board-changed on create, move, and delete", async () => {
@@ -126,11 +194,13 @@ describe("createCore", () => {
     await core.commands.deleteTask(task.id);
 
     expect(events).toHaveLength(3);
-    expect(events[0]!.find((c) => c.state === "backlog")!.tasks).toHaveLength(
-      1,
-    );
-    expect(events[1]!.find((c) => c.state === "dev")!.tasks).toHaveLength(1);
-    expect(events[2]!.every((c) => c.tasks.length === 0)).toBe(true);
+    expect(
+      columnTasks(events[0]!.find((c) => c.state === "backlog")!),
+    ).toHaveLength(1);
+    expect(
+      columnTasks(events[1]!.find((c) => c.state === "dev")!),
+    ).toHaveLength(1);
+    expect(events[2]!.every((c) => columnTasks(c).length === 0)).toBe(true);
 
     unsubscribe();
   });
