@@ -1,4 +1,4 @@
-# Harbormaster — design decision record
+# Harbormaster: design decision record
 
 Product re-platforming of pi-home (Pi extension + cmux workflow) into a
 standalone desktop app. Decisions reached in a grilled design interview,
@@ -31,10 +31,10 @@ control the other:
 | 5 | Brain placement | Core extracted into `packages/core` behind a command API (commands in, state events out), hosted inside the app process. The boundary becomes the daemon API later. |
 | 6 | Extension ↔ app | Shared core library over the per-user state dir; all writes through the command API; no frontend touches state files. Movers tick only in the app. |
 | 7 | TUI board | Frozen, not killed: emergency/SSH fallback compiled against the core API. New board features are app-only. |
-| 8 | Attachment | Takeover-offer semantics (verified: Pi has no concurrent-attachment protection — append-only JSONL, no locking). `openGuarded` ports from pi-home; the cmux branch becomes "focus the app pane". |
+| 8 | Attachment | Takeover-offer semantics (verified: Pi has no concurrent-attachment protection, append-only JSONL, no locking). `openGuarded` ports from pi-home; the cmux branch becomes "focus the app pane". |
 | 9 | Stack | Electron + Vite + React + TS (no Next.js, no router). Verified as the stack coding agents generate most reliably in 2026. |
 | 10 | Design system | Tailwind + shadcn/ui (copy-in ownership), dnd-kit for the board (Kibo UI / Georgegriff shadcn kanban as starting blocks; astryx templates as layout reference: Kanban Board, IDE, Work Item Detail, Side Nav). Re-skin anything lifted from pi-gui. |
-| 11 | Layout engine | dockview — tabs and splits are one panel model. Two top-level views: workspace (task sidebar + per-task dockview terminal workspaces, the default) and kanban board (the "home" triage screen, full-width, reached via sidebar button / Cmd+B); clicking a card enters the task's workspace. Per-task dockview instances persist across view switches. Drag/split → extra `$SHELL` pty in the same worktree. Built-in layout serialization for restore-on-restart. |
+| 11 | Layout engine | dockview: tabs and splits are one panel model. Two top-level views: workspace (task sidebar + per-task dockview terminal workspaces, the default) and kanban board (the "home" triage screen, full-width, reached via sidebar button / Cmd+B); clicking a card enters the task's workspace. Per-task dockview instances persist across view switches. Drag/split → extra `$SHELL` pty in the same worktree. Built-in layout serialization for restore-on-restart. |
 | 12 | Terminals | @xterm/xterm + node-pty (lift pi-gui's `terminal-service.ts` wiring). Pane↔process lifecycle glue is ours. |
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
@@ -46,8 +46,8 @@ control the other:
   (`select`/`confirm`/`input`/`editor`) request/response, fire-and-forget
   (`notify`/`setStatus`/`setWidget`/`setTitle`); `custom()` and
   footer/header/editor overrides are TUI-only (`docs/rpc-extension-ui.md`).
-- pi-home used `ctx.ui.custom()` in exactly one place — the kanban board
-  component — which is replaced by the native board. All other ~70 call sites
+- pi-home used `ctx.ui.custom()` in exactly one place (the kanban board
+  component), which is replaced by the native board. All other ~70 call sites
   are dialog/notify/status/widget calls that survive outside the TUI.
 - pi-gui (minghinmatthewlam/pi-gui, MIT, ~64k LOC) fully renders the dialog
   subprotocol natively, flags terminal-only capabilities gracefully, drives
