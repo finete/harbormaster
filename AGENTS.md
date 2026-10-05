@@ -1,7 +1,18 @@
 # Harbormaster — architecture rules
 
 Read `docs/design-decisions.md` for the full decision record behind these
-rules before proposing structural changes.
+rules before proposing structural changes, and `ai/prds/architecture.md` for
+the volatility-based service layering (Manager / Engine / Resource Access /
+Utility) that `packages/core` follows — pi-home's `src/` layout
+(`manager/`, `engines/`, `access/`, `utilities/`, `contracts/`) carries over.
+
+- **Accessor separation is a hard rule.** All storage and external-system I/O
+  (state files, git, GitHub, Pi sessions, ptys) lives in `access/` services
+  exposing atomic business verbs. Managers and Engines never touch a resource
+  directly; frontends never call access services. Call-chain direction
+  (Client → Manager → Engine → Access → Resource, utilities callable from any
+  layer, never upward) is enforced. Placing every business rule in an Engine
+  is advisory, not hard — extract an Engine when logic is shared or volatile.
 
 - **Core is headless.** `packages/core` owns all board/mover/worktree/presence
   logic behind a command API (commands in, state events out). Frontends
