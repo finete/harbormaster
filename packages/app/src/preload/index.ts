@@ -8,6 +8,8 @@ import type {
   CreateTaskInput,
   HarbormasterApi,
   MoveTaskOptions,
+  PresenceChangedPayload,
+  PresenceSnapshot,
   RepositoryInfo,
   Task,
   TaskState,
@@ -72,6 +74,18 @@ const api: HarbormasterApi = {
       ): void => listener(payload);
       ipcRenderer.on("core:board-changed", handler);
       return () => ipcRenderer.removeListener("core:board-changed", handler);
+    },
+    presence: (taskId: string): Promise<PresenceSnapshot> =>
+      ipcRenderer.invoke("core:presence", taskId),
+    onPresenceChanged: (
+      listener: (payload: PresenceChangedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: PresenceChangedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:presence-changed", handler);
+      return () => ipcRenderer.removeListener("core:presence-changed", handler);
     },
   },
 };

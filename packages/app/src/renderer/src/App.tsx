@@ -1,8 +1,10 @@
 import { PanelLeft } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
 import { Sidebar } from "./components/Sidebar";
+import { TakeoverDialog } from "./components/TakeoverDialog";
 import { Button } from "./components/ui/button";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { flattenBoard, useBoard } from "./core-client";
@@ -21,22 +23,63 @@ type View = "board" | "workspace";
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
+  const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
   const columns = useBoard();
   const flatRows = useMemo(() => flattenBoard(columns), [columns]);
+  const taskTitleRef = useRef<Map<string, string>>(new Map());
+  for (const { task } of flatRows)
+    taskTitleRef.current.set(task.id, task.title);
+
+  // Takeover-offer guard state (see /AGENTS.md "Attachment safety",
+  // /docs/design-decisions.md #8, components/TakeoverDialog.tsx): set only
+  // while a dialog is up for a task that turned out to be live elsewhere.
+  const [takeover, setTakeover] = useState<{
+    taskId: string;
+    presence: PresenceSnapshot;
+  } | null>(null);
 
   // Default focus to the first task once the board has loaded, same as the
   // old mock's `taskOrder[0]` default — but only once: never yank focus
   // away from a task the user picked (or that got created) later.
   useEffect(() => {
     if (!focusedTaskId && flatRows.length > 0) {
-      setFocusedTaskId(flatRows[0]?.task.id ?? "");
+      const firstId = flatRows[0]?.task.id ?? "";
+      setFocusedTaskId(firstId);
+      if (firstId) {
+        setOpenedTaskIds((prev) => new Set(prev).add(firstId));
+      }
     }
   }, [focusedTaskId, flatRows]);
 
-  const selectTask = useCallback((taskId: string) => {
+  const openTask = useCallback((taskId: string) => {
     setFocusedTaskId(taskId);
+    setOpenedTaskIds((prev) =>
+      prev.has(taskId) ? prev : new Set(prev).add(taskId),
+    );
     setView("workspace");
   }, []);
+
+  // Entry point for every "open/focus this task" action (sidebar row, board
+  // card). Own-pane-live tasks (already in `openedTaskIds`) just focus, no
+  // dialog "-" the pane guards its own pty, nothing to double-attach. A task
+  // this app has never opened gets a presence check first; live-and-not-ours
+  // routes through the takeover dialog before ever mounting its pane.
+  const selectTask = useCallback(
+    (taskId: string) => {
+      if (openedTaskIds.has(taskId)) {
+        openTask(taskId);
+        return;
+      }
+      void window.harbormaster.core.presence(taskId).then((presence) => {
+        if (presence.live && !presence.ownedByApp) {
+          setTakeover({ taskId, presence });
+          return;
+        }
+        openTask(taskId);
+      });
+    },
+    [openedTaskIds, openTask],
+  );
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -80,9 +123,26 @@ export function App(): JSX.Element {
             onSelectTask={selectTask}
             onShowBoard={() => setView("board")}
           />
-          <WorkspaceView focusedTaskId={focusedTaskId} />
+          <WorkspaceView
+            focusedTaskId={focusedTaskId}
+            openedTaskIds={openedTaskIds}
+          />
         </div>
       )}
+      <TakeoverDialog
+        open={takeover !== null}
+        taskTitle={
+          takeover ? (taskTitleRef.current.get(takeover.taskId) ?? "") : ""
+        }
+        presence={takeover?.presence ?? null}
+        onCancel={() => setTakeover(null)}
+        onAttachAnyway={() => {
+          if (!takeover) return;
+          const { taskId } = takeover;
+          setTakeover(null);
+          openTask(taskId);
+        }}
+      />
     </div>
   );
 }

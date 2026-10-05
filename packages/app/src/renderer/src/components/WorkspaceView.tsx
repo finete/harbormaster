@@ -1,5 +1,4 @@
 import type { JSX } from "react";
-import { useEffect, useRef, useState } from "react";
 import { TaskWorkspace } from "./TaskWorkspace";
 
 /**
@@ -8,23 +7,19 @@ import { TaskWorkspace } from "./TaskWorkspace";
  * torn down, so switching between tasks (or to the board and back) does not
  * kill running terminal sessions. Only the focused task's workspace is
  * visible; the rest are `display: none` but stay mounted.
+ *
+ * `openedTaskIds` is owned by `App.tsx` (not computed here) because the
+ * takeover guard needs the same "has this task's pane already been opened by
+ * this app" answer before it decides whether live presence needs a dialog.
  */
 export function WorkspaceView({
   focusedTaskId,
+  openedTaskIds,
 }: {
   focusedTaskId: string;
+  openedTaskIds: ReadonlySet<string>;
 }): JSX.Element {
-  const openedRef = useRef<Set<string>>(new Set());
-  const [, forceRender] = useState(0);
-
-  useEffect(() => {
-    if (focusedTaskId && !openedRef.current.has(focusedTaskId)) {
-      openedRef.current.add(focusedTaskId);
-      forceRender((tick) => tick + 1);
-    }
-  }, [focusedTaskId]);
-
-  if (openedRef.current.size === 0) {
+  if (openedTaskIds.size === 0) {
     return (
       <div data-testid="workspace-main" className="relative h-full flex-1">
         <div
@@ -39,7 +34,7 @@ export function WorkspaceView({
 
   return (
     <div data-testid="workspace-main" className="relative h-full flex-1">
-      {Array.from(openedRef.current).map((taskId) => (
+      {Array.from(openedTaskIds).map((taskId) => (
         <div
           key={taskId}
           data-testid={`task-workspace-${taskId}`}
