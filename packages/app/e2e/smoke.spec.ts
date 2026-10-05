@@ -109,6 +109,15 @@ test("the Board button switches to the kanban board with all four columns", asyn
   await expect(window.getByTestId("badge-running").first()).toBeVisible();
 });
 
+test("the board's Workspace button returns to the workspace view", async () => {
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+
+  await window.getByTestId("workspace-button").click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("board-view")).toHaveCount(0);
+});
+
 test("clicking a card returns to the workspace view, focused on that task", async () => {
   await window.getByTestId("card-t-202").click();
 

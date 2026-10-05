@@ -1,7 +1,9 @@
+import { PanelLeft } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Board } from "./components/Board";
 import { Sidebar } from "./components/Sidebar";
+import { Button } from "./components/ui/button";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { taskOrder } from "./mock";
 
@@ -41,8 +43,26 @@ export function App(): JSX.Element {
   return (
     <div className="flex h-screen w-screen bg-background text-foreground">
       {view === "board" ? (
-        <div data-testid="board-view" className="h-full w-full">
-          <Board onSelectTask={selectTask} />
+        <div data-testid="board-view" className="flex h-full w-full flex-col">
+          <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="workspace-button"
+              onClick={() => setView("workspace")}
+              title="Back to workspace (⌘B)"
+            >
+              <PanelLeft className="mr-1.5 h-4 w-4" />
+              Workspace
+            </Button>
+            <span className="text-sm font-medium text-muted-foreground">
+              Board
+            </span>
+            <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
+          </header>
+          <div className="min-h-0 flex-1">
+            <Board onSelectTask={selectTask} />
+          </div>
         </div>
       ) : (
         <div data-testid="workspace-view" className="flex h-full w-full">
