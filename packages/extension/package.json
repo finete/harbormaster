@@ -2,5 +2,25 @@
   "name": "@harbormaster/extension",
   "private": true,
   "version": "0.0.1",
-  "description": "Slim Pi extension: adoption commands, temp write-guard, frozen TUI board."
+  "type": "module",
+  "description": "Slim Pi extension: presence reporting for Harbormaster-hosted sessions. Adoption commands, temp write-guard, and the frozen TUI board land in a later wave.",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@harbormaster/core": "0.0.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.3",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
 }
