@@ -13,8 +13,14 @@ import { BoardColumn } from "./BoardColumn";
 /**
  * Mock kanban board — local-state only. Columns and card placement are a
  * stand-in for @harbormaster/core's board state; see src/renderer/src/mock.ts.
+ * This is the "home" triage screen: clicking a card hands off to the
+ * workspace view, focused on that task.
  */
-export function Board(): JSX.Element {
+export function Board({
+  onSelectTask,
+}: {
+  onSelectTask: (taskId: string) => void;
+}): JSX.Element {
   const [columns, setColumns] = useState(() =>
     mockColumns.map((column) => ({ ...column, cardIds: [...column.cardIds] })),
   );
@@ -56,6 +62,7 @@ export function Board(): JSX.Element {
             cards={column.cardIds
               .map((id) => mockCards[id])
               .filter((c): c is NonNullable<typeof c> => Boolean(c))}
+            onSelectTask={onSelectTask}
           />
         ))}
       </div>

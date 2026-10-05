@@ -16,13 +16,19 @@ const components = {
 
 let nextPanelId = 1;
 
-export function TerminalsHost(): JSX.Element {
+/**
+ * One task's terminal workspace: a dedicated dockview instance, started with
+ * a single terminal panel. `WorkspaceView` mounts exactly one of these per
+ * task (lazily, on first focus) and keeps it alive — hidden, not unmounted —
+ * so ptys and dockview layout survive switching between tasks/views.
+ */
+export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null);
 
   function onReady(event: DockviewReadyEvent): void {
     apiRef.current = event.api;
     event.api.addPanel({
-      id: `terminal-${nextPanelId++}`,
+      id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
       title: "Shell",
     });
@@ -33,7 +39,7 @@ export function TerminalsHost(): JSX.Element {
     if (!api) return;
     const activePanel = api.activePanel;
     api.addPanel({
-      id: `terminal-${nextPanelId++}`,
+      id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
       title: "Shell",
       ...(activePanel

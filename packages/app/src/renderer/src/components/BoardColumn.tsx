@@ -7,9 +7,11 @@ import { TaskCard } from "./TaskCard";
 export function BoardColumn({
   column,
   cards,
+  onSelectTask,
 }: {
   column: MockColumn;
   cards: TaskCardData[];
+  onSelectTask: (taskId: string) => void;
 }): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
@@ -33,7 +35,7 @@ export function BoardColumn({
         data-testid={`column-${column.id}-cards`}
       >
         {cards.map((card) => (
-          <TaskCard key={card.id} card={card} />
+          <TaskCard key={card.id} card={card} onSelect={onSelectTask} />
         ))}
       </div>
     </div>

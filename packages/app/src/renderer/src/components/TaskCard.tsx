@@ -13,7 +13,13 @@ const prVariant = {
   merged: "merged",
 } as const;
 
-export function TaskCard({ card }: { card: TaskCardData }): JSX.Element {
+export function TaskCard({
+  card,
+  onSelect,
+}: {
+  card: TaskCardData;
+  onSelect?: (taskId: string) => void;
+}): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: card.id,
@@ -32,6 +38,7 @@ export function TaskCard({ card }: { card: TaskCardData }): JSX.Element {
         "cursor-grab touch-none select-none active:cursor-grabbing",
         isDragging && "opacity-50 ring-1 ring-primary",
       )}
+      onClick={() => onSelect?.(card.id)}
       {...attributes}
       {...listeners}
     >
