@@ -86,3 +86,16 @@ export const mockColumns: MockColumn[] = [
   { id: "awaiting", title: "Awaiting", cardIds: ["t-301"] },
   { id: "done", title: "Done", cardIds: ["t-401", "t-402"] },
 ];
+
+/** Which column a task currently sits in — used by the sidebar's status dot. */
+export function columnOf(taskId: string): ColumnId {
+  for (const column of mockColumns) {
+    if (column.cardIds.includes(taskId)) return column.id;
+  }
+  throw new Error(`unknown task id: ${taskId}`);
+}
+
+/** Flat task order (board column order) — drives the sidebar task list. */
+export const taskOrder: string[] = mockColumns.flatMap(
+  (column) => column.cardIds,
+);
