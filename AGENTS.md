@@ -1,9 +1,9 @@
-# Harbormaster — architecture rules
+# Harbormaster: architecture rules
 
 Read `docs/design-decisions.md` for the full decision record behind these
 rules before proposing structural changes, and `ai/prds/architecture.md` for
 the volatility-based service layering (Manager / Engine / Resource Access /
-Utility) that `packages/core` follows — pi-home's `src/` layout
+Utility) that `packages/core` follows. Pi-home's `src/` layout
 (`manager/`, `engines/`, `access/`, `utilities/`, `contracts/`) carries over.
 
 - **Accessor separation is a hard rule.** All storage and external-system I/O
@@ -12,7 +12,7 @@ Utility) that `packages/core` follows — pi-home's `src/` layout
   directly; frontends never call access services. Call-chain direction
   (Client → Manager → Engine → Access → Resource, utilities callable from any
   layer, never upward) is enforced. Placing every business rule in an Engine
-  is advisory, not hard — extract an Engine when logic is shared or volatile.
+  is advisory, not mandatory; extract one when logic is shared or volatile.
 
 - **Core is headless.** `packages/core` owns all board/mover/worktree/presence
   logic behind a command API (commands in, state events out). Frontends
@@ -33,7 +33,7 @@ Utility) that `packages/core` follows — pi-home's `src/` layout
   board features are app-only.
 - **UI stack is fixed**: Electron + Vite + React + TypeScript (no Next.js, no
   router), Tailwind + shadcn/ui (copy-in), dnd-kit (kanban board), dockview
-  (tabs/splits — a tab and a split are the same panel model), @xterm/xterm +
+  (tabs/splits: a tab and a split are the same panel model), @xterm/xterm +
   node-pty (session panes).
 - **pi-gui is a parts bin, not a base.** Code lifted from
   minghinmatthewlam/pi-gui (MIT) must be re-skinned to our design tokens and
@@ -51,13 +51,13 @@ the username (`https://finete@github.com/...`) so gh's credential helper
 routes to the right account. Never copy this repo's git config elsewhere, and
 never change this repo's config to any other identity.
 
-**Hard user separation:** every git and GitHub operation on this repository —
-push, `gh` API calls, anything — must act as `finete` and no other account.
+**Hard user separation:** every git and GitHub operation on this repository,
+including push, `gh` API calls, and anything else, must act as `finete` and no other account.
 If a `gh` command is ever needed here, prefix it:
 `GH_TOKEN="$(gh auth token --user finete)" gh …`. Never add other accounts
 as collaborators.
 
-**Workflow:** solo development, directly on `main` — no pull requests, no
+**Workflow:** solo development, directly on `main`, with no pull requests and no
 review ceremony. Subagents/implementers work on short-lived local branches or
 worktrees purely as transport; the supervisor reviews, merges to `main`, and
 pushes. Keep `main` green (typecheck + tests pass at every commit).
