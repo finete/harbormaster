@@ -5,9 +5,11 @@ import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
+import { ToastHost } from "./components/ToastHost";
 import { Button } from "./components/ui/button";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { flattenBoard, useBoard } from "./core-client";
+import { pushToast } from "./toast";
 
 type View = "board" | "workspace";
 
@@ -92,6 +94,17 @@ export function App(): JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Main's 30s automation-refresh loop (see main/index.ts's refreshOnce)
+  // pushes at most one deduped warning per distinct failure; surface it the
+  // same way any task-action error does.
+  useEffect(
+    () =>
+      window.harbormaster.core.onRefreshWarning((warning) => {
+        pushToast(warning, "warning");
+      }),
+    [],
+  );
+
   return (
     <div className="flex h-screen w-screen bg-background text-foreground">
       {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
@@ -154,6 +167,7 @@ export function App(): JSX.Element {
           openTask(taskId);
         }}
       />
+      <ToastHost />
     </div>
   );
 }

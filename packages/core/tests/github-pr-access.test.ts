@@ -413,4 +413,19 @@ describe("GithubPrAccess fixtures", () => {
     );
     expect(status?.mergeCommit).toBeUndefined();
   });
+
+  it("honors HARBORMASTER_GH_COMMAND as a command override for the default execute (e2e fake binaries)", async () => {
+    const previous = process.env.HARBORMASTER_GH_COMMAND;
+    process.env.HARBORMASTER_GH_COMMAND = "/bin/echo";
+    try {
+      // No execute override: exercises the real default, which should run
+      // the fake command instead of "gh" and otherwise behave the same.
+      await expect(
+        new GithubPrAccess().status(repositoryId, "feature"),
+      ).rejects.toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.HARBORMASTER_GH_COMMAND;
+      else process.env.HARBORMASTER_GH_COMMAND = previous;
+    }
+  });
 });

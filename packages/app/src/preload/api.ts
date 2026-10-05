@@ -104,10 +104,33 @@ export interface HarbormasterApi {
       state: TaskState,
       options?: MoveTaskOptions,
     ): Promise<Task>;
+    /**
+     * Push the task's branch, open/reuse its PR, and move it to
+     * `awaiting`/`{ kind: "review" }`. Rejects (no warning shape) for
+     * scratch tasks or tasks with no bound worktree/branch; see
+     * `CoreCommands.toReview`.
+     */
+    toReview(taskId: string): Promise<Task>;
+    /**
+     * Move a task to `done`; any cleanup refusal (dirty worktree, unmerged
+     * branch, ...) surfaces as `warning` instead of throwing. See
+     * `CoreCommands.toDone`.
+     */
+    toDone(taskId: string): Promise<{ task: Task; warning?: string }>;
+    /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
+    refresh(): Promise<{ warnings: string[] }>;
     /** Subscribes to the core's board-changed push channel; returns an unsubscribe fn. */
     onBoardChanged(
       listener: (payload: BoardChangedPayload) => void,
     ): () => void;
+    /**
+     * Subscribes to the main process's 30s automation-refresh push channel
+     * (see `main/index.ts`'s `refreshOnce`): a single joined warning string
+     * whenever `refresh()` surfaces one, deduped against the immediately
+     * preceding push (never fires twice in a row with the same text).
+     * Returns an unsubscribe fn.
+     */
+    onRefreshWarning(listener: (warning: string) => void): () => void;
     /** On-demand liveness snapshot for the takeover guard; see `PresenceSnapshot`. */
     presence(taskId: string): Promise<PresenceSnapshot>;
     /** Subscribes to the ~5s presence poll's push channel; returns an unsubscribe fn. */

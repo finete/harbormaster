@@ -4,15 +4,10 @@ import { Loader2 } from "lucide-react";
 import type { JSX } from "react";
 import type { Task } from "../../../preload/api";
 import { cn } from "../lib/utils";
+import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
+import { TaskActions } from "./TaskActions";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-
-const prVariant = {
-  open: "success",
-  draft: "draft",
-  merged: "merged",
-  closed: "closed",
-} as const;
 
 export function TaskCard({
   task,
@@ -84,11 +79,17 @@ export function TaskCard({
           </Badge>
         )}
         {task.pr && (
-          <Badge variant={prVariant[task.pr.state]} data-testid="badge-pr">
-            PR #{task.pr.number} · {task.pr.state}
+          <Badge variant={prBadgeVariant(task.pr)} data-testid="badge-pr">
+            {prBadgeLabel(task.pr)}
           </Badge>
         )}
       </CardContent>
+      <div className="px-3 pb-2">
+        <TaskActions
+          task={task}
+          onPointerDownCapture={(event) => event.stopPropagation()}
+        />
+      </div>
     </Card>
   );
 }

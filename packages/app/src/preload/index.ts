@@ -65,6 +65,12 @@ const api: HarbormasterApi = {
       state: TaskState,
       options?: MoveTaskOptions,
     ): Promise<Task> => ipcRenderer.invoke("core:moveTask", id, state, options),
+    toReview: (taskId: string): Promise<Task> =>
+      ipcRenderer.invoke("core:toReview", taskId),
+    toDone: (taskId: string): Promise<{ task: Task; warning?: string }> =>
+      ipcRenderer.invoke("core:toDone", taskId),
+    refresh: (): Promise<{ warnings: string[] }> =>
+      ipcRenderer.invoke("core:refresh"),
     onBoardChanged: (
       listener: (payload: BoardChangedPayload) => void,
     ): (() => void) => {
@@ -86,6 +92,14 @@ const api: HarbormasterApi = {
       ): void => listener(payload);
       ipcRenderer.on("core:presence-changed", handler);
       return () => ipcRenderer.removeListener("core:presence-changed", handler);
+    },
+    onRefreshWarning: (listener: (warning: string) => void): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        warning: string,
+      ): void => listener(warning);
+      ipcRenderer.on("core:refresh-warning", handler);
+      return () => ipcRenderer.removeListener("core:refresh-warning", handler);
     },
   },
 };

@@ -5,6 +5,7 @@ import type { TaskState } from "../../../preload/api";
 import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
 import { cn } from "../lib/utils";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 
@@ -14,13 +15,6 @@ const statusDotClass: Record<TaskState, string> = {
   awaiting: "bg-yellow-500",
   done: "bg-green-500",
 };
-
-const prVariant = {
-  open: "success",
-  draft: "draft",
-  merged: "merged",
-  closed: "closed",
-} as const;
 
 /**
  * Narrow task list for the workspace view: every task on the live board,
@@ -40,7 +34,9 @@ export function Sidebar({
   onShowBoard: () => void;
 }): JSX.Element {
   const columns = useBoard();
-  const rows = flattenBoard(columns);
+  // Sidebar excludes archived tasks always (the Done column's "show
+  // archived" toggle is board-only; see BoardColumn.tsx).
+  const rows = flattenBoard(columns).filter(({ task }) => !task.archivedAt);
   const presence = usePresenceMap();
   const [newTaskOpen, setNewTaskOpen] = useState(false);
 
@@ -130,9 +126,10 @@ export function Sidebar({
                 </span>
                 {task.pr && (
                   <Badge
-                    variant={prVariant[task.pr.state]}
+                    variant={prBadgeVariant(task.pr)}
                     className="shrink-0 text-[10px]"
                     data-testid="badge-pr"
+                    title={prBadgeLabel(task.pr)}
                   >
                     #{task.pr.number}
                   </Badge>
