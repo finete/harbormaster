@@ -39,6 +39,15 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/renderer/index.html"),
         },
+        output: {
+          // Keep heavyweight vendor code out of the app chunk; silences the
+          // 500kB warning with real splitting instead of a raised limit.
+          manualChunks: {
+            xterm: ["@xterm/xterm", "@xterm/addon-fit"],
+            dockview: ["dockview-react"],
+            react: ["react", "react-dom"],
+          },
+        },
       },
     },
   },
