@@ -3,7 +3,13 @@
 // `require`, `process`, or any other Node global.
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  BoardChangedPayload,
+  BoardColumn,
+  CreateTaskInput,
   HarbormasterApi,
+  MoveTaskOptions,
+  Task,
+  TaskState,
   TerminalCreateOptions,
   TerminalCreateResult,
   TerminalDataEvent,
@@ -37,6 +43,29 @@ const api: HarbormasterApi = {
       ): void => listener(payload);
       ipcRenderer.on("pty:exit", handler);
       return () => ipcRenderer.removeListener("pty:exit", handler);
+    },
+  },
+  core: {
+    listBoard: (): Promise<BoardColumn[]> =>
+      ipcRenderer.invoke("core:listBoard"),
+    getTask: (id: string): Promise<Task | undefined> =>
+      ipcRenderer.invoke("core:getTask", id),
+    createTask: (input: CreateTaskInput): Promise<Task> =>
+      ipcRenderer.invoke("core:createTask", input),
+    moveTask: (
+      id: string,
+      state: TaskState,
+      options?: MoveTaskOptions,
+    ): Promise<Task> => ipcRenderer.invoke("core:moveTask", id, state, options),
+    onBoardChanged: (
+      listener: (payload: BoardChangedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: BoardChangedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:board-changed", handler);
+      return () => ipcRenderer.removeListener("core:board-changed", handler);
     },
   },
 };

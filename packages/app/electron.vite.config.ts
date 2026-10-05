@@ -6,7 +6,13 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 // See /AGENTS.md for the fixed UI stack this skeleton proves out.
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // @harbormaster/core ships ESM-only (`"type": "module"`), which an
+    // externalized `require()` can't load from this CJS main bundle (Node
+    // ERR_REQUIRE_ESM). Excluding it from externalization bundles it
+    // through Rollup instead, which transpiles it to CJS like everything
+    // else in this output — every other dependency stays externalized
+    // and `require()`d from node_modules as before.
+    plugins: [externalizeDepsPlugin({ exclude: ["@harbormaster/core"] })],
     build: {
       rollupOptions: {
         input: {
