@@ -94,15 +94,22 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex h-screen w-screen bg-background text-foreground">
-      {view === "board" ? (
-        <div data-testid="board-view" className="flex h-full w-full flex-col">
+      {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
+          (and its pty-backed terminals) alive across board/workspace switches. */}
+      {
+        <div
+          data-testid="board-view"
+          className={
+            view === "board" ? "flex h-full w-full flex-col" : "hidden"
+          }
+        >
           <header className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Button
               variant="ghost"
               size="sm"
               data-testid="workspace-button"
               onClick={() => setView("workspace")}
-              title="Back to workspace (\u2318B)"
+              title="Back to workspace"
             >
               <PanelLeft className="mr-1.5 h-4 w-4" />
               Workspace
@@ -116,8 +123,12 @@ export function App(): JSX.Element {
             <Board onSelectTask={selectTask} />
           </div>
         </div>
-      ) : (
-        <div data-testid="workspace-view" className="flex h-full w-full">
+      }
+      {
+        <div
+          data-testid="workspace-view"
+          className={view === "workspace" ? "flex h-full w-full" : "hidden"}
+        >
           <Sidebar
             focusedTaskId={focusedTaskId}
             onSelectTask={selectTask}
@@ -128,7 +139,7 @@ export function App(): JSX.Element {
             openedTaskIds={openedTaskIds}
           />
         </div>
-      )}
+      }
       <TakeoverDialog
         open={takeover !== null}
         taskTitle={
