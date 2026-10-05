@@ -18,11 +18,24 @@ export function WorkspaceView({
   const [, forceRender] = useState(0);
 
   useEffect(() => {
-    if (!openedRef.current.has(focusedTaskId)) {
+    if (focusedTaskId && !openedRef.current.has(focusedTaskId)) {
       openedRef.current.add(focusedTaskId);
       forceRender((tick) => tick + 1);
     }
   }, [focusedTaskId]);
+
+  if (openedRef.current.size === 0) {
+    return (
+      <div data-testid="workspace-main" className="relative h-full flex-1">
+        <div
+          data-testid="workspace-empty-hint"
+          className="flex h-full items-center justify-center text-sm text-muted-foreground"
+        >
+          No task selected — create or pick a task from the sidebar.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-testid="workspace-main" className="relative h-full flex-1">

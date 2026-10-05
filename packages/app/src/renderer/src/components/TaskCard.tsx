@@ -2,8 +2,8 @@ import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Loader2 } from "lucide-react";
 import type { JSX } from "react";
+import type { Task } from "../../../preload/api";
 import { cn } from "../lib/utils";
-import type { TaskCard as TaskCardData } from "../mock";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
@@ -11,45 +11,64 @@ const prVariant = {
   open: "success",
   draft: "draft",
   merged: "merged",
+  closed: "closed",
 } as const;
 
+// TODO(presence): always false until the Pi harness presence adapter lands
+// (see /docs/design-decisions.md item 13). Kept as a named flag, not
+// inlined, so the spinner rendering path + its testid stay alive and the
+// only change needed later is this function's body.
+function isRunning(_task: Task): boolean {
+  return false;
+}
+
 export function TaskCard({
-  card,
+  task,
   onSelect,
 }: {
-  card: TaskCardData;
+  task: Task;
   onSelect?: (taskId: string) => void;
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
-      id: card.id,
+      id: task.id,
     });
 
   const style = transform
     ? { transform: CSS.Translate.toString(transform) }
     : undefined;
 
+  const running = isRunning(task);
+
   return (
     <Card
       ref={setNodeRef}
       style={style}
-      data-testid={`card-${card.id}`}
+      data-testid={`card-${task.id}`}
       className={cn(
         "cursor-grab touch-none select-none active:cursor-grabbing",
         isDragging && "opacity-50 ring-1 ring-primary",
       )}
-      onClick={() => onSelect?.(card.id)}
+      onClick={() => onSelect?.(task.id)}
       {...attributes}
       {...listeners}
     >
       <CardHeader>
-        <CardTitle>{card.title}</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          {card.repo} · <span className="font-mono">{card.branch}</span>
-        </p>
+        <CardTitle>{task.title}</CardTitle>
+        {task.branch && (
+          <p className="text-xs text-muted-foreground">
+            <span className="font-mono">{task.branch}</span>
+            {task.targetBranch && (
+              <>
+                {" → "}
+                <span className="font-mono">{task.targetBranch}</span>
+              </>
+            )}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="flex-row flex-wrap items-center gap-1.5">
-        {card.running && (
+        {running && (
           <Badge
             variant="secondary"
             className="gap-1"
@@ -59,9 +78,9 @@ export function TaskCard({
             running
           </Badge>
         )}
-        {card.pr && (
-          <Badge variant={prVariant[card.pr.state]} data-testid="badge-pr">
-            PR #{card.pr.number} · {card.pr.state}
+        {task.pr && (
+          <Badge variant={prVariant[task.pr.state]} data-testid="badge-pr">
+            PR #{task.pr.number} · {task.pr.state}
           </Badge>
         )}
       </CardContent>

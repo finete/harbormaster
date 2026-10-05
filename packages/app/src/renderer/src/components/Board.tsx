@@ -6,66 +6,139 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { JSX } from "react";
-import { useState } from "react";
-import { type ColumnId, mockCards, mockColumns } from "../mock";
+import { useRef, useState } from "react";
+import type { AwaitingKind, TaskState } from "../../../preload/api";
+import { flattenBoard, useBoard } from "../core-client";
+import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
+import { NewTaskDialog } from "./NewTaskDialog";
+import { Button } from "./ui/button";
 
 /**
- * Mock kanban board — local-state only. Columns and card placement are a
- * stand-in for @harbormaster/core's board state; see src/renderer/src/mock.ts.
- * This is the "home" triage screen: clicking a card hands off to the
- * workspace view, focused on that task.
+ * Kanban board — renders @harbormaster/core's live board projection exactly
+ * as returned (columns -> groups -> tasks; see /packages/core/src/engines
+ * /board-grouping.ts). The board never holds its own copy of task
+ * placement: every drag just calls `moveTask` and waits for the
+ * "board-changed" push to re-render, so there is nothing to roll back if a
+ * move is rejected (e.g. an illegal transition) \u2014 the UI simply doesn't
+ * change.
  */
 export function Board({
   onSelectTask,
 }: {
   onSelectTask: (taskId: string) => void;
 }): JSX.Element {
-  const [columns, setColumns] = useState(() =>
-    mockColumns.map((column) => ({ ...column, cardIds: [...column.cardIds] })),
-  );
+  const columns = useBoard();
+  const [pendingDrop, setPendingDrop] = useState<{
+    taskId: string;
+  } | null>(null);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
+  // dnd-kit doesn't suppress the native `click` event the browser still
+  // fires on pointerup after a completed drag (it only cancels at the
+  // activation-constraint level, not the DOM click). Track whether this
+  // gesture actually crossed the activation distance so a real drag
+  // doesn't also trigger TaskCard's onClick "select" handler; a plain
+  // click (never reaching onDragStart) still selects normally.
+  const draggedRef = useRef(false);
+
+  function handleDragStart(): void {
+    draggedRef.current = true;
+  }
+
+  function handleSelectTask(taskId: string): void {
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      return;
+    }
+    onSelectTask(taskId);
+  }
+
   function handleDragEnd(event: DragEndEvent): void {
     const { active, over } = event;
     if (!over) return;
 
-    const targetColumnId = over.id as ColumnId;
-    const cardId = active.id as string;
+    const targetState = over.id as TaskState;
+    const taskId = active.id as string;
 
-    setColumns((prev) => {
-      const sourceIndex = prev.findIndex((c) => c.cardIds.includes(cardId));
-      const targetIndex = prev.findIndex((c) => c.id === targetColumnId);
-      if (sourceIndex === -1 || targetIndex === -1) return prev;
-      if (prev[sourceIndex]?.id === targetColumnId) return prev;
+    const row = flattenBoard(columns).find((r) => r.task.id === taskId);
+    if (!row || row.state === targetState) return;
 
-      const next = prev.map((c) => ({ ...c, cardIds: [...c.cardIds] }));
-      const source = next[sourceIndex];
-      const target = next[targetIndex];
-      if (!source || !target) return prev;
-      source.cardIds = source.cardIds.filter((id) => id !== cardId);
-      target.cardIds = [...target.cardIds, cardId];
-      return next;
-    });
+    if (targetState === "awaiting") {
+      setPendingDrop({ taskId });
+      return;
+    }
+
+    void window.harbormaster.core
+      .moveTask(taskId, targetState)
+      .catch((error: unknown) => {
+        console.error("moveTask failed:", error);
+      });
+  }
+
+  function confirmAwaiting(awaiting: AwaitingKind): void {
+    const taskId = pendingDrop?.taskId;
+    setPendingDrop(null);
+    if (!taskId) return;
+    void window.harbormaster.core
+      .moveTask(taskId, "awaiting", { awaiting })
+      .catch((error: unknown) => {
+        console.error("moveTask failed:", error);
+      });
   }
 
   return (
-    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-3 overflow-x-auto p-3">
-        {columns.map((column) => (
-          <BoardColumn
-            key={column.id}
-            column={column}
-            cards={column.cardIds
-              .map((id) => mockCards[id])
-              .filter((c): c is NonNullable<typeof c> => Boolean(c))}
-            onSelectTask={onSelectTask}
-          />
-        ))}
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-end border-b border-border px-3 py-2">
+        <Button
+          size="sm"
+          data-testid="board-new-task-button"
+          onClick={() => setNewTaskOpen(true)}
+        >
+          + New task
+        </Button>
       </div>
-    </DndContext>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex h-full gap-3 overflow-x-auto p-3">
+          {columns.map((column) => (
+            <BoardColumn
+              key={column.state}
+              column={column}
+              onSelectTask={handleSelectTask}
+            />
+          ))}
+        </div>
+      </DndContext>
+      <AwaitingReasonDialog
+        open={pendingDrop !== null}
+        onCancel={() => setPendingDrop(null)}
+        onConfirm={confirmAwaiting}
+      />
+      <NewTaskDialog
+        open={newTaskOpen}
+        onOpenChange={setNewTaskOpen}
+        onCreate={(input) => {
+          void window.harbormaster.core
+            .createTask({
+              title: input.title,
+              initialPrompt: "",
+              ...(input.repositoryId
+                ? { repositoryId: input.repositoryId }
+                : {}),
+            })
+            .catch((error: unknown) => {
+              console.error("createTask failed:", error);
+            });
+        }}
+      />
+    </div>
   );
 }

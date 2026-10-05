@@ -1,11 +1,11 @@
 import { PanelLeft } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Board } from "./components/Board";
 import { Sidebar } from "./components/Sidebar";
 import { Button } from "./components/ui/button";
 import { WorkspaceView } from "./components/WorkspaceView";
-import { taskOrder } from "./mock";
+import { flattenBoard, useBoard } from "./core-client";
 
 type View = "board" | "workspace";
 
@@ -20,9 +20,18 @@ type View = "board" | "workspace";
  */
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
-  const [focusedTaskId, setFocusedTaskId] = useState<string>(
-    taskOrder[0] ?? "",
-  );
+  const [focusedTaskId, setFocusedTaskId] = useState<string>("");
+  const columns = useBoard();
+  const flatRows = useMemo(() => flattenBoard(columns), [columns]);
+
+  // Default focus to the first task once the board has loaded, same as the
+  // old mock's `taskOrder[0]` default — but only once: never yank focus
+  // away from a task the user picked (or that got created) later.
+  useEffect(() => {
+    if (!focusedTaskId && flatRows.length > 0) {
+      setFocusedTaskId(flatRows[0]?.task.id ?? "");
+    }
+  }, [focusedTaskId, flatRows]);
 
   const selectTask = useCallback((taskId: string) => {
     setFocusedTaskId(taskId);
@@ -50,7 +59,7 @@ export function App(): JSX.Element {
               size="sm"
               data-testid="workspace-button"
               onClick={() => setView("workspace")}
-              title="Back to workspace (⌘B)"
+              title="Back to workspace (\u2318B)"
             >
               <PanelLeft className="mr-1.5 h-4 w-4" />
               Workspace

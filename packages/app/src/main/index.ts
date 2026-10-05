@@ -2,6 +2,12 @@
 
 import { join } from "node:path";
 import { is } from "@electron-toolkit/utils";
+import type {
+  CreateTaskInput,
+  MoveTaskOptions,
+  TaskState,
+} from "@harbormaster/core";
+import { createCore } from "@harbormaster/core";
 import type { WebContents } from "electron";
 import { app, BrowserWindow, ipcMain } from "electron";
 import type {
@@ -60,6 +66,45 @@ function safeSend(
 ): void {
   if (webContents.isDestroyed()) return;
   webContents.send(channel, payload);
+}
+
+// Headless core command API, hosted in the main process (see
+// /docs/design-decisions.md "Brain placement"). `HARBORMASTER_STATE_DIR` lets
+// e2e tests point this at a fresh tmpdir per run instead of the real
+// per-user state dir; unset in normal app use, where `createCore` falls back
+// to its own default (`~/.harbormaster`).
+const core = createCore(
+  process.env.HARBORMASTER_STATE_DIR
+    ? { stateDir: process.env.HARBORMASTER_STATE_DIR }
+    : {},
+);
+
+function registerCoreIpc(): void {
+  ipcMain.handle("core:listBoard", () => core.commands.listBoard());
+  ipcMain.handle("core:getTask", (_event, id: string) =>
+    core.commands.getTask(id),
+  );
+  ipcMain.handle("core:createTask", (_event, input: CreateTaskInput) =>
+    core.commands.createTask(input),
+  );
+  ipcMain.handle(
+    "core:moveTask",
+    (
+      _event,
+      id: string,
+      state: TaskState,
+      options: MoveTaskOptions | undefined,
+    ) => core.commands.moveTask(id, state, options),
+  );
+
+  // Push channel: forward every core event to every live window. `safeSend`
+  // guards against sending to a webContents destroyed mid-flight (window
+  // closed, app quitting) — same guard the pty IPC uses above.
+  core.events.on("board-changed", (payload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:board-changed", payload);
+    }
+  });
 }
 
 function registerPtyIpc(): void {
@@ -132,13 +177,14 @@ function createWindow(): void {
   // owned them.
   win.on("closed", () => disposeSessionsFor(webContentsId));
 
-  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     void win.loadFile(join(__dirname, "../renderer/index.html"));
   }
 }
 
+registerCoreIpc();
 registerPtyIpc();
 
 app.whenReady().then(() => {
