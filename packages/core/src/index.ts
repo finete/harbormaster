@@ -6,6 +6,8 @@
 // this boundary — it must stay daemon-ready (see /ai/prds/architecture.md).
 
 import {
+  GithubPrAccess,
+  HttpVersionAccess,
   JsonConfigAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
@@ -15,6 +17,7 @@ import {
 } from "./access/index.js";
 import type { CoreCommands } from "./contracts/commands.js";
 import type { CoreEvents } from "./contracts/events.js";
+import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { Clock, IdGenerator } from "./contracts/services.js";
 import { CoreManager } from "./manager/core-manager.js";
 import { SystemClock, UuidGenerator } from "./utilities/defaults.js";
@@ -36,6 +39,10 @@ export interface CoreOptions {
   stateDir?: string;
   clock?: Clock;
   ids?: IdGenerator;
+  /** Overrides the gh-CLI-backed GitHub access; tests inject a fake `Execute` here instead of `GithubPrAccess()`'s default real `gh`. */
+  pullRequests?: PullRequestAccess;
+  /** Overrides the HTTPS version-endpoint access; tests inject a fake fetch here instead of `HttpVersionAccess()`'s default real `fetch`. */
+  versions?: VersionAccess;
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -62,6 +69,8 @@ export function createCore(options: CoreOptions = {}): Core {
   const config = new JsonConfigAccess(paths.configFile);
   const repositories = new LocalGitRepositoryAccess();
   const worktrees = new LocalGitWorktreeAccess();
+  const pullRequests = options.pullRequests ?? new GithubPrAccess();
+  const versions = options.versions ?? new HttpVersionAccess();
 
   const clock = options.clock ?? new SystemClock();
   const ids = options.ids ?? new UuidGenerator();
@@ -76,6 +85,8 @@ export function createCore(options: CoreOptions = {}): Core {
     repositories,
     worktrees,
     bindings: workspaceBindings,
+    pullRequests,
+    versions,
   });
 
   return { commands, events };

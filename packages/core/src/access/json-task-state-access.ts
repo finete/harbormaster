@@ -111,6 +111,9 @@ function isOptionalString(value: unknown): boolean {
 function isValidPr(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isRecord(value)) return false;
+  // Lenient beyond number/state: refresh() may enrich this record with
+  // review/merge fields over time, and corrupt-state detection only needs
+  // to catch structurally broken records, not reject forward-compatible ones.
   return (
     typeof value.number === "number" &&
     (["draft", "open", "merged", "closed"] as const).includes(
