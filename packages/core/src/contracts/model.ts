@@ -140,6 +140,10 @@ export interface GlobalConfig {
   automation: boolean;
   /** Ordered names of active movers; empty until movers exist (phase 2). */
   movers: string[];
+  /** Folder containing all repository checkouts (absolute; "~" expanded on load). */
+  codeRoot?: string;
+  /** Git namespace for new task branches (e.g. "alice/"); may be empty. */
+  branchPrefix?: string;
 }
 
 export const defaultGlobalConfig = (): GlobalConfig => ({
