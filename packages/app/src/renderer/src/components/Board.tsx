@@ -47,7 +47,7 @@ import { Kbd } from "./ui/kbd";
  * change.
  *
  * Also owns the pi-home-style TUI keymap (see lib/board-selection.ts):
- * arrow keys / hjkl move a keyboard-selected card, Enter opens it, n/g/a/x/r/s
+ * arrow keys move a keyboard-selected card, Enter opens it, n/g/a/x/r/s
  * mirror the on-card buttons, Escape returns to the workspace view. Only
  * live while `active` (the board is the visible view, per App.tsx) and
  * never while a dialog is open or focus is in a text field/the terminal
@@ -203,22 +203,18 @@ export function Board({
       const grid = buildSelectionGrid(columns, showArchived);
       switch (event.key) {
         case "ArrowLeft":
-        case "h":
           event.preventDefault();
           setSelectedTaskId((current) => moveSelection(grid, current, "left"));
           return;
         case "ArrowRight":
-        case "l":
           event.preventDefault();
           setSelectedTaskId((current) => moveSelection(grid, current, "right"));
           return;
         case "ArrowUp":
-        case "k":
           event.preventDefault();
           setSelectedTaskId((current) => moveSelection(grid, current, "up"));
           return;
         case "ArrowDown":
-        case "j":
           event.preventDefault();
           setSelectedTaskId((current) => moveSelection(grid, current, "down"));
           return;
