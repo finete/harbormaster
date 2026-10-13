@@ -4,7 +4,7 @@
 // kept live via the "board-changed" push channel — no frontend reads or
 // writes state files directly (see /docs/design-decisions.md "Core is
 // headless").
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   BoardColumn,
   PresenceChangedPayload,
@@ -77,4 +77,23 @@ export function usePresenceMap(): PresenceChangedPayload {
   }, []);
 
   return presence;
+}
+
+/**
+ * Manual "refresh now": invokes the same `core:refresh` command main's 30s
+ * automation loop runs (PR status + movers + archive sweep; warnings are
+ * pushed through the shared refresh-warning channel). `busy` stays set for
+ * at least a beat so the spinner is visible even for an instant refresh.
+ */
+export function useManualRefresh(): { busy: boolean; refresh: () => void } {
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(() => {
+    if (busy) return;
+    setBusy(true);
+    const minimum = new Promise((resolve) => setTimeout(resolve, 400));
+    void Promise.allSettled([window.harbormaster.core.refresh(), minimum]).then(
+      () => setBusy(false),
+    );
+  }, [busy]);
+  return { busy, refresh };
 }

@@ -19,6 +19,8 @@ export interface PtySessionCallbacks {
 interface PtySessionRecord {
   id: string;
   process: pty.IPty;
+  /** The directory the process was spawned in (its starting cwd). */
+  cwd: string;
   dataDisposable: pty.IDisposable;
   exitDisposable: pty.IDisposable;
 }
@@ -58,7 +60,7 @@ export interface PtySessionOptions {
  * missing binary (the fork succeeds; exec fails inside the child), so this
  * is checked up front instead of relying on a thrown error.
  */
-function commandExists(command: string): boolean {
+export function commandExists(command: string): boolean {
   const candidates =
     command.includes("/") || command.startsWith("~")
       ? [command]
@@ -88,12 +90,13 @@ export function createSession(
   const useSpec = !!spec && commandExists(spec.command);
   const fellBackToShell = !!spec && !useSpec;
 
+  const spawnCwd = useSpec ? spec.cwd || cwd : cwd;
   const ptyProcess = useSpec
     ? pty.spawn(spec.command, spec.args, {
         name: "xterm-256color",
         cols,
         rows,
-        cwd: spec.cwd || cwd,
+        cwd: spawnCwd,
         env: { ...(process.env as Record<string, string>), ...spec.env },
       })
     : pty.spawn(defaultShell(), [], {
@@ -114,7 +117,13 @@ export function createSession(
     callbacks.onExit(exitCode),
   );
 
-  sessions.set(id, { id, process: ptyProcess, dataDisposable, exitDisposable });
+  sessions.set(id, {
+    id,
+    process: ptyProcess,
+    cwd: spawnCwd,
+    dataDisposable,
+    exitDisposable,
+  });
   return { id, pid: ptyProcess.pid, fellBackToShell };
 }
 
@@ -163,6 +172,16 @@ export function activeSessionPids(): Set<number> {
       .map((session) => session.process.pid)
       .filter((pid): pid is number => typeof pid === "number"),
   );
+}
+
+/**
+ * Spawn cwds of every live pty right now, passed to core's `toDone` as
+ * `protectedPaths` so a worktree is never removed out from under an open
+ * pane. (Spawn cwd, not the shell's current cwd — a pane that `cd`s
+ * elsewhere still protects the directory it was opened in.)
+ */
+export function activeSessionCwds(): string[] {
+  return [...new Set([...sessions.values()].map((session) => session.cwd))];
 }
 
 export function hostShellLabel(): string {

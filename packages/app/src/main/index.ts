@@ -22,7 +22,9 @@ import type {
 } from "../preload/api";
 import { isAllowedExternalUrl } from "./external-url";
 import {
+  activeSessionCwds,
   activeSessionPids,
+  commandExists,
   createSession,
   disposeAllSessions,
   disposeSession,
@@ -82,6 +84,14 @@ function safeSend(
 // per-user state dir; unset in normal app use, where `createCore` falls back
 // to its own default (`~/.harbormaster`).
 const activeStateDir = process.env.HARBORMASTER_STATE_DIR ?? DEFAULT_STATE_DIR;
+
+// Isolate Electron's own profile (localStorage with the sidebar's persisted
+// width/collapse, window state, caches) the same way: without this, e2e runs
+// share the developer's real profile and a crashed run can leave the rail
+// collapsed for every later run, and for the developer.
+if (process.env.HARBORMASTER_USER_DATA_DIR) {
+  app.setPath("userData", process.env.HARBORMASTER_USER_DATA_DIR);
+}
 const core = createCore({ stateDir: activeStateDir });
 
 // The Pi harness adapter: builds pane launch specs and reads presence. Core
@@ -116,8 +126,13 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:toReview", (_event, taskId: string) =>
     core.commands.toReview(taskId),
   );
+  ipcMain.handle("core:startTask", (_event, taskId: string) =>
+    core.commands.startTask(taskId),
+  );
+  // Main owns the ptys, so it (not the renderer) supplies the live pane
+  // cwds core must never remove a worktree out from under.
   ipcMain.handle("core:toDone", (_event, taskId: string) =>
-    core.commands.toDone(taskId),
+    core.commands.toDone(taskId, { protectedPaths: activeSessionCwds() }),
   );
   // Funnels through the same warning-push path the 30s automation timer
   // uses (see performRefresh below) so a manually-triggered refresh (tests,
@@ -275,14 +290,28 @@ function registerPtyIpc(): void {
         options.primary && options.taskId
           ? await core.commands.getTaskWorkspace(options.taskId)
           : undefined;
-      const spec =
+      const baseSpecInput =
         binding?.worktreePath && options.taskId
-          ? harness.buildLaunchSpec({
+          ? {
               taskId: options.taskId,
               workspacePath: binding.worktreePath,
               stateDir: activeStateDir,
-            })
+            }
           : undefined;
+      let spec = baseSpecInput
+        ? harness.buildLaunchSpec(baseSpecInput)
+        : undefined;
+      // The task's initial prompt kicks off its first pi session only:
+      // core hands it out exactly once (claimInitialPrompt), and only once
+      // pi is actually launchable — a shell fallback must not burn it.
+      if (spec && baseSpecInput && commandExists(spec.command)) {
+        const initialPrompt = await core.commands
+          .claimInitialPrompt(baseSpecInput.taskId)
+          .catch(() => undefined);
+        if (initialPrompt) {
+          spec = harness.buildLaunchSpec({ ...baseSpecInput, initialPrompt });
+        }
+      }
 
       const { id, fellBackToShell } = createSession(
         options.cols,

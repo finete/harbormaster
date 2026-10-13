@@ -82,9 +82,15 @@ async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await window
     .getByTestId("new-task-repo-select")
     .selectOption("github.com/test/fixture");
+  await window.getByTestId("new-task-destination-backlog").click();
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
   await window.getByTestId("board-button").click();
+  // Parked in Backlog: Start creates the worktree the pi pane runs in.
+  await cardLocator(window, title)
+    .locator('[data-testid^="start-task-button-"]')
+    .click();
+  await expect(window.getByTestId("column-dev-cards")).toContainText(title);
 }
 
 test.describe("a bound task's primary pane launches HARBORMASTER_PI_COMMAND with the harness env", () => {
@@ -128,6 +134,7 @@ test.describe("a bound task's primary pane launches HARBORMASTER_PI_COMMAND with
       env: {
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_PI_COMMAND: fakePiPath,
       },
     });
@@ -186,6 +193,7 @@ test.describe("a missing pi binary falls back to a plain shell with a dismissibl
       env: {
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_PI_COMMAND: path.join(
           root,
           "definitely-not-a-real-binary",
@@ -238,7 +246,11 @@ test.describe("the presence poll surfaces a running badge within one poll interv
 
     app = await electron.launch({
       args: [mainEntry],
-      env: { ...process.env, HARBORMASTER_STATE_DIR: stateDir },
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
     window = await app.firstWindow();

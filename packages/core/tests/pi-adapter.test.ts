@@ -39,7 +39,25 @@ describe("PiHarnessAdapter", () => {
         stateDir: "/state",
         initialPrompt: "Fix the thing",
       });
-      expect(spec.args).toEqual(["Fix the thing"]);
+      expect(spec.args).toEqual(["--", "Fix the thing"]);
+    });
+
+    it("defuses Pi's own argv parsing for flag-like, @-prefixed, multiline, and blank prompts", () => {
+      const adapter = new PiHarnessAdapter({ stateDir: "/state" });
+      const build = (initialPrompt: string) =>
+        adapter.buildLaunchSpec({
+          taskId: "task-1",
+          workspacePath: "/work/task-1",
+          stateDir: "/state",
+          initialPrompt,
+        }).args;
+      expect(build("--help me")).toEqual(["--", "--help me"]);
+      expect(build("@src/a.ts explain")).toEqual(["--", " @src/a.ts explain"]);
+      expect(build("line one\nline 'two' \"$HOME\"")).toEqual([
+        "--",
+        "line one\nline 'two' \"$HOME\"",
+      ]);
+      expect(build("   ")).toEqual([]);
     });
 
     it("honors HARBORMASTER_PI_COMMAND as a command override (e2e fake binaries)", () => {

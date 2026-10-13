@@ -175,6 +175,7 @@ test.describe("toReview and toDone drive the board through the real core command
       env: {
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_GH_COMMAND: fakeGh,
       },
     });
@@ -194,6 +195,7 @@ test.describe("toReview and toDone drive the board through the real core command
     await expect(window.getByTestId("new-task-dialog")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Ship Feature");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
+    await window.getByTestId("new-task-destination-backlog").click();
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
 
@@ -202,11 +204,11 @@ test.describe("toReview and toDone drive the board through the real core command
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
 
-    // toReview requires a "dev" (or "awaiting") task; createTask always
-    // lands new work in backlog (see NewTaskDialog.tsx) — move it forward
-    // first, same as a user dragging the card over.
+    // toReview requires a "dev" (or "awaiting") task with a worktree; the
+    // task was parked in Backlog above, so start it (creates the worktree
+    // and moves it to dev), same as a user dragging the card over.
     await window.evaluate(
-      (id) => window.harbormaster.core.moveTask(id, "dev"),
+      (id) => window.harbormaster.core.startTask(id),
       taskId,
     );
     await expect(
@@ -344,6 +346,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
       env: {
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_GH_COMMAND: fakeGh,
       },
     });
@@ -362,6 +365,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Flaky Gh Task");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
+    await window.getByTestId("new-task-destination-backlog").click();
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
 
@@ -374,7 +378,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     // CoreManager.refresh): move it out of backlog so the next tick's PR
     // status check actually calls the (failing) fake gh.
     await window.evaluate(
-      (id) => window.harbormaster.core.moveTask(id, "dev"),
+      (id) => window.harbormaster.core.startTask(id),
       taskId,
     );
 
@@ -443,7 +447,11 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
 
     app = await electron.launch({
       args: [mainEntry],
-      env: { ...process.env, HARBORMASTER_STATE_DIR: stateDir },
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
     window = await app.firstWindow();

@@ -1,4 +1,4 @@
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
@@ -8,7 +8,8 @@ import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { Button } from "./components/ui/button";
 import { WorkspaceView } from "./components/WorkspaceView";
-import { flattenBoard, useBoard } from "./core-client";
+import { flattenBoard, useBoard, useManualRefresh } from "./core-client";
+import { cn } from "./lib/utils";
 import { pushToast } from "./toast";
 
 type View = "board" | "workspace";
@@ -27,6 +28,7 @@ export function App(): JSX.Element {
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
   const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
   const columns = useBoard();
+  const manualRefresh = useManualRefresh();
   const flatRows = useMemo(() => flattenBoard(columns), [columns]);
   const taskTitleRef = useRef<Map<string, string>>(new Map());
   for (const { task } of flatRows)
@@ -126,6 +128,23 @@ export function App(): JSX.Element {
             >
               <PanelLeft className="mr-1.5 h-4 w-4" />
               Workspace
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="board-refresh-button"
+              aria-busy={manualRefresh.busy}
+              disabled={manualRefresh.busy}
+              onClick={manualRefresh.refresh}
+              title="Refresh PR status and run movers now"
+            >
+              <RefreshCw
+                className={cn(
+                  "mr-1.5 h-4 w-4",
+                  manualRefresh.busy && "animate-spin",
+                )}
+              />
+              Refresh
             </Button>
             <span className="text-sm font-medium text-muted-foreground">
               Board

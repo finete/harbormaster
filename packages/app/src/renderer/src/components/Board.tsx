@@ -9,6 +9,7 @@ import type { JSX } from "react";
 import { useRef, useState } from "react";
 import type { AwaitingKind, TaskState } from "../../../preload/api";
 import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
+import { describeThrown, pushToast } from "../toast";
 import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
 import { NewTaskDialog } from "./NewTaskDialog";
@@ -18,7 +19,8 @@ import { Button } from "./ui/button";
  * Kanban board — renders @harbormaster/core's live board projection exactly
  * as returned (columns -> groups -> tasks; see /packages/core/src/engines
  * /board-grouping.ts). The board never holds its own copy of task
- * placement: every drag just calls `moveTask` and waits for the
+ * placement: every drag just calls `moveTask` (or `startTask` for a
+ * backlog -> dev drop) and waits for the
  * "board-changed" push to re-render, so there is nothing to roll back if a
  * move is rejected (e.g. an illegal transition) \u2014 the UI simply doesn't
  * change.
@@ -62,7 +64,18 @@ export function Board({
     onSelectTask(taskId);
   }
 
+  // The suppressed click (if any) is dispatched right after pointerup, i.e.
+  // before a 0ms timer fires; clear the flag then, so a drop that produced
+  // no click (pointer released over another element) can't swallow the
+  // next genuine card click.
+  function clearDraggedSoon(): void {
+    setTimeout(() => {
+      draggedRef.current = false;
+    }, 0);
+  }
+
   function handleDragEnd(event: DragEndEvent): void {
+    clearDraggedSoon();
     const { active, over } = event;
     if (!over) return;
 
@@ -74,6 +87,19 @@ export function Board({
 
     if (targetState === "awaiting") {
       setPendingDrop({ taskId });
+      return;
+    }
+
+    // Backlog -> Dev is "start this task" (pi-home's startBacklogIssue):
+    // startTask creates the parked task's branch + worktree + binding when
+    // it has a repository but no workspace yet, and degrades to a plain
+    // move otherwise — so every backlog->dev drop routes through it.
+    if (row.state === "backlog" && targetState === "dev") {
+      void window.harbormaster.core
+        .startTask(taskId)
+        .catch((error: unknown) => {
+          pushToast(describeThrown(error), "error");
+        });
       return;
     }
 
@@ -110,6 +136,7 @@ export function Board({
         sensors={sensors}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onDragCancel={clearDraggedSoon}
       >
         <div className="flex h-full gap-3 overflow-x-auto p-3">
           {columns.map((column) => (
@@ -136,13 +163,15 @@ export function Board({
           void window.harbormaster.core
             .createTask({
               title: input.title,
-              initialPrompt: "",
+              initialPrompt: input.initialPrompt ?? "",
               ...(input.repositoryId
                 ? { repositoryId: input.repositoryId }
                 : {}),
+              ...(input.start ? { start: true } : {}),
             })
             .catch((error: unknown) => {
               console.error("createTask failed:", error);
+              pushToast(describeThrown(error), "error");
             });
         }}
       />

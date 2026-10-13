@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import type { JSX, MouseEvent, PointerEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
@@ -6,7 +6,7 @@ import { describeThrown, pushToast } from "../toast";
 import { Button } from "./ui/button";
 
 /**
- * Compact "To review" / "Done" action pair, shared by `TaskCard` (board) and
+ * Compact "Start" (backlog only) / "To review" / "Done" actions, shared by `TaskCard` (board) and
  * `TaskWorkspace`'s header (the focused task). Both call straight through
  * the IPC bridge (same pattern as `Board.tsx`/`Sidebar.tsx`'s `moveTask`
  * calls) — the board always re-renders from the next `board-changed` push,
@@ -22,7 +22,7 @@ export function TaskActions({
   /** Stops dnd-kit's drag-activation listeners (spread on the whole TaskCard) from treating a button press as a drag gesture start. */
   onPointerDownCapture?: (event: PointerEvent) => void;
 }): JSX.Element {
-  const [busy, setBusy] = useState<"review" | "done" | null>(null);
+  const [busy, setBusy] = useState<"start" | "review" | "done" | null>(null);
 
   const canReview =
     Boolean(task.repositoryId && task.branch) &&
@@ -31,6 +31,21 @@ export function TaskActions({
 
   function stopClick(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();
+  }
+
+  async function handleStart(
+    event: MouseEvent<HTMLButtonElement>,
+  ): Promise<void> {
+    stopClick(event);
+    if (busy) return;
+    setBusy("start");
+    try {
+      await window.harbormaster.core.startTask(task.id);
+    } catch (error) {
+      pushToast(describeThrown(error), "error");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleToReview(
@@ -70,6 +85,22 @@ export function TaskActions({
       data-testid={`task-actions-${task.id}`}
       onPointerDownCapture={onPointerDownCapture}
     >
+      {task.state === "backlog" && (
+        <Button
+          size="sm"
+          disabled={busy !== null}
+          onClick={handleStart}
+          data-testid={`start-task-button-${task.id}`}
+          title="Start: create the branch + worktree and move to Dev"
+        >
+          {busy === "start" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Play className="h-3 w-3" />
+          )}
+          Start
+        </Button>
+      )}
       <Button
         size="sm"
         variant="outline"

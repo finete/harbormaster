@@ -88,6 +88,9 @@ async function createTask(
 ): Promise<void> {
   await window.getByTestId(newTaskButtonTestId).click();
   await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  // These smoke tasks have no repository, so parking vs starting only decides
+  // the landing column; the suite's assertions expect Backlog.
+  await window.getByTestId("new-task-destination-backlog").click();
   await window.getByTestId("new-task-title-input").fill(title);
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
@@ -101,7 +104,11 @@ test.beforeAll(async () => {
   stateDir = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-"));
   app = await electron.launch({
     args: [mainEntry],
-    env: { ...process.env, HARBORMASTER_STATE_DIR: stateDir },
+    env: {
+      ...process.env,
+      HARBORMASTER_STATE_DIR: stateDir,
+      HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+    },
   });
   watchForMainProcessErrors(app);
   window = await app.firstWindow();
