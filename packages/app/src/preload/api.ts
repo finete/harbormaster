@@ -150,6 +150,8 @@ export interface HarbormasterApi {
      * Returns an unsubscribe fn.
      */
     onRefreshWarning(listener: (warning: string) => void): () => void;
+    /** Cmd/Ctrl+W intercepted in main; renderer closes the focused task workspace. */
+    onCloseTabShortcut(listener: () => void): () => void;
     /** On-demand liveness snapshot for the takeover guard; see `PresenceSnapshot`. */
     presence(taskId: string): Promise<PresenceSnapshot>;
     /** Subscribes to the ~5s presence poll's push channel; returns an unsubscribe fn. */

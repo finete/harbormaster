@@ -107,6 +107,11 @@ const api: HarbormasterApi = {
       ipcRenderer.on("core:refresh-warning", handler);
       return () => ipcRenderer.removeListener("core:refresh-warning", handler);
     },
+    onCloseTabShortcut: (listener: () => void): (() => void) => {
+      const handler = (): void => listener();
+      ipcRenderer.on("app:close-tab", handler);
+      return () => ipcRenderer.removeListener("app:close-tab", handler);
+    },
   },
 };
 
