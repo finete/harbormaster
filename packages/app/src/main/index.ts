@@ -380,6 +380,22 @@ function createWindow(): void {
   win.once("ready-to-show", () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
+  // Cmd/Ctrl+W closes the focused task workspace (cmux-style), not the
+  // window: Electron's default menu owns the accelerator, so intercept it
+  // before the menu sees it and let the renderer decide what "close" means.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (
+      input.type === "keyDown" &&
+      (input.meta || input.control) &&
+      !input.alt &&
+      !input.shift &&
+      input.key.toLowerCase() === "w"
+    ) {
+      event.preventDefault();
+      safeSend(win.webContents, "app:close-tab", undefined);
+    }
+  });
+
   // Dispose this window's ptys as soon as it closes — ahead of (and
   // redundant with, deliberately) the per-session webContents 'destroyed'
   // listener — so pty processes never outlive the window whose panels

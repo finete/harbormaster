@@ -15,9 +15,11 @@ import { TaskWorkspace } from "./TaskWorkspace";
 export function WorkspaceView({
   focusedTaskId,
   openedTaskIds,
+  onCloseTask,
 }: {
   focusedTaskId: string;
   openedTaskIds: ReadonlySet<string>;
+  onCloseTask: (taskId: string) => void;
 }): JSX.Element {
   if (openedTaskIds.size === 0) {
     return (
@@ -41,7 +43,7 @@ export function WorkspaceView({
           className="absolute inset-0 h-full w-full"
           style={{ display: taskId === focusedTaskId ? "block" : "none" }}
         >
-          <TaskWorkspace taskId={taskId} />
+          <TaskWorkspace taskId={taskId} onClose={() => onCloseTask(taskId)} />
         </div>
       ))}
     </div>

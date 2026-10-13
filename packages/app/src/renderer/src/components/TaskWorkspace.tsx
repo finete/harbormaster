@@ -6,7 +6,7 @@ import {
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { cn } from "../lib/utils";
 import { TaskActions } from "./TaskActions";
@@ -25,7 +25,14 @@ let nextPanelId = 1;
  * task (lazily, on first focus) and keeps it alive — hidden, not unmounted —
  * so ptys and dockview layout survive switching between tasks/views.
  */
-export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
+export function TaskWorkspace({
+  taskId,
+  onClose,
+}: {
+  taskId: string;
+  /** Close this task's workspace (cmux-style): unmounts every pane, ending their ptys. */
+  onClose?: () => void;
+}): JSX.Element {
   // Dockview's own api is state (not a ref): the initial-panel effect below
   // needs to re-run once it becomes available, same as it re-runs once the
   // workspace binding resolves — whichever of the two happens last.
@@ -151,6 +158,18 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
             <Plus className="h-3.5 w-3.5" />
             terminal
           </Button>
+          {onClose && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onClose}
+              data-testid="close-workspace-button"
+              aria-label="Close workspace"
+              title="Close this task's workspace and end its terminals (⌘W)"
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
       <div className="min-h-0 flex-1" data-testid="dockview-host">

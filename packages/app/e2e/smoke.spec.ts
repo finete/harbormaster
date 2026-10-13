@@ -183,6 +183,27 @@ test("a terminal panel appears for the focused task and receives pty output", as
   });
 });
 
+test("closing a workspace ends its terminals; reopening starts fresh", async () => {
+  // The focused task has a live terminal from the previous test.
+  const panel = window.getByTestId("terminal-panel").first();
+  await expect(panel).toBeVisible();
+
+  await window.getByTestId("close-workspace-button").click();
+  // Workspace unmounts entirely: no panels, no close button, empty hint only
+  // if nothing else is open (this suite has a single task).
+  await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
+  await expect(window.getByTestId("close-workspace-button")).toHaveCount(0);
+  await expect(window.getByTestId("workspace-empty-hint")).toBeVisible();
+
+  // Reopening from the sidebar mounts a fresh workspace with a fresh pty.
+  await window.locator('[data-testid^="sidebar-task-row-"]').first().click();
+  const reopened = window.getByTestId("terminal-panel").first();
+  await expect(reopened).toBeVisible();
+  await expect(reopened).toHaveAttribute("data-received-output", "true", {
+    timeout: 20_000,
+  });
+});
+
 test("terminals survive a board round-trip without respawning", async () => {
   const panel = window.getByTestId("terminal-panel").first();
   await expect(panel).toBeVisible();

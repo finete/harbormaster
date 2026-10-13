@@ -7,6 +7,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { Button } from "./components/ui/button";
+import { Dialog, DialogFooter } from "./components/ui/dialog";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { flattenBoard, useBoard, useManualRefresh } from "./core-client";
 import { cn } from "./lib/utils";
@@ -42,11 +43,47 @@ export function App(): JSX.Element {
     presence: PresenceSnapshot;
   } | null>(null);
 
+  // Close-workspace confirm: set only while the focused task's agent is
+  // mid-turn and the user asked to close its workspace anyway.
+  const [pendingClose, setPendingClose] = useState<string | null>(null);
+
+  // Closing unmounts the TaskWorkspace, which disposes every pane's pty
+  // (TerminalPane unmount cleanup); the pi session ends, cmux-style. The
+  // task itself stays on the board; reopening starts fresh panes.
+  const closeTask = useCallback((taskId: string) => {
+    setOpenedTaskIds((prev) => {
+      if (!prev.has(taskId)) return prev;
+      const next = new Set(prev);
+      next.delete(taskId);
+      setFocusedTaskId((current) =>
+        current === taskId ? (next.values().next().value ?? "") : current,
+      );
+      return next;
+    });
+  }, []);
+
+  const requestCloseTask = useCallback(
+    (taskId: string) => {
+      void window.harbormaster.core.presence(taskId).then((presence) => {
+        if (presence.live && presence.runningTurn) {
+          setPendingClose(taskId);
+          return;
+        }
+        closeTask(taskId);
+      });
+    },
+    [closeTask],
+  );
+
   // Default focus to the first task once the board has loaded, same as the
-  // old mock's `taskOrder[0]` default — but only once: never yank focus
-  // away from a task the user picked (or that got created) later.
+  // old mock's `taskOrder[0]` default — but only once per launch: never yank
+  // focus from a user pick, and never undo a workspace close (closing the
+  // last workspace empties focusedTaskId on purpose).
+  const autoFocusedRef = useRef(false);
   useEffect(() => {
+    if (autoFocusedRef.current) return;
     if (!focusedTaskId && flatRows.length > 0) {
+      autoFocusedRef.current = true;
       const firstId = flatRows[0]?.task.id ?? "";
       setFocusedTaskId(firstId);
       if (firstId) {
@@ -95,6 +132,18 @@ export function App(): JSX.Element {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
+  // window: close the focused task workspace while in the workspace view.
+  useEffect(
+    () =>
+      window.harbormaster.core.onCloseTabShortcut(() => {
+        if (view === "workspace" && focusedTaskId) {
+          requestCloseTask(focusedTaskId);
+        }
+      }),
+    [view, focusedTaskId, requestCloseTask],
+  );
 
   // Main's 30s automation-refresh loop (see main/index.ts's refreshOnce)
   // pushes at most one deduped warning per distinct failure; surface it the
@@ -169,6 +218,7 @@ export function App(): JSX.Element {
           <WorkspaceView
             focusedTaskId={focusedTaskId}
             openedTaskIds={openedTaskIds}
+            onCloseTask={requestCloseTask}
           />
         </div>
       }
@@ -186,6 +236,42 @@ export function App(): JSX.Element {
           openTask(taskId);
         }}
       />
+      <Dialog
+        open={pendingClose !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingClose(null);
+        }}
+        title="Agent is still working"
+        testId="close-while-running-dialog"
+      >
+        <p className="text-sm text-muted-foreground">
+          “
+          {pendingClose
+            ? (taskTitleRef.current.get(pendingClose) ?? "This task")
+            : ""}
+          ” has an agent mid-turn. Closing the workspace ends its session.
+        </p>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setPendingClose(null)}
+            data-testid="close-while-running-cancel"
+          >
+            Keep it running
+          </Button>
+          <Button
+            variant="outline"
+            className="border-red-900/60 text-red-400 hover:bg-red-950/40"
+            data-testid="close-while-running-confirm"
+            onClick={() => {
+              if (pendingClose) closeTask(pendingClose);
+              setPendingClose(null);
+            }}
+          >
+            Close anyway
+          </Button>
+        </DialogFooter>
+      </Dialog>
       <ToastHost />
     </div>
   );
