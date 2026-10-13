@@ -13,13 +13,14 @@ import {
   PiHarnessAdapter,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import type {
   PresenceChangedPayload,
   PresenceSnapshot,
   TerminalCreateOptions,
   TerminalCreateResult,
 } from "../preload/api";
+import { isAllowedExternalUrl } from "./external-url";
 import {
   activeSessionPids,
   createSession,
@@ -170,9 +171,14 @@ async function pollPresenceOnce(): Promise<void> {
   const entries = await Promise.all(
     tasks.map(async (task) => {
       const status = await harness.presence(task.id);
+      const heartbeatAt = status.live ? status.record?.heartbeatAt : undefined;
       return [
         task.id,
-        { live: status.live, runningTurn: status.runningTurn },
+        {
+          live: status.live,
+          runningTurn: status.runningTurn,
+          ...(heartbeatAt ? { heartbeatAt } : {}),
+        },
       ] as const;
     }),
   );
@@ -358,8 +364,31 @@ function createWindow(): void {
   }
 }
 
+/**
+ * The renderer's only way to open a link in the user's default browser (it
+ * has no Node/shell access). Every URL is checked against the github.com
+ * allowlist in external-url.ts first; anything else resolves `false` and is
+ * never handed to the OS.
+ */
+function registerShellIpc(): void {
+  ipcMain.handle(
+    "shell:openExternal",
+    async (_event, url: unknown): Promise<boolean> => {
+      if (!isAllowedExternalUrl(url)) return false;
+      try {
+        await shell.openExternal(url);
+        return true;
+      } catch (error) {
+        console.error("[main] shell.openExternal failed:", error);
+        return false;
+      }
+    },
+  );
+}
+
 registerCoreIpc();
 registerPtyIpc();
+registerShellIpc();
 
 app.whenReady().then(() => {
   createWindow();

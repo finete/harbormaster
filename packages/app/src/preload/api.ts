@@ -47,11 +47,16 @@ export interface PresenceSnapshot {
   ownedByApp: boolean;
 }
 
+/** One task's entry in the ~5s presence push. */
+export interface PresenceBadge {
+  live: boolean;
+  runningTurn: boolean;
+  /** Last heartbeat of the live attachment (ISO); set only while `live`. Drives the sidebar's relative-time column. */
+  heartbeatAt?: string;
+}
+
 /** Pushed every poll tick (~5s) for every non-done task; badge-sized only (see Sidebar/TaskCard). */
-export type PresenceChangedPayload = Record<
-  string,
-  { live: boolean; runningTurn: boolean }
->;
+export type PresenceChangedPayload = Record<string, PresenceBadge>;
 
 export interface TerminalCreateOptions {
   cols: number;
@@ -85,6 +90,14 @@ export interface TerminalExitEvent {
 }
 
 export interface HarbormasterApi {
+  shell: {
+    /**
+     * Open `url` in the user's default browser. Main only honors
+     * https://github.com/ links (see main/external-url.ts); anything else
+     * resolves `false` without launching anything.
+     */
+    openExternal(url: string): Promise<boolean>;
+  };
   terminal: {
     create(options: TerminalCreateOptions): Promise<TerminalCreateResult>;
     write(id: string, data: string): void;

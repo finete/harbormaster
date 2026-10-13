@@ -1,0 +1,225 @@
+import type { JSX, KeyboardEvent, MouseEvent } from "react";
+import type { Task } from "../../../preload/api";
+import { cn } from "../lib/utils";
+import { pushToast } from "../toast";
+import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
+import {
+  activityTimestamp,
+  pullRequestUrl,
+  relativeTime,
+  type SidebarRow,
+  type StateTone,
+  stateChipLabel,
+} from "./sidebar-model";
+
+/** Bordered chip tones, matching the board's per-column colors. */
+const STATE_CHIP_CLASS: Record<StateTone, string> = {
+  backlog: "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
+  dev: "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  awaiting: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+};
+
+const PR_CHIP_CLASS: Record<ReturnType<typeof prBadgeVariant>, string> = {
+  success: "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
+  draft: "border-slate-500/40 text-slate-300 hover:bg-slate-500/15",
+  merged: "border-violet-500/40 text-violet-300 hover:bg-violet-500/15",
+  closed: "border-red-500/40 text-red-300 hover:bg-red-500/15",
+};
+
+const CHIP_BASE =
+  "inline-flex h-[18px] shrink-0 items-center rounded border px-1.5 text-[10px] font-medium leading-none";
+
+/**
+ * Live-presence indicator. Keeps the pre-redesign test ids so e2e coverage
+ * carries over: `sidebar-row-spinner` while an agent turn runs (pulsing
+ * halo — the "moving symbol while it works"), `sidebar-row-attached-dot`
+ * for live-but-idle (solid green), `sidebar-row-status-dot` otherwise
+ * (muted gray).
+ */
+export function StatusDot({
+  presence,
+}: {
+  presence: SidebarRow["presence"];
+}): JSX.Element {
+  if (presence?.runningTurn) {
+    return (
+      <span
+        className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+        data-testid="sidebar-row-spinner"
+        data-status="running"
+        role="img"
+        aria-label="Agent working"
+      >
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400/60" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-400" />
+      </span>
+    );
+  }
+  if (presence?.live) {
+    return (
+      <span
+        className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+        data-testid="sidebar-row-attached-dot"
+        data-status="idle"
+        role="img"
+        aria-label="Agent attached, idle"
+      >
+        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+      data-testid="sidebar-row-status-dot"
+      data-status="offline"
+      role="img"
+      aria-label="No agent attached"
+    >
+      <span className="h-2 w-2 rounded-full bg-zinc-600" />
+    </span>
+  );
+}
+
+function PrChip({ task }: { task: Task }): JSX.Element | null {
+  const pr = task.pr;
+  if (!pr) return null;
+  const url = pullRequestUrl(task);
+  const open = (event: MouseEvent<HTMLButtonElement>): void => {
+    // The chip sits inside the row's own click target; never let opening
+    // the PR also focus/attach the task.
+    event.stopPropagation();
+    if (!url) return;
+    void window.harbormaster.shell
+      .openExternal(url)
+      .then((opened) => {
+        if (!opened) {
+          pushToast(
+            `Not opening ${url}: only github.com links are allowed.`,
+            "warning",
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("openExternal failed:", error);
+      });
+  };
+  return (
+    <button
+      type="button"
+      data-testid="pr-chip"
+      data-pr-url={url ?? ""}
+      onClick={open}
+      onKeyDown={(event) => event.stopPropagation()}
+      disabled={!url}
+      title={`${prBadgeLabel(pr)}${url ? " — open on GitHub" : ""}`}
+      className={cn(
+        CHIP_BASE,
+        "cursor-pointer font-mono transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:cursor-default",
+        PR_CHIP_CLASS[prBadgeVariant(pr)],
+      )}
+    >
+      #{pr.number}
+    </button>
+  );
+}
+
+/**
+ * One task row: status dot + semibold title + right-aligned relative time;
+ * muted mono branch subline with the board-position chip and PR chip; and
+ * (only while an agent is attached) an activity line. Rows are separated by
+ * a full-width hairline; the selected row gets a rounded subtle highlight.
+ */
+export function SidebarTaskRow({
+  row,
+  selected,
+  now,
+  onSelect,
+}: {
+  row: SidebarRow;
+  selected: boolean;
+  now: number;
+  onSelect: (taskId: string) => void;
+}): JSX.Element {
+  const { task, state, presence } = row;
+  const time = relativeTime(activityTimestamp(row), now);
+  const activity = presence?.runningTurn
+    ? "working…"
+    : presence?.live
+      ? "idle"
+      : undefined;
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(task.id);
+    }
+  };
+
+  return (
+    <div className="border-b border-border/40 px-1.5 py-1 last:border-b-0">
+      {/* biome-ignore lint/a11y/useSemanticElements: nested interactive PR chip rules out a native <button> row */}
+      <div
+        role="button"
+        tabIndex={0}
+        data-testid={`sidebar-task-row-${task.id}`}
+        data-selected={selected || undefined}
+        aria-pressed={selected}
+        onClick={() => onSelect(task.id)}
+        onKeyDown={onKeyDown}
+        className={cn(
+          "flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
+          "hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/60",
+          selected && "bg-accent/70 hover:bg-accent/70",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <StatusDot presence={presence} />
+          <span
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
+            title={task.title}
+          >
+            {task.title}
+          </span>
+          {time && (
+            <span
+              className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+              data-testid="sidebar-row-time"
+              title={activityTimestamp(row)}
+            >
+              {time}
+            </span>
+          )}
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5 pl-5">
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+            title={task.branch}
+            data-testid="sidebar-row-branch"
+          >
+            {task.branch ?? ""}
+          </span>
+          <span
+            data-testid="state-chip"
+            data-state={state}
+            className={cn(CHIP_BASE, STATE_CHIP_CLASS[state])}
+          >
+            {stateChipLabel(task, state)}
+          </span>
+          <PrChip task={task} />
+        </div>
+        {activity && (
+          <div
+            className="flex min-w-0 items-center gap-1 pl-5 text-[11px] text-muted-foreground/80"
+            data-testid="sidebar-row-activity"
+          >
+            <span className="font-medium text-muted-foreground">pi</span>
+            <span aria-hidden>·</span>
+            <span className="truncate">{activity}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

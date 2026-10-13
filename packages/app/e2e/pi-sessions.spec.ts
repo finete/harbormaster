@@ -288,6 +288,11 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await expect(row.getByTestId("sidebar-row-spinner")).toBeVisible({
       timeout: 10_000,
     });
+    // Live-and-working rows also get the activity line and sort first.
+    await expect(row.getByTestId("sidebar-row-activity")).toContainText(
+      "working",
+    );
+    await expect(row.getByTestId("sidebar-row-time")).toHaveText("now");
 
     await window.getByTestId("board-button").click();
     await expect(

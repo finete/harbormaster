@@ -327,3 +327,126 @@ test("Cmd+B toggles between board and workspace views", async () => {
   await window.keyboard.press("Meta+B");
   await expect(window.getByTestId("workspace-view")).toBeVisible();
 });
+
+test("sidebar rows group under a repository header with a state chip per task", async () => {
+  // The previous test ended in the workspace view. Both tasks are
+  // repository-less, so they share the "scratch" group.
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  const group = window.getByTestId("sidebar-group-scratch");
+  await expect(group).toBeVisible();
+  await expect(group.getByTestId("sidebar-group-count")).toHaveText("2");
+
+  const alpha = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Alpha" });
+  const beta = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Beta" });
+  // Alpha was confirmed into Awaiting / Review above; Beta never left backlog.
+  await expect(alpha.getByTestId("state-chip")).toHaveText("Review");
+  await expect(beta.getByTestId("state-chip")).toHaveText("Backlog");
+  await expect(alpha.getByTestId("sidebar-row-status-dot")).toBeVisible();
+  await expect(alpha.getByTestId("sidebar-row-time")).toHaveText(
+    /^(now|\d+m)$/,
+  );
+  await expect(alpha.getByTestId("pr-chip")).toHaveCount(0);
+
+  // Collapsing the group hides its rows; expanding brings them back.
+  await window.getByTestId("sidebar-group-toggle-scratch").click();
+  await expect(alpha).toHaveCount(0);
+  await window.getByTestId("sidebar-group-toggle-scratch").click();
+  await expect(alpha).toBeVisible();
+});
+
+test("the sidebar search filters rows as you type; Escape and the clear button reset it", async () => {
+  const rows = window.locator('[data-testid^="sidebar-task-row-"]');
+  const search = window.getByTestId("sidebar-search");
+  await expect(rows).toHaveCount(2);
+
+  await search.fill("alpha");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Task Alpha");
+
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(rows).toHaveCount(2);
+
+  // Repository/group names match too: both tasks live in "scratch".
+  await search.fill("SCRATCH");
+  await expect(rows).toHaveCount(2);
+
+  await search.fill("no-such-task");
+  await expect(rows).toHaveCount(0);
+  await expect(window.getByTestId("sidebar-search-empty")).toBeVisible();
+
+  await window.getByTestId("sidebar-search-clear").click();
+  await expect(search).toHaveValue("");
+  await expect(rows).toHaveCount(2);
+  await expect(window.getByTestId("sidebar-search-empty")).toHaveCount(0);
+});
+
+test("collapsing the sidebar hides labels down to a strip of status dots, and expands back", async () => {
+  const sidebar = window.getByTestId("sidebar");
+  await window.getByTestId("sidebar-collapse").click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  await expect(
+    window.locator('[data-testid^="sidebar-task-row-"]'),
+  ).toHaveCount(0);
+  await expect(window.getByTestId("sidebar-search")).toHaveCount(0);
+  await expect(sidebar).not.toContainText("Task Alpha");
+  const dots = window.locator('[data-testid^="sidebar-collapsed-row-"]');
+  await expect(dots).toHaveCount(2);
+  const box = await sidebar.boundingBox();
+  expect(box?.width ?? 0).toBeLessThan(80);
+  // Board/new-task stay reachable from the strip.
+  await expect(window.getByTestId("board-button")).toBeVisible();
+  await expect(window.getByTestId("sidebar-new-task-button")).toBeVisible();
+
+  // Collapsed is persisted (localStorage), so always restore it: later
+  // suites share the Electron profile.
+  await window.getByTestId("sidebar-collapse").click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await expect(
+    window.locator('[data-testid^="sidebar-task-row-"]'),
+  ).toHaveCount(2);
+});
+
+test("dragging the sidebar's right edge resizes it within bounds; double-click resets", async () => {
+  const sidebar = window.getByTestId("sidebar");
+  const handle = window.getByTestId("sidebar-resize-handle");
+  // Start from the default width regardless of what a prior run persisted.
+  await handle.dblclick();
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0))
+    .toBe(280);
+
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) throw new Error("resize handle not visible");
+  const x = handleBox.x + handleBox.width / 2;
+  const y = handleBox.y + handleBox.height / 2;
+
+  await window.mouse.move(x, y);
+  await window.mouse.down();
+  await window.mouse.move(x + 60, y, { steps: 5 });
+  await window.mouse.up();
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0))
+    .toBe(340);
+
+  // Way past the max clamps at 480.
+  const wideBox = await handle.boundingBox();
+  if (!wideBox) throw new Error("resize handle not visible");
+  const wx = wideBox.x + wideBox.width / 2;
+  await window.mouse.move(wx, y);
+  await window.mouse.down();
+  await window.mouse.move(wx + 600, y, { steps: 5 });
+  await window.mouse.up();
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0))
+    .toBe(480);
+
+  await handle.dblclick();
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0))
+    .toBe(280);
+});
