@@ -69,6 +69,8 @@ const api: HarbormasterApi = {
       state: TaskState,
       options?: MoveTaskOptions,
     ): Promise<Task> => ipcRenderer.invoke("core:moveTask", id, state, options),
+    startTask: (taskId: string): Promise<Task> =>
+      ipcRenderer.invoke("core:startTask", taskId),
     toReview: (taskId: string): Promise<Task> =>
       ipcRenderer.invoke("core:toReview", taskId),
     toDone: (taskId: string): Promise<{ task: Task; warning?: string }> =>

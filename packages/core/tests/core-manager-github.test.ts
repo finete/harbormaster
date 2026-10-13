@@ -239,6 +239,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
 
@@ -270,6 +271,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
 
@@ -307,6 +309,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
 
@@ -334,6 +337,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
     const binding = await f.core.commands.getTaskWorkspace(task.id);
@@ -355,6 +359,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
     const binding = await f.core.commands.getTaskWorkspace(task.id);
@@ -388,6 +393,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
     f.pullRequests.statusByBranch.set(
@@ -413,6 +419,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
     f.pullRequests.statusByBranch.set(
@@ -435,12 +442,14 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       title: "Broken",
       initialPrompt: "x",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(broken.id, "dev");
     const healthy = await f.core.commands.createTask({
       title: "Healthy",
       initialPrompt: "y",
       repositoryId: repo.id,
+      start: true,
       branch: "healthy-branch",
     });
     await f.core.commands.moveTask(healthy.id, "dev");
@@ -494,6 +503,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       title: "Add widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
     await f.core.commands.moveTask(task.id, "dev");
 

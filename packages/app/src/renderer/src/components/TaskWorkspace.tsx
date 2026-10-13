@@ -6,8 +6,9 @@ import {
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
-import { Plus } from "lucide-react";
-import { flattenBoard, useBoard } from "../core-client";
+import { Plus, RefreshCw } from "lucide-react";
+import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
+import { cn } from "../lib/utils";
 import { TaskActions } from "./TaskActions";
 import { TerminalPane } from "./TerminalPane";
 import { Button } from "./ui/button";
@@ -30,6 +31,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
   // workspace binding resolves — whichever of the two happens last.
   const [api, setApi] = useState<DockviewApi | null>(null);
   const initialPanelCreatedRef = useRef(false);
+  const piPanelCreatedRef = useRef(false);
   // Resolved once per task: the worktree path a repository-backed task's
   // terminals should spawn into (undefined for scratch tasks, falling back
   // to the app's own cwd — see TerminalPane/ptySessions.ts). `cwdLoaded`
@@ -41,10 +43,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
   // live board every other view reads (see core-client.ts), so the actions'
   // enabled state always reflects the latest state/branch/repositoryId.
   const columns = useBoard();
+  const manualRefresh = useManualRefresh();
   const task = flattenBoard(columns).find(
     (row) => row.task.id === taskId,
   )?.task;
 
+  // Re-resolved whenever the task changes column: a parked backlog task
+  // has no binding yet, and `startTask` creates one as it moves to Dev.
+  const taskState = task?.state;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: taskState is a deliberate re-fetch trigger, see comment above.
   useEffect(() => {
     let cancelled = false;
     void window.harbormaster.core.getTaskWorkspace(taskId).then((binding) => {
@@ -55,20 +62,35 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [taskId, taskState]);
 
   useEffect(() => {
-    if (!api || !cwdLoaded || initialPanelCreatedRef.current) return;
-    initialPanelCreatedRef.current = true;
-    api.addPanel({
-      id: `${taskId}-terminal-${nextPanelId++}`,
-      component: "terminal",
-      // The first panel in a bound task's workspace runs pi (see
-      // TerminalPane.tsx / main/index.ts's pty:create handler); scratch
-      // tasks (no `cwd`, no binding) keep the plain-shell title/behavior.
-      title: cwd ? "Pi" : "Shell",
-      params: { cwd, taskId, primary: true },
-    });
+    if (!api || !cwdLoaded) return;
+    if (!initialPanelCreatedRef.current) {
+      initialPanelCreatedRef.current = true;
+      piPanelCreatedRef.current = Boolean(cwd);
+      api.addPanel({
+        id: `${taskId}-terminal-${nextPanelId++}`,
+        component: "terminal",
+        // The first panel in a bound task's workspace runs pi (see
+        // TerminalPane.tsx / main/index.ts's pty:create handler); scratch
+        // tasks (no `cwd`, no binding) keep the plain-shell title/behavior.
+        title: cwd ? "Pi" : "Shell",
+        params: { cwd, taskId, primary: true },
+      });
+      return;
+    }
+    // Opened while still parked (plain shell), then started: the worktree
+    // now exists, so give the task the pi pane it would have had.
+    if (cwd && !piPanelCreatedRef.current) {
+      piPanelCreatedRef.current = true;
+      api.addPanel({
+        id: `${taskId}-terminal-${nextPanelId++}`,
+        component: "terminal",
+        title: "Pi",
+        params: { cwd, taskId, primary: true },
+      });
+    }
   }, [api, cwdLoaded, cwd, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
@@ -102,6 +124,24 @@ export function TaskWorkspace({ taskId }: { taskId: string }): JSX.Element {
         </span>
         <div className="flex items-center gap-2">
           {task && <TaskActions task={task} />}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={manualRefresh.refresh}
+            disabled={manualRefresh.busy}
+            aria-busy={manualRefresh.busy}
+            aria-label="Refresh"
+            title="Refresh PR status and run movers now"
+            data-testid="workspace-refresh-button"
+          >
+            <RefreshCw
+              className={cn(
+                "h-3.5 w-3.5",
+                manualRefresh.busy && "animate-spin",
+              )}
+            />
+          </Button>
           <Button
             size="sm"
             variant="outline"

@@ -118,6 +118,12 @@ export interface HarbormasterApi {
       options?: MoveTaskOptions,
     ): Promise<Task>;
     /**
+     * Start a parked backlog task: creates its branch + worktree + binding
+     * (repository-backed tasks without one) and moves it to `dev`. See
+     * `CoreCommands.startTask`.
+     */
+    startTask(taskId: string): Promise<Task>;
+    /**
      * Push the task's branch, open/reuse its PR, and move it to
      * `awaiting`/`{ kind: "review" }`. Rejects (no warning shape) for
      * scratch tasks or tasks with no bound worktree/branch; see
@@ -126,8 +132,8 @@ export interface HarbormasterApi {
     toReview(taskId: string): Promise<Task>;
     /**
      * Move a task to `done`; any cleanup refusal (dirty worktree, unmerged
-     * branch, ...) surfaces as `warning` instead of throwing. See
-     * `CoreCommands.toDone`.
+     * branch, a worktree still open in one of this app's panes, ...)
+     * surfaces as `warning` instead of throwing. See `CoreCommands.toDone`.
      */
     toDone(taskId: string): Promise<{ task: Task; warning?: string }>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */

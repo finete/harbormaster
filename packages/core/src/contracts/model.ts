@@ -93,6 +93,12 @@ export interface Task {
   state: TaskState;
   title: string;
   initialPrompt: string;
+  /**
+   * When `initialPrompt` was handed to the task's first harness session
+   * (see `CoreCommands.claimInitialPrompt`); unset until then, so the prompt
+   * kicks off exactly one session, never every re-opened pane.
+   */
+  initialPromptDeliveredAt?: string;
   /** Opaque repository identity; resolved against git access in a later phase. Normalized like "github.com/org/repo". */
   repositoryId?: string;
   /** Working branch for this task's worktree, once bound. */

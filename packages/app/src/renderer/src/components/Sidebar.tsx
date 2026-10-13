@@ -190,8 +190,9 @@ export function Sidebar({
         void window.harbormaster.core
           .createTask({
             title: input.title,
-            initialPrompt: "",
+            initialPrompt: input.initialPrompt ?? "",
             ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+            ...(input.start ? { start: true } : {}),
           })
           .catch((error: unknown) => {
             console.error("createTask failed:", error);

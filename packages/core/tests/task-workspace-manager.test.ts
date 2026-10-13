@@ -142,6 +142,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Add Widget!",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
 
     expect(task.repositoryId).toBe(repo.id);
@@ -179,6 +180,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Add Widget",
       initialPrompt: "do it",
       repositoryId: repo.id,
+      start: true,
     });
 
     expect(task.branch).toMatch(/^alice\/add-widget-[a-z0-9]{6}$/);
@@ -195,6 +197,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Existing",
       initialPrompt: "x",
       repositoryId: repo.id,
+      start: true,
       branch: "task/collide",
     });
     expect(existing.branch).toBe("task/collide");
@@ -204,6 +207,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
         title: "Colliding task",
         initialPrompt: "y",
         repositoryId: repo.id,
+        start: true,
         branch: "task/collide",
       }),
     ).rejects.toThrow();
@@ -239,6 +243,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Doomed",
       initialPrompt: "x",
       repositoryId: repo.id,
+      start: true,
     });
     const binding = await f.core.commands.getTaskWorkspace(task.id);
     const worktreePath = binding?.worktreePath;
@@ -262,6 +267,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Cleanable",
       initialPrompt: "x",
       repositoryId: repo.id,
+      start: true,
     });
     const binding = await f.core.commands.getTaskWorkspace(task.id);
     const worktreePath = binding?.worktreePath;
@@ -286,6 +292,7 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
       title: "Dirty",
       initialPrompt: "x",
       repositoryId: repo.id,
+      start: true,
     });
     const binding = await f.core.commands.getTaskWorkspace(task.id);
     const worktreePath = binding?.worktreePath;

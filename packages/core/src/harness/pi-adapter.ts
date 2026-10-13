@@ -60,6 +60,20 @@ function defaultIsAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Pi's CLI takes a first message as a positional argument (`pi [options]
+ * [--] [@files...] [messages...]`), opening an interactive session that
+ * immediately sends it. The pty spawns argv directly (no shell), so no shell
+ * quoting is needed — only Pi's own parsing must be defused: `--` ends
+ * option parsing (a prompt starting with "-" is never read as a flag), and a
+ * leading "@" (Pi's file-attachment marker, honored even after `--`) is
+ * shielded with a leading space. Multiline prompts pass through verbatim.
+ */
+export function piPromptArgs(prompt: string | undefined): string[] {
+  if (!prompt?.trim()) return [];
+  return ["--", prompt.startsWith("@") ? ` ${prompt}` : prompt];
+}
+
 export class PiHarnessAdapter implements HarnessAdapter {
   private readonly presenceAccess: PresenceAccess;
   private readonly clock: Clock;
@@ -85,7 +99,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
       // instead of a real `pi` install; unset (the normal case) runs `pi`.
       command: process.env[PI_COMMAND_ENV] || "pi",
-      args: input.initialPrompt ? [input.initialPrompt] : [],
+      args: piPromptArgs(input.initialPrompt),
       cwd: input.workspacePath,
       env,
     };

@@ -15,6 +15,7 @@ import type {
   CreateTaskInput,
   DeleteTaskOptions,
   MoveTaskOptions,
+  ToDoneOptions,
   UpdateTaskInput,
 } from "../contracts/commands.js";
 import type {
@@ -107,39 +108,28 @@ export class CoreManager implements CoreCommands {
   async createTask(input: CreateTaskInput): Promise<Task> {
     const now = this.deps.clock.now().toISOString();
     const id = this.deps.ids.next();
+    const startNow = input.start === true;
 
     let repo: RepositoryInfo | undefined;
     let branch = input.branch;
     let targetBranch = input.targetBranch;
-    let worktreePath: string | undefined;
 
     if (input.repositoryId !== undefined) {
       const config = await this.deps.config.load();
-      const repos = await this.deps.repositories.discoverRepositories(
-        config.codeRoot ?? "",
-      );
-      repo = repos.find((candidate) => candidate.id === input.repositoryId);
-      if (!repo) {
-        throw new Error(`Repository not found: ${input.repositoryId}`);
+      repo = await this.findRepository(input.repositoryId, config);
+      // A parked (backlog) task records only what it will need later: the
+      // branch is derived when it is actually started (`startTask`), so a
+      // parked task never reserves a git ref.
+      if (startNow) {
+        branch ??= deriveTaskBranch(input.title, id, config.branchPrefix ?? "");
       }
-      branch ??= deriveTaskBranch(input.title, id, config.branchPrefix ?? "");
       targetBranch ??= repo.defaultBranch;
-      // Any failure here (branch collision, dirty baseRef, missing repo,
-      // ...) must leave no task and no orphan worktree — createTaskWorktree
-      // itself guarantees no leftover directory/bookkeeping on failure, so
-      // there is nothing to clean up on this path beyond rethrowing.
-      const worktree = await this.deps.worktrees.createTaskWorktree(
-        repo,
-        branch,
-        repo.defaultBranch,
-      );
-      worktreePath = worktree.path;
     }
 
     const task: Task = {
       id,
       kind: input.kind ?? "task",
-      state: "backlog",
+      state: startNow ? "dev" : "backlog",
       title: input.title,
       initialPrompt: input.initialPrompt,
       ...(input.repositoryId !== undefined
@@ -152,42 +142,129 @@ export class CoreManager implements CoreCommands {
       stateChangedAt: now,
     };
 
-    try {
+    if (startNow && repo && branch) {
+      await this.provisionTaskWorkspace(repo, id, branch, now, {
+        persist: () => this.deps.tasks.createTask(task),
+        undo: () => this.deps.tasks.removeTask(id),
+      });
+    } else {
       await this.deps.tasks.createTask(task);
-    } catch (error) {
-      if (repo && worktreePath) {
-        await this.deps.worktrees
-          .removeWorktree(repo, worktreePath, true)
-          .catch(() => {});
-      }
-      throw error;
-    }
-
-    if (repo && worktreePath && branch) {
-      const binding: WorkspaceBinding = {
-        id: this.deps.ids.next(),
-        taskId: id,
-        worktreePath,
-        branch,
-        detached: false,
-        createdAt: now,
-        updatedAt: now,
-      };
-      try {
-        await this.deps.bindings.attachBinding(binding);
-      } catch (error) {
-        // Roll back the task and the worktree: no task may exist without a
-        // consistent binding once a repository was involved.
-        await this.deps.tasks.removeTask(id).catch(() => {});
-        await this.deps.worktrees
-          .removeWorktree(repo, worktreePath, true)
-          .catch(() => {});
-        throw error;
-      }
     }
 
     await this.publishTaskChange(task);
     return task;
+  }
+
+  async startTask(taskId: string): Promise<Task> {
+    const task = await this.requireTask(taskId);
+    if (task.state !== "backlog") {
+      throw new Error(
+        `Only a backlog task can be started (task is in "${task.state}")`,
+      );
+    }
+    const binding = task.repositoryId
+      ? await this.deps.bindings.getBindingForTask(taskId)
+      : undefined;
+    if (!task.repositoryId || binding?.worktreePath) {
+      return this.moveTask(taskId, "dev");
+    }
+
+    const config = await this.deps.config.load();
+    const repo = await this.findRepository(task.repositoryId, config);
+    const branch =
+      task.branch ??
+      deriveTaskBranch(task.title, task.id, config.branchPrefix ?? "");
+    const now = this.deps.clock.now().toISOString();
+    const next: Task = {
+      ...task,
+      state: "dev",
+      branch,
+      targetBranch: task.targetBranch ?? repo.defaultBranch,
+      updatedAt: now,
+      stateChangedAt: now,
+    };
+    delete next.awaiting;
+    await this.provisionTaskWorkspace(repo, task.id, branch, now, {
+      persist: () => this.deps.tasks.replaceTask(next),
+      undo: () => this.deps.tasks.replaceTask(task),
+    });
+    await this.publishTaskChange(next);
+    return next;
+  }
+
+  /**
+   * Shared by `createTask` (start now) and `startTask`: create the task's
+   * branch + worktree, persist the task record (`persist`), then attach its
+   * binding. Any failure leaves no orphan worktree and undoes the task
+   * write (`undo`) when the binding step fails; the triggering error is
+   * rethrown as-is.
+   */
+  private async provisionTaskWorkspace(
+    repo: RepositoryInfo,
+    taskId: string,
+    branch: string,
+    now: string,
+    task: { persist: () => Promise<void>; undo: () => Promise<void> },
+  ): Promise<void> {
+    // Branch collision, dirty baseRef, missing repo, ... — createTaskWorktree
+    // itself guarantees no leftover directory/bookkeeping on failure, so
+    // there is nothing to clean up on this path beyond rethrowing.
+    const worktree = await this.deps.worktrees.createTaskWorktree(
+      repo,
+      branch,
+      repo.defaultBranch,
+    );
+    // Undo both halves of `git worktree add -b`: the directory and the
+    // freshly-created (commit-less) branch, so a retry never collides with
+    // a leftover ref.
+    const removeWorktree = async () => {
+      await this.deps.worktrees
+        .removeWorktree(repo, worktree.path, true)
+        .catch(() => {});
+      await this.deps.worktrees
+        .deleteBranch(repo, branch, true)
+        .catch(() => {});
+    };
+
+    try {
+      await task.persist();
+    } catch (error) {
+      await removeWorktree();
+      throw error;
+    }
+
+    const binding: WorkspaceBinding = {
+      id: this.deps.ids.next(),
+      taskId,
+      worktreePath: worktree.path,
+      branch,
+      detached: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      await this.deps.bindings.attachBinding(binding);
+    } catch (error) {
+      // Roll back the task write and the worktree: no started task may
+      // exist without a consistent binding once a repository was involved.
+      await task.undo().catch(() => {});
+      await removeWorktree();
+      throw error;
+    }
+  }
+
+  async claimInitialPrompt(taskId: string): Promise<string | undefined> {
+    const task = await this.requireTask(taskId);
+    if (task.initialPromptDeliveredAt || !task.initialPrompt.trim()) {
+      return undefined;
+    }
+    const now = this.deps.clock.now().toISOString();
+    await this.deps.tasks.replaceTask({
+      ...task,
+      initialPromptDeliveredAt: now,
+      updatedAt: now,
+    });
+    return task.initialPrompt;
   }
 
   async moveTask(
@@ -292,10 +369,13 @@ export class CoreManager implements CoreCommands {
     return next;
   }
 
-  async toDone(taskId: string): Promise<{ task: Task; warning?: string }> {
+  async toDone(
+    taskId: string,
+    options?: ToDoneOptions,
+  ): Promise<{ task: Task; warning?: string }> {
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "done");
-    return this.executeSafeDone(task);
+    return this.executeSafeDone(task, options?.protectedPaths ?? []);
   }
 
   async refresh(): Promise<{ warnings: string[] }> {
@@ -454,13 +534,22 @@ export class CoreManager implements CoreCommands {
    */
   private async executeSafeDone(
     task: Task,
+    protectedPaths: readonly string[] = [],
   ): Promise<{ task: Task; warning?: string }> {
     let warning: string | undefined;
     if (task.repositoryId && task.branch) {
       try {
         const repo = await this.findRepository(task.repositoryId);
         const binding = await this.deps.bindings.getBindingForTask(task.id);
-        if (binding?.worktreePath) {
+        if (
+          binding?.worktreePath &&
+          isProtectedPath(binding.worktreePath, protectedPaths)
+        ) {
+          // A live pane (or other process) still has this worktree as its
+          // cwd: never pull it out from under it. Nothing else is cleaned
+          // up either — the branch is still checked out in that worktree.
+          warning = `worktree left in place: it is open in a live session (${binding.worktreePath})`;
+        } else if (binding?.worktreePath) {
           try {
             await this.deps.worktrees.removeWorktree(
               repo,
@@ -516,8 +605,11 @@ export class CoreManager implements CoreCommands {
     return changed;
   }
 
-  private async findRepository(repositoryId: string): Promise<RepositoryInfo> {
-    const config = await this.deps.config.load();
+  private async findRepository(
+    repositoryId: string,
+    loadedConfig?: GlobalConfig,
+  ): Promise<RepositoryInfo> {
+    const config = loadedConfig ?? (await this.deps.config.load());
     const repos = await this.deps.repositories.discoverRepositories(
       config.codeRoot ?? "",
     );
@@ -591,6 +683,21 @@ function prEquals(a: TaskPullRequest | undefined, b: TaskPullRequest): boolean {
     a.mergeCommit?.oid === b.mergeCommit?.oid &&
     a.mergeCommit?.targetBranch === b.mergeCommit?.targetBranch
   );
+}
+
+/** Whether `path` is one of `protectedPaths` or contains one of them (a live cwd inside the worktree); trailing slashes ignored. */
+function isProtectedPath(
+  path: string,
+  protectedPaths: readonly string[],
+): boolean {
+  const normalize = (value: string) => value.replace(/\/+$/, "");
+  const target = normalize(path);
+  return protectedPaths.some((candidate) => {
+    const root = normalize(candidate);
+    return (
+      root.length > 0 && (target === root || root.startsWith(`${target}/`))
+    );
+  });
 }
 
 function describeError(error: unknown): string {

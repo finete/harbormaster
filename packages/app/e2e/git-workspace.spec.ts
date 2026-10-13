@@ -101,7 +101,11 @@ test.beforeAll(async () => {
 
   app = await electron.launch({
     args: [mainEntry],
-    env: { ...process.env, HARBORMASTER_STATE_DIR: stateDir },
+    env: {
+      ...process.env,
+      HARBORMASTER_STATE_DIR: stateDir,
+      HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+    },
   });
   watchForMainProcessErrors(app);
   window = await app.firstWindow();
@@ -135,6 +139,7 @@ test("the fixture repo appears in the New Task dialog's repository picker", asyn
 
   await expect(window.getByTestId("new-task-branch-preview")).toBeVisible();
 
+  await window.getByTestId("new-task-destination-backlog").click();
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
 });
@@ -143,6 +148,8 @@ test("creating a task with the repo shows a derived branch subline on its card",
   await window.getByTestId("board-button").click();
   const card = cardLocator("Add git workspace");
   await expect(card).toBeVisible();
+  // Parked in Backlog above: starting it derives the branch + worktree.
+  await card.locator('[data-testid^="start-task-button-"]').click();
 
   // TaskCard renders "<branch> \u2192 <targetBranch>" in a font-mono subline
   // once task.branch is set (see components/TaskCard.tsx).

@@ -141,6 +141,7 @@ function validTask(value: unknown): value is Task {
     ["backlog", "dev", "awaiting", "done"].includes(value.state as string) &&
     isString(value.title) &&
     typeof value.initialPrompt === "string" &&
+    isOptionalString(value.initialPromptDeliveredAt) &&
     isOptionalString(value.repositoryId) &&
     isOptionalString(value.branch) &&
     isOptionalString(value.targetBranch) &&
