@@ -15,6 +15,7 @@ import type {
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBoard, usePresenceMap } from "../core-client";
+import { modKeyLabel } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
@@ -28,6 +29,7 @@ import {
   sidebarRows,
 } from "./sidebar-model";
 import { Button } from "./ui/button";
+import { Kbd } from "./ui/kbd";
 
 const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
@@ -92,6 +94,7 @@ export function Sidebar({
   onCloseTask,
   onShowBoard,
   onCreateTask,
+  openNewTaskSignal,
 }: {
   focusedTaskId: string | null;
   openedTaskIds: ReadonlySet<string>;
@@ -99,11 +102,23 @@ export function Sidebar({
   onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
   onCreateTask: (input: NewTaskDialogResult) => void;
+  /** Bumped by App.tsx's Cmd/Ctrl+N handler while the workspace view is active; opens this sidebar's New Task dialog. */
+  openNewTaskSignal?: number;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const openNewTaskSignalRef = useRef(openNewTaskSignal);
+  useEffect(() => {
+    if (
+      openNewTaskSignal !== undefined &&
+      openNewTaskSignal !== openNewTaskSignalRef.current
+    ) {
+      openNewTaskSignalRef.current = openNewTaskSignal;
+      setNewTaskOpen(true);
+    }
+  }, [openNewTaskSignal]);
   const [query, setQuery] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(),
@@ -408,6 +423,7 @@ export function Sidebar({
         >
           <Plus className="h-3.5 w-3.5" aria-hidden />
           New task
+          <Kbd>{`${modKeyLabel()}N`}</Kbd>
         </Button>
         <Button
           size="sm"
@@ -418,6 +434,7 @@ export function Sidebar({
         >
           <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
           Board
+          <Kbd>{`${modKeyLabel()}B`}</Kbd>
         </Button>
       </div>
       {/* Straddles the right border so the grab target sits on the seam. */}

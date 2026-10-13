@@ -13,11 +13,14 @@ export function TaskCard({
   task,
   presence,
   onSelect,
+  selected,
 }: {
   task: Task;
   /** Live/runningTurn snapshot from the ~5s presence poll; absent task ids are treated as not-present. */
   presence?: { live: boolean; runningTurn: boolean } | undefined;
   onSelect?: (taskId: string) => void;
+  /** Keyboard-selected card (see Board.tsx); draws a visible ring, independent of mouse hover/click. */
+  selected?: boolean;
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -36,9 +39,11 @@ export function TaskCard({
       ref={setNodeRef}
       style={style}
       data-testid={`card-${task.id}`}
+      data-selected={selected ? "true" : "false"}
       className={cn(
         "cursor-grab touch-none select-none active:cursor-grabbing",
         isDragging && "opacity-50 ring-1 ring-primary",
+        selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
       )}
       onClick={() => onSelect?.(task.id)}
       {...attributes}

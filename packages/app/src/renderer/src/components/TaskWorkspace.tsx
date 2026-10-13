@@ -8,10 +8,12 @@ import { useEffect, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
+import { modKeyLabel } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { TaskActions } from "./TaskActions";
 import { TerminalPane } from "./TerminalPane";
 import { Button } from "./ui/button";
+import { Kbd } from "./ui/kbd";
 
 const components = {
   terminal: TerminalPane,
@@ -168,6 +170,7 @@ export function TaskWorkspace({
               title="Close this task's workspace and end its terminals (⌘W)"
             >
               <X className="h-3.5 w-3.5" />
+              <Kbd>{`${modKeyLabel()}W`}</Kbd>
             </Button>
           )}
         </div>

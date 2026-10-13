@@ -4,6 +4,7 @@ import type {
   BoardColumn as BoardColumnData,
   PresenceChangedPayload,
 } from "../../../preload/api";
+import { visibleGroupsForColumn } from "../lib/board-selection";
 import { cn } from "../lib/utils";
 import { TaskCard } from "./TaskCard";
 import { Button } from "./ui/button";
@@ -14,6 +15,7 @@ export function BoardColumn({
   onSelectTask,
   showArchived,
   onToggleArchived,
+  selectedTaskId,
 }: {
   column: BoardColumnData;
   presence: PresenceChangedPayload;
@@ -21,6 +23,8 @@ export function BoardColumn({
   /** Done-column-only: whether archived tasks (`task.archivedAt` set) are currently shown. Unused for every other column. */
   showArchived?: boolean;
   onToggleArchived?: () => void;
+  /** Keyboard-selected card id (see Board.tsx/lib/board-selection.ts), or absent outside the board view. */
+  selectedTaskId?: string | null;
 }): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: column.state });
 
@@ -31,16 +35,10 @@ export function BoardColumn({
   );
   // Archived tasks are hidden by default, done-column only (see
   // /AGENTS.md-adjacent design note in core-manager.ts's archiveDoneTasks):
-  // every other column never has an archivedAt task to begin with.
-  const visibleGroups =
-    column.state === "done" && !showArchived
-      ? column.groups
-          .map((group) => ({
-            ...group,
-            tasks: group.tasks.filter((task) => !task.archivedAt),
-          }))
-          .filter((group) => group.tasks.length > 0)
-      : column.groups;
+  // every other column never has an archivedAt task to begin with. Shared
+  // with Board.tsx's keyboard-selection grid so both always agree on what's
+  // actually on screen.
+  const visibleGroups = visibleGroupsForColumn(column, Boolean(showArchived));
   const taskCount = visibleGroups.reduce(
     (total, group) => total + group.tasks.length,
     0,
@@ -111,6 +109,7 @@ export function BoardColumn({
                   task={task}
                   presence={presence[task.id]}
                   onSelect={onSelectTask}
+                  selected={selectedTaskId === task.id}
                 />
               ))}
             </div>
