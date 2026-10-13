@@ -12,6 +12,7 @@ import type {
   CreateTaskInput,
   MoveTaskOptions,
   PresenceRecord,
+  ReopenTaskInput,
   RepositoryInfo,
   Task,
   TaskState,
@@ -26,6 +27,7 @@ export type {
   CreateTaskInput,
   MoveTaskOptions,
   PresenceRecord,
+  ReopenTaskInput,
   RepositoryInfo,
   Task,
   TaskState,
@@ -136,6 +138,15 @@ export interface HarbormasterApi {
      * surfaces as `warning` instead of throwing. See `CoreCommands.toDone`.
      */
     toDone(taskId: string): Promise<{ task: Task; warning?: string }>;
+    /**
+     * Reopen a Done task as a new Dev cycle (fresh branch + worktree; the
+     * previous conversation is forked into its next pi pane). A missing
+     * previous conversation surfaces as `warning`. See `CoreCommands.reopenTask`.
+     */
+    reopenTask(
+      taskId: string,
+      input?: ReopenTaskInput,
+    ): Promise<{ task: Task; warning?: string }>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
     refresh(): Promise<{ warnings: string[] }>;
     /** Subscribes to the core's board-changed push channel; returns an unsubscribe fn. */

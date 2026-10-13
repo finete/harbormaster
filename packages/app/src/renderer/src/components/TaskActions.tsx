@@ -1,14 +1,17 @@
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, RotateCcw } from "lucide-react";
 import type { JSX, MouseEvent, PointerEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
 import {
   canDone,
+  canReopen,
   canReview,
+  reopenTaskMutation,
   startTaskMutation,
   toDoneMutation,
   toReviewMutation,
 } from "../lib/task-mutations";
+import { ReopenTaskDialog } from "./ReopenTaskDialog";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
@@ -29,7 +32,10 @@ export function TaskActions({
   /** Stops dnd-kit's drag-activation listeners (spread on the whole TaskCard) from treating a button press as a drag gesture start. */
   onPointerDownCapture?: (event: PointerEvent) => void;
 }): JSX.Element {
-  const [busy, setBusy] = useState<"start" | "review" | "done" | null>(null);
+  const [busy, setBusy] = useState<
+    "start" | "review" | "done" | "reopen" | null
+  >(null);
+  const [reopenOpen, setReopenOpen] = useState(false);
 
   const reviewAllowed = canReview(task);
   const doneAllowed = canDone(task);
@@ -75,6 +81,60 @@ export function TaskActions({
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleReopenClick(event: MouseEvent<HTMLButtonElement>): void {
+    stopClick(event);
+    if (busy) return;
+    setReopenOpen(true);
+  }
+
+  async function handleReopenConfirm(objective: string): Promise<void> {
+    setReopenOpen(false);
+    if (busy) return;
+    setBusy("reopen");
+    try {
+      await reopenTaskMutation(task.id, objective);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (canReopen(task)) {
+    return (
+      <div
+        className="flex items-center gap-1.5"
+        data-testid={`task-actions-${task.id}`}
+        onPointerDownCapture={onPointerDownCapture}
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={handleReopenClick}
+          data-testid={`reopen-task-button-${task.id}`}
+          title="Reopen: a new Dev cycle (fresh branch + worktree) that continues the previous conversation"
+        >
+          {busy === "reopen" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3 w-3" />
+          )}
+          Reopen
+        </Button>
+        {/* Clicks inside the dialog must not bubble to the card (which opens the task). */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: event-propagation boundary only, not an interactive element. */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: same — keyboard events are handled by the dialog itself. */}
+        <div onClick={(event) => event.stopPropagation()}>
+          <ReopenTaskDialog
+            open={reopenOpen}
+            title={task.title}
+            onCancel={() => setReopenOpen(false)}
+            onConfirm={(objective) => void handleReopenConfirm(objective)}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (

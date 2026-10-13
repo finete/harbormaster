@@ -334,9 +334,11 @@ test("Start now lands in Dev with a worktree, and the prompt reaches the first p
     .getByTestId(`task-workspace-${taskId}`)
     .getByTestId("terminal-panel")
     .first();
-  // argv reached pi verbatim: `--` guard, multiline intact, nothing
+  // argv reached pi verbatim: the task's pre-assigned session id first
+  // (`--session-id <id>`), then the `--` guard, multiline intact, nothing
   // shell-expanded ($HOME stays literal).
-  await expect(panel).toContainText("PI-ARGC:2", { timeout: 20_000 });
+  await expect(panel).toContainText("PI-ARGC:4", { timeout: 20_000 });
+  await expect(panel).toContainText("PI-ARG:--session-id");
   await expect(panel).toContainText("PI-ARG:--");
   await expect(panel).toContainText("PI-ARG:Fix the 'flaky' test");
   await expect(panel).toContainText("then report $HOME");

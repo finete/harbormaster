@@ -147,9 +147,33 @@ export interface BoardColumn {
 export interface WorkspaceBinding {
   id: string;
   taskId: string;
+  /**
+   * The task's live worktree. Cleared (binding kept) when `toDone` removes
+   * the worktree, so the session identity below survives for a reopen —
+   * pi-home parks its binding the same way instead of deleting it.
+   */
   worktreePath?: string;
   branch?: string;
+  /**
+   * Harness session identity assigned by core before the task's first pane
+   * launch (`claimSessionLaunch`), so every later pane reopens the same
+   * conversation. pi-home's equivalent is the session file it creates up
+   * front (`PiSessionAccess.create`) and stores as `sessionPath`.
+   */
+  sessionId?: string;
+  /**
+   * The persisted session file for `sessionId`, once the harness reported it
+   * (`recordTaskSession`, called by the extension on session start).
+   */
   sessionPath?: string;
+  /** The previous cycle's session file, kept when a Done task is reopened (pi-home parity). */
+  previousSessionPath?: string;
+  /**
+   * Set by `reopenTask`: the next pane launch forks this session file into
+   * the new cycle's session instead of starting blank. Consumed (cleared) by
+   * the first `claimSessionLaunch` that hands it out.
+   */
+  forkFromSessionPath?: string;
   detached: boolean;
   createdAt: string;
   updatedAt: string;

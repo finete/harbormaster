@@ -75,6 +75,16 @@ export interface PresenceAccess {
   clear(taskId: string): Promise<void>;
 }
 
+/**
+ * Resource Access over harness session files (Pi's append-only JSONL
+ * transcripts). Core never parses or creates them — the harness owns their
+ * format — it only needs to know whether a recorded file is still there
+ * before asking the harness to resume or fork it.
+ */
+export interface SessionFileAccess {
+  exists(sessionPath: string): Promise<boolean>;
+}
+
 /** Per-user global configuration storage. */
 export interface ConfigAccess {
   load(): Promise<GlobalConfig>;

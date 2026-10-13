@@ -2,6 +2,7 @@
 // events out". Kept separate from model.ts because these are call-shape
 // contracts, not persisted domain data.
 
+import type { SessionLaunch } from "./harness.js";
 import type {
   AwaitingKind,
   BoardColumn,
@@ -11,6 +12,21 @@ import type {
   WorkspaceBinding,
 } from "./model.js";
 import type { RepositoryInfo } from "./workspace.js";
+
+export interface ReopenTaskInput {
+  /**
+   * pi-home's "What should Pi do now?" answer. When non-empty it becomes the
+   * task's `initialPrompt` and is delivered (once, via `claimInitialPrompt`)
+   * as the reopened session's first message; empty = open the session and
+   * let the user type.
+   */
+  objective?: string;
+}
+
+export interface RecordTaskSessionInput {
+  sessionId: string;
+  sessionPath: string;
+}
 
 export interface CreateTaskInput {
   title: string;
@@ -115,6 +131,41 @@ export interface CoreCommands {
    * was already claimed.
    */
   claimInitialPrompt(taskId: string): Promise<string | undefined>;
+  /**
+   * Decide which harness conversation the task's pane opens, for a
+   * frontend that is about to launch the harness (call it only once the
+   * harness command is known to be launchable). On the first launch this
+   * pre-assigns and persists the session id in the task's workspace
+   * binding, so every later launch resumes the same conversation; after a
+   * `reopenTask` it hands out the pending fork exactly once. Returns
+   * `undefined` when the task has no live worktree binding.
+   */
+  claimSessionLaunch(taskId: string): Promise<SessionLaunch | undefined>;
+  /**
+   * Called by the harness process itself on session start: record the
+   * persisted session file for the task's bound session id (or adopt the
+   * session outright for a legacy binding that has none). A different
+   * session id (the user started another conversation in the pane) is
+   * ignored — the binding stays authoritative. Returns whether anything was
+   * recorded.
+   */
+  recordTaskSession(
+    taskId: string,
+    input: RecordTaskSessionInput,
+  ): Promise<boolean>;
+  /**
+   * Reopen a Done task as a new Dev cycle (pi-home's `reopenDoneWork`): a
+   * fresh branch + worktree off the repository's default branch, with the
+   * previous cycle's conversation forked into the new session on its first
+   * launch. If the old worktree is still on disk (cleanup was refused) it
+   * is reused as-is with its session. Any failure rolls everything back
+   * (no branch, worktree, binding, or state change survives). A missing
+   * previous conversation is a `warning`, never a failure.
+   */
+  reopenTask(
+    taskId: string,
+    input?: ReopenTaskInput,
+  ): Promise<{ task: Task; warning?: string }>;
   /** Patch a task's non-state fields (title, prompt, error) without moving it. */
   updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
   deleteTask(id: string, options?: DeleteTaskOptions): Promise<void>;

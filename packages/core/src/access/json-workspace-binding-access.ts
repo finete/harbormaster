@@ -129,6 +129,9 @@ function validBinding(value: unknown): value is WorkspaceBinding {
     isOptionalString(value.worktreePath) &&
     isOptionalString(value.branch) &&
     isOptionalString(value.sessionPath) &&
+    isOptionalString(value.sessionId) &&
+    isOptionalString(value.previousSessionPath) &&
+    isOptionalString(value.forkFromSessionPath) &&
     typeof value.detached === "boolean" &&
     isString(value.createdAt) &&
     isString(value.updatedAt)

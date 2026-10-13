@@ -317,7 +317,11 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
 
     expect(result.task.state).toBe("done");
     expect(result.warning).toBeUndefined();
-    expect(await f.core.commands.getTaskWorkspace(task.id)).toBeUndefined();
+    // The binding is parked (worktree cleared), not deleted: its session
+    // identity survives for a later reopen.
+    const parked = await f.core.commands.getTaskWorkspace(task.id);
+    expect(parked).toBeDefined();
+    expect(parked?.worktreePath).toBeUndefined();
     const worktrees = await git(
       ["worktree", "list", "--porcelain"],
       f.checkout,
@@ -377,7 +381,9 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     expect(result.task.state).toBe("done");
     expect(result.warning).toMatch(/branch left in place/i);
     // The worktree itself was removed cleanly (it had no uncommitted changes).
-    expect(await f.core.commands.getTaskWorkspace(task.id)).toBeUndefined();
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBeUndefined();
     expect(await git(["branch", "--list", task.branch!], f.checkout)).toContain(
       task.branch!,
     );
