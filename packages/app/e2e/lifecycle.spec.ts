@@ -479,7 +479,14 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
     await expect(cardLocator(window, "Old Archived Task")).toBeVisible();
     await expect(toggle).toContainText("hide archived (1)");
 
-    await window.getByTestId("workspace-button").click();
+    // The rail only lists *open* task workspaces (see sidebar-model.ts); this
+    // state dir was seeded directly (nothing was ever opened through the
+    // UI), so open "Fresh Done Task" explicitly from its card before
+    // checking the sidebar. This also proves archived tasks stay out of the
+    // sidebar even if somehow opened: the app's launch auto-focus may well
+    // have picked "Old Archived Task" first (it sorts ahead in Done), and
+    // it must still never render as a row.
+    await cardLocator(window, "Fresh Done Task").click();
     await expect(window.getByTestId("workspace-view")).toBeVisible();
     await expect(
       window.locator('[data-testid^="sidebar-task-row-"]').filter({

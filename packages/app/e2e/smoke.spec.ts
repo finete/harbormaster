@@ -183,7 +183,7 @@ test("a terminal panel appears for the focused task and receives pty output", as
   });
 });
 
-test("closing a workspace ends its terminals; reopening starts fresh", async () => {
+test("closing a workspace ends its terminals, drops it off the rail, and reopening from the board starts fresh", async () => {
   // The focused task has a live terminal from the previous test.
   const panel = window.getByTestId("terminal-panel").first();
   await expect(panel).toBeVisible();
@@ -194,9 +194,19 @@ test("closing a workspace ends its terminals; reopening starts fresh", async () 
   await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
   await expect(window.getByTestId("close-workspace-button")).toHaveCount(0);
   await expect(window.getByTestId("workspace-empty-hint")).toBeVisible();
+  // The rail lists open task workspaces only (cmux-style): closing the only
+  // open task empties it entirely, even though the task itself is untouched.
+  await expect(
+    window.locator('[data-testid^="sidebar-task-row-"]'),
+  ).toHaveCount(0);
 
-  // Reopening from the sidebar mounts a fresh workspace with a fresh pty.
-  await window.locator('[data-testid^="sidebar-task-row-"]').first().click();
+  // Reopening happens from the Board now \u2014 the task dropped off the rail,
+  // it didn't disappear from the board.
+  await window.getByTestId("board-button").click();
+  const card = cardLocator("Task Alpha");
+  await expect(card).toBeVisible();
+  await card.click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
   const reopened = window.getByTestId("terminal-panel").first();
   await expect(reopened).toBeVisible();
   await expect(reopened).toHaveAttribute("data-received-output", "true", {
@@ -288,6 +298,131 @@ test("clicking a card returns to the workspace view, focused on that task", asyn
   await expect(panel).toHaveAttribute("data-received-output", "true", {
     timeout: 20_000,
   });
+});
+
+// Entering this block: Task Alpha and Task Beta are both open (in the
+// rail), Task Beta focused; both still sit in the Backlog column on the
+// board. Every test below restores exactly that "both open" rail state by
+// the end, since later tests (the repository-group lane) assert a
+// scratch-group count of 2.
+test("hovering a row reveals a close \u2715; clicking it closes that task's workspace, leaves the task on the board, and moves focus off a task that's gone", async () => {
+  const betaRow = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Beta" });
+  await expect(betaRow).toHaveAttribute("aria-pressed", "true");
+
+  await betaRow.hover();
+  await betaRow.getByTestId("sidebar-row-close").click();
+
+  // Gone from the rail...
+  await expect(
+    window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Task Beta" }),
+  ).toHaveCount(0);
+  // ...but closing a row never touches board state: still on the board, in
+  // the same column.
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("column-backlog-cards")).toContainText(
+    "Task Beta",
+  );
+  await window.getByTestId("workspace-button").click();
+
+  // Beta was focused when closed: focus moves to the only other open task
+  // (App.closeTask), same as Cmd+W already covers for the keyboard path.
+  const alphaRow = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Alpha" });
+  await expect(alphaRow).toHaveAttribute("aria-pressed", "true");
+
+  // Reopen Beta (from its board card) so later tests see both tasks open.
+  await window.getByTestId("board-button").click();
+  await cardLocator("Task Beta").click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+});
+
+test("middle-clicking a row closes it too, without touching board state", async () => {
+  await window.getByTestId("board-button").click();
+  await createTask("board-new-task-button", "Task Gamma");
+  const card = cardLocator("Task Gamma");
+  await expect(card).toBeVisible();
+  await card.click();
+
+  const gammaRow = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Gamma" });
+  await expect(gammaRow).toBeVisible();
+
+  await gammaRow.click({ button: "middle" });
+
+  await expect(
+    window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Task Gamma" }),
+  ).toHaveCount(0);
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("column-backlog-cards")).toContainText(
+    "Task Gamma",
+  );
+  await window.getByTestId("workspace-button").click();
+});
+
+test("closing a non-focused row doesn't steal focus from the focused workspace", async () => {
+  // Re-focus Beta so this test starts from a known state regardless of
+  // whichever task the previous tests left focused.
+  const betaRow = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Beta" });
+  await betaRow.click();
+  await expect(betaRow).toHaveAttribute("aria-pressed", "true");
+
+  const alphaRow = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Task Alpha" });
+  await alphaRow.hover();
+  await alphaRow.getByTestId("sidebar-row-close").click();
+
+  // Alpha is gone from the rail; Beta is still focused and its workspace is
+  // still the one showing \u2014 closing a row you're not looking at must not
+  // reassign focus.
+  await expect(
+    window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Task Alpha" }),
+  ).toHaveCount(0);
+  await expect(betaRow).toHaveAttribute("aria-pressed", "true");
+
+  // Alpha's board placement is untouched by the close.
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("column-backlog-cards")).toContainText(
+    "Task Alpha",
+  );
+
+  // Reopen Alpha so the "both open" rail state holds for later tests.
+  await cardLocator("Task Alpha").click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+});
+
+test("the rail lists only opened tasks: a parked backlog task stays off the rail until opened, while still on the board", async () => {
+  await window.getByTestId("board-button").click();
+  await createTask("board-new-task-button", "Parked Idea");
+  await expect(cardLocator("Parked Idea")).toBeVisible();
+  await expect(window.getByTestId("column-backlog-cards")).toContainText(
+    "Parked Idea",
+  );
+
+  await window.getByTestId("workspace-button").click();
+  await expect(
+    window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Parked Idea" }),
+  ).toHaveCount(0);
+
+  // Both still land in the "both open" state that the rest of this suite
+  // expects (Parked Idea deliberately stays unopened and out of scope).
+  await expect(
+    window.locator('[data-testid^="sidebar-task-row-"]'),
+  ).toHaveCount(2);
 });
 
 test("dragging a card into awaiting opens the reason dialog; cancel keeps the card in place", async () => {

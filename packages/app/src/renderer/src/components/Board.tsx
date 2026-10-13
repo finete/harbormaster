@@ -12,7 +12,7 @@ import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
 import { describeThrown, pushToast } from "../toast";
 import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
-import { NewTaskDialog } from "./NewTaskDialog";
+import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { Button } from "./ui/button";
 
 /**
@@ -27,8 +27,10 @@ import { Button } from "./ui/button";
  */
 export function Board({
   onSelectTask,
+  onCreateTask,
 }: {
   onSelectTask: (taskId: string) => void;
+  onCreateTask: (input: NewTaskDialogResult) => void;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
@@ -159,21 +161,7 @@ export function Board({
       <NewTaskDialog
         open={newTaskOpen}
         onOpenChange={setNewTaskOpen}
-        onCreate={(input) => {
-          void window.harbormaster.core
-            .createTask({
-              title: input.title,
-              initialPrompt: input.initialPrompt ?? "",
-              ...(input.repositoryId
-                ? { repositoryId: input.repositoryId }
-                : {}),
-              ...(input.start ? { start: true } : {}),
-            })
-            .catch((error: unknown) => {
-              console.error("createTask failed:", error);
-              pushToast(describeThrown(error), "error");
-            });
-        }}
+        onCreate={onCreateTask}
       />
     </div>
   );
