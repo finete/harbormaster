@@ -27,7 +27,7 @@ export function TaskActions({
   const canReview =
     Boolean(task.repositoryId && task.branch) &&
     (task.state === "dev" || task.state === "awaiting");
-  const canDone = task.state === "dev" || task.state === "awaiting";
+  const canDone = task.state !== "done";
 
   function stopClick(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();
