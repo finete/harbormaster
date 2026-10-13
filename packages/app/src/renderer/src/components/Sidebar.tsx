@@ -16,7 +16,7 @@ import type {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBoard, usePresenceMap } from "../core-client";
 import { cn } from "../lib/utils";
-import { NewTaskDialog } from "./NewTaskDialog";
+import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
 import {
   clampSidebarWidth,
@@ -72,23 +72,33 @@ function useNow(intervalMs: number): number {
 }
 
 /**
- * Workspace-view task rail, modeled on Orca's worktree sidebar: rows
- * grouped by repository (collapsible, "scratch" last, running tasks first),
- * a type-to-filter search box, drag-to-resize right edge (persisted), and a
+ * Workspace-view task rail, modeled on cmux's sidebar: the rail lists only
+ * *open* task workspaces (`openedTaskIds`, owned by App.tsx), not the full
+ * board inventory -- the Board stays the full inventory. Rows are grouped
+ * by repository (collapsible, "scratch" last, running tasks first), a
+ * type-to-filter search box, drag-to-resize right edge (persisted), and a
  * collapse toggle down to a thin strip of status dots. Clicking a row
- * focuses that task through App's takeover-guarded `selectTask`. The footer
- * keeps "+ New task" and the "Board" button (Cmd+B also works, see App.tsx).
- * Archived tasks are always excluded (the Done column's "show archived"
- * toggle is board-only; see BoardColumn.tsx).
+ * focuses that task through App's takeover-guarded `selectTask`; each row's
+ * hover close button (or a middle-click) closes just that task's workspace
+ * through `onCloseTask` (App's `requestCloseTask`) without touching its
+ * board state. The footer keeps "+ New task" and the "Board" button (Cmd+B
+ * also works, see App.tsx). Archived tasks are always excluded (the Done
+ * column's "show archived" toggle is board-only; see BoardColumn.tsx).
  */
 export function Sidebar({
   focusedTaskId,
+  openedTaskIds,
   onSelectTask,
+  onCloseTask,
   onShowBoard,
+  onCreateTask,
 }: {
   focusedTaskId: string | null;
+  openedTaskIds: ReadonlySet<string>;
   onSelectTask: (taskId: string) => void;
+  onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
+  onCreateTask: (input: NewTaskDialogResult) => void;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
@@ -105,8 +115,8 @@ export function Sidebar({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(
-    () => sidebarRows(columns, presence),
-    [columns, presence],
+    () => sidebarRows(columns, presence, openedTaskIds),
+    [columns, presence, openedTaskIds],
   );
   const groups = useMemo(() => groupRows(rows), [rows]);
   const searching = query.trim().length > 0;
@@ -186,18 +196,7 @@ export function Sidebar({
     <NewTaskDialog
       open={newTaskOpen}
       onOpenChange={setNewTaskOpen}
-      onCreate={(input) => {
-        void window.harbormaster.core
-          .createTask({
-            title: input.title,
-            initialPrompt: input.initialPrompt ?? "",
-            ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
-            ...(input.start ? { start: true } : {}),
-          })
-          .catch((error: unknown) => {
-            console.error("createTask failed:", error);
-          });
-      }}
+      onCreate={onCreateTask}
     />
   );
 
@@ -340,7 +339,7 @@ export function Sidebar({
             data-testid="sidebar-empty-hint"
             className="px-4 py-4 text-xs text-muted-foreground"
           >
-            No tasks yet — create one to get started.
+            No open tasks — pick one from the Board.
           </p>
         )}
         {rows.length > 0 && visibleGroups.length === 0 && (
@@ -390,6 +389,7 @@ export function Sidebar({
                       selected={focusedTaskId === row.task.id}
                       now={now}
                       onSelect={onSelectTask}
+                      onClose={onCloseTask}
                     />
                   ))}
                 </div>

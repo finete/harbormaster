@@ -35,15 +35,21 @@ export function repoLabel(task: Pick<Task, "repositoryId">): string {
   return parts[parts.length - 1] ?? id;
 }
 
-/** Every non-archived task on the board, in board (column, then group) order. */
+/**
+ * Every non-archived, *opened* task on the board, in board (column, then
+ * group) order. The rail lists open task workspaces, cmux-style, not the
+ * full board inventory (`openedTaskIds` is App's `openedTaskIds` state) —
+ * the Board stays the full inventory, see App.tsx / docs/design-decisions.md.
+ */
 export function sidebarRows(
   columns: BoardColumn[],
   presence: Record<string, PresenceBadge | undefined>,
+  openedTaskIds: ReadonlySet<string>,
 ): SidebarRow[] {
   return columns.flatMap((column) =>
     column.groups.flatMap((group) =>
       group.tasks
-        .filter((task) => !task.archivedAt)
+        .filter((task) => !task.archivedAt && openedTaskIds.has(task.id))
         .map((task) => ({
           task,
           state: column.state,

@@ -1,4 +1,5 @@
-import type { JSX, KeyboardEvent, MouseEvent } from "react";
+import { X } from "lucide-react";
+import type { JSX, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import type { Task } from "../../../preload/api";
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
@@ -130,17 +131,26 @@ function PrChip({ task }: { task: Task }): JSX.Element | null {
  * muted mono branch subline with the board-position chip and PR chip; and
  * (only while an agent is attached) an activity line. Rows are separated by
  * a full-width hairline; the selected row gets a rounded subtle highlight.
+ *
+ * Closable, cmux-style: hovering reveals a small ✕ that replaces the
+ * relative time (pure CSS `group-hover`, no hover state needed) and closes
+ * just this task's workspace — never the task itself, see App.tsx's
+ * `requestCloseTask`. Middle-clicking anywhere on the row does the same;
+ * the matching `onPointerDown` suppresses the browser's default middle-click
+ * autoscroll so the click actually lands.
  */
 export function SidebarTaskRow({
   row,
   selected,
   now,
   onSelect,
+  onClose,
 }: {
   row: SidebarRow;
   selected: boolean;
   now: number;
   onSelect: (taskId: string) => void;
+  onClose: (taskId: string) => void;
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
@@ -157,6 +167,27 @@ export function SidebarTaskRow({
     }
   };
 
+  const onCloseClick = (event: MouseEvent<HTMLButtonElement>): void => {
+    // The close button sits inside the row's own click target; never let it
+    // also focus/attach the task.
+    event.stopPropagation();
+    onClose(task.id);
+  };
+
+  // Middle-click (auxclick, button 1) closes the row from anywhere on it,
+  // matching cmux's SidebarPointerInteractionMonitor.
+  const onAuxClick = (event: MouseEvent<HTMLDivElement>): void => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    onClose(task.id);
+  };
+
+  // Suppress the browser's default middle-click autoscroll so the auxclick
+  // above isn't fighting a scroll gesture.
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    if (event.button === 1) event.preventDefault();
+  };
+
   return (
     <div className="border-b border-border/40 px-1.5 py-1 last:border-b-0">
       {/* biome-ignore lint/a11y/useSemanticElements: nested interactive PR chip rules out a native <button> row */}
@@ -168,8 +199,10 @@ export function SidebarTaskRow({
         aria-pressed={selected}
         onClick={() => onSelect(task.id)}
         onKeyDown={onKeyDown}
+        onAuxClick={onAuxClick}
+        onPointerDown={onPointerDown}
         className={cn(
-          "flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
+          "group flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
           "hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/60",
           selected && "bg-accent/70 hover:bg-accent/70",
         )}
@@ -184,13 +217,24 @@ export function SidebarTaskRow({
           </span>
           {time && (
             <span
-              className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+              className="shrink-0 text-[11px] tabular-nums text-muted-foreground group-hover:hidden"
               data-testid="sidebar-row-time"
               title={activityTimestamp(row)}
             >
               {time}
             </span>
           )}
+          <button
+            type="button"
+            data-testid="sidebar-row-close"
+            aria-label={`Close ${task.title}`}
+            title="Close workspace"
+            onClick={onCloseClick}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground group-hover:flex"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+          </button>
         </div>
         <div className="flex min-w-0 items-center gap-1.5 pl-5">
           <span

@@ -3,6 +3,7 @@ import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
+import type { NewTaskDialogResult } from "./components/NewTaskDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
@@ -11,7 +12,7 @@ import { Dialog, DialogFooter } from "./components/ui/dialog";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { flattenBoard, useBoard, useManualRefresh } from "./core-client";
 import { cn } from "./lib/utils";
-import { pushToast } from "./toast";
+import { describeThrown, pushToast } from "./toast";
 
 type View = "board" | "workspace";
 
@@ -122,6 +123,33 @@ export function App(): JSX.Element {
     [openedTaskIds, openTask],
   );
 
+  // Shared "+ New task" handler for both entry points (Sidebar's footer
+  // button, Board's header button): "Start now" auto-opens the new task's
+  // workspace so it appears in the rail immediately, cmux-style; parked
+  // backlog tasks stay off the rail until the user opens them explicitly
+  // (a board card click or a sidebar row, once one exists). This never
+  // focuses or switches view \u2014 only `selectTask`/`openTask` do that \u2014
+  // so creating a task from the board keeps the board on screen.
+  const createTask = useCallback((input: NewTaskDialogResult) => {
+    void window.harbormaster.core
+      .createTask({
+        title: input.title,
+        initialPrompt: input.initialPrompt ?? "",
+        ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+        ...(input.start ? { start: true } : {}),
+      })
+      .then((task) => {
+        if (!input.start) return;
+        setOpenedTaskIds((prev) =>
+          prev.has(task.id) ? prev : new Set(prev).add(task.id),
+        );
+      })
+      .catch((error: unknown) => {
+        console.error("createTask failed:", error);
+        pushToast(describeThrown(error), "error");
+      });
+  }, []);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
@@ -201,7 +229,7 @@ export function App(): JSX.Element {
             <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
           </header>
           <div className="min-h-0 flex-1">
-            <Board onSelectTask={selectTask} />
+            <Board onSelectTask={selectTask} onCreateTask={createTask} />
           </div>
         </div>
       }
@@ -212,8 +240,11 @@ export function App(): JSX.Element {
         >
           <Sidebar
             focusedTaskId={focusedTaskId}
+            openedTaskIds={openedTaskIds}
             onSelectTask={selectTask}
+            onCloseTask={requestCloseTask}
             onShowBoard={() => setView("board")}
+            onCreateTask={createTask}
           />
           <WorkspaceView
             focusedTaskId={focusedTaskId}

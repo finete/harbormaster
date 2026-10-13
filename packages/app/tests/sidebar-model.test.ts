@@ -67,15 +67,37 @@ describe("sidebarRows", () => {
         ],
       },
     ];
-    const rows = sidebarRows(columns, {
-      a: { live: true, runningTurn: false },
-    });
+    const rows = sidebarRows(
+      columns,
+      { a: { live: true, runningTurn: false } },
+      new Set(["a", "b", "c"]),
+    );
     expect(rows.map((r) => [r.task.id, r.state])).toEqual([
       ["a", "backlog"],
       ["b", "done"],
     ]);
     expect(rows[0]?.presence?.live).toBe(true);
     expect(rows[1]?.presence).toBeUndefined();
+  });
+
+  it("excludes tasks that are not in the opened set, even if unarchived", () => {
+    const columns: BoardColumn[] = [
+      {
+        state: "backlog",
+        title: "Backlog",
+        groups: [
+          {
+            id: "g1",
+            tasks: [
+              task({ id: "a", state: "backlog" }),
+              task({ id: "b", state: "backlog" }),
+            ],
+          },
+        ],
+      },
+    ];
+    const rows = sidebarRows(columns, {}, new Set(["a"]));
+    expect(rows.map((r) => r.task.id)).toEqual(["a"]);
   });
 });
 
