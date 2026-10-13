@@ -233,6 +233,51 @@ test.describe("toReview and toDone drive the board through the real core command
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
 
+  test("the reviewed task's sidebar row shows its repo group, a Review state chip, and a #42 PR chip that routes through the openExternal allowlist", async () => {
+    await window.getByTestId("workspace-button").click();
+    await expect(window.getByTestId("workspace-view")).toBeVisible();
+
+    // The fixture's origin is a local bare repo, so the normalized
+    // repository id (and hence the short group name) ends in "bare-origin".
+    const group = window.getByTestId("sidebar-group-bare-origin");
+    await expect(group).toBeVisible();
+    const row = group
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Ship Feature" });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("state-chip")).toHaveText("Review");
+    await expect(row.getByTestId("sidebar-row-branch")).not.toBeEmpty();
+
+    const chip = row.getByTestId("pr-chip");
+    await expect(chip).toHaveText("#42");
+    await expect(chip).toHaveAttribute(
+      "data-pr-url",
+      "https://example.invalid/fixture/pull/42",
+    );
+
+    // The fake gh reports a non-GitHub URL, so main's allowlist (see
+    // main/external-url.ts, unit-tested in tests/external-url.test.ts)
+    // refuses it: no browser launches and the renderer surfaces a warning.
+    const opened = await window.evaluate(() =>
+      window.harbormaster.shell.openExternal(
+        "https://example.invalid/fixture/pull/42",
+      ),
+    );
+    expect(opened).toBe(false);
+    const pressedBefore = await row.getAttribute("aria-pressed");
+    await chip.click();
+    const warning = window.getByTestId("toast-warning");
+    await expect(warning).toContainText("only github.com links");
+    // Clicking the chip never doubles as a row click (no focus change).
+    await expect(row).toHaveAttribute("aria-pressed", pressedBefore ?? "");
+    await warning.getByTestId("toast-dismiss").dispatchEvent("click");
+    await expect(window.getByTestId("toast-warning")).toHaveCount(0);
+
+    // Leave the app on the board view, where the next test starts.
+    await window.getByTestId("board-button").click();
+    await expect(window.getByTestId("board-view")).toBeVisible();
+  });
+
   test("Done on a clean scratch task moves it straight to the Done column with no warning", async () => {
     // The previous test ended on the board view; back to the workspace view
     // for its sidebar "+ New task" button.
@@ -438,5 +483,15 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
         hasText: "Fresh Done Task",
       }),
     ).toHaveCount(1);
+    await expect(
+      window
+        .getByTestId("sidebar-task-row-visible-done-task-1")
+        .getByTestId("state-chip"),
+    ).toHaveText("Done");
+    await expect(
+      window
+        .getByTestId("sidebar-group-scratch")
+        .getByTestId("sidebar-group-count"),
+    ).toHaveText("1");
   });
 });

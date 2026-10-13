@@ -21,6 +21,10 @@ import type {
 } from "./api";
 
 const api: HarbormasterApi = {
+  shell: {
+    openExternal: (url: string): Promise<boolean> =>
+      ipcRenderer.invoke("shell:openExternal", url),
+  },
   terminal: {
     create: (options: TerminalCreateOptions): Promise<TerminalCreateResult> =>
       ipcRenderer.invoke("pty:create", options),
