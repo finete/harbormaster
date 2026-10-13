@@ -1,4 +1,4 @@
-// Keyboard-layer e2e lane: board navigation (arrows/hjkl + Enter), the
+// Keyboard-layer e2e lane: board navigation (arrow keys + Enter), the
 // TUI-style single-key shortcuts (n/x/r/s/g/a/Escape), the pi-home-style key
 // legend, kbd hint chips on the Board/New task buttons, and the guard that
 // keeps every shortcut out of the way while a dialog is open or the
@@ -122,13 +122,13 @@ test("kbd hint chips are visible on the Board and New task buttons", async () =>
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test("selection starts on the first card and arrow/hjkl keys move it", async () => {
+test("selection starts on the first card and arrow keys move it", async () => {
   await expect(cardLocator("Keyboard Alpha")).toHaveAttribute(
     "data-selected",
     "true",
   );
 
-  await window.keyboard.press("j");
+  await window.keyboard.press("ArrowDown");
   await expect(cardLocator("Keyboard Beta")).toHaveAttribute(
     "data-selected",
     "true",
@@ -141,13 +141,13 @@ test("selection starts on the first card and arrow/hjkl keys move it", async () 
   );
 
   // Clamped at the bottom of the column.
-  await window.keyboard.press("j");
+  await window.keyboard.press("ArrowDown");
   await expect(cardLocator("Keyboard Gamma")).toHaveAttribute(
     "data-selected",
     "true",
   );
 
-  await window.keyboard.press("k");
+  await window.keyboard.press("ArrowUp");
   await expect(cardLocator("Keyboard Beta")).toHaveAttribute(
     "data-selected",
     "true",
@@ -193,11 +193,11 @@ test('"n" opens the New Task dialog, and typing inside it does not also trigger 
 test('"x" moves the selected card to Done', async () => {
   // Clamp to the top of the backlog column, then step down to the bottom
   // (Keyboard Gamma) regardless of whatever the previous test left selected.
-  await window.keyboard.press("k");
-  await window.keyboard.press("k");
-  await window.keyboard.press("k");
-  await window.keyboard.press("j");
-  await window.keyboard.press("j");
+  await window.keyboard.press("ArrowUp");
+  await window.keyboard.press("ArrowUp");
+  await window.keyboard.press("ArrowUp");
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("ArrowDown");
   await expect(cardLocator("Keyboard Gamma")).toHaveAttribute(
     "data-selected",
     "true",

@@ -9,7 +9,7 @@ const ENTRIES: Array<{ key: string; label: string }> = [
   { key: "s", label: "Start" },
   { key: "g", label: "Refresh" },
   { key: "a", label: "Archived" },
-  { key: "hjkl/\u2190 \u2192", label: "Navigate" },
+  { key: "\u2190\u2191\u2193\u2192", label: "Navigate" },
   { key: "esc", label: "Workspace" },
 ];
 
