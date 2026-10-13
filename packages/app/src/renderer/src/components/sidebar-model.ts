@@ -49,7 +49,10 @@ export function sidebarRows(
   return columns.flatMap((column) =>
     column.groups.flatMap((group) =>
       group.tasks
-        .filter((task) => !task.archivedAt && openedTaskIds.has(task.id))
+        // An open workspace always gets a row (cmux rule: every open window
+        // is listed), even an archived task, or it becomes an orphan pane
+        // with no way to see or close it from the rail.
+        .filter((task) => openedTaskIds.has(task.id))
         .map((task) => ({
           task,
           state: column.state,

@@ -46,7 +46,7 @@ describe("repoLabel", () => {
 });
 
 describe("sidebarRows", () => {
-  it("flattens columns in order, drops archived tasks, attaches presence", () => {
+  it("flattens columns in order, keeps open archived tasks, attaches presence", () => {
     const columns: BoardColumn[] = [
       {
         state: "backlog",
@@ -72,9 +72,12 @@ describe("sidebarRows", () => {
       { a: { live: true, runningTurn: false } },
       new Set(["a", "b", "c"]),
     );
+    // "c" is archived but OPEN: an open workspace always gets a row (cmux
+    // rule), otherwise it becomes an orphan pane with no rail affordance.
     expect(rows.map((r) => [r.task.id, r.state])).toEqual([
       ["a", "backlog"],
       ["b", "done"],
+      ["c", "done"],
     ]);
     expect(rows[0]?.presence?.live).toBe(true);
     expect(rows[1]?.presence).toBeUndefined();

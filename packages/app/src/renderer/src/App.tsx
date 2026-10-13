@@ -84,12 +84,13 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (autoFocusedRef.current) return;
     if (!focusedTaskId && flatRows.length > 0) {
+      // Never resurrect an archived task (it would open a workspace the user
+      // finished with a week ago); prefer the first live row, else stay empty.
+      const firstLive = flatRows.find(({ task }) => !task.archivedAt);
+      if (!firstLive) return;
       autoFocusedRef.current = true;
-      const firstId = flatRows[0]?.task.id ?? "";
-      setFocusedTaskId(firstId);
-      if (firstId) {
-        setOpenedTaskIds((prev) => new Set(prev).add(firstId));
-      }
+      setFocusedTaskId(firstLive.task.id);
+      setOpenedTaskIds((prev) => new Set(prev).add(firstLive.task.id));
     }
   }, [focusedTaskId, flatRows]);
 
