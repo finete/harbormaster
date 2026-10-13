@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { IDockviewPanelProps } from "dockview-react";
 import type { JSX } from "react";
@@ -31,7 +32,16 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     const terminal = new Terminal({
       convertEol: true,
       cursorBlink: true,
+      // Nerd Font first so powerline/p10k prompts render their glyphs; the
+      // fallbacks keep the terminal usable on machines without it.
+      fontFamily:
+        '"Hack Nerd Font Mono", "HackNerdFontMono", "MesloLGS NF", Menlo, monospace',
       fontSize: 13,
+      lineHeight: 1.25,
+      scrollback: 10_000,
+      macOptionIsMeta: true,
+      // Never let xterm recolor output for contrast; themes own their colors.
+      minimumContrastRatio: 1,
       // Keeps an accessible text mirror of the terminal's rendered rows in
       // the DOM alongside the canvas paint, so e2e tests can assert on
       // terminal contents (shell output, prompts) via plain text matchers.
@@ -39,11 +49,41 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       theme: {
         background: "#0b0f14",
         foreground: "#d7dde3",
+        cursor: "#d7dde3",
+        cursorAccent: "#0b0f14",
+        selectionBackground: "#2c3a4d",
+        black: "#1c2126",
+        red: "#f2777a",
+        green: "#99cc99",
+        yellow: "#ffcc66",
+        blue: "#6699cc",
+        magenta: "#cc99cc",
+        cyan: "#66cccc",
+        white: "#d7dde3",
+        brightBlack: "#4a5561",
+        brightRed: "#f99157",
+        brightGreen: "#b5e0a6",
+        brightYellow: "#ffd98c",
+        brightBlue: "#8ab6e8",
+        brightMagenta: "#e0b3e0",
+        brightCyan: "#8ce0e0",
+        brightWhite: "#f2f6fa",
       },
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+    // WebGL paints crisper and faster than the DOM renderer; fall back
+    // silently when the context is unavailable (rare: headless GL limits,
+    // too many live contexts). On context loss, dispose so xterm returns to
+    // its default renderer instead of a frozen canvas.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      terminal.loadAddon(webgl);
+    } catch {
+      // DOM renderer fallback is fine.
+    }
     fitAddon.fit();
 
     let disposed = false;
@@ -108,7 +148,14 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       unsubscribeData?.();
       unsubscribeExit?.();
       if (sessionId) void window.harbormaster.terminal.dispose(sessionId);
-      terminal.dispose();
+      // xterm's dispose cascades into loaded addons; the WebGL addon can
+      // throw when its context is already torn down. A throw inside a React
+      // cleanup unmounts the entire tree, so never let it escape.
+      try {
+        terminal.dispose();
+      } catch {
+        // Renderer teardown raced the GL context; nothing left to free.
+      }
     };
   }, []);
 
@@ -135,7 +182,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         data-testid="terminal-panel"
         data-panel-id={props.api.id}
         data-received-output={hasReceivedOutput}
-        className="min-h-0 flex-1 p-1"
+        className="terminal-host min-h-0 flex-1 bg-[#0b0f14] py-1.5 pl-3"
       />
     </div>
   );
