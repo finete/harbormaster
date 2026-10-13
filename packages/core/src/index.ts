@@ -13,6 +13,7 @@ import {
   JsonWorkspaceBindingAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalSessionFileAccess,
   SessionPresenceAccess,
 } from "./access/index.js";
 import type { CoreCommands } from "./contracts/commands.js";
@@ -85,6 +86,7 @@ export function createCore(options: CoreOptions = {}): Core {
     repositories,
     worktrees,
     bindings: workspaceBindings,
+    sessions: new LocalSessionFileAccess(),
     pullRequests,
     versions,
   });

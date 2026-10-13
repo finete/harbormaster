@@ -40,7 +40,9 @@ export function TaskWorkspace({
   // workspace binding resolves — whichever of the two happens last.
   const [api, setApi] = useState<DockviewApi | null>(null);
   const initialPanelCreatedRef = useRef(false);
-  const piPanelCreatedRef = useRef(false);
+  // The worktree the current Pi panel was opened in; a reopened Done task
+  // gets a new worktree, and with it a new Pi panel.
+  const piPanelCwdRef = useRef<string | undefined>(undefined);
   // Resolved once per task: the worktree path a repository-backed task's
   // terminals should spawn into (undefined for scratch tasks, falling back
   // to the app's own cwd — see TerminalPane/ptySessions.ts). `cwdLoaded`
@@ -77,7 +79,7 @@ export function TaskWorkspace({
     if (!api || !cwdLoaded) return;
     if (!initialPanelCreatedRef.current) {
       initialPanelCreatedRef.current = true;
-      piPanelCreatedRef.current = Boolean(cwd);
+      piPanelCwdRef.current = cwd;
       api.addPanel({
         id: `${taskId}-terminal-${nextPanelId++}`,
         component: "terminal",
@@ -89,10 +91,11 @@ export function TaskWorkspace({
       });
       return;
     }
-    // Opened while still parked (plain shell), then started: the worktree
-    // now exists, so give the task the pi pane it would have had.
-    if (cwd && !piPanelCreatedRef.current) {
-      piPanelCreatedRef.current = true;
+    // Opened while still parked (plain shell), then started — or opened
+    // while Done, then reopened into a new cycle's worktree: give the task
+    // the pi pane it would have had (core resumes/forks its conversation).
+    if (cwd && cwd !== piPanelCwdRef.current) {
+      piPanelCwdRef.current = cwd;
       api.addPanel({
         id: `${taskId}-terminal-${nextPanelId++}`,
         component: "terminal",

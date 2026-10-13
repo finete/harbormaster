@@ -15,6 +15,8 @@ import type {
   CreateTaskInput,
   DeleteTaskOptions,
   MoveTaskOptions,
+  RecordTaskSessionInput,
+  ReopenTaskInput,
   ToDoneOptions,
   UpdateTaskInput,
 } from "../contracts/commands.js";
@@ -23,6 +25,7 @@ import type {
   PullRequestStatus,
   VersionAccess,
 } from "../contracts/github.js";
+import type { SessionLaunch } from "../contracts/harness.js";
 import type {
   BoardColumn,
   GlobalConfig,
@@ -36,6 +39,7 @@ import type {
   Clock,
   ConfigAccess,
   IdGenerator,
+  SessionFileAccess,
   TaskStateAccess,
   WorkspaceBindingAccess,
 } from "../contracts/services.js";
@@ -64,6 +68,8 @@ export interface CoreManagerDependencies {
   repositories: GitRepositoryAccess;
   worktrees: GitWorktreeAccess;
   bindings: WorkspaceBindingAccess;
+  /** Existence checks for harness session files before resuming/forking them. */
+  sessions: SessionFileAccess;
   pullRequests: PullRequestAccess;
   versions: VersionAccess;
 }
@@ -217,14 +223,8 @@ export class CoreManager implements CoreCommands {
     // Undo both halves of `git worktree add -b`: the directory and the
     // freshly-created (commit-less) branch, so a retry never collides with
     // a leftover ref.
-    const removeWorktree = async () => {
-      await this.deps.worktrees
-        .removeWorktree(repo, worktree.path, true)
-        .catch(() => {});
-      await this.deps.worktrees
-        .deleteBranch(repo, branch, true)
-        .catch(() => {});
-    };
+    const removeWorktree = () =>
+      this.discardTaskWorktree(repo, worktree.path, branch);
 
     try {
       await task.persist();
@@ -265,6 +265,220 @@ export class CoreManager implements CoreCommands {
       updatedAt: now,
     });
     return task.initialPrompt;
+  }
+
+  async claimSessionLaunch(taskId: string): Promise<SessionLaunch | undefined> {
+    const task = await this.requireTask(taskId);
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding?.worktreePath) return undefined;
+    const now = this.deps.clock.now().toISOString();
+
+    // First launch after `reopenTask`: hand the pending fork out exactly
+    // once, so later launches resume the forked session instead of forking
+    // the previous cycle again.
+    if (binding.forkFromSessionPath) {
+      const forkFrom = binding.forkFromSessionPath;
+      const sessionId = binding.sessionId ?? this.deps.ids.next();
+      const { forkFromSessionPath: _consumed, ...rest } = binding;
+      await this.deps.bindings.replaceBinding({
+        ...rest,
+        sessionId,
+        updatedAt: now,
+      });
+      return (await this.deps.sessions.exists(forkFrom))
+        ? { mode: "fork", sessionId, forkFrom }
+        : { mode: "new", sessionId };
+    }
+
+    if (binding.sessionId) {
+      const sessionPath =
+        binding.sessionPath &&
+        (await this.deps.sessions.exists(binding.sessionPath))
+          ? binding.sessionPath
+          : undefined;
+      return {
+        mode: "resume",
+        sessionId: binding.sessionId,
+        ...(sessionPath ? { sessionPath } : {}),
+      };
+    }
+
+    // Legacy binding from before session binding existed: a pane already
+    // ran here (its prompt was delivered), so reconnect to the most recent
+    // conversation in this per-task worktree rather than starting a new
+    // one. The harness's `recordTaskSession` call then binds it for good.
+    if (task.initialPromptDeliveredAt) return { mode: "continue" };
+
+    const sessionId = this.deps.ids.next();
+    await this.deps.bindings.replaceBinding({
+      ...binding,
+      sessionId,
+      updatedAt: now,
+    });
+    return { mode: "new", sessionId };
+  }
+
+  async recordTaskSession(
+    taskId: string,
+    input: RecordTaskSessionInput,
+  ): Promise<boolean> {
+    if (!input.sessionId || !input.sessionPath) return false;
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding) return false;
+    if (binding.sessionId) {
+      // Another conversation started inside the task's pane (e.g. Pi's
+      // /new): the binding stays authoritative, like pi-home's.
+      if (binding.sessionId !== input.sessionId) return false;
+      if (binding.sessionPath === input.sessionPath) return false;
+    } else if (!binding.worktreePath) {
+      return false;
+    }
+    await this.deps.bindings.replaceBinding({
+      ...binding,
+      sessionId: input.sessionId,
+      sessionPath: input.sessionPath,
+      updatedAt: this.deps.clock.now().toISOString(),
+    });
+    return true;
+  }
+
+  async reopenTask(
+    taskId: string,
+    input?: ReopenTaskInput,
+  ): Promise<{ task: Task; warning?: string }> {
+    const task = await this.requireTask(taskId);
+    if (task.state !== "done") {
+      throw new Error(
+        `Only a done task can be reopened (task is in "${task.state}")`,
+      );
+    }
+    const now = this.deps.clock.now().toISOString();
+    const objective = input?.objective?.trim();
+    const reopened: Task = {
+      ...task,
+      state: "dev",
+      updatedAt: now,
+      stateChangedAt: now,
+    };
+    delete reopened.completedAt;
+    delete reopened.archivedAt;
+    delete reopened.awaiting;
+    if (objective) {
+      // Delivered once, as the reopened session's first message.
+      reopened.initialPrompt = objective;
+      delete reopened.initialPromptDeliveredAt;
+    } else {
+      // No new directive: never replay the old prompt into the new cycle.
+      reopened.initialPromptDeliveredAt = task.initialPromptDeliveredAt ?? now;
+    }
+
+    if (!task.repositoryId) {
+      await this.deps.tasks.replaceTask(reopened);
+      await this.publishTaskChange(reopened);
+      return { task: reopened };
+    }
+
+    const config = await this.deps.config.load();
+    const repo = await this.findRepository(task.repositoryId, config);
+    const previous = await this.deps.bindings.getBindingForTask(taskId);
+
+    // Cleanup was refused at Done time (dirty or open in a live pane): the
+    // old worktree is still there, so reopen into it with its own session
+    // instead of orphaning it next to a new cycle.
+    if (previous?.worktreePath) {
+      const live = await this.deps.worktrees.listWorktrees(repo);
+      if (live.some((worktree) => worktree.path === previous.worktreePath)) {
+        await this.deps.tasks.replaceTask(reopened);
+        await this.publishTaskChange(reopened);
+        return { task: reopened };
+      }
+    }
+
+    // New cycle (pi-home's reopenDoneWork): fresh branch + worktree off the
+    // default branch; the previous conversation is forked into the new
+    // session on its first launch (see claimSessionLaunch).
+    let warning: string | undefined;
+    const forkFrom =
+      previous?.sessionPath &&
+      (await this.deps.sessions.exists(previous.sessionPath))
+        ? previous.sessionPath
+        : undefined;
+    if (!forkFrom && (previous?.sessionPath || previous?.sessionId)) {
+      warning = previous.sessionPath
+        ? `previous conversation not found (${previous.sessionPath}); the reopened task starts a fresh session`
+        : "previous conversation was never recorded; the reopened task starts a fresh session";
+    }
+
+    const branch = deriveTaskBranch(
+      task.title,
+      this.deps.ids.next(),
+      config.branchPrefix ?? "",
+    );
+    const worktree = await this.deps.worktrees.createTaskWorktree(
+      repo,
+      branch,
+      repo.defaultBranch,
+    );
+    const discardWorktree = () =>
+      this.discardTaskWorktree(repo, worktree.path, branch);
+
+    const binding: WorkspaceBinding = {
+      id: previous?.id ?? this.deps.ids.next(),
+      taskId,
+      worktreePath: worktree.path,
+      branch,
+      detached: false,
+      // Pre-assigned like a first launch (the new cycle never inherits the
+      // legacy `--continue` path): forked into when a previous conversation
+      // exists, else created fresh under this id.
+      sessionId: this.deps.ids.next(),
+      ...(previous?.sessionPath
+        ? { previousSessionPath: previous.sessionPath }
+        : {}),
+      ...(forkFrom ? { forkFromSessionPath: forkFrom } : {}),
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+    };
+    try {
+      if (previous) await this.deps.bindings.replaceBinding(binding);
+      else await this.deps.bindings.attachBinding(binding);
+    } catch (error) {
+      await discardWorktree();
+      throw error;
+    }
+
+    const next: Task = {
+      ...reopened,
+      branch,
+      targetBranch: task.targetBranch ?? repo.defaultBranch,
+    };
+    delete next.pr;
+    try {
+      await this.deps.tasks.replaceTask(next);
+    } catch (error) {
+      // No half-created cycle: restore the old binding, drop the new
+      // worktree + branch; the task record itself was never changed.
+      if (previous) {
+        await this.deps.bindings.replaceBinding(previous).catch(() => {});
+      } else {
+        await this.deps.bindings.removeBinding(taskId).catch(() => {});
+      }
+      await discardWorktree();
+      throw error;
+    }
+
+    await this.publishTaskChange(next);
+    return { task: next, ...(warning ? { warning } : {}) };
+  }
+
+  /** Undo both halves of `git worktree add -b`, best effort: the directory and its fresh branch. */
+  private async discardTaskWorktree(
+    repo: RepositoryInfo,
+    path: string,
+    branch: string,
+  ): Promise<void> {
+    await this.deps.worktrees.removeWorktree(repo, path, true).catch(() => {});
+    await this.deps.worktrees.deleteBranch(repo, branch, true).catch(() => {});
   }
 
   async moveTask(
@@ -556,7 +770,14 @@ export class CoreManager implements CoreCommands {
               binding.worktreePath,
               false,
             );
-            await this.deps.bindings.removeBinding(task.id);
+            // Park the binding instead of deleting it (pi-home parity): the
+            // worktree is gone, but the session identity must survive so a
+            // later `reopenTask` can carry the conversation forward.
+            const { worktreePath: _removed, ...parked } = binding;
+            await this.deps.bindings.replaceBinding({
+              ...parked,
+              updatedAt: this.deps.clock.now().toISOString(),
+            });
           } catch (error) {
             warning = `worktree left in place: ${describeError(error)}`;
           }

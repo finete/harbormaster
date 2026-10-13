@@ -10,6 +10,7 @@ import type {
   HarnessAdapter,
   LaunchSpec,
   PresenceStatus,
+  SessionLaunch,
 } from "../contracts/harness.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
 import { SystemClock } from "../utilities/defaults.js";
@@ -74,6 +75,38 @@ export function piPromptArgs(prompt: string | undefined): string[] {
   return ["--", prompt.startsWith("@") ? ` ${prompt}` : prompt];
 }
 
+/**
+ * Map core's session decision onto Pi's CLI (verified against pi 1.0.x
+ * `pi --help` and docs/cli.md):
+ *
+ * - `--session <path>` opens that exact file; Pi takes the cwd from the
+ *   file's header (an interactive prompt offers to continue in the current
+ *   cwd if that directory no longer exists).
+ * - `--session-id <id>` opens the session with that exact id in the cwd's
+ *   project, or creates it under that id when absent — which is how core
+ *   pre-assigns a task's session before Pi ever wrote the file.
+ * - `--fork <path> --session-id <id>` copies a session into a new one for
+ *   the current cwd, under the chosen id (the two flags combine; `--fork`
+ *   must not be combined with `--session`/`--continue`, and `--session-id`
+ *   must not be combined with `--session`/`--continue`).
+ * - `--continue` reopens the most recent session for the cwd.
+ */
+export function piSessionArgs(session: SessionLaunch | undefined): string[] {
+  if (!session) return [];
+  switch (session.mode) {
+    case "new":
+      return ["--session-id", session.sessionId];
+    case "resume":
+      return session.sessionPath
+        ? ["--session", session.sessionPath]
+        : ["--session-id", session.sessionId];
+    case "fork":
+      return ["--fork", session.forkFrom, "--session-id", session.sessionId];
+    case "continue":
+      return ["--continue"];
+  }
+}
+
 export class PiHarnessAdapter implements HarnessAdapter {
   private readonly presenceAccess: PresenceAccess;
   private readonly clock: Clock;
@@ -99,7 +132,10 @@ export class PiHarnessAdapter implements HarnessAdapter {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
       // instead of a real `pi` install; unset (the normal case) runs `pi`.
       command: process.env[PI_COMMAND_ENV] || "pi",
-      args: piPromptArgs(input.initialPrompt),
+      args: [
+        ...piSessionArgs(input.session),
+        ...piPromptArgs(input.initialPrompt),
+      ],
       cwd: input.workspacePath,
       env,
     };

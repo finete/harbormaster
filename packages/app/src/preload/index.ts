@@ -10,6 +10,7 @@ import type {
   MoveTaskOptions,
   PresenceChangedPayload,
   PresenceSnapshot,
+  ReopenTaskInput,
   RepositoryInfo,
   Task,
   TaskState,
@@ -75,6 +76,11 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:toReview", taskId),
     toDone: (taskId: string): Promise<{ task: Task; warning?: string }> =>
       ipcRenderer.invoke("core:toDone", taskId),
+    reopenTask: (
+      taskId: string,
+      input?: ReopenTaskInput,
+    ): Promise<{ task: Task; warning?: string }> =>
+      ipcRenderer.invoke("core:reopenTask", taskId, input),
     refresh: (): Promise<{ warnings: string[] }> =>
       ipcRenderer.invoke("core:refresh"),
     onBoardChanged: (

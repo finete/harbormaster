@@ -13,6 +13,27 @@
 
 import type { PresenceRecord } from "./model.js";
 
+/**
+ * Which conversation a task pane should open, as decided by core's
+ * `claimSessionLaunch` from the task's workspace binding. The adapter maps
+ * each mode to its harness's own CLI flags.
+ *
+ * - `new`: first launch — create the session under the pre-assigned id.
+ * - `resume`: reopen the bound session (by its recorded file when known
+ *   and present, else by id in the task's cwd — Pi creates it under that
+ *   id if it was never persisted).
+ * - `fork`: first launch after a Done task was reopened — copy the
+ *   previous cycle's conversation into a new session with this id.
+ * - `continue`: legacy binding from before session binding existed — reopen
+ *   the most recent session for the task's cwd (the worktree is per-task, so
+ *   that is the task's conversation).
+ */
+export type SessionLaunch =
+  | { mode: "new"; sessionId: string }
+  | { mode: "resume"; sessionId: string; sessionPath?: string }
+  | { mode: "fork"; sessionId: string; forkFrom: string }
+  | { mode: "continue" };
+
 export interface BuildLaunchSpecInput {
   taskId: string;
   /** Working directory the session's process runs in (the task's worktree or workspace). */
@@ -21,6 +42,8 @@ export interface BuildLaunchSpecInput {
   stateDir: string;
   /** Seed prompt for a brand-new session; omitted when resuming/attaching to an existing one. */
   initialPrompt?: string;
+  /** Which conversation to open (see `CoreCommands.claimSessionLaunch`); omitted = harness default (a fresh, unbound session). */
+  session?: SessionLaunch;
 }
 
 /**

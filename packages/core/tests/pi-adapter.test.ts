@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SessionPresenceAccess } from "../src/access/session-presence-access.js";
 import type { Clock } from "../src/contracts/services.js";
-import { PiHarnessAdapter } from "../src/harness/pi-adapter.js";
+import { PiHarnessAdapter, piSessionArgs } from "../src/harness/pi-adapter.js";
 
 class FixedClock implements Clock {
   constructor(private current: Date) {}
@@ -58,6 +58,95 @@ describe("PiHarnessAdapter", () => {
         "line one\nline 'two' \"$HOME\"",
       ]);
       expect(build("   ")).toEqual([]);
+    });
+
+    it("maps each session launch mode onto Pi's session flags, before the prompt", () => {
+      const adapter = new PiHarnessAdapter({ stateDir: "/state" });
+      const build = (
+        session: Parameters<typeof adapter.buildLaunchSpec>[0]["session"],
+        initialPrompt?: string,
+      ) =>
+        adapter.buildLaunchSpec({
+          taskId: "task-1",
+          workspacePath: "/work/task-1",
+          stateDir: "/state",
+          ...(session ? { session } : {}),
+          ...(initialPrompt ? { initialPrompt } : {}),
+        }).args;
+
+      expect(build({ mode: "new", sessionId: "s-1" }, "Do it")).toEqual([
+        "--session-id",
+        "s-1",
+        "--",
+        "Do it",
+      ]);
+      expect(build({ mode: "resume", sessionId: "s-1" })).toEqual([
+        "--session-id",
+        "s-1",
+      ]);
+      // A known file wins over the id: Pi opens it regardless of cwd.
+      expect(
+        build({
+          mode: "resume",
+          sessionId: "s-1",
+          sessionPath: "/sessions/a_s-1.jsonl",
+        }),
+      ).toEqual(["--session", "/sessions/a_s-1.jsonl"]);
+      expect(
+        build(
+          { mode: "fork", sessionId: "s-2", forkFrom: "/sessions/a_s-1.jsonl" },
+          "Next step",
+        ),
+      ).toEqual([
+        "--fork",
+        "/sessions/a_s-1.jsonl",
+        "--session-id",
+        "s-2",
+        "--",
+        "Next step",
+      ]);
+      expect(build({ mode: "continue" })).toEqual(["--continue"]);
+      expect(build(undefined)).toEqual([]);
+    });
+
+    it("never combines flags Pi rejects together (--session/--continue with --session-id, --fork with --session/--continue)", () => {
+      const sessions = [
+        { mode: "new", sessionId: "s" },
+        { mode: "resume", sessionId: "s" },
+        { mode: "resume", sessionId: "s", sessionPath: "/p.jsonl" },
+        { mode: "fork", sessionId: "s", forkFrom: "/p.jsonl" },
+        { mode: "continue" },
+      ] as const;
+      for (const session of sessions) {
+        const args = piSessionArgs(session);
+        const has = (flag: string) => args.includes(flag);
+        expect(
+          has("--session-id") && (has("--session") || has("--continue")),
+        ).toBe(false);
+        expect(has("--fork") && (has("--session") || has("--continue"))).toBe(
+          false,
+        );
+      }
+    });
+
+    it("keeps session args when HARBORMASTER_PI_COMMAND overrides the command", () => {
+      const previous = process.env.HARBORMASTER_PI_COMMAND;
+      process.env.HARBORMASTER_PI_COMMAND = "/tmp/fake-pi";
+      try {
+        const spec = new PiHarnessAdapter({
+          stateDir: "/state",
+        }).buildLaunchSpec({
+          taskId: "task-1",
+          workspacePath: "/work/task-1",
+          stateDir: "/state",
+          session: { mode: "resume", sessionId: "s-1" },
+        });
+        expect(spec.command).toBe("/tmp/fake-pi");
+        expect(spec.args).toEqual(["--session-id", "s-1"]);
+      } finally {
+        if (previous === undefined) delete process.env.HARBORMASTER_PI_COMMAND;
+        else process.env.HARBORMASTER_PI_COMMAND = previous;
+      }
     });
 
     it("honors HARBORMASTER_PI_COMMAND as a command override (e2e fake binaries)", () => {

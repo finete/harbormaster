@@ -5,6 +5,7 @@ import { is } from "@electron-toolkit/utils";
 import type {
   CreateTaskInput,
   MoveTaskOptions,
+  ReopenTaskInput,
   TaskState,
 } from "@harbormaster/core";
 import {
@@ -133,6 +134,11 @@ function registerCoreIpc(): void {
   // cwds core must never remove a worktree out from under.
   ipcMain.handle("core:toDone", (_event, taskId: string) =>
     core.commands.toDone(taskId, { protectedPaths: activeSessionCwds() }),
+  );
+  ipcMain.handle(
+    "core:reopenTask",
+    (_event, taskId: string, input: ReopenTaskInput | undefined) =>
+      core.commands.reopenTask(taskId, input),
   );
   // Funnels through the same warning-push path the 30s automation timer
   // uses (see performRefresh below) so a manually-triggered refresh (tests,
@@ -301,16 +307,24 @@ function registerPtyIpc(): void {
       let spec = baseSpecInput
         ? harness.buildLaunchSpec(baseSpecInput)
         : undefined;
-      // The task's initial prompt kicks off its first pi session only:
-      // core hands it out exactly once (claimInitialPrompt), and only once
-      // pi is actually launchable — a shell fallback must not burn it.
+      // Only once pi is actually launchable (a shell fallback must not burn
+      // either claim): core decides which conversation the pane opens —
+      // the task's bound session on every reopen, a pre-assigned new one on
+      // first launch, or the previous cycle's fork after a Done reopen
+      // (claimSessionLaunch) — and hands the task's initial prompt out
+      // exactly once (claimInitialPrompt).
       if (spec && baseSpecInput && commandExists(spec.command)) {
+        const session = await core.commands
+          .claimSessionLaunch(baseSpecInput.taskId)
+          .catch(() => undefined);
         const initialPrompt = await core.commands
           .claimInitialPrompt(baseSpecInput.taskId)
           .catch(() => undefined);
-        if (initialPrompt) {
-          spec = harness.buildLaunchSpec({ ...baseSpecInput, initialPrompt });
-        }
+        spec = harness.buildLaunchSpec({
+          ...baseSpecInput,
+          ...(session ? { session } : {}),
+          ...(initialPrompt ? { initialPrompt } : {}),
+        });
       }
 
       const { id, fellBackToShell } = createSession(

@@ -23,6 +23,10 @@ export function canDone(task: Pick<Task, "state">): boolean {
   return task.state !== "done";
 }
 
+export function canReopen(task: Pick<Task, "state">): boolean {
+  return task.state === "done";
+}
+
 /** Start: create the branch + worktree and move a backlog task to Dev. */
 export async function startTaskMutation(taskId: string): Promise<void> {
   try {
@@ -45,6 +49,26 @@ export async function toReviewMutation(taskId: string): Promise<void> {
 export async function toDoneMutation(taskId: string): Promise<void> {
   try {
     const result = await window.harbormaster.core.toDone(taskId);
+    if (result.warning) pushToast(result.warning, "warning");
+  } catch (error) {
+    pushToast(describeThrown(error), "error");
+  }
+}
+
+/**
+ * Reopen a Done task as a new Dev cycle (see `CoreCommands.reopenTask`):
+ * failures and the "previous conversation not found" warning both surface
+ * as toasts; the board updates from the next `board-changed` push.
+ */
+export async function reopenTaskMutation(
+  taskId: string,
+  objective: string,
+): Promise<void> {
+  try {
+    const result = await window.harbormaster.core.reopenTask(
+      taskId,
+      objective ? { objective } : {},
+    );
     if (result.warning) pushToast(result.warning, "warning");
   } catch (error) {
     pushToast(describeThrown(error), "error");

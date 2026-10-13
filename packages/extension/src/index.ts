@@ -16,6 +16,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+  createCore,
   JsonTaskStateAccess,
   resolveStatePaths,
   SessionPresenceAccess,
@@ -75,6 +76,16 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     if (!sessionPath) return;
     const mode = ctx.hasUI ? ("interactive" as const) : ("headless" as const);
     await reporter.start({ taskId, sessionPath, mode }).catch(() => {});
+    // Session-binding capture point: only this Pi process knows the exact
+    // session file it opened, so it reports it through core's command API
+    // (never by writing the binding itself). Core records it only for the
+    // task's bound session id, so resuming later uses `pi --session <file>`.
+    await createCore({ stateDir })
+      .commands.recordTaskSession(taskId, {
+        sessionId: ctx.sessionManager.getSessionId(),
+        sessionPath,
+      })
+      .catch(() => false);
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
       void reporter.heartbeat().catch(() => {});
