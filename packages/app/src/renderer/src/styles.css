@@ -24,3 +24,22 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* xterm chrome: match the app's dark theme instead of the default white
+   scrollbar, and keep the canvas flush with the padded host. */
+.terminal-host .xterm-viewport {
+  background-color: transparent !important;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: hsl(210 14% 24%);
+  border-radius: 4px;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: hsl(210 12% 32%);
+}
