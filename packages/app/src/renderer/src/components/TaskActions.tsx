@@ -2,8 +2,15 @@ import { Loader2, Play } from "lucide-react";
 import type { JSX, MouseEvent, PointerEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
-import { describeThrown, pushToast } from "../toast";
+import {
+  canDone,
+  canReview,
+  startTaskMutation,
+  toDoneMutation,
+  toReviewMutation,
+} from "../lib/task-mutations";
 import { Button } from "./ui/button";
+import { Kbd } from "./ui/kbd";
 
 /**
  * Compact "Start" (backlog only) / "To review" / "Done" actions, shared by `TaskCard` (board) and
@@ -24,10 +31,8 @@ export function TaskActions({
 }): JSX.Element {
   const [busy, setBusy] = useState<"start" | "review" | "done" | null>(null);
 
-  const canReview =
-    Boolean(task.repositoryId && task.branch) &&
-    (task.state === "dev" || task.state === "awaiting");
-  const canDone = task.state !== "done";
+  const reviewAllowed = canReview(task);
+  const doneAllowed = canDone(task);
 
   function stopClick(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();
@@ -40,9 +45,7 @@ export function TaskActions({
     if (busy) return;
     setBusy("start");
     try {
-      await window.harbormaster.core.startTask(task.id);
-    } catch (error) {
-      pushToast(describeThrown(error), "error");
+      await startTaskMutation(task.id);
     } finally {
       setBusy(null);
     }
@@ -55,9 +58,7 @@ export function TaskActions({
     if (busy) return;
     setBusy("review");
     try {
-      await window.harbormaster.core.toReview(task.id);
-    } catch (error) {
-      pushToast(describeThrown(error), "error");
+      await toReviewMutation(task.id);
     } finally {
       setBusy(null);
     }
@@ -70,10 +71,7 @@ export function TaskActions({
     if (busy) return;
     setBusy("done");
     try {
-      const result = await window.harbormaster.core.toDone(task.id);
-      if (result.warning) pushToast(result.warning, "warning");
-    } catch (error) {
-      pushToast(describeThrown(error), "error");
+      await toDoneMutation(task.id);
     } finally {
       setBusy(null);
     }
@@ -91,7 +89,7 @@ export function TaskActions({
           disabled={busy !== null}
           onClick={handleStart}
           data-testid={`start-task-button-${task.id}`}
-          title="Start: create the branch + worktree and move to Dev"
+          title="Start: create the branch + worktree and move to Dev (s)"
         >
           {busy === "start" ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -99,27 +97,32 @@ export function TaskActions({
             <Play className="h-3 w-3" />
           )}
           Start
+          <Kbd>s</Kbd>
         </Button>
       )}
       <Button
         size="sm"
         variant="outline"
-        disabled={!canReview || busy !== null}
+        disabled={!reviewAllowed || busy !== null}
         onClick={handleToReview}
         data-testid={`to-review-button-${task.id}`}
+        title="Move to Awaiting review (r)"
       >
         {busy === "review" && <Loader2 className="h-3 w-3 animate-spin" />}
         To review
+        <Kbd>r</Kbd>
       </Button>
       <Button
         size="sm"
         variant="outline"
-        disabled={!canDone || busy !== null}
+        disabled={!doneAllowed || busy !== null}
         onClick={handleToDone}
         data-testid={`to-done-button-${task.id}`}
+        title="Move to Done (x)"
       >
         {busy === "done" && <Loader2 className="h-3 w-3 animate-spin" />}
         Done
+        <Kbd>x</Kbd>
       </Button>
     </div>
   );

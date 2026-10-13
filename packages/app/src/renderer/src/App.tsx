@@ -9,8 +9,10 @@ import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { Button } from "./components/ui/button";
 import { Dialog, DialogFooter } from "./components/ui/dialog";
+import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { flattenBoard, useBoard, useManualRefresh } from "./core-client";
+import { isTypingTarget } from "./lib/keyboard-guard";
 import { cn } from "./lib/utils";
 import { describeThrown, pushToast } from "./toast";
 
@@ -47,6 +49,13 @@ export function App(): JSX.Element {
   // Close-workspace confirm: set only while the focused task's agent is
   // mid-turn and the user asked to close its workspace anyway.
   const [pendingClose, setPendingClose] = useState<string | null>(null);
+
+  // Cmd/Ctrl+N "open New Task dialog from either view" (board or workspace):
+  // each view owns its own New Task dialog instance (Board.tsx / Sidebar.tsx),
+  // so this just bumps whichever one is currently visible's open-signal —
+  // never both, so only one `new-task-dialog` ever mounts at a time.
+  const [boardNewTaskSignal, setBoardNewTaskSignal] = useState(0);
+  const [sidebarNewTaskSignal, setSidebarNewTaskSignal] = useState(0);
 
   // Closing unmounts the TaskWorkspace, which disposes every pane's pty
   // (TerminalPane unmount cleanup); the pi session ends, cmux-style. The
@@ -153,14 +162,26 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "b") {
         event.preventDefault();
         setView((current) => (current === "board" ? "workspace" : "board"));
+        return;
+      }
+      if (key === "n") {
+        // No dialog already open, and not mid-typing in some unrelated field
+        // (see lib/keyboard-guard.ts) — matches the board's single-key guard.
+        if (takeover || pendingClose) return;
+        if (isTypingTarget(event.target)) return;
+        event.preventDefault();
+        if (view === "board") setBoardNewTaskSignal((count) => count + 1);
+        else setSidebarNewTaskSignal((count) => count + 1);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [view, takeover, pendingClose]);
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
@@ -223,6 +244,7 @@ export function App(): JSX.Element {
                 )}
               />
               Refresh
+              <Kbd>g</Kbd>
             </Button>
             <span className="text-sm font-medium text-muted-foreground">
               Board
@@ -230,7 +252,13 @@ export function App(): JSX.Element {
             <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
           </header>
           <div className="min-h-0 flex-1">
-            <Board onSelectTask={selectTask} onCreateTask={createTask} />
+            <Board
+              onSelectTask={selectTask}
+              onCreateTask={createTask}
+              active={view === "board"}
+              openNewTaskSignal={boardNewTaskSignal}
+              onBackToWorkspace={() => setView("workspace")}
+            />
           </div>
         </div>
       }
@@ -246,6 +274,7 @@ export function App(): JSX.Element {
             onCloseTask={requestCloseTask}
             onShowBoard={() => setView("board")}
             onCreateTask={createTask}
+            openNewTaskSignal={sidebarNewTaskSignal}
           />
           <WorkspaceView
             focusedTaskId={focusedTaskId}

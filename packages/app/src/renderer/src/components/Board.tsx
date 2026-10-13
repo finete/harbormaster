@@ -6,14 +6,35 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { JSX } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AwaitingKind, TaskState } from "../../../preload/api";
-import { flattenBoard, useBoard, usePresenceMap } from "../core-client";
+import {
+  flattenBoard,
+  useBoard,
+  useManualRefresh,
+  usePresenceMap,
+} from "../core-client";
+import {
+  buildSelectionGrid,
+  moveSelection,
+  resolveSelection,
+} from "../lib/board-selection";
+import { isTypingTarget } from "../lib/keyboard-guard";
+import { modKeyLabel } from "../lib/platform";
+import {
+  canReview,
+  canStart,
+  startTaskMutation,
+  toDoneMutation,
+  toReviewMutation,
+} from "../lib/task-mutations";
 import { describeThrown, pushToast } from "../toast";
 import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
+import { BoardKeyLegend } from "./BoardKeyLegend";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { Button } from "./ui/button";
+import { Kbd } from "./ui/kbd";
 
 /**
  * Kanban board — renders @harbormaster/core's live board projection exactly
@@ -24,20 +45,38 @@ import { Button } from "./ui/button";
  * "board-changed" push to re-render, so there is nothing to roll back if a
  * move is rejected (e.g. an illegal transition) \u2014 the UI simply doesn't
  * change.
+ *
+ * Also owns the pi-home-style TUI keymap (see lib/board-selection.ts):
+ * arrow keys / hjkl move a keyboard-selected card, Enter opens it, n/g/a/x/r/s
+ * mirror the on-card buttons, Escape returns to the workspace view. Only
+ * live while `active` (the board is the visible view, per App.tsx) and
+ * never while a dialog is open or focus is in a text field/the terminal
+ * (lib/keyboard-guard.ts).
  */
 export function Board({
   onSelectTask,
   onCreateTask,
+  active = true,
+  openNewTaskSignal,
+  onBackToWorkspace,
 }: {
   onSelectTask: (taskId: string) => void;
   onCreateTask: (input: NewTaskDialogResult) => void;
+  /** Whether the board is the currently-visible view; gates the single-key TUI shortcuts. */
+  active?: boolean;
+  /** Bumped by App.tsx's Cmd/Ctrl+N handler while the board is the active view; opens this board's New Task dialog. */
+  openNewTaskSignal?: number;
+  /** Escape: back to the workspace view (App.tsx owns the view switch). */
+  onBackToWorkspace?: () => void;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
+  const manualRefresh = useManualRefresh();
   const [pendingDrop, setPendingDrop] = useState<{
     taskId: string;
   } | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Done-column-only toggle (see BoardColumn.tsx); archived tasks are hidden
   // by default, sidebar excludes them always regardless of this.
   const [showArchived, setShowArchived] = useState(false);
@@ -123,8 +162,130 @@ export function Board({
       });
   }
 
+  // Keyboard selection follows the live board: starts at the first card,
+  // stays on the same task across re-renders (e.g. after x/r/s moves it to
+  // another column), and resets to the first card if that task disappears
+  // (archived-hidden, moved to a filtered-out state, etc) — see
+  // lib/board-selection.ts's resolveSelection.
+  useEffect(() => {
+    const grid = buildSelectionGrid(columns, showArchived);
+    setSelectedTaskId((previous) => resolveSelection(grid, previous));
+  }, [columns, showArchived]);
+
+  // Cmd/Ctrl+N from App.tsx while this board is the active view.
+  const openNewTaskSignalRef = useRef(openNewTaskSignal);
+  useEffect(() => {
+    if (
+      openNewTaskSignal !== undefined &&
+      openNewTaskSignal !== openNewTaskSignalRef.current
+    ) {
+      openNewTaskSignalRef.current = openNewTaskSignal;
+      setNewTaskOpen(true);
+    }
+  }, [openNewTaskSignal]);
+
+  const selectedTask = flattenBoard(columns).find(
+    (row) => row.task.id === selectedTaskId,
+  )?.task;
+
+  // The TUI-style single-key board keymap (pi-home parity, see
+  // lib/board-selection.ts and AGENTS.md's "port the spirit" brief): only
+  // live while this board is the visible view, no dialog is open, and focus
+  // isn't in a text field or the terminal (lib/keyboard-guard.ts) — the
+  // xterm terminal must receive every keystroke verbatim when focused.
+  useEffect(() => {
+    if (!active) return;
+    function onKeyDown(event: KeyboardEvent): void {
+      if (newTaskOpen || pendingDrop) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+
+      const grid = buildSelectionGrid(columns, showArchived);
+      switch (event.key) {
+        case "ArrowLeft":
+        case "h":
+          event.preventDefault();
+          setSelectedTaskId((current) => moveSelection(grid, current, "left"));
+          return;
+        case "ArrowRight":
+        case "l":
+          event.preventDefault();
+          setSelectedTaskId((current) => moveSelection(grid, current, "right"));
+          return;
+        case "ArrowUp":
+        case "k":
+          event.preventDefault();
+          setSelectedTaskId((current) => moveSelection(grid, current, "up"));
+          return;
+        case "ArrowDown":
+        case "j":
+          event.preventDefault();
+          setSelectedTaskId((current) => moveSelection(grid, current, "down"));
+          return;
+        case "Enter":
+          if (selectedTaskId) {
+            event.preventDefault();
+            onSelectTask(selectedTaskId);
+          }
+          return;
+        case "n":
+          event.preventDefault();
+          setNewTaskOpen(true);
+          return;
+        case "g":
+          event.preventDefault();
+          manualRefresh.refresh();
+          return;
+        case "a":
+          event.preventDefault();
+          setShowArchived((prev) => !prev);
+          return;
+        case "x":
+          if (selectedTask) {
+            event.preventDefault();
+            void toDoneMutation(selectedTask.id);
+          }
+          return;
+        case "r":
+          if (selectedTask && canReview(selectedTask)) {
+            event.preventDefault();
+            void toReviewMutation(selectedTask.id);
+          }
+          return;
+        case "s":
+          if (selectedTask && canStart(selectedTask)) {
+            event.preventDefault();
+            void startTaskMutation(selectedTask.id);
+          }
+          return;
+        case "Escape":
+          if (onBackToWorkspace) {
+            event.preventDefault();
+            onBackToWorkspace();
+          }
+          return;
+        default:
+          return;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    active,
+    newTaskOpen,
+    pendingDrop,
+    columns,
+    showArchived,
+    selectedTaskId,
+    selectedTask,
+    onSelectTask,
+    onBackToWorkspace,
+    manualRefresh,
+  ]);
+
   return (
     <div className="flex h-full flex-col">
+      <BoardKeyLegend />
       <div className="flex items-center justify-end border-b border-border px-3 py-2">
         <Button
           size="sm"
@@ -132,6 +293,7 @@ export function Board({
           onClick={() => setNewTaskOpen(true)}
         >
           + New task
+          <Kbd>{`${modKeyLabel()}N`}</Kbd>
         </Button>
       </div>
       <DndContext
@@ -149,6 +311,7 @@ export function Board({
               onSelectTask={handleSelectTask}
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived((prev) => !prev)}
+              selectedTaskId={selectedTaskId}
             />
           ))}
         </div>
