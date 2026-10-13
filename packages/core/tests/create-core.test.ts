@@ -89,9 +89,12 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await expect(core.commands.moveTask(task.id, "done")).rejects.toThrow(
-      /Cannot move/,
-    );
+    // backlog -> awaiting is the illegal edge (backlog may go to dev or done).
+    await expect(
+      core.commands.moveTask(task.id, "awaiting", {
+        awaiting: { kind: "review" },
+      }),
+    ).rejects.toThrow(/Cannot move/);
   });
 
   it("moveTask to awaiting requires an awaiting reason", async () => {

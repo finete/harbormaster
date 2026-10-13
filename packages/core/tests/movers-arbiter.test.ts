@@ -96,14 +96,14 @@ describe("arbitrateMove (generic core, no domain rules)", () => {
   });
 
   it("rejects illegal proposals with a warning instead of moving", async () => {
-    // backlog can only transition to dev; done and review are illegal from there.
-    const illegal = mover({ type: "done" });
+    // backlog can only transition to dev or done; review is illegal from there.
+    const illegal = mover({ type: "review" });
     const decision = await arbitrateMove(input("backlog"), helpers, [
       ["illegal", illegal],
     ]);
     expect(decision.move).toEqual({ type: "stay" });
     expect(decision.warnings).toEqual([
-      expect.stringContaining("Mover illegal proposed an illegal done move"),
+      expect.stringContaining("Mover illegal proposed an illegal review move"),
     ]);
     expect(
       (

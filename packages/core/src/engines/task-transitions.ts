@@ -5,7 +5,7 @@
 import type { TaskState } from "../contracts/model.js";
 
 const ALLOWED_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  backlog: ["dev"],
+  backlog: ["dev", "done"], // done from backlog = discarding a parked idea
   dev: ["backlog", "awaiting", "done"],
   awaiting: ["dev", "done"],
   done: ["dev"],
