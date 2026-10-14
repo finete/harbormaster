@@ -307,4 +307,89 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     expect(await f.core.commands.getTask(task.id)).toBeDefined();
     expect(await f.core.commands.getTaskWorkspace(task.id)).toBeDefined();
   });
+
+  it("listRepositories collapses several checkouts of the same repo into one entry, and createTask always provisions off the primary", async () => {
+    const f = await fixture();
+    // A second checkout of the same remote, alphabetically after "harbor-repo"
+    // (mirroring arnac/arnac2/arnac3) "- without a preferredCheckout override,
+    // the primary stays "harbor-repo".
+    const second = join(f.codeRoot, "harbor-repo2");
+    await git(["clone", join(f.codeRoot, "..", "upstream.git"), second]);
+    await git(
+      ["remote", "set-url", "origin", "git@github.com:acme/harbor-repo.git"],
+      second,
+    );
+
+    const repos = await f.core.commands.listRepositories();
+    expect(repos).toHaveLength(1);
+    const repo = repos[0]!;
+    expect(repo.root).toBe(f.checkout);
+    expect(repo.checkouts).toEqual([
+      { root: f.checkout, isPrimary: true },
+      { root: second, isPrimary: false },
+    ]);
+
+    const task = await f.core.commands.createTask({
+      title: "Primary provisioning",
+      initialPrompt: "x",
+      repositoryId: repo.id,
+      start: true,
+    });
+    const binding = await f.core.commands.getTaskWorkspace(task.id);
+    if (!binding?.worktreePath) throw new Error("expected a worktree binding");
+    // Each clone has its own independent git worktree bookkeeping: the
+    // worktree only shows up in `git worktree list` run from whichever
+    // checkout it was actually created from. Asserting it shows up for
+    // f.checkout but not for `second` proves provisioning used the primary.
+    const fromPrimary = await git(
+      ["worktree", "list", "--porcelain"],
+      f.checkout,
+    );
+    const fromSecond = await git(["worktree", "list", "--porcelain"], second);
+    expect(fromPrimary).toContain(binding.worktreePath);
+    expect(fromSecond).not.toContain(binding.worktreePath);
+  });
+
+  it("honors repositories.<id>.preferredCheckout when provisioning a worktree", async () => {
+    const f = await fixture();
+    const second = join(f.codeRoot, "harbor-repo2");
+    await git(["clone", join(f.codeRoot, "..", "upstream.git"), second]);
+    await git(
+      ["remote", "set-url", "origin", "git@github.com:acme/harbor-repo.git"],
+      second,
+    );
+
+    await writeFile(
+      join(f.stateDir, "config.json"),
+      JSON.stringify({
+        automation: true,
+        movers: [],
+        codeRoot: f.codeRoot,
+        branchPrefix: "",
+        repositories: {
+          "github.com/acme/harbor-repo": { preferredCheckout: second },
+        },
+      }),
+    );
+
+    const repos = await f.core.commands.listRepositories();
+    expect(repos).toHaveLength(1);
+    expect(repos[0]?.root).toBe(second);
+
+    const task = await f.core.commands.createTask({
+      title: "Preferred checkout provisioning",
+      initialPrompt: "x",
+      repositoryId: repos[0]!.id,
+      start: true,
+    });
+    const binding = await f.core.commands.getTaskWorkspace(task.id);
+    if (!binding?.worktreePath) throw new Error("expected a worktree binding");
+    const fromSecond = await git(["worktree", "list", "--porcelain"], second);
+    const fromPrimary = await git(
+      ["worktree", "list", "--porcelain"],
+      f.checkout,
+    );
+    expect(fromSecond).toContain(binding.worktreePath);
+    expect(fromPrimary).not.toContain(binding.worktreePath);
+  });
 });

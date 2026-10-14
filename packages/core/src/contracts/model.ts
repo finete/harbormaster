@@ -74,6 +74,15 @@ export interface RepositoryConfig {
   deployment?: DeploymentPipeline;
   /** Mover order for this repository's tasks; overrides the global `movers` (an empty list disables automatic moves here). */
   movers?: string[];
+  /**
+   * Explicit primary-checkout override for a repository with several
+   * checkouts under `codeRoot` (e.g. `arnac`, `arnac2`, `arnac3`). Validated
+   * leniently at config-load time (must be a non-empty string); whether the
+   * path is actually a known, non-linked-worktree checkout of this
+   * repository is checked by `GitRepositoryAccess.discoverRepositories` at
+   * discovery time, not here.
+   */
+  preferredCheckout?: string;
 }
 
 /** Ordered list of board columns; the source of truth for board layout. */

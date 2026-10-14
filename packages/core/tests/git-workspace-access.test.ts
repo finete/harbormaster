@@ -97,7 +97,87 @@ describe.skipIf(!gitAvailable)("LocalGitRepositoryAccess", () => {
       root: f.checkout,
       defaultBranch: "main",
       remoteUrl: "git@github.com:acme/harbor-repo.git",
+      checkouts: [{ root: f.checkout, isPrimary: true }],
     });
+  });
+
+  it("groups several checkouts of the same remote (arnac/arnac2/arnac3) into one RepositoryInfo, primary chosen alphabetically", async () => {
+    const f = await fixture();
+    const second = join(f.code, "harbor-repo2");
+    await git(["clone", f.bare, second]);
+    await git(
+      ["remote", "set-url", "origin", "git@github.com:acme/harbor-repo.git"],
+      second,
+    );
+    const third = join(f.code, "harbor-repo3");
+    await git(["clone", f.bare, third]);
+    await git(
+      ["remote", "set-url", "origin", "git@github.com:acme/harbor-repo.git"],
+      third,
+    );
+
+    const access = new LocalGitRepositoryAccess();
+    const repos = await access.discoverRepositories(f.code);
+    expect(repos).toHaveLength(1);
+    const repo = repos[0]!;
+    expect(repo.id).toBe("github.com/acme/harbor-repo");
+    // Alphabetically-first checkout wins by default: "harbor-repo" sorts
+    // before "harbor-repo2"/"harbor-repo3".
+    expect(repo.root).toBe(f.checkout);
+    expect(repo.checkouts).toEqual([
+      { root: f.checkout, isPrimary: true },
+      { root: second, isPrimary: false },
+      { root: third, isPrimary: false },
+    ]);
+  });
+
+  it("folds a linked git-worktree checkout into its parent's group, and never selects it as primary", async () => {
+    const f = await fixture();
+    const linked = join(f.code, "harbor-repo-wt");
+    await git(["branch", "side"], f.checkout);
+    await git(["worktree", "add", linked, "side"], f.checkout);
+
+    const access = new LocalGitRepositoryAccess();
+    const repos = await access.discoverRepositories(f.code);
+    expect(repos).toHaveLength(1);
+    const repo = repos[0]!;
+    expect(repo.root).toBe(f.checkout);
+    expect(repo.checkouts).toEqual([
+      { root: f.checkout, isPrimary: true },
+      { root: linked, isPrimary: false },
+    ]);
+  });
+
+  it("honors a valid preferredCheckout override, and falls back to the heuristic when it is invalid/missing", async () => {
+    const f = await fixture();
+    const second = join(f.code, "harbor-repo2");
+    await git(["clone", f.bare, second]);
+    await git(
+      ["remote", "set-url", "origin", "git@github.com:acme/harbor-repo.git"],
+      second,
+    );
+
+    const access = new LocalGitRepositoryAccess();
+    const preferred = await access.discoverRepositories(f.code, {
+      "github.com/acme/harbor-repo": second,
+    });
+    expect(preferred[0]?.root).toBe(second);
+    expect(
+      preferred[0]?.checkouts.find((c) => c.root === second)?.isPrimary,
+    ).toBe(true);
+    expect(
+      preferred[0]?.checkouts.find((c) => c.root === f.checkout)?.isPrimary,
+    ).toBe(false);
+
+    // An invalid override (unknown path) is ignored; heuristic wins instead.
+    const invalid = await access.discoverRepositories(f.code, {
+      "github.com/acme/harbor-repo": "/not/a/real/checkout",
+    });
+    expect(invalid[0]?.root).toBe(f.checkout);
+
+    // No override at all: same heuristic result.
+    const none = await access.discoverRepositories(f.code);
+    expect(none[0]?.root).toBe(f.checkout);
   });
 
   it("returns an empty list for a code root with no checkouts, and skips dotfiles", async () => {

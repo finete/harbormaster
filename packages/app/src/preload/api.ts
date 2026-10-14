@@ -29,6 +29,7 @@ export type {
   MoveTaskOptions,
   PresenceRecord,
   ReopenTaskInput,
+  RepositoryCheckout,
   RepositoryInfo,
   Task,
   TaskState,

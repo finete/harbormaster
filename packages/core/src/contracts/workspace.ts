@@ -8,21 +8,42 @@
 // free-form worktree roots. Managers and Engines only ever see these
 // interfaces; concrete git-shelling-out implementations live in access/.
 
-/** One discoverable Git repository checkout under a code root. */
+/**
+ * One known checkout of a {@link RepositoryInfo}'s identity (there may be
+ * several under a code root, e.g. `arnac`, `arnac2`, `arnac3` all cloning
+ * the same remote).
+ */
+export interface RepositoryCheckout {
+  /** Absolute, realpath-resolved path to this checkout. */
+  root: string;
+  /** Whether this is the repository's primary checkout (`=== RepositoryInfo.root`). */
+  isPrimary: boolean;
+}
+
+/**
+ * One discoverable Git *repository identity* under a code root — several
+ * directory checkouts of the same remote (or, for remoteless repos, the
+ * same git-common-dir) are grouped into a single entry here, ported from
+ * pi-home's `src/access/git-repository-access.ts` grouping. `root` always
+ * points at the primary checkout (see {@link RepositoryCheckout}); task
+ * worktrees are only ever provisioned from it.
+ */
 export interface RepositoryInfo {
   /**
    * Normalized remote identity, e.g. `"github.com/org/repo"` (ssh and https
    * remote URLs both normalize to this form, case-folded, `.git` stripped).
-   * Falls back to the realpath of `root` when the checkout has no `origin`
-   * remote.
+   * Falls back to the realpath of the checkout's git-common-dir when no
+   * checkout in the group has an `origin` remote.
    */
   id: string;
-  /** Absolute, realpath-resolved path to the repository's checkout. */
+  /** Absolute, realpath-resolved path to the repository's primary checkout. */
   root: string;
-  /** Best-effort default branch (origin/HEAD, else main/master, else current branch). */
+  /** Best-effort default branch (origin/HEAD, else main/master, else current branch), read from the primary checkout. */
   defaultBranch: string;
-  /** Raw `origin` remote URL, if the repository has one configured. */
+  /** Raw `origin` remote URL, if any checkout in the group has one configured. */
   remoteUrl?: string;
+  /** Every known checkout of this repository identity, including the primary, sorted by path. */
+  checkouts: RepositoryCheckout[];
 }
 
 /** One Git worktree attached to a repository. */
@@ -43,9 +64,18 @@ export interface WorktreeInfo {
 export interface GitRepositoryAccess {
   /**
    * Find every Git checkout directly under `codeRoot` (one level deep,
-   * dotfiles skipped), describing each as a {@link RepositoryInfo}.
+   * dotfiles skipped), group them by repository identity (normalized remote,
+   * falling back to git-common-dir for remoteless repos), and return one
+   * {@link RepositoryInfo} per identity. `preferredCheckouts` (keyed by
+   * repository id, from `GlobalConfig.repositories[id].preferredCheckout`)
+   * honors an explicit primary-checkout choice when the path is valid (a
+   * known, non-linked-worktree checkout of that identity); otherwise the
+   * primary is the alphabetically-first non-linked-worktree checkout.
    */
-  discoverRepositories(codeRoot: string): Promise<RepositoryInfo[]>;
+  discoverRepositories(
+    codeRoot: string,
+    preferredCheckouts?: Record<string, string>,
+  ): Promise<RepositoryInfo[]>;
   /** Resolve the repository whose checkout contains `cwd`. */
   resolveRepository(cwd: string): Promise<RepositoryInfo>;
 }
