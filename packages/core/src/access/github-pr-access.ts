@@ -79,6 +79,7 @@ export class GithubPrAccess implements PullRequestAccess {
       `repos/${this.apiPath(repositoryId)}/compare/${ancestorOid}...${descendantOid}`,
       "--jq",
       ".status",
+      ...this.hostnameArgs(repositoryId),
     ]);
     const status = output.trim();
     if (!["ahead", "behind", "identical", "diverged"].includes(status)) {
@@ -108,6 +109,7 @@ export class GithubPrAccess implements PullRequestAccess {
       `repos/${this.apiPath(repositoryId)}/commits?sha=${startOid}&per_page=${capped}`,
       "--jq",
       '[.[] | {oid: .sha, subject: (.commit.message | split("\n")[0])}]',
+      ...this.hostnameArgs(repositoryId),
     ]);
     const parsed: unknown = JSON.parse(output);
     if (
@@ -155,7 +157,7 @@ export class GithubPrAccess implements PullRequestAccess {
         "pr",
         "create",
         "--repo",
-        this.apiPath(repositoryId),
+        this.ghRepo(repositoryId),
         "--base",
         baseBranch,
         "--head",
@@ -202,7 +204,7 @@ export class GithubPrAccess implements PullRequestAccess {
       "ready",
       String(pullRequest.number),
       "--repo",
-      this.apiPath(repositoryId),
+      this.ghRepo(repositoryId),
     ]);
     const refreshed = await this.find(repositoryId, branch, "open");
     return {
@@ -227,7 +229,7 @@ export class GithubPrAccess implements PullRequestAccess {
       "--limit",
       "1",
       "--repo",
-      this.apiPath(repositoryId),
+      this.ghRepo(repositoryId),
       "--json",
       "number,url,state,isDraft,author,reviewDecision,reviewRequests,reviews,headRefOid,mergeCommit,baseRefName",
     ]);
@@ -253,7 +255,9 @@ export class GithubPrAccess implements PullRequestAccess {
         ? {
             mergeCommit: {
               oid: pr.mergeCommit.oid,
-              targetBranch: pr.baseRefName ?? "",
+              // Absent base: the manager falls back to the repository's
+              // default branch (it owns the repository lookup).
+              ...(pr.baseRefName ? { targetBranch: pr.baseRefName } : {}),
               url: this.commitUrl(repositoryId, pr.url, pr.mergeCommit.oid),
             },
           }
@@ -277,13 +281,33 @@ export class GithubPrAccess implements PullRequestAccess {
 
   /** `owner/repo`, derived from a normalized `host/owner/repo` repository id. */
   private apiPath(repositoryId: string): string {
+    return this.repoParts(repositoryId).path;
+  }
+
+  /**
+   * gh's `[HOST/]OWNER/REPO` form with the host kept, so GitHub Enterprise
+   * repositories are never silently resolved against github.com.
+   */
+  private ghRepo(repositoryId: string): string {
+    const { host, path } = this.repoParts(repositoryId);
+    return host ? `${host}/${path}` : path;
+  }
+
+  /** `gh api` takes the host as a flag; github.com is gh's own default. */
+  private hostnameArgs(repositoryId: string): string[] {
+    const { host } = this.repoParts(repositoryId);
+    return !host || host === "github.com" ? [] : ["--hostname", host];
+  }
+
+  private repoParts(repositoryId: string): { host: string; path: string } {
     const parts = repositoryId.split("/");
+    // A local-path remote (fixtures) yields an empty host: no host flag.
     if (parts.length < 3 || !parts[1] || !parts[2]) {
       throw new Error(
         `Cannot derive owner/repo from repository id: ${repositoryId}`,
       );
     }
-    return parts.slice(1).join("/");
+    return { host: parts[0] ?? "", path: parts.slice(1).join("/") };
   }
 }
 

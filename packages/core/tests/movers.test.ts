@@ -1,9 +1,8 @@
 // Ported and adapted from pi-home's tests/unit/default-addons.test.ts for
 // Harbormaster's simpler AwaitingKind (no separately tracked production
 // commit/pull-request snapshot — `task.pr.mergeCommit` is the single source
-// of truth once merged) and the dropped stage-less "manual production wait"
-// (no pipeline configured => this mover stays out of the way, see
-// deployment-pipeline-mover.ts's doc comment).
+// of truth once merged). The stage-less "manual production wait" is the
+// reserved PRODUCTION_STAGE (see deployment-pipeline-mover.ts).
 
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -17,6 +16,7 @@ import type {
   DeploymentPipeline,
   TaskPullRequest,
 } from "../src/contracts/model.js";
+import { PRODUCTION_STAGE } from "../src/engines/deployment.js";
 import { deploymentPipelineMover } from "../src/engines/movers/deployment-pipeline-mover.js";
 import { githubReviewMover } from "../src/engines/movers/github-review-mover.js";
 
@@ -178,11 +178,48 @@ describe("deployment-pipeline default mover", () => {
     expect(helpers.runHook).not.toHaveBeenCalled();
   });
 
-  it("stays out of the way entirely for a merge with no pipeline configured", async () => {
+  it("parks a merge with no pipeline configured in the stage-less Production deploy wait", async () => {
     const helpers = fakeHelpers();
     await expect(
       deploymentPipelineMover.decide(
         input(task("dev", undefined, pr({ state: "merged" }))),
+        helpers,
+      ),
+    ).resolves.toEqual({
+      type: "deploy",
+      stageId: PRODUCTION_STAGE.id,
+      stageLabel: "Production deploy",
+    });
+  });
+
+  it("adopts the first configured stage for a stage-less wait once a pipeline exists", async () => {
+    const wait = {
+      kind: "deploy" as const,
+      stageId: PRODUCTION_STAGE.id,
+      stageLabel: PRODUCTION_STAGE.label,
+    };
+    await expect(
+      deploymentPipelineMover.decide(
+        input(task("awaiting", wait, pr({ state: "merged" })), pipeline),
+        fakeHelpers(),
+      ),
+    ).resolves.toEqual({
+      type: "deploy",
+      stageId: "pre",
+      stageLabel: "Preprod deploy",
+    });
+  });
+
+  it("never advances the stage-less Production deploy wait on its own (manual Done only)", async () => {
+    const helpers = fakeHelpers(() => ({ satisfied: true }));
+    const wait = {
+      kind: "deploy" as const,
+      stageId: PRODUCTION_STAGE.id,
+      stageLabel: PRODUCTION_STAGE.label,
+    };
+    await expect(
+      deploymentPipelineMover.decide(
+        input(task("awaiting", wait, pr({ state: "merged" }))),
         helpers,
       ),
     ).resolves.toEqual({ type: "stay" });

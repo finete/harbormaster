@@ -27,7 +27,8 @@ export interface PullRequestStatus {
   reviewRequested: boolean;
   reviewSubmitted: boolean;
   headRefOid?: string;
-  mergeCommit?: { oid: string; targetBranch: string; url: string };
+  /** `targetBranch` is absent when GitHub did not report the PR's base branch. */
+  mergeCommit?: { oid: string; targetBranch?: string; url: string };
   checkedAt: string;
 }
 

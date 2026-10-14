@@ -9,15 +9,17 @@ import type {
   MoverInput,
   MoverTaskView,
 } from "../contracts/addons.js";
-import { DEFAULT_MOVER_ORDER } from "../contracts/addons.js";
 import type {
   CoreCommands,
   CreateTaskInput,
   DeleteTaskOptions,
   MoveTaskOptions,
   RecordTaskSessionInput,
+  RefreshOptions,
   ReopenTaskInput,
+  ToDoneConfirmation,
   ToDoneOptions,
+  ToDoneResult,
   UpdateTaskInput,
 } from "../contracts/commands.js";
 import type {
@@ -51,12 +53,20 @@ import type {
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
 import {
+  activeMoverOrder,
   arbitrateMove,
+  automationConfigProblems,
+  builtinAutomationNames,
   builtinHooks,
   builtinMovers,
+  effectivePipeline,
 } from "../engines/movers/index.js";
-import { assertAllowedTransition } from "../engines/task-transitions.js";
+import {
+  assertAllowedTransition,
+  assertMayReturnToDev,
+} from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
+import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 
 export interface CoreManagerDependencies {
@@ -81,7 +91,17 @@ const COLUMN_TITLES: Record<TaskState, string> = {
   done: "Done",
 };
 
+/** PR observations in flight at once during `refresh()` (pi-home parity). */
+const REFRESH_CONCURRENCY = 4;
+
 export class CoreManager implements CoreCommands {
+  /** The running `refresh()`, joined by any call made while it runs. */
+  private refreshInFlight: Promise<{ warnings: string[] }> | undefined;
+  /** Serialized config whose problems were last reported (once per distinct config). */
+  private lastValidatedConfig: string | undefined;
+  /** Last reported done-cleanup retry failure per task (dedupe). */
+  private readonly cleanupWarnings = new Map<string, string>();
+
   constructor(private readonly deps: CoreManagerDependencies) {}
 
   async listBoard(): Promise<BoardColumn[]> {
@@ -486,28 +506,39 @@ export class CoreManager implements CoreCommands {
     state: TaskState,
     options?: MoveTaskOptions,
   ): Promise<Task> {
-    const task = await this.requireTask(id);
-    assertAllowedTransition(task.state, state);
     if (state === "awaiting" && !options?.awaiting) {
       throw new Error(
         'Moving a task to "awaiting" requires an awaiting reason',
       );
     }
     const now = this.deps.clock.now().toISOString();
-    const stateChanged = task.state !== state;
-    const next: Task = {
-      ...task,
-      state,
-      updatedAt: now,
-      stateChangedAt: stateChanged ? now : task.stateChangedAt,
-      ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
-    };
-    if (state === "awaiting" && options?.awaiting) {
-      next.awaiting = options.awaiting;
-    } else {
-      delete next.awaiting;
-    }
-    await this.deps.tasks.replaceTask(next);
+    // Validated and written against the task as persisted under the lock,
+    // so a concurrent refresh's PR patch is never overwritten.
+    const next = await this.deps.tasks.patchTask(id, (task) => {
+      assertAllowedTransition(task.state, state);
+      assertMayReturnToDev(task.state, task.awaiting, state);
+      const stateChanged = task.state !== state;
+      const moved: Task = {
+        ...task,
+        state,
+        updatedAt: now,
+        stateChangedAt: stateChanged ? now : task.stateChangedAt,
+        ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
+      };
+      if (state === "awaiting" && options?.awaiting) {
+        moved.awaiting = options.awaiting;
+      } else {
+        delete moved.awaiting;
+      }
+      // Leaving done reopens the task in place (same as `reopenTask`'s
+      // bookkeeping): it is no longer completed, nor archived.
+      if (task.state === "done" && state !== "done") {
+        delete moved.completedAt;
+        delete moved.archivedAt;
+      }
+      return moved;
+    });
+    if (!next) throw new Error(`Task not found: ${id}`);
     await this.publishTaskChange(next);
     return next;
   }
@@ -555,103 +586,222 @@ export class CoreManager implements CoreCommands {
       );
     }
     const repo = await this.findRepository(task.repositoryId);
+    if (!repo.remoteUrl) {
+      throw new Error(
+        `Cannot open a pull request: ${repo.root} has no origin remote`,
+      );
+    }
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (!binding?.worktreePath) {
       throw new Error(`No worktree bound for task: ${taskId}`);
     }
     await this.deps.worktrees.pushBranch(binding.worktreePath, task.branch);
+    const targetBranch = task.targetBranch ?? repo.defaultBranch;
     const status = await this.deps.pullRequests.ensureOpen(
       task.repositoryId,
       task.branch,
       binding.worktreePath,
       task.title,
       task.initialPrompt,
-      task.targetBranch ?? repo.defaultBranch,
+      targetBranch,
     );
     const now = this.deps.clock.now().toISOString();
-    const stateChanged = task.state !== "awaiting";
-    const next: Task = {
-      ...task,
-      pr: toTaskPullRequest(status),
-      state: "awaiting",
-      awaiting: { kind: "review" },
-      updatedAt: now,
-      stateChangedAt: stateChanged ? now : task.stateChangedAt,
-    };
-    await this.deps.tasks.replaceTask(next);
+    // Push + PR creation take a while: apply the move to the task as
+    // persisted now, not the snapshot read before the slow calls.
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
+      assertAllowedTransition(fresh.state, "awaiting");
+      return {
+        ...fresh,
+        pr: toTaskPullRequest(status, targetBranch),
+        state: "awaiting",
+        awaiting: { kind: "review" },
+        updatedAt: now,
+        stateChangedAt: fresh.state !== "awaiting" ? now : fresh.stateChangedAt,
+      };
+    });
+    if (!next) throw new Error(`Task not found: ${taskId}`);
     await this.publishTaskChange(next);
     return next;
   }
 
-  async toDone(
-    taskId: string,
-    options?: ToDoneOptions,
-  ): Promise<{ task: Task; warning?: string }> {
+  async toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "done");
-    return this.executeSafeDone(task, options?.protectedPaths ?? []);
+    const result = await this.executeSafeDone(
+      task,
+      options?.protectedPaths ?? [],
+      { mode: "manual", force: options?.force ?? {} },
+    );
+    if (result.confirm) return result.confirm;
+    if (!result.task) throw new Error(`Task not found: ${taskId}`);
+    return {
+      task: result.task,
+      ...(result.warning ? { warning: result.warning } : {}),
+    };
   }
 
-  async refresh(): Promise<{ warnings: string[] }> {
+  refresh(options?: RefreshOptions): Promise<{ warnings: string[] }> {
+    // Single-flight: the 30s timer and a manual refresh must never run two
+    // observations of the same task side by side (each would decide moves
+    // off its own reading); a call made mid-run joins the running one.
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const run = this.runRefresh(options?.protectedPaths ?? []).finally(() => {
+      this.refreshInFlight = undefined;
+    });
+    this.refreshInFlight = run;
+    return run;
+  }
+
+  private async runRefresh(
+    protectedPaths: readonly string[],
+  ): Promise<{ warnings: string[] }> {
     const config = await this.deps.config.load();
+    const warnings: string[] = [...this.configWarningsOnce(config)];
     const tasks = await this.deps.tasks.listTasks();
-    const warnings: string[] = [];
+    const repositories = await this.repositoryIndex(config);
     let changed = false;
 
-    for (const task of tasks) {
-      if (
-        task.kind !== "task" ||
-        task.state === "backlog" ||
-        task.state === "done" ||
-        !task.repositoryId ||
-        !task.branch
-      ) {
-        continue;
-      }
-      let current = task;
-      try {
-        const status = await this.deps.pullRequests.status(
-          task.repositoryId,
-          task.branch,
-        );
-        if (status) {
-          const pr = toTaskPullRequest(status);
-          if (!prEquals(current.pr, pr)) {
-            const now = this.deps.clock.now().toISOString();
-            current = { ...current, pr, updatedAt: now };
-            await this.deps.tasks.replaceTask(current);
-            changed = true;
-          }
-        }
-      } catch (error) {
-        warnings.push(`${task.title}: ${describeError(error)}`);
-        // Errors never move anything: skip the mover step for this task too.
-        continue;
-      }
+    const candidates = tasks.filter(
+      (task) =>
+        task.kind === "task" &&
+        task.state !== "backlog" &&
+        task.state !== "done" &&
+        Boolean(task.repositoryId) &&
+        Boolean(task.branch),
+    );
+    // Each observation is dominated by gh latency and independent of the
+    // others; writes are lock-serialized field patches, so a few run at
+    // once (pi-home's reconcile uses the same 4-worker pool).
+    await forEachConcurrently(candidates, REFRESH_CONCURRENCY, async (task) => {
+      const moved = await this.refreshTask(
+        task,
+        config,
+        repositories,
+        protectedPaths,
+        warnings,
+      );
+      if (moved) changed = true;
+    });
 
-      if (!config.automation) continue;
-      try {
-        const moved = await this.applyMoverStep(current, config, warnings);
-        if (moved) changed = true;
-      } catch (error) {
-        warnings.push(`${task.title}: ${describeError(error)}`);
-      }
+    if (
+      await this.retryDoneCleanups(
+        tasks,
+        repositories,
+        protectedPaths,
+        warnings,
+      )
+    ) {
+      changed = true;
     }
-
     if (await this.archiveDoneTasks()) changed = true;
     if (changed) await this.publishBoard();
     return { warnings };
+  }
+
+  /** Observe one task's PR and apply at most one mover step; returns whether anything changed. */
+  private async refreshTask(
+    snapshot: Task,
+    config: GlobalConfig,
+    repositories: Map<string, RepositoryInfo> | undefined,
+    protectedPaths: readonly string[],
+    warnings: string[],
+  ): Promise<boolean> {
+    const repositoryId = snapshot.repositoryId;
+    const branch = snapshot.branch;
+    if (!repositoryId || !branch) return false;
+    const repo = repositories?.get(repositoryId);
+    // No origin remote: nothing on GitHub to observe, and nothing to warn
+    // about every tick either (pi-home's silent skip).
+    if (repo && !repo.remoteUrl) return false;
+
+    let changed = false;
+    let current: Task | undefined = snapshot;
+    try {
+      const status = await this.deps.pullRequests.status(repositoryId, branch);
+      if (status) {
+        const pr = toTaskPullRequest(
+          status,
+          snapshot.targetBranch ?? repo?.defaultBranch,
+        );
+        // Re-read under the lock and patch only `pr`: the task may have
+        // been moved, reopened onto a new branch, or completed while gh was
+        // answering — never write the stale snapshot back over that.
+        current = await this.deps.tasks.patchTask(snapshot.id, (fresh) => {
+          if (!sameObservation(fresh, snapshot) || prEquals(fresh.pr, pr)) {
+            return undefined;
+          }
+          changed = true;
+          return {
+            ...fresh,
+            pr,
+            updatedAt: this.deps.clock.now().toISOString(),
+          };
+        });
+      } else {
+        current = await this.deps.tasks.getTask(snapshot.id);
+      }
+    } catch (error) {
+      warnings.push(`${snapshot.title}: ${describeError(error)}`);
+      // Errors never move anything: skip the mover step for this task too.
+      return false;
+    }
+
+    if (!config.automation || !current || !sameObservation(current, snapshot)) {
+      return changed;
+    }
+    try {
+      const moved = await this.applyMoverStep(
+        current,
+        config,
+        protectedPaths,
+        warnings,
+      );
+      if (moved) changed = true;
+    } catch (error) {
+      warnings.push(`${snapshot.title}: ${describeError(error)}`);
+    }
+    return changed;
+  }
+
+  /**
+   * Config problems (unregistered mover/hook names, an empty mover list)
+   * are reported once per distinct config, at the refresh that first loads
+   * it — not on every tick.
+   */
+  private configWarningsOnce(config: GlobalConfig): string[] {
+    const key = JSON.stringify(config);
+    if (key === this.lastValidatedConfig) return [];
+    this.lastValidatedConfig = key;
+    return automationConfigProblems(config, builtinAutomationNames);
+  }
+
+  /** Repositories by id for this refresh; `undefined` when discovery itself failed (then nothing is skipped). */
+  private async repositoryIndex(
+    config: GlobalConfig,
+  ): Promise<Map<string, RepositoryInfo> | undefined> {
+    try {
+      const repos = await this.deps.repositories.discoverRepositories(
+        config.codeRoot ?? "",
+      );
+      return new Map(repos.map((repo) => [repo.id, repo]));
+    } catch {
+      return undefined;
+    }
   }
 
   /** One addon-decided board move per task, at most, per `refresh()` call. */
   private async applyMoverStep(
     task: Task,
     config: GlobalConfig,
+    protectedPaths: readonly string[],
     warnings: string[],
   ): Promise<boolean> {
-    const pipeline = task.repositoryId
-      ? config.repositories?.[task.repositoryId]?.deployment
-      : undefined;
+    const pipeline = effectivePipeline(
+      task.repositoryId
+        ? config.repositories?.[task.repositoryId]?.deployment
+        : undefined,
+      builtinAutomationNames,
+    );
     const view: MoverTaskView = {
       id: task.id,
       kind: task.kind,
@@ -663,18 +813,17 @@ export class CoreManager implements CoreCommands {
     };
     const input: MoverInput = { task: view, ...(pipeline ? { pipeline } : {}) };
     const helpers = this.moverHelpers(task.repositoryId);
-    const order =
-      config.movers.length > 0 ? config.movers : DEFAULT_MOVER_ORDER;
-    const movers = order
+    // Unregistered names were already reported once (configWarningsOnce).
+    const movers = activeMoverOrder(config, task.repositoryId)
       .map((name) => [name, builtinMovers[name]] as const)
       .filter((entry): entry is [string, (typeof builtinMovers)[string]] =>
         Boolean(entry[1]),
       );
+    if (movers.length === 0) return false;
     const decision = await arbitrateMove(input, helpers, movers);
     warnings.push(...decision.warnings);
     if (decision.move.type === "stay") return false;
-    await this.executeMove(task, decision.move, warnings);
-    return true;
+    return this.executeMove(task, decision.move, protectedPaths, warnings);
   }
 
   private moverHelpers(repositoryId: string | undefined): MoverHelpers {
@@ -707,20 +856,24 @@ export class CoreManager implements CoreCommands {
     return helpers;
   }
 
+  /** Execute a mover's winning proposal; returns whether the task actually moved. */
   private async executeMove(
     task: Task,
     move: BoardMove,
+    protectedPaths: readonly string[],
     warnings: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     switch (move.type) {
+      case "stay":
+        return false;
       case "dev":
         await this.moveTask(task.id, "dev");
-        return;
+        return true;
       case "review":
         await this.moveTask(task.id, "awaiting", {
           awaiting: { kind: "review" },
         });
-        return;
+        return true;
       case "deploy":
         await this.moveTask(task.id, "awaiting", {
           awaiting: {
@@ -729,85 +882,244 @@ export class CoreManager implements CoreCommands {
             stageLabel: move.stageLabel,
           },
         });
-        return;
+        return true;
       case "done": {
-        const result = await this.executeSafeDone(task);
-        if (result.warning) {
-          warnings.push(`${task.title}: ${result.warning}`);
+        const result = await this.executeSafeDone(task, protectedPaths, {
+          mode: "auto",
+        });
+        if (result.stayed) {
+          // pi-home: auto-landing never overrides a cleanup refusal; the
+          // task stays where it is until the user marks it Done.
+          warnings.push(
+            `${task.title}: deployed and ready to land — mark it Done (${result.warning})`,
+          );
+          return false;
         }
-        return;
+        if (result.warning) warnings.push(`${task.title}: ${result.warning}`);
+        return true;
       }
     }
   }
 
   /**
-   * The done safe path: remove the worktree if clean, delete the branch if
-   * its PR is merged. Any refusal (dirty worktree, unmerged branch, missing
-   * repository/binding) never blocks the move to `done` \u2014 it surfaces as a
-   * warning in the result instead.
+   * The done path. A live pane's worktree (`protectedPaths`) is never
+   * touched: manual Done lands with a warning, auto-landing stays put.
+   * Manual Done (pi-home's `complete`) otherwise asks before destroying
+   * work — uncommitted changes, then an unmerged branch — by returning
+   * `confirm` without moving the task, and with the matching `force`
+   * answers removes the worktree (forced when dirty) and deletes the branch
+   * (`-D`). Auto-landing (`mode: "auto"`) never asks and never forces: any
+   * refusal keeps the task where it is (`stayed: true`, nothing changed).
+   * Failures that are not questions (missing repository, git errors) never
+   * block a manual Done; they become the `warning`.
    */
   private async executeSafeDone(
     task: Task,
-    protectedPaths: readonly string[] = [],
-  ): Promise<{ task: Task; warning?: string }> {
+    protectedPaths: readonly string[],
+    how:
+      | { mode: "auto" }
+      | {
+          mode: "manual";
+          force: NonNullable<ToDoneOptions["force"]>;
+        },
+  ): Promise<{
+    task?: Task;
+    warning?: string;
+    stayed?: boolean;
+    confirm?: ToDoneConfirmation;
+  }> {
+    const auto = how.mode === "auto";
     let warning: string | undefined;
+    const addWarning = (text: string) => {
+      warning = warning ? `${warning}; ${text}` : text;
+    };
     if (task.repositoryId && task.branch) {
+      let repo: RepositoryInfo | undefined;
       try {
-        const repo = await this.findRepository(task.repositoryId);
-        const binding = await this.deps.bindings.getBindingForTask(task.id);
-        if (
-          binding?.worktreePath &&
-          isProtectedPath(binding.worktreePath, protectedPaths)
-        ) {
+        repo = await this.findRepository(task.repositoryId);
+      } catch (error) {
+        if (auto) return { stayed: true, warning: describeError(error) };
+        addWarning(describeError(error));
+      }
+      const binding = repo
+        ? await this.deps.bindings.getBindingForTask(task.id)
+        : undefined;
+      if (repo && binding?.worktreePath) {
+        const path = binding.worktreePath;
+        if (isProtectedPath(path, protectedPaths)) {
           // A live pane (or other process) still has this worktree as its
-          // cwd: never pull it out from under it. Nothing else is cleaned
-          // up either — the branch is still checked out in that worktree.
-          warning = `worktree left in place: it is open in a live session (${binding.worktreePath})`;
-        } else if (binding?.worktreePath) {
-          try {
-            await this.deps.worktrees.removeWorktree(
-              repo,
-              binding.worktreePath,
-              false,
-            );
-            // Park the binding instead of deleting it (pi-home parity): the
-            // worktree is gone, but the session identity must survive so a
-            // later `reopenTask` can carry the conversation forward.
-            const { worktreePath: _removed, ...parked } = binding;
-            await this.deps.bindings.replaceBinding({
-              ...parked,
-              updatedAt: this.deps.clock.now().toISOString(),
-            });
-          } catch (error) {
-            warning = `worktree left in place: ${describeError(error)}`;
-          }
-          if (shouldDeleteBranch(task.pr)) {
-            try {
-              await this.deps.worktrees.deleteBranch(repo, task.branch, false);
-            } catch (error) {
-              const branchWarning = `branch left in place: ${describeError(error)}`;
-              warning = warning
-                ? `${warning}; ${branchWarning}`
-                : branchWarning;
+          // cwd: never pull it out from under it, and never ask (pi-home's
+          // protectedCwd). The branch is still checked out there too; the
+          // refresh retry sweep cleans up once the pane is gone.
+          const text = `worktree left in place: it is open in a live session (${path})`;
+          if (auto) return { stayed: true, warning: text };
+          addWarning(text);
+        } else {
+          const merged = shouldDeleteBranch(task.pr);
+          let forceRemove = false;
+          let deleteBranch = merged;
+          if (how.mode === "manual") {
+            const dirty = await this.deps.worktrees
+              .isWorktreeDirty(path)
+              .catch(() => false);
+            if (dirty && !how.force.removeDirty) {
+              return {
+                confirm: {
+                  requiresConfirmation: "dirty",
+                  detail: `${task.title}: the worktree has uncommitted changes (${path})`,
+                },
+              };
             }
+            if (!merged && task.kind === "task" && !how.force.deleteUnmerged) {
+              return {
+                confirm: {
+                  requiresConfirmation: "unmerged",
+                  detail: `${task.title}: branch ${task.branch} isn't merged; the worktree and local branch will be deleted`,
+                },
+              };
+            }
+            forceRemove = dirty;
+            deleteBranch = merged || Boolean(how.force.deleteUnmerged);
+          }
+          let removed = false;
+          try {
+            await this.deps.worktrees.removeWorktree(repo, path, forceRemove);
+            removed = true;
+            await this.parkBinding(binding);
+          } catch (error) {
+            const text = `worktree left in place: ${describeError(error)}`;
+            if (auto && !removed) return { stayed: true, warning: text };
+            addWarning(text);
+          }
+          if (deleteBranch) {
+            const branchWarning = await this.deleteTaskBranch(
+              repo,
+              task.branch,
+            );
+            if (branchWarning) addWarning(branchWarning);
           }
         }
-      } catch (error) {
-        warning = describeError(error);
       }
     }
     const now = this.deps.clock.now().toISOString();
-    const next: Task = {
-      ...task,
-      state: "done",
-      updatedAt: now,
-      stateChangedAt: now,
-      completedAt: task.completedAt ?? now,
-    };
-    delete next.awaiting;
-    await this.deps.tasks.replaceTask(next);
-    await this.publishTaskChange(next);
-    return { task: next, ...(warning ? { warning } : {}) };
+    // Patch the move onto the task as persisted now: the worktree removal
+    // above can take a while, and a concurrent refresh may have updated
+    // the PR snapshot meanwhile.
+    const next = await this.deps.tasks.patchTask(task.id, (fresh) => {
+      assertAllowedTransition(fresh.state, "done");
+      const landed: Task = {
+        ...fresh,
+        state: "done",
+        updatedAt: now,
+        stateChangedAt: now,
+        completedAt: fresh.completedAt ?? now,
+      };
+      delete landed.awaiting;
+      return landed;
+    });
+    if (next) await this.publishTaskChange(next);
+    return { ...(next ? { task: next } : {}), ...(warning ? { warning } : {}) };
+  }
+
+  /** The worktree is gone; keep the binding (session identity survives for a reopen — pi-home parks it the same way). */
+  private async parkBinding(binding: WorkspaceBinding): Promise<void> {
+    const { worktreePath: _removed, ...parked } = binding;
+    await this.deps.bindings.replaceBinding({
+      ...parked,
+      updatedAt: this.deps.clock.now().toISOString(),
+    });
+  }
+
+  /**
+   * Force-delete (`-D`) the task's local branch; returns a warning on
+   * failure. Only ever called for a merged PR (squash merges look unmerged
+   * to `-d`) or after the user confirmed deleting an unmerged one.
+   */
+  private async deleteTaskBranch(
+    repo: RepositoryInfo,
+    branch: string,
+  ): Promise<string | undefined> {
+    try {
+      await this.deps.worktrees.deleteBranch(repo, branch, true);
+      return undefined;
+    } catch (error) {
+      return `branch left in place: ${describeError(error)}`;
+    }
+  }
+
+  /** The retry sweep never asks: it only deletes a merged PR's branch. */
+  private async deleteMergedBranch(
+    repo: RepositoryInfo,
+    branch: string,
+    pr: TaskPullRequest | undefined,
+  ): Promise<string | undefined> {
+    if (!shouldDeleteBranch(pr)) return undefined;
+    return this.deleteTaskBranch(repo, branch);
+  }
+
+  /**
+   * Retry the safe cleanup for done tasks whose worktree is still on disk
+   * (a manual Done refused it: dirty, or open in a live pane). One attempt
+   * per task per refresh; a live pane's worktree is skipped silently, and a
+   * repeated refusal is reported only when its reason changes. After the
+   * session-continuity rework a Done task keeps its binding, so "still on
+   * disk" means the binding still carries a `worktreePath`.
+   */
+  private async retryDoneCleanups(
+    tasks: readonly Task[],
+    repositories: Map<string, RepositoryInfo> | undefined,
+    protectedPaths: readonly string[],
+    warnings: string[],
+  ): Promise<boolean> {
+    for (const task of tasks) {
+      if (
+        task.state !== "done" ||
+        task.kind !== "task" ||
+        !task.repositoryId ||
+        !task.branch
+      ) {
+        continue;
+      }
+      const repo = repositories?.get(task.repositoryId);
+      if (!repo) continue;
+      let binding: WorkspaceBinding | undefined;
+      try {
+        binding = await this.deps.bindings.getBindingForTask(task.id);
+      } catch {
+        continue;
+      }
+      if (!binding?.worktreePath) {
+        this.cleanupWarnings.delete(task.id);
+        continue;
+      }
+      if (isProtectedPath(binding.worktreePath, protectedPaths)) continue;
+      // Narrow the race with a concurrent reopen (which reuses this very
+      // worktree): only clean up a task that is still done right now.
+      const fresh = await this.deps.tasks.getTask(task.id);
+      if (fresh?.state !== "done") continue;
+      let failure: string | undefined;
+      try {
+        await this.deps.worktrees.removeWorktree(
+          repo,
+          binding.worktreePath,
+          false,
+        );
+        await this.parkBinding(binding);
+        failure = await this.deleteMergedBranch(repo, task.branch, task.pr);
+      } catch (error) {
+        failure = `worktree left in place: ${describeError(error)}`;
+      }
+      if (!failure) {
+        this.cleanupWarnings.delete(task.id);
+        continue;
+      }
+      if (this.cleanupWarnings.get(task.id) !== failure) {
+        this.cleanupWarnings.set(task.id, failure);
+        warnings.push(`${task.title}: ${failure}`);
+      }
+    }
+    // Bindings are not part of the board projection: nothing to publish.
+    return false;
   }
 
   private async archiveDoneTasks(): Promise<boolean> {
@@ -815,13 +1127,12 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now();
     let changed = false;
     for (const task of tasks) {
-      if (shouldArchive(task, now)) {
-        await this.deps.tasks.replaceTask({
-          ...task,
-          archivedAt: now.toISOString(),
-        });
+      if (!shouldArchive(task, now)) continue;
+      await this.deps.tasks.patchTask(task.id, (fresh) => {
+        if (!shouldArchive(fresh, now)) return undefined;
         changed = true;
-      }
+        return { ...fresh, archivedAt: now.toISOString() };
+      });
     }
     return changed;
   }
@@ -856,7 +1167,26 @@ export class CoreManager implements CoreCommands {
   }
 }
 
-function toTaskPullRequest(status: PullRequestStatus): TaskPullRequest {
+/**
+ * Whether a task as persisted now is still the observation `snapshot` was
+ * taken for: still active, on the same repository and branch (a reopen
+ * swaps the branch), so a PR snapshot fetched for it still applies.
+ */
+function sameObservation(current: Task, snapshot: Task): boolean {
+  return (
+    current.kind === "task" &&
+    current.state !== "backlog" &&
+    current.state !== "done" &&
+    current.repositoryId === snapshot.repositoryId &&
+    current.branch === snapshot.branch
+  );
+}
+
+/** `fallbackTargetBranch` stands in when GitHub did not report the merged PR's base branch (pi-home: the repository default). */
+function toTaskPullRequest(
+  status: PullRequestStatus,
+  fallbackTargetBranch?: string,
+): TaskPullRequest {
   const state: TaskPullRequest["state"] =
     status.state === "MERGED"
       ? "merged"
@@ -883,7 +1213,8 @@ function toTaskPullRequest(status: PullRequestStatus): TaskPullRequest {
       ? {
           mergeCommit: {
             oid: status.mergeCommit.oid,
-            targetBranch: status.mergeCommit.targetBranch,
+            targetBranch:
+              status.mergeCommit.targetBranch ?? fallbackTargetBranch ?? "",
           },
         }
       : {}),

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedExternalUrl } from "../src/main/external-url";
+import {
+  githubHostsFromRepositoryIds,
+  isAllowedExternalUrl,
+} from "../src/main/external-url";
 
 // Unit coverage for the `shell:openExternal` IPC allowlist (main/index.ts's
 // registerShellIpc): only plain https://github.com/ links ever reach
@@ -46,5 +49,38 @@ describe("isAllowedExternalUrl", () => {
     expect(isAllowedExternalUrl(`https://github.com/${"a".repeat(3000)}`)).toBe(
       false,
     );
+  });
+});
+
+describe("GitHub Enterprise hosts of discovered repositories", () => {
+  it("derives only github-ish hosts from repository ids", () => {
+    expect(
+      githubHostsFromRepositoryIds([
+        "github.com/a/b",
+        "github.acme.com/a/b",
+        "acme.ghe.com/a/b",
+        "gitlab.com/a/b",
+        "/Users/me/Code/local-only",
+      ]),
+    ).toEqual(["github.com", "github.acme.com", "acme.ghe.com"]);
+  });
+
+  it("allows an extra host with the same strictness, and nothing else", () => {
+    const hosts = ["github.acme.com"];
+    expect(
+      isAllowedExternalUrl("https://github.acme.com/org/repo/pull/3", hosts),
+    ).toBe(true);
+    expect(isAllowedExternalUrl("https://github.acme.com/org/repo")).toBe(
+      false,
+    );
+    expect(
+      isAllowedExternalUrl("http://github.acme.com/org/repo/pull/3", hosts),
+    ).toBe(false);
+    expect(
+      isAllowedExternalUrl("https://github.acme.com:8443/org/repo", hosts),
+    ).toBe(false);
+    expect(
+      isAllowedExternalUrl("https://evil.example/org/repo/pull/3", hosts),
+    ).toBe(false);
   });
 });

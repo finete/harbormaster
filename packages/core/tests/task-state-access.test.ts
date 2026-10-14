@@ -61,6 +61,33 @@ describe("JsonTaskStateAccess", () => {
     expect(await access.getTask(task.id)).toEqual(updated);
   });
 
+  it("patchTask applies a patch to the task as persisted now, not a caller's snapshot", async () => {
+    const task = makeTask();
+    await access.createTask(task);
+    const stale = { ...task };
+    // Someone else moved the task after `stale` was read.
+    await access.replaceTask({ ...task, state: "dev" });
+
+    const patched = await access.patchTask(task.id, (current) => ({
+      ...current,
+      lastError: "boom",
+    }));
+
+    expect(stale.state).toBe("backlog");
+    expect(patched).toMatchObject({ state: "dev", lastError: "boom" });
+    expect(await access.getTask(task.id)).toEqual(patched);
+  });
+
+  it("patchTask leaves the task untouched when the patch returns undefined, and resolves undefined for a missing task", async () => {
+    const task = makeTask();
+    await access.createTask(task);
+    expect(await access.patchTask(task.id, () => undefined)).toEqual(task);
+    expect(await access.getTask(task.id)).toEqual(task);
+    expect(
+      await access.patchTask("missing", (current) => current),
+    ).toBeUndefined();
+  });
+
   it("replaceTask rejects an unknown id", async () => {
     await expect(
       access.replaceTask(makeTask({ id: "missing" })),

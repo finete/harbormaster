@@ -27,7 +27,11 @@ export function shouldArchive(
   );
 }
 
-/** Branch deletion on the done safe-path only ever happens for a merged PR. */
+/**
+ * Whether the done path deletes the branch without asking: only for a
+ * merged PR (always with `-D`: squash merges look unmerged to `git branch
+ * -d`). An unmerged branch is deleted only after the user confirmed it.
+ */
 export function shouldDeleteBranch(pr: TaskPullRequest | undefined): boolean {
   return pr?.state === "merged";
 }

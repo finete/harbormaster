@@ -54,9 +54,10 @@ export class JsonConfigAccess implements ConfigAccess {
     if (!isRecord(raw)) throw this.invalid();
     try {
       const repositories = normalizeRepositories(raw.repositories);
+      const movers = normalizeMovers("movers", raw.movers);
       return {
         automation: normalizeAutomation(raw.automation),
-        movers: normalizeMovers(raw.movers),
+        ...(movers ? { movers } : {}),
         codeRoot: normalizeCodeRoot(raw.codeRoot),
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
         ...(repositories ? { repositories } : {}),
@@ -102,10 +103,15 @@ function normalizeRepositories(
     if (!isRecord(entry)) {
       throw new Error(`repositories.${repositoryId} must be an object`);
     }
-    const config: RepositoryConfig = { ...entry };
+    const config: RepositoryConfig = { ...entry } as RepositoryConfig;
     if (entry.deployment !== undefined) {
       config.deployment = normalizeDeployment(repositoryId, entry.deployment);
     }
+    const movers = normalizeMovers(
+      `repositories.${repositoryId}.movers`,
+      entry.movers,
+    );
+    if (movers) config.movers = movers;
     repositories[repositoryId] = config;
   }
   return repositories;
@@ -155,6 +161,11 @@ function normalizeDeployment(
     if (stage.options !== undefined && !isRecord(stage.options)) {
       throw new Error(`${stageAt}.options must be an object`);
     }
+    // pi-home parity: options only ever reach a hook, so options on a
+    // manual (hookless) stage are a config mistake, rejected at load.
+    if (stage.options !== undefined && stage.hook === undefined) {
+      throw new Error(`${stageAt}.options requires a hook`);
+    }
     return {
       id: stage.id,
       label: typeof stage.label === "string" ? stage.label.trim() : stage.id,
@@ -181,11 +192,28 @@ function normalizeAutomation(value: unknown): boolean {
   return value;
 }
 
-function normalizeMovers(value: unknown): string[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
-    throw new Error("movers must be an array of strings");
-  return [...value] as string[];
+/**
+ * Absent = `undefined` (built-in default order); an explicit empty list is
+ * kept as-is and disables automatic moves. Whether each name is a
+ * registered mover is a registry concern checked by the manager (one
+ * load-time warning), not here.
+ */
+function normalizeMovers(at: string, value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value))
+    throw new Error(`${at} must be an array of strings`);
+  const seen = new Set<string>();
+  return value.map((name) => {
+    if (typeof name !== "string" || !name.trim()) {
+      throw new Error(`${at} entries must be non-empty mover names`);
+    }
+    const trimmed = name.trim();
+    if (seen.has(trimmed)) {
+      throw new Error(`${at} lists mover "${trimmed}" twice`);
+    }
+    seen.add(trimmed);
+    return trimmed;
+  });
 }
 
 /** Absolute folder containing every repository checkout (default `~/Code`). */

@@ -31,6 +31,7 @@ import type {
 import {
   CoreEventBus,
   CoreManager,
+  isToDoneConfirmation,
   JsonConfigAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
@@ -316,8 +317,12 @@ describe.skipIf(!gitAvailable)("toDone keeps the session identity", () => {
       sessionPath: file,
     });
 
-    const result = await f.manager.toDone(task.id);
-    expect(result.warning).toBeUndefined();
+    // No PR ever merged: the user confirmed deleting the unmerged workspace.
+    const result = await f.manager.toDone(task.id, {
+      force: { deleteUnmerged: true },
+    });
+    expect(result).not.toHaveProperty("requiresConfirmation");
+    expect(result).not.toHaveProperty("warning");
     const binding = await f.manager.getTaskWorkspace(task.id);
     expect(binding?.worktreePath).toBeUndefined();
     expect(binding?.sessionId).toBe(launch.sessionId);
@@ -340,7 +345,11 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
       sessionPath: file,
     });
     await f.manager.claimInitialPrompt(task.id);
-    const { task: done } = await f.manager.toDone(task.id);
+    const result = await f.manager.toDone(task.id, {
+      force: { deleteUnmerged: true },
+    });
+    if (isToDoneConfirmation(result)) throw new Error("unexpected question");
+    const done = result.task;
     expect(await exists(oldWorktree)).toBe(false);
     return { done, file, oldWorktree, oldSessionId: launch.sessionId };
   }
@@ -414,8 +423,13 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     if (!before?.worktreePath || launch?.mode !== "new")
       throw new Error("expected a bound task");
     await writeFile(join(before.worktreePath, "dirty.txt"), "wip\n");
-    const done = await f.manager.toDone(task.id);
-    expect(done.warning).toMatch(/worktree left in place/);
+    // A live pane keeps the worktree in place (no question asked).
+    const done = await f.manager.toDone(task.id, {
+      protectedPaths: [before.worktreePath],
+    });
+    expect(done).toMatchObject({
+      warning: expect.stringMatching(/worktree left in place/),
+    });
 
     const result = await f.manager.reopenTask(task.id);
     expect(result.task.state).toBe("dev");

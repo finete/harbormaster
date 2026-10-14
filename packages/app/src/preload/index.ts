@@ -18,6 +18,8 @@ import type {
   TerminalCreateResult,
   TerminalDataEvent,
   TerminalExitEvent,
+  ToDoneForce,
+  ToDoneResult,
   WorkspaceBinding,
 } from "./api";
 
@@ -74,8 +76,11 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:startTask", taskId),
     toReview: (taskId: string): Promise<Task> =>
       ipcRenderer.invoke("core:toReview", taskId),
-    toDone: (taskId: string): Promise<{ task: Task; warning?: string }> =>
-      ipcRenderer.invoke("core:toDone", taskId),
+    toDone: (
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult> =>
+      ipcRenderer.invoke("core:toDone", taskId, options),
     reopenTask: (
       taskId: string,
       input?: ReopenTaskInput,

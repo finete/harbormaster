@@ -19,5 +19,12 @@ export const builtinHooks: Readonly<Record<string, StageHook>> = Object.freeze({
   "version-endpoint": versionEndpointHook,
 });
 
+/** Names the built-in registry provides, for config validation. */
+export const builtinAutomationNames = Object.freeze({
+  movers: new Set(Object.keys(builtinMovers)) as ReadonlySet<string>,
+  hooks: new Set(Object.keys(builtinHooks)) as ReadonlySet<string>,
+});
+
 export * from "./arbiter.js";
+export * from "./config.js";
 export { deploymentPipelineMover, githubReviewMover, versionEndpointHook };

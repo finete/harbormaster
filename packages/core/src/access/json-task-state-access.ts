@@ -56,6 +56,28 @@ export class JsonTaskStateAccess implements TaskStateAccess {
     });
   }
 
+  async patchTask(
+    id: string,
+    patch: (current: Task) => Task | undefined,
+  ): Promise<Task | undefined> {
+    return withFileLock(this.lockPath, async () => {
+      const state = await this.readValidated();
+      const index = state.tasks.findIndex((item) => item.id === id);
+      const current = state.tasks[index];
+      if (index < 0 || !current) return undefined;
+      const next = patch(structuredClone(current));
+      // Nothing changed: leave the file unwritten.
+      if (!next) return current;
+      if (next.id !== id) {
+        throw new Error(`patchTask cannot change a task id: ${id}`);
+      }
+      state.tasks[index] = next;
+      this.validate(state);
+      await writeJsonAtomic(this.statePath, state);
+      return structuredClone(next);
+    });
+  }
+
   async removeTask(id: string): Promise<void> {
     await this.mutate((state) => {
       state.tasks = state.tasks.filter((item) => item.id !== id);

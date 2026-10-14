@@ -59,6 +59,46 @@ export interface ToDoneOptions {
    * running shell/agent never has its cwd deleted out from under it.
    */
   protectedPaths?: string[];
+  /**
+   * The user's answers to a previous `ToDoneConfirmation` (pi-home's
+   * "Discard uncommitted changes?" / "Delete unmerged task workspace?"):
+   * `removeDirty` force-removes a worktree with uncommitted changes,
+   * `deleteUnmerged` removes the worktree and force-deletes (`-D`) a branch
+   * whose PR never merged. Never overrides `protectedPaths`.
+   */
+  force?: { removeDirty?: boolean; deleteUnmerged?: boolean };
+}
+
+/**
+ * A manual Done that needs the user's say-so before destroying work; the
+ * task was NOT moved. Ask, then call `toDone` again with the matching
+ * `force` flag (answers accumulate: a confirmed `dirty` may be followed by
+ * `unmerged`).
+ */
+export interface ToDoneConfirmation {
+  requiresConfirmation: "dirty" | "unmerged";
+  /** Human-readable context for the question (task title, worktree path). */
+  detail: string;
+}
+
+export type ToDoneResult =
+  | { task: Task; warning?: string }
+  | ToDoneConfirmation;
+
+/** Narrow a `toDone` result to the confirmation-required case. */
+export function isToDoneConfirmation(
+  result: ToDoneResult,
+): result is ToDoneConfirmation {
+  return "requiresConfirmation" in result;
+}
+
+export interface RefreshOptions {
+  /**
+   * Same meaning as `ToDoneOptions.protectedPaths`: live pane cwds the
+   * refresh must never remove a worktree out from under (mover-driven
+   * landing and the done-cleanup retry sweep both honor it).
+   */
+  protectedPaths?: string[];
 }
 
 export interface MoveTaskOptions {
@@ -178,23 +218,30 @@ export interface CoreCommands {
    */
   toReview(taskId: string): Promise<Task>;
   /**
-   * Move a task to `done`. Attempts the safe cleanup path first (remove the
-   * worktree if clean, delete the branch if its PR is merged); any refusal
-   * (dirty worktree, unmerged branch, missing repository) never blocks the
-   * move — the task still lands in `done` and the refusal surfaces as
-   * `warning` in the result instead of throwing. A worktree whose path is in
-   * `options.protectedPaths` is never removed (also a `warning`).
+   * Move a task to `done`, cleaning up its workspace (pi-home's `complete`):
+   * remove the worktree and delete the branch. Destroying work needs the
+   * user's confirmation first: a worktree with uncommitted changes, or a
+   * branch whose PR never merged, returns a `ToDoneConfirmation` WITHOUT
+   * moving the task (answer via `options.force` on the next call). A
+   * merged PR's branch is deleted with `-D` without asking. A worktree in
+   * `options.protectedPaths` (a live pane's cwd) is never touched and never
+   * asked about: the task lands with a `warning` and refresh retries the
+   * cleanup once the pane is gone. Other failures (missing repository, git
+   * errors) never block the move either; they surface as `warning`.
    */
-  toDone(
-    taskId: string,
-    options?: ToDoneOptions,
-  ): Promise<{ task: Task; warning?: string }>;
+  toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
   /**
-   * Re-fetch PR status for every repository-backed task with an open PR,
-   * update `task.pr`, and — when `config.automation` is true — let the
-   * configured movers propose at most one board move per task. Also flags
-   * `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
-   * `board-changed` when anything changed. This is what the app polls.
+   * Re-fetch PR status for every repository-backed task with an open PR
+   * (a few tasks concurrently), patch `task.pr` onto the task as currently
+   * persisted (never a stale snapshot, so a concurrent move is never
+   * clobbered), and — when `config.automation` is true — let the
+   * configured movers propose at most one board move per task. Repositories
+   * without an `origin` remote are skipped silently. Also retries the safe
+   * worktree cleanup for done tasks whose worktree is still on disk, and
+   * flags `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
+   * `board-changed` when anything changed. This is what the app polls; a
+   * call made while another refresh is still running joins that run
+   * instead of overlapping it.
    */
-  refresh(): Promise<{ warnings: string[] }>;
+  refresh(options?: RefreshOptions): Promise<{ warnings: string[] }>;
 }

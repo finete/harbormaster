@@ -3,6 +3,8 @@
 // pipelines, no cmux. Those return in later phases behind the same shapes
 // where it makes sense.
 
+import { DEFAULT_MOVER_ORDER } from "./addons.js";
+
 export const STATE_VERSION = 1 as const;
 
 /** Permanent, repository-backed work vs. local-only scratch work. */
@@ -70,6 +72,8 @@ export interface DeploymentPipeline {
 /** Per-repository settings from the global config, keyed by normalized repository id. */
 export interface RepositoryConfig {
   deployment?: DeploymentPipeline;
+  /** Mover order for this repository's tasks; overrides the global `movers` (an empty list disables automatic moves here). */
+  movers?: string[];
 }
 
 /** Ordered list of board columns; the source of truth for board layout. */
@@ -218,8 +222,11 @@ export interface PresenceRecord {
 export interface GlobalConfig {
   /** Global kill switch for future addon-driven board moves. */
   automation: boolean;
-  /** Ordered names of active movers; empty until movers exist (phase 2). */
-  movers: string[];
+  /**
+   * Ordered names of active movers. Absent = the built-in default order;
+   * an explicit empty list disables automatic moves (pi-home semantics).
+   */
+  movers?: string[];
   /** Folder containing all repository checkouts (absolute; "~" expanded on load). */
   codeRoot?: string;
   /** Git namespace for new task branches (e.g. "alice/"); may be empty. */
@@ -228,7 +235,8 @@ export interface GlobalConfig {
   repositories?: Record<string, RepositoryConfig>;
 }
 
+/** Written to a fresh config file: the built-in movers, spelled out so users see what they can reorder or drop. */
 export const defaultGlobalConfig = (): GlobalConfig => ({
   automation: true,
-  movers: [],
+  movers: [...DEFAULT_MOVER_ORDER],
 });

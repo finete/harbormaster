@@ -21,6 +21,19 @@ export interface TaskStateAccess {
   createTask(task: Task): Promise<void>;
   /** Replace a task's persisted fields entirely; the id must already exist. */
   replaceTask(task: Task): Promise<void>;
+  /**
+   * Atomic read-modify-write of one task under the state lock: `patch`
+   * receives the task as currently persisted (never a caller's stale
+   * snapshot) and returns its replacement, or `undefined` to leave it
+   * untouched. Resolves to the task as persisted afterwards (`undefined`
+   * when the task no longer exists). This is what slow callers (refresh,
+   * which waits on GitHub between reading and writing) use so they only
+   * ever change the fields they own and never clobber a concurrent move.
+   */
+  patchTask(
+    id: string,
+    patch: (current: Task) => Task | undefined,
+  ): Promise<Task | undefined>;
   removeTask(id: string): Promise<void>;
 }
 

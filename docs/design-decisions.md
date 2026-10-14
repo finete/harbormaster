@@ -80,3 +80,30 @@ cross-task split layouts, daemon, non-Pi adapters.
 3. Run alongside cmux/pi-home until trusted.
 4. Delete the cmux integration (`record.cmux`, focus-pane branch, `CMUX_*`
    capture) and retire the old pi-home repo to frozen-extension status.
+
+## Blessed divergences from pi-home
+
+Deliberate differences from pi-home's behavior, confirmed in the
+behavioral-parity audit. Everything else is meant to match pi-home; a
+difference not listed here is a bug.
+
+- **Always push before `ensureOpen`.** To review pushes the task branch
+  every time before reusing or opening the PR (pi-home pushed only when
+  creating one), so a reused PR always shows the latest local commits.
+- **The auto path never force-deletes.** A mover-proposed landing (after the
+  last deployment stage) never asks and never forces: if cleanup would be
+  refused (dirty worktree, open in a live pane, ...) the task stays in
+  Awaiting with a "deployed and ready to land — mark it Done" warning.
+  Manual Done matches pi-home: it asks "Discard uncommitted changes?" /
+  "Delete unmerged task workspace?" before destroying work, and keeps a
+  live pane's worktree without asking (cleaned up by a later refresh).
+- **Dev → Backlog keeps the worktree.** No parking modes: a task moved back
+  to Backlog keeps its branch, worktree, and session as-is.
+- **Worktree layout.** Task worktrees live at
+  `<codeRoot>/.harbormaster-worktrees/<branch-slug>`, and derived branch
+  names end in a 6-character task-id suffix.
+- **Movers tick only in the app.** The Electron app is the single automation
+  host; the Pi extension never runs movers or refreshes.
+- **The in-session widget is read-only.** The extension's task widget shows
+  task/PR/awaiting context but offers no board actions (pi-home's
+  `/todev`, `/toreview`, ... commands are app actions).

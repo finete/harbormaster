@@ -3,7 +3,14 @@
 // TaskActions.tsx), extracted so Board.tsx's single-key shortcuts (s/r/x)
 // drive the exact same path the buttons do — no second implementation to
 // drift out of sync.
-import type { Task } from "../../../preload/api";
+import type {
+  MoveTaskOptions,
+  Task,
+  TaskState,
+  ToDoneConfirmation,
+  ToDoneForce,
+} from "../../../preload/api";
+import { requestConfirm } from "../confirm";
 import { describeThrown, pushToast } from "../toast";
 
 export function canStart(task: Pick<Task, "state">): boolean {
@@ -27,6 +34,19 @@ export function canReopen(task: Pick<Task, "state">): boolean {
   return task.state === "done";
 }
 
+/** A plain column move (drag-and-drop); a rejected move surfaces as an error toast. */
+export async function moveTaskMutation(
+  taskId: string,
+  state: TaskState,
+  options?: MoveTaskOptions,
+): Promise<void> {
+  try {
+    await window.harbormaster.core.moveTask(taskId, state, options);
+  } catch (error) {
+    pushToast(describeThrown(error), "error");
+  }
+}
+
 /** Start: create the branch + worktree and move a backlog task to Dev. */
 export async function startTaskMutation(taskId: string): Promise<void> {
   try {
@@ -45,11 +65,63 @@ export async function toReviewMutation(taskId: string): Promise<void> {
   }
 }
 
-/** Move a task to Done; surfaces `toDone`'s returned warning the same way the button does. */
+/** pi-home's completion questions (presentation/flows.ts `completeWork`). */
+const DONE_QUESTIONS: Record<
+  ToDoneConfirmation["requiresConfirmation"],
+  { title: string; confirmLabel: string; flag: keyof ToDoneForce }
+> = {
+  dirty: {
+    title: "Discard uncommitted changes?",
+    confirmLabel: "Remove anyway",
+    flag: "removeDirty",
+  },
+  unmerged: {
+    title: "Delete unmerged task workspace?",
+    confirmLabel: "Delete anyway",
+    flag: "deleteUnmerged",
+  },
+};
+
+const DONE_MESSAGES: Record<
+  ToDoneConfirmation["requiresConfirmation"],
+  string
+> = {
+  dirty: "The worktree has uncommitted changes — remove it anyway?",
+  unmerged:
+    "The branch isn't merged — delete the worktree and local branch anyway?",
+};
+
+/**
+ * Move a task to Done (button, `x`, or a drop on Done). Destroying work is
+ * confirmed first, exactly like pi-home: core answers with a question
+ * (uncommitted changes, then an unmerged branch) without moving the task;
+ * each confirm re-asks with the accumulated answers, any cancel leaves the
+ * task untouched. The landed result's warning surfaces as a toast.
+ */
 export async function toDoneMutation(taskId: string): Promise<void> {
   try {
-    const result = await window.harbormaster.core.toDone(taskId);
-    if (result.warning) pushToast(result.warning, "warning");
+    const force: ToDoneForce = {};
+    for (;;) {
+      const result = await window.harbormaster.core.toDone(taskId, { force });
+      if (!("requiresConfirmation" in result)) {
+        if (result.warning) pushToast(result.warning, "warning");
+        return;
+      }
+      const question = DONE_QUESTIONS[result.requiresConfirmation];
+      // The same question twice means core refused despite the answer;
+      // never loop on it.
+      if (force[question.flag]) {
+        pushToast(result.detail, "error");
+        return;
+      }
+      const confirmed = await requestConfirm({
+        title: question.title,
+        message: `${DONE_MESSAGES[result.requiresConfirmation]} (${result.detail})`,
+        confirmLabel: question.confirmLabel,
+      });
+      if (!confirmed) return;
+      force[question.flag] = true;
+    }
   } catch (error) {
     pushToast(describeThrown(error), "error");
   }

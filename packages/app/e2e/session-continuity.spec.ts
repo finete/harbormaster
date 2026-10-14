@@ -116,7 +116,6 @@ test.beforeAll(async () => {
     path.join(stateDir, "config.json"),
     JSON.stringify({
       automation: false,
-      movers: [],
       codeRoot,
       branchPrefix: "",
     }),
@@ -233,6 +232,11 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await window.getByTestId("board-button").click();
   const card = cardLocator("Continuity");
   await card.getByTestId(`to-done-button-${taskId}`).click();
+  // No PR ever merged: pi-home's "Delete unmerged task workspace?" question.
+  const confirm = window.getByTestId("confirm-dialog");
+  await expect(confirm).toContainText("Delete unmerged task workspace?");
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(confirm).toHaveCount(0);
   await expect(
     window
       .getByTestId("column-done-cards")

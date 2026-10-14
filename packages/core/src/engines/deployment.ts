@@ -35,6 +35,23 @@ export function parseDeployedVersion(document: string): DeployedVersion {
   };
 }
 
+/**
+ * The reserved stage-less "Production deploy" wait (pi-home's manual
+ * production wait): a merged PR in a repository with no deployment
+ * pipeline parks here. Its id can never collide with a configured stage
+ * (config stage ids must start alphanumeric), and no hook ever advances it
+ * — only a manual Done lands the task.
+ */
+export const PRODUCTION_STAGE: Readonly<DeploymentStageConfig> = Object.freeze({
+  id: "__production",
+  label: "Production deploy",
+});
+
+/** Whether `stageId` is the reserved stage-less production wait. */
+export function isProductionWait(stageId: string): boolean {
+  return stageId === PRODUCTION_STAGE.id;
+}
+
 export function firstStage(
   stages: readonly DeploymentStageConfig[],
 ): DeploymentStageConfig | undefined {

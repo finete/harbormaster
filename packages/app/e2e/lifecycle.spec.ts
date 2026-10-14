@@ -8,6 +8,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -53,6 +54,39 @@ async function cardTaskId(card: Locator): Promise<string> {
   const testId = await card.getAttribute("data-testid");
   if (!testId) throw new Error("card missing data-testid");
   return testId.replace("card-", "");
+}
+
+/**
+ * Simulates a dnd-kit drag (same technique as smoke.spec.ts): real pointer
+ * down/move/up, grabbing the card by its title strip so the press never
+ * lands on the card's action buttons.
+ */
+async function dragTo(
+  window: Page,
+  card: Locator,
+  target: Locator,
+): Promise<void> {
+  const cardBox = await card.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!cardBox || !targetBox) throw new Error("drag source/target not visible");
+  const startX = cardBox.x + cardBox.width / 2;
+  const startY = cardBox.y + 12;
+  const endX = targetBox.x + targetBox.width / 2;
+  const endY = targetBox.y + targetBox.height / 2;
+  await window.mouse.move(startX, startY);
+  await window.mouse.down();
+  const steps = 20;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    await window.mouse.move(
+      startX + (endX - startX) * t,
+      startY + (endY - startY) * t,
+    );
+    await window.waitForTimeout(20);
+  }
+  await window.waitForTimeout(50);
+  await window.mouse.up();
+  await window.waitForTimeout(250);
 }
 
 /**
@@ -164,7 +198,6 @@ test.describe("toReview and toDone drive the board through the real core command
       path.join(stateDir, "config.json"),
       JSON.stringify({
         automation: true,
-        movers: [],
         codeRoot,
         branchPrefix: "",
       }),
@@ -315,6 +348,212 @@ test.describe("toReview and toDone drive the board through the real core command
     await expect(window.getByTestId("toast-warning")).toHaveCount(0);
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
+
+  test("dragging a branch-backed Dev card to Awaiting and confirming Review runs To review: the branch is pushed and the PR badge appears", async () => {
+    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("sidebar-new-task-button").click();
+    await window.getByTestId("new-task-title-input").fill("Drag Review");
+    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
+    await window.getByTestId("new-task-destination-backlog").click();
+    await window.getByTestId("new-task-submit").click();
+    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+
+    await window.getByTestId("board-button").click();
+    const card = cardLocator(window, "Drag Review");
+    await expect(card).toBeVisible();
+    const taskId = await cardTaskId(card);
+    await window.evaluate(
+      (id) => window.harbormaster.core.startTask(id),
+      taskId,
+    );
+    const devCard = window
+      .getByTestId("column-dev-cards")
+      .locator(`[data-testid="card-${taskId}"]`);
+    await expect(devCard).toBeVisible();
+    const branch = await window.evaluate(
+      async (id) => (await window.harbormaster.core.getTask(id))?.branch,
+      taskId,
+    );
+
+    await dragTo(window, devCard, window.getByTestId("column-awaiting"));
+    await expect(window.getByTestId("awaiting-reason-dialog")).toBeVisible();
+    await window.getByTestId("awaiting-reason-confirm").click();
+
+    const awaitingCard = window
+      .getByTestId("column-awaiting-cards")
+      .locator(`[data-testid="card-${taskId}"]`);
+    await expect(awaitingCard).toBeVisible({ timeout: 15_000 });
+    await expect(awaitingCard.getByTestId("badge-pr")).toContainText("PR #42");
+    // toReview pushed the branch (a plain moveTask never would).
+    const remoteRefs = execFileSync(
+      "git",
+      ["ls-remote", "--heads", path.join(root, "bare-origin.git")],
+      { encoding: "utf8" },
+    );
+    expect(remoteRefs).toContain(`refs/heads/${branch}`);
+    await expect(window.getByTestId("toast-error")).toHaveCount(0);
+  });
+
+  test("dragging a repo-backed card to Done runs the Done cleanup: its clean worktree is removed and the binding parked", async () => {
+    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("sidebar-new-task-button").click();
+    await window.getByTestId("new-task-title-input").fill("Drag Done");
+    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
+    await window.getByTestId("new-task-destination-backlog").click();
+    await window.getByTestId("new-task-submit").click();
+    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+
+    await window.getByTestId("board-button").click();
+    const card = cardLocator(window, "Drag Done");
+    await expect(card).toBeVisible();
+    const taskId = await cardTaskId(card);
+    await window.evaluate(
+      (id) => window.harbormaster.core.startTask(id),
+      taskId,
+    );
+    const devCard = window
+      .getByTestId("column-dev-cards")
+      .locator(`[data-testid="card-${taskId}"]`);
+    await expect(devCard).toBeVisible();
+    const worktreePath = await window.evaluate(
+      async (id) =>
+        (await window.harbormaster.core.getTaskWorkspace(id))?.worktreePath,
+      taskId,
+    );
+    expect(worktreePath && existsSync(worktreePath)).toBe(true);
+
+    await dragTo(window, devCard, window.getByTestId("column-done"));
+    // The PR is open, not merged: the same question the Done button asks.
+    const confirm = window.getByTestId("confirm-dialog");
+    await expect(confirm).toContainText("Delete unmerged task workspace?");
+    await window.getByTestId("confirm-dialog-confirm").click();
+    await expect(confirm).toHaveCount(0);
+
+    await expect(
+      window
+        .getByTestId("column-done-cards")
+        .locator(`[data-testid="card-${taskId}"]`),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(() => existsSync(worktreePath as string), { timeout: 15_000 })
+      .toBe(false);
+    const binding = await window.evaluate(
+      (id) => window.harbormaster.core.getTaskWorkspace(id),
+      taskId,
+    );
+    expect(binding).toBeDefined();
+    expect(binding?.worktreePath).toBeUndefined();
+    await expect(window.getByTestId("toast-error")).toHaveCount(0);
+  });
+});
+
+test.describe("Done on a dirty worktree asks first (pi-home's completion questions)", () => {
+  let app: ElectronApplication;
+  let window: Page;
+  let root: string;
+  const mainProcessErrors: string[] = [];
+
+  test.beforeAll(async () => {
+    root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-done-confirm-"));
+    const stateDir = path.join(root, "state");
+    const codeRoot = path.join(root, "Code");
+    mkdirSync(stateDir, { recursive: true });
+    mkdirSync(codeRoot, { recursive: true });
+    seedFixtureRepoWithBareRemote(root, codeRoot);
+    const fakeGh = writeFakeGhSucceeding(root);
+    writeFileSync(
+      path.join(stateDir, "config.json"),
+      JSON.stringify({ automation: true, codeRoot, branchPrefix: "" }),
+    );
+    app = await electron.launch({
+      args: [mainEntry],
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_GH_COMMAND: fakeGh,
+      },
+    });
+    watchForMainProcessErrors(app, mainProcessErrors);
+    window = await app.firstWindow();
+    await window.waitForLoadState("domcontentloaded");
+  });
+
+  test.afterAll(async () => {
+    await app.close();
+    expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("cancel keeps the task and its changes in place; confirming both questions lands it and removes the worktree", async () => {
+    await window.getByTestId("sidebar-new-task-button").click();
+    await window.getByTestId("new-task-title-input").fill("Dirty Done");
+    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
+    await window.getByTestId("new-task-destination-backlog").click();
+    await window.getByTestId("new-task-submit").click();
+    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+
+    await window.getByTestId("board-button").click();
+    const card = cardLocator(window, "Dirty Done");
+    await expect(card).toBeVisible();
+    const taskId = await cardTaskId(card);
+    await window.evaluate(
+      (id) => window.harbormaster.core.startTask(id),
+      taskId,
+    );
+    const devCard = window
+      .getByTestId("column-dev-cards")
+      .locator(`[data-testid="card-${taskId}"]`);
+    await expect(devCard).toBeVisible();
+    const worktreePath = (await window.evaluate(
+      async (id) =>
+        (
+          await window.harbormaster.core.getTaskWorkspace(id)
+        )?.worktreePath,
+      taskId,
+    )) as string;
+    const dirtyFile = path.join(worktreePath, "uncommitted.txt");
+    writeFileSync(dirtyFile, "work in progress\n");
+    // A fresh app auto-opens the new task's workspace; a live pane in the
+    // worktree would (correctly) skip the questions and keep it. Close it.
+    await window.getByTestId("workspace-button").click();
+    const closeButton = window.getByTestId("close-workspace-button");
+    if ((await closeButton.count()) > 0) {
+      await closeButton.click();
+      await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
+    }
+    await window.getByTestId("board-button").click();
+
+    const confirm = window.getByTestId("confirm-dialog");
+    await devCard.getByTestId(`to-done-button-${taskId}`).click();
+    await expect(confirm).toContainText("Discard uncommitted changes?");
+    await expect(window.getByTestId("confirm-dialog-message")).toContainText(
+      "uncommitted changes",
+    );
+    await window.getByTestId("confirm-dialog-cancel").click();
+    await expect(confirm).toHaveCount(0);
+    // Cancel changed nothing: still in Dev, the change still on disk.
+    await expect(devCard).toBeVisible();
+    expect(existsSync(dirtyFile)).toBe(true);
+
+    await devCard.getByTestId(`to-done-button-${taskId}`).click();
+    await expect(confirm).toContainText("Discard uncommitted changes?");
+    await window.getByTestId("confirm-dialog-confirm").click();
+    // Next question, same as pi-home: the branch never merged.
+    await expect(confirm).toContainText("Delete unmerged task workspace?");
+    await window.getByTestId("confirm-dialog-confirm").click();
+    await expect(confirm).toHaveCount(0);
+
+    await expect(
+      window
+        .getByTestId("column-done-cards")
+        .locator(`[data-testid="card-${taskId}"]`),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(() => existsSync(worktreePath), { timeout: 15_000 })
+      .toBe(false);
+    await expect(window.getByTestId("toast-error")).toHaveCount(0);
+  });
 });
 
 test.describe("the refresh loop surfaces a dismissible warning banner when gh fails", () => {
@@ -335,7 +574,6 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
       path.join(stateDir, "config.json"),
       JSON.stringify({
         automation: true,
-        movers: [],
         codeRoot,
         branchPrefix: "",
       }),

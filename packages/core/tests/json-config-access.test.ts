@@ -21,7 +21,8 @@ describe("JsonConfigAccess", () => {
     const access = new JsonConfigAccess(path);
     const config = await access.load();
     expect(config.automation).toBe(true);
-    expect(config.movers).toEqual([]);
+    // Written out explicitly (pi-home parity) so users see what to reorder.
+    expect(config.movers).toEqual(["github-review", "deployment-pipeline"]);
     expect(config.codeRoot).toBe(join(homedir(), "Code"));
     expect(config.branchPrefix).toBe("");
 
@@ -140,6 +141,48 @@ describe("JsonConfigAccess", () => {
       "github.com/acme/widgets"
     ] as unknown as Record<string, unknown> | undefined;
     expect(repository?.futureField).toBe("kept");
+  });
+
+  it("distinguishes absent movers (defaults) from an explicit empty list, and parses per-repository movers", async () => {
+    await writeFile(path, JSON.stringify({ codeRoot: "/tmp/code" }));
+    expect((await new JsonConfigAccess(path).load()).movers).toBeUndefined();
+
+    await writeFile(
+      path,
+      JSON.stringify({
+        movers: [],
+        repositories: { "github.com/acme/x": { movers: ["github-review"] } },
+      }),
+    );
+    const config = await new JsonConfigAccess(path).load();
+    expect(config.movers).toEqual([]);
+    expect(config.repositories?.["github.com/acme/x"]?.movers).toEqual([
+      "github-review",
+    ]);
+  });
+
+  it("rejects stage options without a hook and duplicate mover names at load", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        repositories: {
+          "github.com/acme/x": {
+            deployment: {
+              stages: [{ id: "prod", options: { url: "https://x" } }],
+            },
+          },
+        },
+      }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "options requires a hook",
+    );
+
+    await writeFile(
+      path,
+      JSON.stringify({ movers: ["github-review", "github-review"] }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow("twice");
   });
 
   it("rejects an empty stages array and duplicate stage ids", async () => {

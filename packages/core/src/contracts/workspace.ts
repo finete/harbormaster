@@ -76,6 +76,8 @@ export interface GitWorktreeAccess {
     path: string,
     force?: boolean,
   ): Promise<void>;
+  /** Whether the worktree at `path` has uncommitted changes (staged, unstaged, or untracked). */
+  isWorktreeDirty(path: string): Promise<boolean>;
   branchExists(repo: RepositoryInfo, branch: string): Promise<boolean>;
   /**
    * Delete a branch. Uses a safe, non-force delete (refusing branches not
