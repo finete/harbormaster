@@ -111,7 +111,6 @@ test.describe("a bound task's primary pane launches HARBORMASTER_PI_COMMAND with
       path.join(stateDir, "config.json"),
       JSON.stringify({
         automation: true,
-        movers: [],
         codeRoot,
         branchPrefix: "",
       }),
@@ -182,7 +181,6 @@ test.describe("a missing pi binary falls back to a plain shell with a dismissibl
       path.join(stateDir, "config.json"),
       JSON.stringify({
         automation: true,
-        movers: [],
         codeRoot,
         branchPrefix: "",
       }),
@@ -310,5 +308,31 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await expect(
       cardLocator(window, "Presence Task").getByTestId("badge-running"),
     ).toBeVisible({ timeout: 10_000 });
+
+    // The agent loop ends while the session stays open: pi-home's ● "your
+    // move" — attention styling on the card and the sidebar row, not a
+    // neutral "attached".
+    await presence.setTurnActive(
+      taskId,
+      process.pid,
+      false,
+      new Date().toISOString(),
+    );
+    const attention = cardLocator(window, "Presence Task").getByTestId(
+      "badge-attention",
+    );
+    await expect(attention).toBeVisible({ timeout: 10_000 });
+    await expect(attention).toHaveText("your move");
+    await window.getByTestId("workspace-button").click();
+    await expect(row.getByTestId("sidebar-row-attention-dot")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(row.getByTestId("sidebar-row-attention-dot")).toHaveAttribute(
+      "data-status",
+      "attention",
+    );
+    await expect(row.getByTestId("sidebar-row-activity")).toContainText(
+      "your move",
+    );
   });
 });

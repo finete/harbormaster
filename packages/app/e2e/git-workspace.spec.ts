@@ -93,7 +93,6 @@ test.beforeAll(async () => {
     path.join(stateDir, "config.json"),
     JSON.stringify({
       automation: true,
-      movers: [],
       codeRoot,
       branchPrefix: "",
     }),

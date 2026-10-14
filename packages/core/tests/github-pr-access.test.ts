@@ -177,7 +177,7 @@ describe("GithubPrAccess fixtures", () => {
         "--body",
         "Feature body",
         "--repo",
-        "acme/widgets",
+        "github.com/acme/widgets",
       ]),
     );
     // No real gh/git invocation ever happened — the fake execute recorded every call.
@@ -236,7 +236,7 @@ describe("GithubPrAccess fixtures", () => {
       "ready",
       "14",
       "--repo",
-      "acme/widgets",
+      "github.com/acme/widgets",
     ]);
   });
 
@@ -297,11 +297,37 @@ describe("GithubPrAccess fixtures", () => {
       repositoryId,
       "feature",
     );
+    // No base branch reported: targetBranch is left for the manager to
+    // fill from the repository's default branch.
     expect(status?.mergeCommit).toEqual({
       oid: "fffeee1112223",
-      targetBranch: "",
       url: "https://github.com/acme/widgets/commit/fffeee1112223",
     });
+  });
+
+  it("keeps a GitHub Enterprise host: --repo HOST/OWNER/REPO and gh api --hostname", async () => {
+    const calls: string[][] = [];
+    const access = new GithubPrAccess(async (_command, args) => {
+      calls.push(args);
+      return args[0] === "api" ? "ahead\n" : "[]";
+    });
+    await access.status("ghe.example.com/acme/widgets", "feature");
+    await access.containsCommit(
+      "ghe.example.com/acme/widgets",
+      "abc1234",
+      "ca9bdff2",
+    );
+    expect(calls[0]).toEqual(
+      expect.arrayContaining(["--repo", "ghe.example.com/acme/widgets"]),
+    );
+    expect(calls[1]).toEqual([
+      "api",
+      "repos/acme/widgets/compare/abc1234...ca9bdff2",
+      "--jq",
+      ".status",
+      "--hostname",
+      "ghe.example.com",
+    ]);
   });
 
   it("decides commit containment from GitHub compare statuses and memoizes per pair", async () => {

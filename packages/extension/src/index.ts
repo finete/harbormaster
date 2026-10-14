@@ -5,7 +5,8 @@
 // When a Harbormaster-launched Pi process starts (see
 // `@harbormaster/core`'s `PiHarnessAdapter.buildLaunchSpec`, which sets
 // `HARBORMASTER_TASK_ID` / `HARBORMASTER_STATE_DIR`), this extension
-// registers presence, heartbeats on an interval, tracks turn boundaries, and
+// registers presence, heartbeats on an interval, tracks agent-loop
+// boundaries (agent_start/agent_end), names the session after the task, and
 // ends its record on shutdown — the same liveness signal the core harness
 // adapter's `presence()` reads back. Outside a Harbormaster-launched
 // session (the env vars are absent — a bare `pi` run, or any other host)
@@ -93,7 +94,14 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     heartbeatTimer.unref();
 
     const task = await taskState.getTask(taskId).catch(() => undefined);
-    if (task) ctx.ui.setTitle(task.title);
+    if (task) {
+      ctx.ui.setTitle(task.title);
+      // pi-home names the task's Pi session after the task (its
+      // `appendSessionInfo`/`setSessionName`), so `/resume` and the session
+      // selector show the task instead of the first prompt. Only written
+      // when it differs: each rename appends a session-info entry.
+      if (pi.getSessionName() !== task.title) pi.setSessionName(task.title);
+    }
     ctx.ui.setWidget(TASK_WIDGET_KEY, buildTaskWidgetLines(task, ctx.ui.theme));
     stopWidgetRefresh();
     widgetRefreshTimer = setInterval(() => {
@@ -102,10 +110,14 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     widgetRefreshTimer.unref();
   });
 
-  pi.on("turn_start", async () => {
+  // Running state spans the whole agent loop (pi-home parity), not a single
+  // LLM turn: between tool-call turns the agent is still working, so
+  // turn_start/turn_end would flicker the board between running and "your
+  // move" mid-run.
+  pi.on("agent_start", async () => {
     await reporter.setTurnActive(true).catch(() => {});
   });
-  pi.on("turn_end", async (_event, ctx: ExtensionContext) => {
+  pi.on("agent_end", async (_event, ctx: ExtensionContext) => {
     await reporter.setTurnActive(false).catch(() => {});
     await refreshWidget(ctx).catch(() => {});
   });

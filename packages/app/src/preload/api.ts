@@ -16,6 +16,7 @@ import type {
   RepositoryInfo,
   Task,
   TaskState,
+  ToDoneResult,
   WorkspaceBinding,
 } from "@harbormaster/core";
 
@@ -31,8 +32,16 @@ export type {
   RepositoryInfo,
   Task,
   TaskState,
+  ToDoneConfirmation,
+  ToDoneResult,
   WorkspaceBinding,
 } from "@harbormaster/core";
+
+/** The user's answers to a previous `toDone` confirmation question. */
+export interface ToDoneForce {
+  removeDirty?: boolean;
+  deleteUnmerged?: boolean;
+}
 
 /**
  * On-demand liveness snapshot for one task's harness session (see
@@ -133,11 +142,15 @@ export interface HarbormasterApi {
      */
     toReview(taskId: string): Promise<Task>;
     /**
-     * Move a task to `done`; any cleanup refusal (dirty worktree, unmerged
-     * branch, a worktree still open in one of this app's panes, ...)
-     * surfaces as `warning` instead of throwing. See `CoreCommands.toDone`.
+     * Move a task to `done`. Uncommitted changes or an unmerged branch come
+     * back as a confirmation question (task NOT moved); answer it by calling
+     * again with `force`. A worktree open in one of this app's panes (main
+     * supplies those) is kept with a `warning`. See `CoreCommands.toDone`.
      */
-    toDone(taskId: string): Promise<{ task: Task; warning?: string }>;
+    toDone(
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult>;
     /**
      * Reopen a Done task as a new Dev cycle (fresh branch + worktree; the
      * previous conversation is forked into its next pi pane). A missing

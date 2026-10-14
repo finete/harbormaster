@@ -32,7 +32,8 @@ export function TaskCard({
     : undefined;
 
   const running = !!presence?.runningTurn;
-  const attached = !!presence?.live && !running;
+  // Live but idle = pi-home's ● "your move": the agent is waiting on you.
+  const attention = !!presence?.live && !running;
 
   return (
     <Card
@@ -74,13 +75,17 @@ export function TaskCard({
             running
           </Badge>
         )}
-        {attached && (
+        {attention && (
           <Badge
             variant="outline"
-            className="gap-1 opacity-75"
-            data-testid="badge-attached"
+            className="gap-1 border-amber-400/60 text-amber-300"
+            data-testid="badge-attention"
           >
-            attached
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-amber-400"
+              aria-hidden
+            />
+            your move
           </Badge>
         )}
         {task.pr && (

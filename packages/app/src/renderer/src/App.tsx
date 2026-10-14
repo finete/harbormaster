@@ -3,6 +3,7 @@ import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
+import { ConfirmHost } from "./components/ConfirmHost";
 import type { NewTaskDialogResult } from "./components/NewTaskDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
@@ -334,6 +335,7 @@ export function App(): JSX.Element {
         </DialogFooter>
       </Dialog>
       <ToastHost />
+      <ConfirmHost />
     </div>
   );
 }

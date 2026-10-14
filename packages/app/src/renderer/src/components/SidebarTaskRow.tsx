@@ -34,9 +34,10 @@ const CHIP_BASE =
 /**
  * Live-presence indicator. Keeps the pre-redesign test ids so e2e coverage
  * carries over: `sidebar-row-spinner` while an agent turn runs (pulsing
- * halo — the "moving symbol while it works"), `sidebar-row-attached-dot`
- * for live-but-idle (solid green), `sidebar-row-status-dot` otherwise
- * (muted gray).
+ * halo — the "moving symbol while it works"), `sidebar-row-attention-dot`
+ * for live-but-idle — pi-home's ● "your move": the agent finished its loop
+ * and waits on you, so it is styled as attention (amber), not as a calm
+ * "all good" — and `sidebar-row-status-dot` otherwise (muted gray).
  */
 export function StatusDot({
   presence,
@@ -61,12 +62,12 @@ export function StatusDot({
     return (
       <span
         className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
-        data-testid="sidebar-row-attached-dot"
-        data-status="idle"
+        data-testid="sidebar-row-attention-dot"
+        data-status="attention"
         role="img"
-        aria-label="Agent attached, idle"
+        aria-label="Your move: agent waiting for input"
       >
-        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+        <span className="h-2 w-2 rounded-full bg-amber-400 ring-2 ring-amber-400/30" />
       </span>
     );
   }
@@ -157,8 +158,9 @@ export function SidebarTaskRow({
   const activity = presence?.runningTurn
     ? "working…"
     : presence?.live
-      ? "idle"
+      ? "your move"
       : undefined;
+  const attention = !presence?.runningTurn && !!presence?.live;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Enter" || event.key === " ") {
@@ -260,7 +262,14 @@ export function SidebarTaskRow({
           >
             <span className="font-medium text-muted-foreground">pi</span>
             <span aria-hidden>·</span>
-            <span className="truncate">{activity}</span>
+            <span
+              className={cn(
+                "truncate",
+                attention && "font-medium text-amber-300",
+              )}
+            >
+              {activity}
+            </span>
           </div>
         )}
       </div>

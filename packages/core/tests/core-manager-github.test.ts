@@ -19,7 +19,7 @@ import type {
   VersionAccess,
 } from "../src/contracts/github.js";
 import type { Clock, GlobalConfig } from "../src/contracts/index.js";
-import { type Core, createCore } from "../src/index.js";
+import { type Core, createCore, isToDoneConfirmation } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -192,9 +192,9 @@ async function fixture(): Promise<Fixture> {
   // identity is needed for these tests.
 
   await mkdir(stateDir, { recursive: true });
+  // No `movers` key: the built-in default order (an explicit [] disables).
   const config: GlobalConfig = {
     automation: true,
-    movers: [],
     codeRoot,
     branchPrefix: "",
   };
@@ -222,7 +222,6 @@ async function writeConfig(
     join(f.stateDir, "config.json"),
     JSON.stringify({
       automation: true,
-      movers: [],
       codeRoot: f.codeRoot,
       branchPrefix: "",
       ...patch,
@@ -301,7 +300,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
 });
 
 describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
-  it("removes a clean worktree and keeps the branch when the PR never merged", async () => {
+  it("asks before deleting an unmerged workspace; cancel leaves everything, confirming removes the worktree and -D's the branch", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -311,29 +310,47 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
+      .worktreePath!;
+    // A commit only on the task branch: `git branch -d` would refuse it.
+    await writeFile(join(worktree, "feature.txt"), "feature\n");
+    await git(["add", "."], worktree);
+    await gitCommit(worktree, "feature work");
 
-    const result = await f.core.commands.toDone(task.id);
+    const question = await f.core.commands.toDone(task.id);
 
-    expect(result.task.state).toBe("done");
-    expect(result.warning).toBeUndefined();
+    expect(question).toEqual({
+      requiresConfirmation: "unmerged",
+      detail: expect.stringContaining("isn't merged"),
+    });
+    // Not moved, nothing removed (a cancelled dialog = this state).
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBe(worktree);
+    expect(await git(["branch", "--list", task.branch!], f.checkout)).toContain(
+      task.branch!,
+    );
+
+    const result = await f.core.commands.toDone(task.id, {
+      force: { deleteUnmerged: true },
+    });
+
+    expect(isToDoneConfirmation(result)).toBe(false);
+    expect(result).toMatchObject({ task: { state: "done" } });
+    expect(result).not.toHaveProperty("warning");
     // The binding is parked (worktree cleared), not deleted: its session
     // identity survives for a later reopen.
     const parked = await f.core.commands.getTaskWorkspace(task.id);
     expect(parked).toBeDefined();
     expect(parked?.worktreePath).toBeUndefined();
-    const worktrees = await git(
-      ["worktree", "list", "--porcelain"],
-      f.checkout,
-    );
-    expect(worktrees).not.toContain(task.branch!);
-    // The branch itself still exists (PR never merged, so it was never deleted).
-    expect(await git(["branch", "--list", task.branch!], f.checkout)).toContain(
-      task.branch!,
-    );
+    expect(
+      await git(["worktree", "list", "--porcelain"], f.checkout),
+    ).not.toContain(task.branch!);
+    expect(await git(["branch", "--list", task.branch!], f.checkout)).toBe("");
   });
 
-  it("marks done anyway and surfaces a warning when the worktree is dirty", async () => {
+  it("asks about uncommitted changes first, then the unmerged branch; with both answers it force-removes and lands", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -343,19 +360,64 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
-    const binding = await f.core.commands.getTaskWorkspace(task.id);
-    await writeFile(join(binding!.worktreePath!, "scratch.txt"), "dirty\n");
+    const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
+      .worktreePath!;
+    await writeFile(join(worktree, "scratch.txt"), "dirty\n");
 
-    const result = await f.core.commands.toDone(task.id);
+    expect(await f.core.commands.toDone(task.id)).toEqual({
+      requiresConfirmation: "dirty",
+      detail: expect.stringContaining("uncommitted changes"),
+    });
+    expect(
+      await f.core.commands.toDone(task.id, { force: { removeDirty: true } }),
+    ).toMatchObject({ requiresConfirmation: "unmerged" });
+    // Still untouched after two questions.
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect(await git(["status", "--porcelain"], worktree)).toContain(
+      "scratch.txt",
+    );
 
-    expect(result.task.state).toBe("done");
-    expect(result.warning).toMatch(/worktree left in place/i);
-    // The dirty worktree was left intact rather than destroyed.
-    expect(await f.core.commands.getTaskWorkspace(task.id)).toBeDefined();
+    const result = await f.core.commands.toDone(task.id, {
+      force: { removeDirty: true, deleteUnmerged: true },
+    });
+
+    expect(result).toMatchObject({ task: { state: "done" } });
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBeUndefined();
+    expect(
+      await git(["worktree", "list", "--porcelain"], f.checkout),
+    ).not.toContain(task.branch!);
   });
 
-  it("marks done anyway and surfaces a warning when a merged branch cannot be safely deleted locally", async () => {
+  it("never asks about a worktree open in a live pane: it lands with a warning and keeps the worktree", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const task = await f.core.commands.createTask({
+      title: "Add widget",
+      initialPrompt: "do it",
+      repositoryId: repo.id,
+      start: true,
+    });
+    const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
+      .worktreePath!;
+    await writeFile(join(worktree, "scratch.txt"), "dirty\n");
+
+    const result = await f.core.commands.toDone(task.id, {
+      protectedPaths: [worktree],
+    });
+
+    expect(result).toMatchObject({
+      task: { state: "done" },
+      warning: expect.stringMatching(/live session/),
+    });
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBe(worktree);
+  });
+
+  it("force-deletes (-D) a merged branch even though a squash merge left it unmerged locally", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -379,14 +441,14 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     const result = await f.core.commands.toDone(task.id);
 
     expect(result.task.state).toBe("done");
-    expect(result.warning).toMatch(/branch left in place/i);
+    expect(result.warning).toBeUndefined();
     // The worktree itself was removed cleanly (it had no uncommitted changes).
     expect(
       (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
     ).toBeUndefined();
-    expect(await git(["branch", "--list", task.branch!], f.checkout)).toContain(
-      task.branch!,
-    );
+    // `git branch -d` would refuse (the commit never reached local main);
+    // a merged PR is proof enough, so the branch is gone.
+    expect(await git(["branch", "--list", task.branch!], f.checkout)).toBe("");
   });
 });
 

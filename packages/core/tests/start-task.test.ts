@@ -417,6 +417,7 @@ describe.skipIf(!gitAvailable)("toDone protectedPaths", () => {
     if (!worktreePath) throw new Error("expected a worktree");
     const result = await commands.toDone(task.id, {
       protectedPaths: [`${worktreePath}-other`],
+      force: { deleteUnmerged: true },
     });
     expect(result.warning).toBeUndefined();
     expect(await exists(worktreePath)).toBe(false);

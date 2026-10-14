@@ -20,8 +20,12 @@ import type {
   PresenceSnapshot,
   TerminalCreateOptions,
   TerminalCreateResult,
+  ToDoneForce,
 } from "../preload/api";
-import { isAllowedExternalUrl } from "./external-url";
+import {
+  githubHostsFromRepositoryIds,
+  isAllowedExternalUrl,
+} from "./external-url";
 import {
   activeSessionCwds,
   activeSessionPids,
@@ -132,8 +136,20 @@ function registerCoreIpc(): void {
   );
   // Main owns the ptys, so it (not the renderer) supplies the live pane
   // cwds core must never remove a worktree out from under.
-  ipcMain.handle("core:toDone", (_event, taskId: string) =>
-    core.commands.toDone(taskId, { protectedPaths: activeSessionCwds() }),
+  ipcMain.handle(
+    "core:toDone",
+    (_event, taskId: string, options: { force?: ToDoneForce } | undefined) =>
+      core.commands.toDone(taskId, {
+        protectedPaths: activeSessionCwds(),
+        ...(options?.force
+          ? {
+              force: {
+                removeDirty: options.force.removeDirty === true,
+                deleteUnmerged: options.force.deleteUnmerged === true,
+              },
+            }
+          : {}),
+      }),
   );
   ipcMain.handle(
     "core:reopenTask",
@@ -250,7 +266,12 @@ function pushRefreshWarning(warning: string | undefined): void {
 // returns) warnings exactly the same way.
 async function performRefresh(): Promise<{ warnings: string[] }> {
   try {
-    const result = await core.commands.refresh();
+    // Live pane cwds: neither a mover-driven landing nor the done-cleanup
+    // retry may remove a worktree a pane is still running in. Overlapping
+    // calls (timer + manual `g`) are joined by core's single-flight refresh.
+    const result = await core.commands.refresh({
+      protectedPaths: activeSessionCwds(),
+    });
     pushRefreshWarning(
       result.warnings.length > 0 ? result.warnings.join("; ") : undefined,
     );
@@ -425,15 +446,26 @@ function createWindow(): void {
 
 /**
  * The renderer's only way to open a link in the user's default browser (it
- * has no Node/shell access). Every URL is checked against the github.com
- * allowlist in external-url.ts first; anything else resolves `false` and is
- * never handed to the OS.
+ * has no Node/shell access). Every URL is checked against the allowlist in
+ * external-url.ts first (github.com, plus the GitHub Enterprise hosts of
+ * discovered repositories); anything else resolves `false` and is never
+ * handed to the OS.
  */
 function registerShellIpc(): void {
   ipcMain.handle(
     "shell:openExternal",
     async (_event, url: unknown): Promise<boolean> => {
-      if (!isAllowedExternalUrl(url)) return false;
+      if (!isAllowedExternalUrl(url)) {
+        // Not github.com: allow a GitHub Enterprise host only when a
+        // discovered repository actually lives there (looked up on demand).
+        const repositories = await core.commands
+          .listRepositories()
+          .catch(() => []);
+        const hosts = githubHostsFromRepositoryIds(
+          repositories.map((repo) => repo.id),
+        );
+        if (!isAllowedExternalUrl(url, hosts)) return false;
+      }
       try {
         await shell.openExternal(url);
         return true;

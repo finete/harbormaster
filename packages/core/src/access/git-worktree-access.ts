@@ -66,7 +66,7 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     path: string,
     force = false,
   ): Promise<void> {
-    if (!force && (await this.isDirty(path))) {
+    if (!force && (await this.isWorktreeDirty(path))) {
       throw new Error(
         `Refusing to remove dirty worktree: ${path} (pass force to override)`,
       );
@@ -117,7 +117,7 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     return { path, head, detached: !branch, ...(branch ? { branch } : {}) };
   }
 
-  private async isDirty(path: string): Promise<boolean> {
+  async isWorktreeDirty(path: string): Promise<boolean> {
     const status = await run(
       "git",
       ["status", "--porcelain=v1", "--untracked-files=all"],

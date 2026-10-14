@@ -4,12 +4,11 @@
 // stageLabel }`, no separately tracked commit/pull-request snapshot — the
 // task's own `pr.mergeCommit` is the single source of truth once merged).
 //
-// A merged PR enters the first configured deployment stage. A repository
-// with no deployment pipeline configured is a deliberate simplification:
-// this mover stays out of the way entirely (no pipeline => no automatic
-// landing) rather than pi-home's stage-less "manual production wait", which
-// Harbormaster's AwaitingKind has no slot for. Stage hooks decide
-// advancement; after the last stage the task lands via `{ type: "done" }`
+// A merged PR enters the first configured deployment stage, or — when the
+// repository has no pipeline — pi-home's stage-less manual production wait
+// (the reserved `PRODUCTION_STAGE`, which only a manual Done ever leaves). A
+// stage-less wait in a repository that has since gained a pipeline adopts
+// the first stage. Stage hooks decide advancement; after the last stage the task lands via `{ type: "done" }`
 // (the manager's safe cleanup path). Because deployments can reach a later
 // environment first (e.g. a hotfix goes to prod before pre), the mover
 // checks hooked stages from the furthest one back to the current stage and
@@ -18,7 +17,12 @@
 
 import type { BoardMove, TaskMover } from "../../contracts/addons.js";
 import type { DeploymentStageConfig } from "../../contracts/model.js";
-import { firstStage, stageAfter } from "../deployment.js";
+import {
+  firstStage,
+  isProductionWait,
+  PRODUCTION_STAGE,
+  stageAfter,
+} from "../deployment.js";
 import { observePullRequest } from "../pull-request-observation.js";
 
 export const deploymentPipelineMover: TaskMover = {
@@ -30,8 +34,7 @@ export const deploymentPipelineMover: TaskMover = {
       task.pr &&
       observePullRequest(task.state, task.awaiting, task.pr) === "merged"
     ) {
-      const first = firstStage(stages);
-      return first ? enterStage(first) : { type: "stay" };
+      return enterStage(firstStage(stages) ?? PRODUCTION_STAGE);
     }
     const awaiting = task.awaiting;
     if (
@@ -40,6 +43,11 @@ export const deploymentPipelineMover: TaskMover = {
       stages.length === 0
     ) {
       return { type: "stay" };
+    }
+    // Legacy stage-less wait in a now-configured repository: adopt stage 1.
+    if (isProductionWait(awaiting.stageId)) {
+      const first = firstStage(stages);
+      return first ? enterStage(first) : { type: "stay" };
     }
 
     const currentIndex = stages.findIndex(

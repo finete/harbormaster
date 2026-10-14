@@ -2,6 +2,7 @@ import type { Task } from "@harbormaster/core";
 import { describe, expect, it } from "vitest";
 import {
   awaitingReasonLabel,
+  awaitingSourceLine,
   buildTaskWidgetLines,
   prStatusColor,
   prStatusWord,
@@ -221,7 +222,7 @@ describe("buildTaskWidgetLines", () => {
     expect(lines?.[0]).toContain("Dev · task · Fix the login bug");
   });
 
-  it("returns two lines when a PR exists, PR line first", () => {
+  it("leads with the awaiting source, then the PR line, then the summary (title linked to the open PR)", () => {
     const lines = buildTaskWidgetLines(
       baseTask({
         state: "awaiting",
@@ -234,10 +235,46 @@ describe("buildTaskWidgetLines", () => {
       }),
       fakeTheme,
     );
-    expect(lines).toHaveLength(2);
-    expect(lines?.[0]).toContain("PR #11");
-    expect(lines?.[1]).toContain(
-      "Awaiting · review · task · Fix the login bug",
+    expect(lines).toHaveLength(3);
+    expect(lines?.[0]).toMatch(/^\[success\]Review · .*PR #11/);
+    expect(lines?.[1]).toContain("PR #11");
+    expect(lines?.[2]).toContain("Awaiting · review · task · ");
+    expect(lines?.[2]).toContain(
+      "\x1b]8;;https://github.com/x/y/pull/11\x1b\\Fix the login bug",
     );
+  });
+
+  it("names a deployment wait's merged PR and target branch", () => {
+    const line = awaitingSourceLine(
+      baseTask({
+        state: "awaiting",
+        awaiting: {
+          kind: "deploy",
+          stageId: "__production",
+          stageLabel: "Production deploy",
+        },
+        pr: {
+          number: 12,
+          state: "merged",
+          url: "https://github.com/x/y/pull/12",
+          mergeCommit: { oid: "abc1234", targetBranch: "main" },
+        },
+      }),
+      fakeTheme,
+    );
+    expect(line).toContain("Production deploy · ");
+    expect(line).toContain("#12 → main");
+  });
+
+  it("links a Slack wait's permalink and leaves the title unlinked without an open PR", () => {
+    const task = baseTask({
+      state: "awaiting",
+      awaiting: { kind: "slack", permalink: "https://slack.example/p1" },
+    });
+    expect(awaitingSourceLine(task, fakeTheme)).toContain(
+      "\x1b]8;;https://slack.example/p1",
+    );
+    expect(awaitingSourceLine(baseTask(), fakeTheme)).toBeUndefined();
+    expect(taskSummaryLine(task, fakeTheme)).not.toContain("\x1b]8;");
   });
 });

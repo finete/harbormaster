@@ -8,6 +8,7 @@ import {
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { AwaitingKind, TaskState } from "../../../preload/api";
+import { isConfirmOpen } from "../confirm";
 import {
   flattenBoard,
   useBoard,
@@ -24,11 +25,11 @@ import { modKeyLabel } from "../lib/platform";
 import {
   canReview,
   canStart,
+  moveTaskMutation,
   startTaskMutation,
   toDoneMutation,
   toReviewMutation,
 } from "../lib/task-mutations";
-import { describeThrown, pushToast } from "../toast";
 import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
 import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
@@ -40,11 +41,12 @@ import { Kbd } from "./ui/kbd";
  * Kanban board — renders @harbormaster/core's live board projection exactly
  * as returned (columns -> groups -> tasks; see /packages/core/src/engines
  * /board-grouping.ts). The board never holds its own copy of task
- * placement: every drag just calls `moveTask` (or `startTask` for a
- * backlog -> dev drop) and waits for the
- * "board-changed" push to re-render, so there is nothing to roll back if a
- * move is rejected (e.g. an illegal transition) \u2014 the UI simply doesn't
- * change.
+ * placement: every drag routes through the same mutation its button/key
+ * uses (`startTask` for backlog -> dev, `toDone` for Done, `toReview` for
+ * Awaiting / Review on a branch-backed task, `moveTask` otherwise) and
+ * waits for the "board-changed" push to re-render, so there is nothing to
+ * roll back if a move is rejected (e.g. an illegal transition): the UI
+ * simply doesn't change and the error surfaces as a toast.
  *
  * Also owns the pi-home-style TUI keymap (see lib/board-selection.ts):
  * arrow keys move a keyboard-selected card, Enter opens it, n/g/a/x/r/s
@@ -136,30 +138,34 @@ export function Board({
     // it has a repository but no workspace yet, and degrades to a plain
     // move otherwise — so every backlog->dev drop routes through it.
     if (row.state === "backlog" && targetState === "dev") {
-      void window.harbormaster.core
-        .startTask(taskId)
-        .catch((error: unknown) => {
-          pushToast(describeThrown(error), "error");
-        });
+      void startTaskMutation(taskId);
       return;
     }
 
-    void window.harbormaster.core
-      .moveTask(taskId, targetState)
-      .catch((error: unknown) => {
-        console.error("moveTask failed:", error);
-      });
+    // A drop on Done is the same gesture as the Done button / `x`: the safe
+    // cleanup path (worktree + merged branch) with its warning toast, never
+    // a bare column move that would leave the workspace behind.
+    if (targetState === "done") {
+      void toDoneMutation(taskId);
+      return;
+    }
+
+    void moveTaskMutation(taskId, targetState);
   }
 
   function confirmAwaiting(awaiting: AwaitingKind): void {
     const taskId = pendingDrop?.taskId;
     setPendingDrop(null);
     if (!taskId) return;
-    void window.harbormaster.core
-      .moveTask(taskId, "awaiting", { awaiting })
-      .catch((error: unknown) => {
-        console.error("moveTask failed:", error);
-      });
+    const task = flattenBoard(columns).find((r) => r.task.id === taskId)?.task;
+    // "Review" for a branch-backed task is the To review action (push +
+    // open/reuse the PR), exactly like the button / `r`; Slack and deploy
+    // reasons (and review for scratch work) are plain column moves.
+    if (awaiting.kind === "review" && task && canReview(task)) {
+      void toReviewMutation(taskId);
+      return;
+    }
+    void moveTaskMutation(taskId, "awaiting", { awaiting });
   }
 
   // Keyboard selection follows the live board: starts at the first card,
@@ -196,7 +202,7 @@ export function Board({
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent): void {
-      if (newTaskOpen || pendingDrop) return;
+      if (newTaskOpen || pendingDrop || isConfirmOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
