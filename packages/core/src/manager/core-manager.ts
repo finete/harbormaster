@@ -122,7 +122,10 @@ export class CoreManager implements CoreCommands {
 
   async listRepositories(): Promise<RepositoryInfo[]> {
     const config = await this.deps.config.load();
-    return this.deps.repositories.discoverRepositories(config.codeRoot ?? "");
+    return this.deps.repositories.discoverRepositories(
+      config.codeRoot ?? "",
+      preferredCheckoutsFromConfig(config),
+    );
   }
 
   async getTaskWorkspace(
@@ -560,6 +563,7 @@ export class CoreManager implements CoreCommands {
         const config = await this.deps.config.load();
         const repos = await this.deps.repositories.discoverRepositories(
           config.codeRoot ?? "",
+          preferredCheckoutsFromConfig(config),
         );
         const repo = repos.find(
           (candidate) => candidate.id === task.repositoryId,
@@ -782,6 +786,7 @@ export class CoreManager implements CoreCommands {
     try {
       const repos = await this.deps.repositories.discoverRepositories(
         config.codeRoot ?? "",
+        preferredCheckoutsFromConfig(config),
       );
       return new Map(repos.map((repo) => [repo.id, repo]));
     } catch {
@@ -1144,6 +1149,7 @@ export class CoreManager implements CoreCommands {
     const config = loadedConfig ?? (await this.deps.config.load());
     const repos = await this.deps.repositories.discoverRepositories(
       config.codeRoot ?? "",
+      preferredCheckoutsFromConfig(config),
     );
     const repo = repos.find((candidate) => candidate.id === repositoryId);
     if (!repo) throw new Error(`Repository not found: ${repositoryId}`);
@@ -1254,4 +1260,16 @@ function isProtectedPath(
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Repository id -> configured primary-checkout override, for `GitRepositoryAccess.discoverRepositories`. */
+function preferredCheckoutsFromConfig(
+  config: GlobalConfig,
+): Record<string, string> {
+  const preferred: Record<string, string> = {};
+  for (const [id, repoConfig] of Object.entries(config.repositories ?? {})) {
+    if (repoConfig.preferredCheckout)
+      preferred[id] = repoConfig.preferredCheckout;
+  }
+  return preferred;
 }

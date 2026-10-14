@@ -112,9 +112,36 @@ function normalizeRepositories(
       entry.movers,
     );
     if (movers) config.movers = movers;
+    const preferredCheckout = normalizePreferredCheckout(
+      repositoryId,
+      entry.preferredCheckout,
+    );
+    if (preferredCheckout) config.preferredCheckout = preferredCheckout;
+    else delete config.preferredCheckout;
     repositories[repositoryId] = config;
   }
   return repositories;
+}
+
+/**
+ * Validated leniently: only the type is checked (a non-empty string once
+ * trimmed, else dropped). Whether the path is actually a discoverable,
+ * non-linked-worktree checkout of this repository is a
+ * `GitRepositoryAccess.discoverRepositories` concern at discovery time, not
+ * a config-load concern (git access is out of scope here).
+ */
+function normalizePreferredCheckout(
+  repositoryId: string,
+  value: unknown,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new Error(
+      `repositories.${repositoryId}.preferredCheckout must be a string`,
+    );
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function normalizeDeployment(

@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import type { RepositoryInfo } from "../../../preload/api";
+import { repositoryLabel } from "../lib/repository-label";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Dialog, DialogFooter } from "./ui/dialog";
@@ -180,7 +181,7 @@ export function NewTaskDialog({
                 value={repo.id}
                 data-testid="new-task-repo-option"
               >
-                {repo.id}
+                {repositoryLabel(repo)}
               </option>
             ))}
           </select>
