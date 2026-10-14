@@ -1,5 +1,6 @@
 import {
   type DockviewApi,
+  type DockviewGroupPanel,
   DockviewReact,
   type DockviewReadyEvent,
 } from "dockview-react";
@@ -9,9 +10,12 @@ import "dockview-react/dist/styles/dockview.css";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import { defaultTerminalTitle } from "../lib/terminal-title";
 import { cn } from "../lib/utils";
+import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { TaskActions } from "./TaskActions";
 import { TerminalPane } from "./TerminalPane";
+import { TerminalTab } from "./TerminalTab";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
@@ -19,7 +23,18 @@ const components = {
   terminal: TerminalPane,
 };
 
+const tabComponents = {
+  terminal: TerminalTab,
+};
+
 let nextPanelId = 1;
+
+/**
+ * A click in the unoccupied area right of a group's tabs opens a new plain
+ * shell in that group (cmux-style); a drag (pointerdown/up further apart
+ * than this, e.g. dragging the void to reposition the group) must not.
+ */
+const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
 
 /**
  * One task's terminal workspace: a dedicated dockview instance, started with
@@ -50,6 +65,13 @@ export function TaskWorkspace({
   // panel never spawns early with the wrong cwd.
   const [cwd, setCwd] = useState<string | undefined>(undefined);
   const [cwdLoaded, setCwdLoaded] = useState(false);
+  // Read by the split-button header action and the tab-strip void-click
+  // handler, both of which are wired up once (stable function identities —
+  // see below) and must always see the latest cwd/taskId/api without
+  // forcing dockview to recreate its header-actions/group DOM wiring.
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
+  const apiRef = useRef<DockviewApi | null>(null);
   // Live task record for the header's "To review"/"Done" actions; the same
   // live board every other view reads (see core-client.ts), so the actions'
   // enabled state always reflects the latest state/branch/repositoryId.
@@ -83,10 +105,11 @@ export function TaskWorkspace({
       api.addPanel({
         id: `${taskId}-terminal-${nextPanelId++}`,
         component: "terminal",
-        // The first panel in a bound task's workspace runs pi (see
-        // TerminalPane.tsx / main/index.ts's pty:create handler); scratch
-        // tasks (no `cwd`, no binding) keep the plain-shell title/behavior.
-        title: cwd ? "Pi" : "Shell",
+        tabComponent: "terminal",
+        // Initial title only — TerminalPane overwrites this on mount via
+        // dockview's panel api as soon as it knows pi's launch outcome, and
+        // tracks live OSC title changes after that (see lib/terminal-title).
+        title: defaultTerminalTitle({ cwd, primary: true }),
         params: { cwd, taskId, primary: true },
       });
       return;
@@ -99,15 +122,111 @@ export function TaskWorkspace({
       api.addPanel({
         id: `${taskId}-terminal-${nextPanelId++}`,
         component: "terminal",
-        title: "Pi",
+        tabComponent: "terminal",
+        title: defaultTerminalTitle({ cwd, primary: true }),
         params: { cwd, taskId, primary: true },
       });
     }
   }, [api, cwdLoaded, cwd, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
+    apiRef.current = event.api;
     setApi(event.api);
   }
+
+  // Stable identity across renders (see cwdRef/apiRef above): dockview's
+  // react layer recreates every group's header-actions component instance
+  // whenever this function component's identity changes, so it must never
+  // be redefined per-render.
+  const splitGroupRef = useRef<
+    (groupId: string, direction: "right" | "below") => void
+  >(() => {});
+  splitGroupRef.current = (groupId, direction) => {
+    const current = apiRef.current;
+    if (!current) return;
+    const group = current.getGroup(groupId);
+    if (!group) return;
+    current.addPanel({
+      id: `${taskId}-terminal-${nextPanelId++}`,
+      component: "terminal",
+      tabComponent: "terminal",
+      title: defaultTerminalTitle({ cwd: cwdRef.current, primary: false }),
+      params: { cwd: cwdRef.current, taskId, primary: false },
+      position: { referenceGroup: group.id, direction },
+    });
+  };
+  const headerActionsComponentRef = useRef(
+    makeGroupHeaderActions((groupId, direction) =>
+      splitGroupRef.current(groupId, direction),
+    ),
+  );
+
+  // Click-empty-tab-strip-space = new shell (cmux-style): attach a
+  // click-not-drag listener to each group's `.void-container` (dockview's
+  // own DOM element for the unoccupied tab-strip area right of the tabs —
+  // see dockview-core's TabsContainer/VoidContainer), not a global
+  // listener, so dragging that void to reposition a group is unaffected and
+  // clicks on actual tabs never reach it.
+  useEffect(() => {
+    if (!api) return;
+    const detachers = new Map<string, () => void>();
+
+    function attach(group: DockviewGroupPanel): void {
+      if (detachers.has(group.id)) return;
+      const voidEl =
+        group.element.querySelector<HTMLElement>(".void-container");
+      if (!voidEl) return;
+      voidEl.setAttribute("data-testid", "tab-strip-void");
+      let pointerDownAt: { x: number; y: number } | null = null;
+      const onPointerDown = (event: PointerEvent): void => {
+        if (event.button !== 0) return;
+        pointerDownAt = { x: event.clientX, y: event.clientY };
+      };
+      const onPointerUp = (event: PointerEvent): void => {
+        const start = pointerDownAt;
+        pointerDownAt = null;
+        if (!start) return;
+        const dx = Math.abs(event.clientX - start.x);
+        const dy = Math.abs(event.clientY - start.y);
+        if (
+          dx > VOID_CLICK_DRAG_THRESHOLD_PX ||
+          dy > VOID_CLICK_DRAG_THRESHOLD_PX
+        ) {
+          return;
+        }
+        const current = apiRef.current;
+        if (!current) return;
+        current.addPanel({
+          id: `${taskId}-terminal-${nextPanelId++}`,
+          component: "terminal",
+          tabComponent: "terminal",
+          title: defaultTerminalTitle({ cwd: cwdRef.current, primary: false }),
+          params: { cwd: cwdRef.current, taskId, primary: false },
+          position: { referenceGroup: group.id, direction: "within" },
+        });
+      };
+      voidEl.addEventListener("pointerdown", onPointerDown);
+      voidEl.addEventListener("pointerup", onPointerUp);
+      detachers.set(group.id, () => {
+        voidEl.removeEventListener("pointerdown", onPointerDown);
+        voidEl.removeEventListener("pointerup", onPointerUp);
+      });
+    }
+
+    for (const group of api.groups) attach(group);
+    const addGroupDisposable = api.onDidAddGroup((group) => attach(group));
+    const removeGroupDisposable = api.onDidRemoveGroup((group) => {
+      detachers.get(group.id)?.();
+      detachers.delete(group.id);
+    });
+
+    return () => {
+      addGroupDisposable.dispose();
+      removeGroupDisposable.dispose();
+      for (const detach of detachers.values()) detach();
+      detachers.clear();
+    };
+  }, [api, taskId]);
 
   function addTerminal(): void {
     if (!api) return;
@@ -115,7 +234,8 @@ export function TaskWorkspace({
     api.addPanel({
       id: `${taskId}-terminal-${nextPanelId++}`,
       component: "terminal",
-      title: "Shell",
+      tabComponent: "terminal",
+      title: defaultTerminalTitle({ cwd, primary: false }),
       params: { cwd, taskId, primary: false },
       ...(activePanel
         ? {
@@ -183,6 +303,8 @@ export function TaskWorkspace({
           className="dockview-theme-dark h-full w-full"
           onReady={onReady}
           components={components}
+          tabComponents={tabComponents}
+          rightHeaderActionsComponent={headerActionsComponentRef.current}
         />
       </div>
     </div>
