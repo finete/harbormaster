@@ -3,7 +3,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Crosshair,
   LayoutGrid,
+  Pin,
   Plus,
   Search,
   X,
@@ -13,20 +15,36 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useBoard, usePresenceMap } from "../core-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Task } from "../../../preload/api";
+import { useBoard, usePresenceMap, useUnreadTaskIds } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import { cycleTaskId } from "../lib/sidebar-cycle";
+import {
+  readCollapsedGroups,
+  readPinnedTaskIds,
+  storeCollapsedGroups,
+  storePinnedTaskIds,
+  togglePinned,
+} from "../lib/sidebar-persistence";
 import { cn } from "../lib/utils";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
+import {
+  type ContextMenuItem,
+  SidebarRowContextMenu,
+} from "./SidebarRowContextMenu";
 import { SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
 import {
   clampSidebarWidth,
   groupRows,
   matchesQuery,
+  partitionPinned,
+  pullRequestUrl,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   sidebarRows,
+  visibleTaskOrder,
 } from "./sidebar-model";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
@@ -35,6 +53,8 @@ const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
 /** Relative times ("now", "3m", ...) re-render at least this often. */
 const CLOCK_TICK_MS = 30_000;
+/** How long a revealed row stays highlighted (item 1). */
+const REVEAL_FLASH_MS = 900;
 
 function readStoredWidth(): number {
   try {
@@ -108,6 +128,7 @@ export function Sidebar({
   const columns = useBoard();
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
+  const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const openNewTaskSignalRef = useRef(openNewTaskSignal);
   useEffect(() => {
@@ -120,8 +141,10 @@ export function Sidebar({
     }
   }, [openNewTaskSignal]);
   const [query, setQuery] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
-    () => new Set(),
+  // Saved group-collapse state (Orca polish item 2): same localStorage
+  // pattern as rail width/collapse below, restored on launch.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
+    readCollapsedGroups(window.localStorage),
   );
   const [collapsed, setCollapsed] = useState(readStoredCollapsed);
   const [width, setWidth] = useState(readStoredWidth);
@@ -129,21 +152,66 @@ export function Sidebar({
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Pinned tasks (Orca polish item 3), persisted ids; render above the repo
+  // groups via `partitionPinned` below.
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() =>
+    readPinnedTaskIds(window.localStorage),
+  );
+  // Inline rename (item 4): only one row at a time.
+  const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
+  // Right-click context menu (item 6).
+  const [contextMenu, setContextMenu] = useState<{
+    taskId: string;
+    x: number;
+    y: number;
+    worktreePath?: string;
+  } | null>(null);
+  // Scroll-to-current / reveal (item 1): the task id to scroll into view +
+  // flash, bumped by a nonce so repeated requests for the same task
+  // (clicking the crosshair twice) still re-trigger.
+  const [revealRequest, setRevealRequest] = useState<{
+    taskId: string;
+    nonce: number;
+  } | null>(null);
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null);
+  const rowNodes = useRef(new Map<string, HTMLDivElement>());
+  const setRowRef = useCallback(
+    (taskId: string, node: HTMLDivElement | null): void => {
+      if (node) rowNodes.current.set(taskId, node);
+      else rowNodes.current.delete(taskId);
+    },
+    [],
+  );
+
   const rows = useMemo(
     () => sidebarRows(columns, presence, openedTaskIds),
     [columns, presence, openedTaskIds],
   );
   const groups = useMemo(() => groupRows(rows), [rows]);
+  const { pinned, rest: restGroups } = useMemo(
+    () => partitionPinned(groups, pinnedIds),
+    [groups, pinnedIds],
+  );
   const searching = query.trim().length > 0;
+  const visiblePinned = useMemo(
+    () => pinned.filter((row) => matchesQuery(row, query)),
+    [pinned, query],
+  );
   const visibleGroups = useMemo(
     () =>
-      groups
+      restGroups
         .map((group) => ({
           ...group,
           rows: group.rows.filter((row) => matchesQuery(row, query)),
         }))
         .filter((group) => group.rows.length > 0),
-    [groups, query],
+    [restGroups, query],
+  );
+  // The rail's full top-to-bottom task order as currently rendered; drives
+  // both keyboard cycling (item 5) and the reveal-filter-clear check (item 1).
+  const visibleOrder = useMemo(
+    () => visibleTaskOrder(visiblePinned, visibleGroups),
+    [visiblePinned, visibleGroups],
   );
 
   const toggleCollapsed = (): void => {
@@ -158,9 +226,198 @@ export function Sidebar({
       const next = new Set(current);
       if (next.has(label)) next.delete(label);
       else next.add(label);
+      storeCollapsedGroups(window.localStorage, next);
       return next;
     });
   };
+
+  const togglePin = (taskId: string): void => {
+    setPinnedIds((current) => {
+      const next = togglePinned(current, taskId);
+      storePinnedTaskIds(window.localStorage, next);
+      return next;
+    });
+  };
+
+  // --- Scroll-to-current / reveal (Orca polish item 1) ---------------------
+  const requestReveal = useCallback((taskId: string): void => {
+    setRevealRequest((current) => ({
+      taskId,
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+  }, []);
+
+  const prevFocusedRef = useRef(focusedTaskId);
+  useEffect(() => {
+    if (focusedTaskId && focusedTaskId !== prevFocusedRef.current) {
+      requestReveal(focusedTaskId);
+    }
+    prevFocusedRef.current = focusedTaskId;
+  }, [focusedTaskId, requestReveal]);
+
+  // Only depends on the request itself and `query`: a filter that's hiding
+  // the target gets cleared here, and the effect re-runs (query changed) to
+  // finish the scroll+flash once the row is actually in the DOM. Does *not*
+  // depend on `rows`/`visibleOrder` so an unrelated presence push can't
+  // re-trigger (and re-scroll/re-flash) an already-handled request. Crucially,
+  // a handled request is cleared (`setRevealRequest(null)`) once it's either
+  // resolved or dropped: left set, it would re-fire on *any later* unrelated
+  // query edit (e.g. the very next time the user types a search that happens
+  // to hide whatever task was last revealed) and silently stomp the user's
+  // own filter back to empty.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately keyed on [revealRequest, query] only, see the comment above.
+  useEffect(() => {
+    if (!revealRequest) return;
+    const { taskId } = revealRequest;
+    const existsAtAll = rows.some((row) => row.task.id === taskId);
+    if (!existsAtAll) {
+      setRevealRequest(null);
+      return;
+    }
+    const isVisible = visibleOrder.includes(taskId);
+    if (!isVisible) {
+      if (searching) setQuery("");
+      return; // wait for the query-clear to commit; this effect reruns on `query`.
+    }
+    setRevealRequest(null);
+    const raf = requestAnimationFrame(() => {
+      rowNodes.current.get(taskId)?.scrollIntoView({ block: "nearest" });
+      setFlashTaskId(taskId);
+    });
+    const timer = window.setTimeout(() => {
+      setFlashTaskId((current) => (current === taskId ? null : current));
+    }, REVEAL_FLASH_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [revealRequest, query]);
+
+  // --- Keyboard cycling (Orca polish item 5) --------------------------------
+  // Main intercepts Cmd/Ctrl+Shift+Up/Down ahead of the terminal (see
+  // main/index.ts's before-input-event handler) and pushes a plain
+  // direction; this opens the next/previous row through the same guarded
+  // `onSelectTask` path a click uses.
+  useEffect(
+    () =>
+      window.harbormaster.core.onCycleTask((direction) => {
+        const next = cycleTaskId(visibleOrder, focusedTaskId, direction);
+        if (next) onSelectTask(next);
+      }),
+    [visibleOrder, focusedTaskId, onSelectTask],
+  );
+
+  // --- Inline rename (Orca polish item 4) -----------------------------------
+  const commitRename = useCallback((taskId: string, title: string): void => {
+    setRenamingTaskId(null);
+    void window.harbormaster.core
+      .updateTaskState(taskId, { title })
+      .catch((error: unknown) => {
+        console.error("rename failed:", error);
+      });
+  }, []);
+
+  // --- Context menu (Orca polish item 6) ------------------------------------
+  const openContextMenu = useCallback(
+    (taskId: string, x: number, y: number): void => {
+      setContextMenu({ taskId, x, y });
+      void window.harbormaster.core.getTaskWorkspace(taskId).then((binding) => {
+        setContextMenu((current) =>
+          current && current.taskId === taskId
+            ? {
+                ...current,
+                ...(binding?.worktreePath
+                  ? { worktreePath: binding.worktreePath }
+                  : {}),
+              }
+            : current,
+        );
+      });
+    },
+    [],
+  );
+
+  function contextMenuItems(task: Task): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [
+      {
+        key: "close",
+        label: "Close workspace",
+        onSelect: () => onCloseTask(task.id),
+      },
+      {
+        key: pinnedIds.has(task.id) ? "unpin" : "pin",
+        label: pinnedIds.has(task.id) ? "Unpin" : "Pin",
+        onSelect: () => togglePin(task.id),
+      },
+      {
+        key: "rename",
+        label: "Rename",
+        onSelect: () => setRenamingTaskId(task.id),
+      },
+      {
+        key: "copy-branch",
+        label: "Copy branch",
+        disabled: !task.branch,
+        onSelect: () => {
+          if (task.branch) void navigator.clipboard.writeText(task.branch);
+        },
+      },
+    ];
+    if (contextMenu?.worktreePath) {
+      const worktreePath = contextMenu.worktreePath;
+      items.push({
+        key: "copy-worktree-path",
+        label: "Copy worktree path",
+        onSelect: () => void navigator.clipboard.writeText(worktreePath),
+      });
+      items.push({
+        key: "reveal-in-finder",
+        label: "Reveal in Finder",
+        onSelect: () => {
+          void window.harbormaster.shell.revealInFolder(worktreePath);
+        },
+      });
+    }
+    const prUrl = pullRequestUrl(task);
+    if (prUrl) {
+      items.push({
+        key: "open-pr",
+        label: "Open PR",
+        separatorBefore: true,
+        onSelect: () => void window.harbormaster.shell.openExternal(prUrl),
+      });
+    }
+    return items;
+  }
+
+  const contextMenuRow = contextMenu
+    ? rows.find((row) => row.task.id === contextMenu.taskId)
+    : undefined;
+
+  function renderRow(
+    row: ReturnType<typeof sidebarRows>[number],
+    isPinned: boolean,
+  ) {
+    return (
+      <SidebarTaskRow
+        key={row.task.id}
+        row={row}
+        selected={focusedTaskId === row.task.id}
+        now={now}
+        onSelect={onSelectTask}
+        onClose={onCloseTask}
+        pinned={isPinned}
+        unread={unreadTaskIds.has(row.task.id)}
+        isRenaming={renamingTaskId === row.task.id}
+        onRenameCommit={commitRename}
+        onRenameCancel={() => setRenamingTaskId(null)}
+        onRenameRequest={setRenamingTaskId}
+        onContextMenu={openContextMenu}
+        rowRef={setRowRef}
+        flash={flashTaskId === row.task.id}
+      />
+    );
+  }
 
   const commitWidth = (next: number): void => {
     const clamped = clampSidebarWidth(next);
@@ -303,12 +560,23 @@ export function Sidebar({
         </span>
         <button
           type="button"
+          data-testid="sidebar-reveal-button"
+          aria-label="Reveal current task"
+          title="Scroll to the focused task"
+          disabled={!focusedTaskId}
+          onClick={() => focusedTaskId && requestReveal(focusedTaskId)}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Crosshair className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <button
+          type="button"
           data-testid="sidebar-collapse"
           aria-expanded={true}
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
           onClick={toggleCollapsed}
-          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
         >
           <ChevronsLeft className="h-4 w-4" aria-hidden />
         </button>
@@ -357,13 +625,32 @@ export function Sidebar({
             No open tasks — pick one from the Board.
           </p>
         )}
-        {rows.length > 0 && visibleGroups.length === 0 && (
-          <p
-            data-testid="sidebar-search-empty"
-            className="px-4 py-4 text-xs text-muted-foreground"
-          >
-            No tasks match “{query.trim()}”.
-          </p>
+        {rows.length > 0 &&
+          visiblePinned.length === 0 &&
+          visibleGroups.length === 0 && (
+            <p
+              data-testid="sidebar-search-empty"
+              className="px-4 py-4 text-xs text-muted-foreground"
+            >
+              No tasks match "{query.trim()}".
+            </p>
+          )}
+        {visiblePinned.length > 0 && (
+          <section data-testid="sidebar-pinned-section" className="pt-1">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Pin className="h-3 w-3 shrink-0 rotate-45" aria-hidden />
+              <span>Pinned</span>
+              <span
+                className="ml-auto font-normal tabular-nums text-muted-foreground/70"
+                data-testid="sidebar-pinned-count"
+              >
+                {visiblePinned.length}
+              </span>
+            </div>
+            <div className="border-y border-border/40">
+              {visiblePinned.map((row) => renderRow(row, true))}
+            </div>
+          </section>
         )}
         {visibleGroups.map((group) => {
           // A live filter always shows its matches, even inside a group
@@ -397,16 +684,7 @@ export function Sidebar({
               </button>
               {open && (
                 <div className="border-y border-border/40">
-                  {group.rows.map((row) => (
-                    <SidebarTaskRow
-                      key={row.task.id}
-                      row={row}
-                      selected={focusedTaskId === row.task.id}
-                      now={now}
-                      onSelect={onSelectTask}
-                      onClose={onCloseTask}
-                    />
-                  ))}
+                  {group.rows.map((row) => renderRow(row, false))}
                 </div>
               )}
             </section>
@@ -465,6 +743,15 @@ export function Sidebar({
         />
       </div>
       {newTaskDialog}
+      {contextMenu && contextMenuRow && (
+        <SidebarRowContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          testId="sidebar-row-context-menu"
+          items={contextMenuItems(contextMenuRow.task)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

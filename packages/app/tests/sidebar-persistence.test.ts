@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest";
+import {
+  readCollapsedGroups,
+  readPinnedTaskIds,
+  type StorageLike,
+  storeCollapsedGroups,
+  storePinnedTaskIds,
+  togglePinned,
+} from "../src/renderer/src/lib/sidebar-persistence";
+
+function fakeStorage(): StorageLike {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => {
+      map.set(key, value);
+    },
+  };
+}
+
+describe("collapsed groups persistence", () => {
+  it("round-trips an empty store as an empty set", () => {
+    const storage = fakeStorage();
+    expect(readCollapsedGroups(storage)).toEqual(new Set());
+  });
+
+  it("round-trips a stored set", () => {
+    const storage = fakeStorage();
+    storeCollapsedGroups(storage, new Set(["repo-a", "repo-b"]));
+    expect(readCollapsedGroups(storage)).toEqual(new Set(["repo-a", "repo-b"]));
+  });
+
+  it("tolerates corrupt JSON", () => {
+    const storage = fakeStorage();
+    storage.setItem("harbormaster.sidebar.collapsedGroups", "{not json");
+    expect(readCollapsedGroups(storage)).toEqual(new Set());
+  });
+
+  it("tolerates a non-array JSON value", () => {
+    const storage = fakeStorage();
+    storage.setItem("harbormaster.sidebar.collapsedGroups", '{"a":1}');
+    expect(readCollapsedGroups(storage)).toEqual(new Set());
+  });
+});
+
+describe("pinned task id persistence", () => {
+  it("round-trips a stored set", () => {
+    const storage = fakeStorage();
+    storePinnedTaskIds(storage, new Set(["t1", "t2"]));
+    expect(readPinnedTaskIds(storage)).toEqual(new Set(["t1", "t2"]));
+  });
+
+  it("reads back empty when never written", () => {
+    expect(readPinnedTaskIds(fakeStorage())).toEqual(new Set());
+  });
+});
+
+describe("togglePinned", () => {
+  it("adds an unpinned id", () => {
+    expect(togglePinned(new Set(), "t1")).toEqual(new Set(["t1"]));
+  });
+
+  it("removes a pinned id", () => {
+    expect(togglePinned(new Set(["t1"]), "t1")).toEqual(new Set());
+  });
+
+  it("never mutates the input set", () => {
+    const current = new Set(["t1"]);
+    togglePinned(current, "t2");
+    expect(current).toEqual(new Set(["t1"]));
+  });
+});

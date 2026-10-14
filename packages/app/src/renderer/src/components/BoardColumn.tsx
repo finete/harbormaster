@@ -16,6 +16,7 @@ export function BoardColumn({
   showArchived,
   onToggleArchived,
   selectedTaskId,
+  unreadTaskIds,
 }: {
   column: BoardColumnData;
   presence: PresenceChangedPayload;
@@ -25,6 +26,8 @@ export function BoardColumn({
   onToggleArchived?: () => void;
   /** Keyboard-selected card id (see Board.tsx/lib/board-selection.ts), or absent outside the board view. */
   selectedTaskId?: string | null;
+  /** "Finished while you weren't looking" task ids (see core-client.ts's useUnreadTaskIds). */
+  unreadTaskIds?: ReadonlySet<string>;
 }): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: column.state });
 
@@ -110,6 +113,7 @@ export function BoardColumn({
                   presence={presence[task.id]}
                   onSelect={onSelectTask}
                   selected={selectedTaskId === task.id}
+                  unread={unreadTaskIds?.has(task.id)}
                 />
               ))}
             </div>

@@ -20,6 +20,7 @@ import type {
   TerminalExitEvent,
   ToDoneForce,
   ToDoneResult,
+  UpdateTaskInput,
   WorkspaceBinding,
 } from "./api";
 
@@ -27,6 +28,8 @@ const api: HarbormasterApi = {
   shell: {
     openExternal: (url: string): Promise<boolean> =>
       ipcRenderer.invoke("shell:openExternal", url),
+    revealInFolder: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke("shell:revealInFolder", path),
   },
   terminal: {
     create: (options: TerminalCreateOptions): Promise<TerminalCreateResult> =>
@@ -122,6 +125,18 @@ const api: HarbormasterApi = {
       const handler = (): void => listener();
       ipcRenderer.on("app:close-tab", handler);
       return () => ipcRenderer.removeListener("app:close-tab", handler);
+    },
+    updateTaskState: (id: string, patch: UpdateTaskInput): Promise<Task> =>
+      ipcRenderer.invoke("core:updateTaskState", id, patch),
+    onCycleTask: (
+      listener: (direction: "up" | "down") => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        direction: "up" | "down",
+      ): void => listener(direction);
+      ipcRenderer.on("app:cycle-task", handler);
+      return () => ipcRenderer.removeListener("app:cycle-task", handler);
     },
   },
 };

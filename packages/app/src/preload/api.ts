@@ -17,6 +17,7 @@ import type {
   Task,
   TaskState,
   ToDoneResult,
+  UpdateTaskInput,
   WorkspaceBinding,
 } from "@harbormaster/core";
 
@@ -35,6 +36,7 @@ export type {
   TaskState,
   ToDoneConfirmation,
   ToDoneResult,
+  UpdateTaskInput,
   WorkspaceBinding,
 } from "@harbormaster/core";
 
@@ -109,6 +111,14 @@ export interface HarbormasterApi {
      * resolves `false` without launching anything.
      */
     openExternal(url: string): Promise<boolean>;
+    /**
+     * Reveal `path` in the OS file manager (Finder on macOS). Main
+     * allowlists `path` to a directory under the configured `codeRoot` or
+     * the app's own state dir (mirrors `openExternal`'s host allowlist —
+     * see main/reveal-path.ts); anything else resolves `false` without
+     * shelling out.
+     */
+    revealInFolder(path: string): Promise<boolean>;
   };
   terminal: {
     create(options: TerminalCreateOptions): Promise<TerminalCreateResult>;
@@ -183,5 +193,17 @@ export interface HarbormasterApi {
     onPresenceChanged(
       listener: (payload: PresenceChangedPayload) => void,
     ): () => void;
+    /**
+     * Patch a task's non-state fields (title, prompt, error) without moving
+     * it "-" used by the sidebar's inline rename (Orca polish item 4). Emits
+     * the same `board-changed` push every other mutation does, so the board
+     * card picks up a renamed title through the normal event flow. A
+     * terminal pane's pi session name/widget only reflects the new title on
+     * its *next* launch (it is set once at spawn time) "-" a known, accepted
+     * limitation, not a bug.
+     */
+    updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
+    /** Cmd/Ctrl+Shift+ArrowUp/Down intercepted in main; renderer cycles sidebar focus. */
+    onCycleTask(listener: (direction: "up" | "down") => void): () => void;
   };
 }

@@ -259,6 +259,7 @@ export function App(): JSX.Element {
               active={view === "board"}
               openNewTaskSignal={boardNewTaskSignal}
               onBackToWorkspace={() => setView("workspace")}
+              focusedTaskId={focusedTaskId || null}
             />
           </div>
         </div>

@@ -14,6 +14,7 @@ import {
   useBoard,
   useManualRefresh,
   usePresenceMap,
+  useUnreadTaskIds,
 } from "../core-client";
 import {
   buildSelectionGrid,
@@ -61,6 +62,7 @@ export function Board({
   active = true,
   openNewTaskSignal,
   onBackToWorkspace,
+  focusedTaskId = null,
 }: {
   onSelectTask: (taskId: string) => void;
   onCreateTask: (input: NewTaskDialogResult) => void;
@@ -70,10 +72,13 @@ export function Board({
   openNewTaskSignal?: number;
   /** Escape: back to the workspace view (App.tsx owns the view switch). */
   onBackToWorkspace?: () => void;
+  /** App's currently-focused task (see core-client.ts's useUnreadTaskIds); absent outside the workspace view's own tracking. */
+  focusedTaskId?: string | null;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
   const manualRefresh = useManualRefresh();
+  const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   const [pendingDrop, setPendingDrop] = useState<{
     taskId: string;
   } | null>(null);
@@ -314,6 +319,7 @@ export function Board({
               showArchived={showArchived}
               onToggleArchived={() => setShowArchived((prev) => !prev)}
               selectedTaskId={selectedTaskId}
+              unreadTaskIds={unreadTaskIds}
             />
           ))}
         </div>

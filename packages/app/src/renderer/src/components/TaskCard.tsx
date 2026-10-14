@@ -14,6 +14,7 @@ export function TaskCard({
   presence,
   onSelect,
   selected,
+  unread,
 }: {
   task: Task;
   /** Live/runningTurn snapshot from the ~5s presence poll; absent task ids are treated as not-present. */
@@ -21,6 +22,8 @@ export function TaskCard({
   onSelect?: (taskId: string) => void;
   /** Keyboard-selected card (see Board.tsx); draws a visible ring, independent of mouse hover/click. */
   selected?: boolean;
+  /** "Finished while you weren't looking" (Orca polish item 7, see core-client.ts's useUnreadTaskIds); a subtle card badge, cleared once the task gains focus. */
+  unread?: boolean | undefined;
 }): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -51,7 +54,17 @@ export function TaskCard({
       {...listeners}
     >
       <CardHeader>
-        <CardTitle>{task.title}</CardTitle>
+        <CardTitle className="flex items-center gap-1.5">
+          {unread && (
+            <span
+              data-testid="badge-unread"
+              title="Finished while you weren't looking"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
+              aria-hidden
+            />
+          )}
+          {task.title}
+        </CardTitle>
         {task.branch && (
           <p className="text-xs text-muted-foreground">
             <span className="font-mono">{task.branch}</span>

@@ -4,13 +4,14 @@
 // kept live via the "board-changed" push channel — no frontend reads or
 // writes state files directly (see /docs/design-decisions.md "Core is
 // headless").
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BoardColumn,
   PresenceChangedPayload,
   Task,
   TaskState,
 } from "../../preload/api";
+import { applyUnreadTransition, clearUnread } from "./lib/unread";
 
 export type {
   BoardColumn,
@@ -85,6 +86,75 @@ export function usePresenceMap(): PresenceChangedPayload {
  * pushed through the shared refresh-warning channel). `busy` stays set for
  * at least a beat so the spinner is visible even for an instant refresh.
  */
+/**
+ * Session-local "finished while you weren't looking" tracking (Orca polish
+ * item 7): subscribes to the same ~5s presence push `usePresenceMap` does,
+ * folding each push through the pure transition rule in `lib/unread.ts`.
+ * Self-contained (its own presence subscription) so both the sidebar rows
+ * and the board cards can call it without fighting over one shared
+ * subscription's state. Never persisted "-" a fresh launch starts clean.
+ */
+export function useUnreadTaskIds(
+  focusedTaskId: string | null,
+): ReadonlySet<string> {
+  const [unread, setUnread] = useState<Set<string>>(() => new Set());
+  const previousRef = useRef<PresenceChangedPayload>({});
+  const focusedTaskIdRef = useRef(focusedTaskId);
+  focusedTaskIdRef.current = focusedTaskId;
+  const windowFocusedRef = useRef(
+    typeof document === "undefined" ? true : document.hasFocus(),
+  );
+
+  useEffect(() => {
+    function onFocus(): void {
+      windowFocusedRef.current = true;
+      const current = focusedTaskIdRef.current;
+      if (current) setUnread((prev) => clearUnread(prev, current));
+    }
+    function onBlur(): void {
+      windowFocusedRef.current = false;
+    }
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.harbormaster.core.onPresenceChanged(
+      (payload) => {
+        // Capture the pre-push snapshot *before* touching the ref: React's
+        // `setUnread` updater below can run after this callback returns
+        // (it isn't a React-originated event, so updates aren't
+        // synchronously flushed), and by then `previousRef.current =
+        // payload` would already have overwritten it "-" comparing the new
+        // push against itself and never seeing a transition.
+        const previous = previousRef.current;
+        previousRef.current = payload;
+        setUnread((current) =>
+          applyUnreadTransition(current, {
+            previous,
+            next: payload,
+            focusedTaskId,
+            windowFocused: windowFocusedRef.current,
+          }),
+        );
+      },
+    );
+    return unsubscribe;
+  }, [focusedTaskId]);
+
+  // The task that just gained focus is, by definition, being looked at now.
+  useEffect(() => {
+    if (!focusedTaskId) return;
+    setUnread((current) => clearUnread(current, focusedTaskId));
+  }, [focusedTaskId]);
+
+  return unread;
+}
+
 export function useManualRefresh(): { busy: boolean; refresh: () => void } {
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(() => {

@@ -5,6 +5,7 @@ import {
   clampSidebarWidth,
   groupRows,
   matchesQuery,
+  partitionPinned,
   pullRequestUrl,
   relativeTime,
   repoLabel,
@@ -12,6 +13,7 @@ import {
   type SidebarRow,
   sidebarRows,
   stateChipLabel,
+  visibleTaskOrder,
 } from "../src/renderer/src/components/sidebar-model";
 
 const T0 = "2025-01-01T00:00:00.000Z";
@@ -257,5 +259,48 @@ describe("clampSidebarWidth", () => {
     expect(clampSidebarWidth(900)).toBe(480);
     expect(clampSidebarWidth(300.4)).toBe(300);
     expect(clampSidebarWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT_WIDTH);
+  });
+});
+
+describe("partitionPinned", () => {
+  const a = row(task({ id: "a", repositoryId: "github.com/org/repo" }));
+  const b = row(task({ id: "b", repositoryId: "github.com/org/repo" }));
+  const c = row(task({ id: "c" }));
+  const groups = groupRows([a, b, c]);
+
+  it("returns every group unchanged when nothing is pinned", () => {
+    const { pinned, rest } = partitionPinned(groups, new Set());
+    expect(pinned).toEqual([]);
+    expect(rest).toBe(groups);
+  });
+
+  it("lifts pinned rows out of their group into the pinned section", () => {
+    const pinnedIds = new Set(["b"]);
+    const { pinned, rest } = partitionPinned(groups, pinnedIds);
+    expect(pinned.map((r) => r.task.id)).toEqual(["b"]);
+    const remainingIds = rest.flatMap((group) =>
+      group.rows.map((r) => r.task.id),
+    );
+    expect(remainingIds).toEqual(["a", "c"]);
+  });
+
+  it("drops a group entirely once every one of its rows is pinned", () => {
+    const { rest } = partitionPinned(groups, new Set(["c"]));
+    expect(rest.some((group) => group.label === "scratch")).toBe(false);
+  });
+});
+
+describe("visibleTaskOrder", () => {
+  it("lists pinned rows first, then each group in order", () => {
+    const a = row(task({ id: "a", repositoryId: "github.com/org/repo" }));
+    const b = row(task({ id: "b", repositoryId: "github.com/org/repo" }));
+    const c = row(task({ id: "c" }));
+    const groups = groupRows([a, b, c]);
+    const { pinned, rest } = partitionPinned(groups, new Set(["c"]));
+    expect(visibleTaskOrder(pinned, rest)).toEqual(["c", "a", "b"]);
+  });
+
+  it("returns an empty list for no rows", () => {
+    expect(visibleTaskOrder([], [])).toEqual([]);
   });
 });
