@@ -5,6 +5,7 @@ import type { IDockviewPanelProps } from "dockview-react";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
+import { defaultTerminalTitle, piTerminalTitle } from "../lib/terminal-title";
 
 /**
  * One xterm.js terminal wired over the narrow `window.harbormaster.terminal`
@@ -95,6 +96,19 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       | { cwd?: string; taskId?: string; primary?: boolean }
       | undefined;
     const cwd = params?.cwd;
+    const isPrimary = !!params?.primary;
+
+    // Live tab title (cmux parity): default to "π" (primary/pi panes) or
+    // the cwd's basename (plain shells) until xterm reports the shell's
+    // first OSC title, then track every change verbatim (prefixed "π " for
+    // primary panes). Routed through dockview's panel api, not React state,
+    // so a title change never re-renders/remounts this panel.
+    props.api.setTitle(defaultTerminalTitle({ cwd, primary: isPrimary }));
+    const titleDisposable = terminal.onTitleChange((title) => {
+      if (!title) return;
+      props.api.setTitle(isPrimary ? piTerminalTitle(title) : title);
+    });
+
     void window.harbormaster.terminal
       .create({
         cols: terminal.cols,
@@ -144,6 +158,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
     return () => {
       disposed = true;
+      titleDisposable.dispose();
       resizeObserver.disconnect();
       unsubscribeData?.();
       unsubscribeExit?.();
