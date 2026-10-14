@@ -1,12 +1,13 @@
 // Electron main process entry — see /AGENTS.md for the fixed UI stack.
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
   CreateTaskInput,
   MoveTaskOptions,
   ReopenTaskInput,
   TaskState,
+  UpdateTaskInput,
 } from "@harbormaster/core";
 import {
   createCore,
@@ -37,6 +38,7 @@ import {
   resizeSession,
   writeToSession,
 } from "./ptySessions";
+import { isAllowedRevealPath } from "./reveal-path";
 
 // Surface main-process crashes to stderr instead of letting Electron's
 // default "uncaught exception" dialog pop up in front of the user. Node only
@@ -155,6 +157,15 @@ function registerCoreIpc(): void {
     "core:reopenTask",
     (_event, taskId: string, input: ReopenTaskInput | undefined) =>
       core.commands.reopenTask(taskId, input),
+  );
+  // Sidebar inline rename (Orca polish item 4): patches title (or any other
+  // non-state field) and publishes the same `board-changed` event every
+  // other mutation does "-" the board card picks up the new title through
+  // the normal event flow, no extra plumbing needed here.
+  ipcMain.handle(
+    "core:updateTaskState",
+    (_event, id: string, patch: UpdateTaskInput) =>
+      core.commands.updateTaskState(id, patch),
   );
   // Funnels through the same warning-push path the 30s automation timer
   // uses (see performRefresh below) so a manually-triggered refresh (tests,
@@ -428,6 +439,24 @@ function createWindow(): void {
     ) {
       event.preventDefault();
       safeSend(win.webContents, "app:close-tab", undefined);
+      return;
+    }
+    // Sidebar keyboard cycling (Orca polish item 5): Cmd/Ctrl+Shift+Up/Down
+    // cycles focus through the rail's visible rows. The terminal panes keep
+    // raw keyboard focus most of the time (lib/keyboard-guard.ts deliberately
+    // never intercepts inside xterm), so "-" exactly like the Cmd+W handler
+    // above "-" this has to be caught here in main, ahead of the renderer/pty,
+    // or it would just be typed into whichever terminal has focus.
+    if (
+      input.type === "keyDown" &&
+      (input.meta || input.control) &&
+      input.shift &&
+      !input.alt &&
+      (input.key === "ArrowUp" || input.key === "ArrowDown")
+    ) {
+      event.preventDefault();
+      const direction = input.key === "ArrowUp" ? "up" : "down";
+      safeSend(win.webContents, "app:cycle-task", direction);
     }
   });
 
@@ -473,6 +502,31 @@ function registerShellIpc(): void {
         console.error("[main] shell.openExternal failed:", error);
         return false;
       }
+    },
+  );
+
+  // "Reveal in Finder" (Orca polish item 6 context menu): same allowlist
+  // shape as openExternal above, but for local paths "-" only a worktree
+  // path under the configured codeRoot, or anything under this app's own
+  // state dir, is ever handed to the OS file manager (see reveal-path.ts).
+  ipcMain.handle(
+    "shell:revealInFolder",
+    async (_event, targetPath: unknown): Promise<boolean> => {
+      // No direct `codeRoot` getter on the command API; derive the allowed
+      // roots from discovered repositories instead "-" each repo's own
+      // checkout, plus its parent (the code root worktrees live next to,
+      // at `<codeRoot>/.harbormaster-worktrees/`), plus this app's state
+      // dir (session files, etc).
+      const repositories = await core.commands
+        .listRepositories()
+        .catch(() => []);
+      const roots = [
+        activeStateDir,
+        ...repositories.flatMap((repo) => [repo.root, dirname(repo.root)]),
+      ];
+      if (!isAllowedRevealPath(targetPath, roots)) return false;
+      shell.showItemInFolder(targetPath);
+      return true;
     },
   );
 }

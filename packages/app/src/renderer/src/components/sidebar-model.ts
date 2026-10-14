@@ -192,3 +192,45 @@ export function clampSidebarWidth(width: number): number {
     Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)),
   );
 }
+
+/**
+ * Splits `groups` into a "Pinned" section (Orca polish item 3) and the
+ * remaining repo groups with pinned rows removed, so a pinned task never
+ * renders twice. Pinned rows keep their relative (board) order, not
+ * insertion-into-`pinnedIds` order, so re-pinning doesn't reshuffle the
+ * section.
+ */
+export function partitionPinned(
+  groups: SidebarGroup[],
+  pinnedIds: ReadonlySet<string>,
+): { pinned: SidebarRow[]; rest: SidebarGroup[] } {
+  if (pinnedIds.size === 0) return { pinned: [], rest: groups };
+  const pinned: SidebarRow[] = [];
+  const rest = groups
+    .map((group) => {
+      const keep: SidebarRow[] = [];
+      for (const row of group.rows) {
+        if (pinnedIds.has(row.task.id)) pinned.push(row);
+        else keep.push(row);
+      }
+      return { ...group, rows: keep };
+    })
+    .filter((group) => group.rows.length > 0);
+  return { pinned, rest };
+}
+
+/**
+ * The rail's full top-to-bottom task id order (pinned section, then each
+ * visible repo group in order) "-" what Cmd/Ctrl+Shift+Up/Down cycles
+ * through (see lib/sidebar-cycle.ts) and what the reveal/scroll-to-current
+ * feature scrolls within.
+ */
+export function visibleTaskOrder(
+  pinned: SidebarRow[],
+  groups: SidebarGroup[],
+): string[] {
+  return [
+    ...pinned.map((row) => row.task.id),
+    ...groups.flatMap((group) => group.rows.map((row) => row.task.id)),
+  ];
+}

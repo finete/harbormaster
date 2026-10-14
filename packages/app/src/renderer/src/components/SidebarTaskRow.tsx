@@ -1,5 +1,6 @@
-import { X } from "lucide-react";
+import { Pin, X } from "lucide-react";
 import type { JSX, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
@@ -146,12 +147,37 @@ export function SidebarTaskRow({
   now,
   onSelect,
   onClose,
+  pinned = false,
+  unread = false,
+  isRenaming = false,
+  onRenameCommit,
+  onRenameCancel,
+  onRenameRequest,
+  onContextMenu,
+  rowRef,
+  flash = false,
 }: {
   row: SidebarRow;
   selected: boolean;
   now: number;
   onSelect: (taskId: string) => void;
   onClose: (taskId: string) => void;
+  /** Rendered in the Pinned section (Orca polish item 3); shows a small pin glyph. */
+  pinned?: boolean;
+  /** "Finished while you weren't looking" (Orca polish item 7): dot accent + bolder title, cleared on focus. */
+  unread?: boolean;
+  /** Inline-rename mode (Orca polish item 4): swaps the title for a text input. */
+  isRenaming?: boolean;
+  onRenameCommit?: (taskId: string, title: string) => void;
+  onRenameCancel?: () => void;
+  /** Double-clicking the title asks the owning Sidebar to enter rename mode for this row. */
+  onRenameRequest?: (taskId: string) => void;
+  /** Right-click handler (Orca polish item 6); receives client coordinates for the context menu. */
+  onContextMenu?: (taskId: string, x: number, y: number) => void;
+  /** Lets the owning Sidebar track this row's DOM node for scroll-into-view/reveal (item 1). */
+  rowRef?: (taskId: string, node: HTMLDivElement | null) => void;
+  /** Brief highlight after a reveal/scroll-to-current (item 1); self-clears in the parent. */
+  flash?: boolean;
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
@@ -161,12 +187,50 @@ export function SidebarTaskRow({
       ? "your move"
       : undefined;
   const attention = !presence?.runningTurn && !!presence?.live;
+  const [draftTitle, setDraftTitle] = useState(task.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isRenaming) {
+      setDraftTitle(task.title);
+      // Autofocus + select-all so typing immediately replaces the title.
+      requestAnimationFrame(() => inputRef.current?.select());
+    }
+  }, [isRenaming, task.title]);
+
+  const commitRename = (): void => {
+    const next = draftTitle.trim();
+    onRenameCommit?.(task.id, next.length > 0 ? next : task.title);
+  };
+
+  const onTitleDoubleClick = (event: MouseEvent<HTMLSpanElement>): void => {
+    event.stopPropagation();
+    onRenameRequest?.(task.id);
+  };
+
+  const onRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRename();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      onRenameCancel?.();
+    }
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (isRenaming) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onSelect(task.id);
     }
+  };
+
+  const onRowContextMenu = (event: MouseEvent<HTMLDivElement>): void => {
+    if (!onContextMenu) return;
+    event.preventDefault();
+    onContextMenu(task.id, event.clientX, event.clientY);
   };
 
   const onCloseClick = (event: MouseEvent<HTMLButtonElement>): void => {
@@ -194,30 +258,70 @@ export function SidebarTaskRow({
     <div className="border-b border-border/40 px-1.5 py-1 last:border-b-0">
       {/* biome-ignore lint/a11y/useSemanticElements: nested interactive PR chip rules out a native <button> row */}
       <div
+        ref={(node) => rowRef?.(task.id, node)}
         role="button"
         tabIndex={0}
         data-testid={`sidebar-task-row-${task.id}`}
         data-selected={selected || undefined}
+        data-pinned={pinned || undefined}
+        data-unread={unread || undefined}
         aria-pressed={selected}
-        onClick={() => onSelect(task.id)}
+        onClick={() => !isRenaming && onSelect(task.id)}
         onKeyDown={onKeyDown}
         onAuxClick={onAuxClick}
         onPointerDown={onPointerDown}
+        onContextMenu={onRowContextMenu}
         className={cn(
           "group flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
           "hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/60",
           selected && "bg-accent/70 hover:bg-accent/70",
+          flash && "ring-2 ring-primary/70 bg-primary/10",
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <StatusDot presence={presence} />
-          <span
-            className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground"
-            title={task.title}
-          >
-            {task.title}
-          </span>
-          {time && (
+          {pinned && (
+            <Pin
+              className="h-3 w-3 shrink-0 rotate-45 text-muted-foreground"
+              aria-hidden
+              data-testid="sidebar-row-pin-icon"
+            />
+          )}
+          {unread && (
+            <span
+              data-testid="sidebar-row-unread-dot"
+              aria-hidden
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
+            />
+          )}
+          {isRenaming ? (
+            <input
+              ref={inputRef}
+              type="text"
+              value={draftTitle}
+              data-testid={`sidebar-row-rename-input-${task.id}`}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onKeyDown={onRenameKeyDown}
+              onClick={(event) => event.stopPropagation()}
+              onBlur={commitRename}
+              spellCheck={false}
+              className="min-w-0 flex-1 rounded border border-primary/60 bg-background px-1 py-0.5 text-sm font-semibold text-foreground outline-none"
+            />
+          ) : (
+            // biome-ignore lint/a11y/noStaticElementInteractions: double-click-to-rename is a bonus affordance alongside the context menu's Rename item and the row's own keyboard/click handling; no new interaction surface for keyboard users.
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-sm text-foreground",
+                unread ? "font-bold" : "font-semibold",
+              )}
+              title={task.title}
+              data-testid="sidebar-row-title"
+              onDoubleClick={onTitleDoubleClick}
+            >
+              {task.title}
+            </span>
+          )}
+          {time && !isRenaming && (
             <span
               className="shrink-0 text-[11px] tabular-nums text-muted-foreground group-hover:hidden"
               data-testid="sidebar-row-time"
