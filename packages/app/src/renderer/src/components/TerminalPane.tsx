@@ -38,7 +38,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       fontFamily:
         '"Hack Nerd Font Mono", "HackNerdFontMono", "MesloLGS NF", Menlo, monospace',
       fontSize: 13,
-      lineHeight: 1.25,
+      // No lineHeight multiplier: fractional cell heights (13 * 1.25 = 16.25px)
+      // land the WebGL glyph atlas on subpixel boundaries and blur every
+      // glyph, especially on retina. Integer cells = Ghostty-crisp text.
+      lineHeight: 1,
       scrollback: 10_000,
       macOptionIsMeta: true,
       // Never let xterm recolor output for contrast; themes own their colors.
