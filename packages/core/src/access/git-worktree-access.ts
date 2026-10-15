@@ -71,11 +71,18 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
         `Refusing to remove dirty worktree: ${path} (pass force to override)`,
       );
     }
+    // A worktree is registered to the checkout that created it, which for
+    // repos with several checkouts (or pi-home-era migrations) need not be
+    // this RepositoryInfo's primary root. Resolve the owner from the worktree
+    // itself; fall back to the primary when the worktree is too broken to ask.
+    const ownerRoot = await this.owningCheckoutRoot(path).catch(
+      () => repo.root,
+    );
     try {
       await run(
         "git",
         ["worktree", "remove", ...(force ? ["--force"] : []), path],
-        repo.root,
+        ownerRoot,
       );
     } catch (error) {
       const stillExists = await fsAccess(path).then(
@@ -85,8 +92,20 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       if (stillExists) throw error;
       // The worktree directory is already gone (e.g. removed out-of-band);
       // prune git's bookkeeping instead of surfacing a stale error.
-      await run("git", ["worktree", "prune"], repo.root);
+      await run("git", ["worktree", "prune"], ownerRoot);
     }
+  }
+
+  /** The checkout a worktree belongs to: parent of its git common dir. */
+  private async owningCheckoutRoot(worktreePath: string): Promise<string> {
+    const commonDir = (
+      await run(
+        "git",
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        worktreePath,
+      )
+    ).trim();
+    return dirname(commonDir);
   }
 
   async branchExists(repo: RepositoryInfo, branch: string): Promise<boolean> {

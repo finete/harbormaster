@@ -157,22 +157,25 @@ test("fresh state dir renders an empty board and an empty sidebar hint", async (
   await expect(window.getByTestId("workspace-view")).toBeVisible();
 });
 
-test("creating a task shows it in the sidebar and the backlog column", async () => {
+test("creating a task shows it on the board; opening it puts it on the rail", async () => {
   await createTask("sidebar-new-task-button", "Task Alpha");
 
+  // Nothing auto-opens anymore: the parked task lives on the board only.
+  await window.getByTestId("board-button").click();
+  await expect(cardLocator("Task Alpha")).toBeVisible();
+  await expect(window.getByTestId("column-backlog-cards")).toContainText(
+    "Task Alpha",
+  );
+
+  // Opening it from the board is what adds it to the rail (open set).
+  await cardLocator("Task Alpha").click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
   await expect(
     window.locator('[data-testid^="sidebar-task-row-"]').filter({
       hasText: "Task Alpha",
     }),
   ).toBeVisible();
   await expect(window.getByTestId("sidebar-empty-hint")).toHaveCount(0);
-
-  await window.getByTestId("board-button").click();
-  await expect(cardLocator("Task Alpha")).toBeVisible();
-  await expect(window.getByTestId("column-backlog-cards")).toContainText(
-    "Task Alpha",
-  );
-  await window.getByTestId("workspace-button").click();
 });
 
 test("a terminal panel appears for the focused task and receives pty output", async () => {

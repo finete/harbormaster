@@ -107,23 +107,10 @@ export function App(): JSX.Element {
     [closeTask],
   );
 
-  // Default focus to the first task once the board has loaded, same as the
-  // old mock's `taskOrder[0]` default — but only once per launch: never yank
-  // focus from a user pick, and never undo a workspace close (closing the
-  // last workspace empties focusedTaskId on purpose).
-  const autoFocusedRef = useRef(false);
-  useEffect(() => {
-    if (autoFocusedRef.current) return;
-    if (!focusedTaskId && flatRows.length > 0) {
-      // Never resurrect an archived task (it would open a workspace the user
-      // finished with a week ago); prefer the first live row, else stay empty.
-      const firstLive = flatRows.find(({ task }) => !task.archivedAt);
-      if (!firstLive) return;
-      autoFocusedRef.current = true;
-      setFocusedTaskId(firstLive.task.id);
-      setOpenedTaskIds((prev) => new Set(prev).add(firstLive.task.id));
-    }
-  }, [focusedTaskId, flatRows]);
+  // No auto-open on launch: opening a task spawns its pi session, and doing
+  // that for whatever happens to sort first on the board meant every app
+  // restart started an agent session nobody asked for. Launch lands on the
+  // empty workspace hint; the user picks from the board or rail.
 
   const openTask = useCallback((taskId: string) => {
     setFocusedTaskId(taskId);

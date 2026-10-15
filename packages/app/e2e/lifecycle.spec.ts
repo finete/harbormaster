@@ -296,7 +296,13 @@ test.describe("toAwait and toDone drive the board through the real core command 
   });
 
   test("the reviewed task's sidebar row shows its repo group, a Review state chip, and a #42 PR chip that routes through the openExternal allowlist", async () => {
-    await window.getByTestId("workspace-button").click();
+    // The rail lists open workspaces only and nothing auto-opens: open the
+    // reviewed task from its card first.
+    await window
+      .getByTestId("column-awaiting-cards")
+      .locator('[data-testid^="card-"]')
+      .first()
+      .click();
     await expect(window.getByTestId("workspace-view")).toBeVisible();
 
     // The fixture's origin is a local bare repo, so the normalized
