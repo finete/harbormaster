@@ -112,40 +112,47 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       props.api.setTitle(isPrimary ? piTerminalTitle(title) : title);
     });
 
-    void window.harbormaster.terminal
-      .create({
-        cols: terminal.cols,
-        rows: terminal.rows,
-        ...(cwd ? { cwd } : {}),
-        ...(params?.taskId ? { taskId: params.taskId } : {}),
-        ...(params?.primary ? { primary: true } : {}),
-      })
-      .then(({ id, fellBackToShell: fellBack }) => {
-        if (disposed) {
-          void window.harbormaster.terminal.dispose(id);
-          return;
-        }
-        sessionId = id;
-        if (fellBack) setFellBackToShell(true);
-
-        unsubscribeData = window.harbormaster.terminal.onData((event) => {
-          if (event.id === id) {
-            terminal.write(event.data);
-            setHasReceivedOutput(true);
+    // Deferred one macrotask: React StrictMode (dev) double-mounts effects,
+    // and spawning on the throwaway first mount consumed the task's one-shot
+    // session/prompt claims — pi #1 claimed the initial prompt, got torn down
+    // instantly, and pi #2 started blank. The timer never fires on the
+    // StrictMode throwaway because its cleanup clears it synchronously.
+    const createTimer = window.setTimeout(() => {
+      void window.harbormaster.terminal
+        .create({
+          cols: terminal.cols,
+          rows: terminal.rows,
+          ...(cwd ? { cwd } : {}),
+          ...(params?.taskId ? { taskId: params.taskId } : {}),
+          ...(params?.primary ? { primary: true } : {}),
+        })
+        .then(({ id, fellBackToShell: fellBack }) => {
+          if (disposed) {
+            void window.harbormaster.terminal.dispose(id);
+            return;
           }
-        });
-        unsubscribeExit = window.harbormaster.terminal.onExit((event) => {
-          if (event.id === id) {
-            terminal.writeln(
-              `\r\n[process exited with code ${event.exitCode}]`,
-            );
-          }
-        });
+          sessionId = id;
+          if (fellBack) setFellBackToShell(true);
 
-        terminal.onData((data) => {
-          window.harbormaster.terminal.write(id, data);
+          unsubscribeData = window.harbormaster.terminal.onData((event) => {
+            if (event.id === id) {
+              terminal.write(event.data);
+              setHasReceivedOutput(true);
+            }
+          });
+          unsubscribeExit = window.harbormaster.terminal.onExit((event) => {
+            if (event.id === id) {
+              terminal.writeln(
+                `\r\n[process exited with code ${event.exitCode}]`,
+              );
+            }
+          });
+
+          terminal.onData((data) => {
+            window.harbormaster.terminal.write(id, data);
+          });
         });
-      });
+    }, 0);
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
@@ -161,6 +168,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
     return () => {
       disposed = true;
+      window.clearTimeout(createTimer);
       titleDisposable.dispose();
       resizeObserver.disconnect();
       unsubscribeData?.();
