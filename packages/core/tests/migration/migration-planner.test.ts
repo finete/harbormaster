@@ -393,3 +393,50 @@ describe("planMigration — temporary (scratch) tasks", () => {
     expect(plan.toImport[0]!.task.repositoryId).toBe("github.com/acme/widgets");
   });
 });
+
+describe("bindingless Beads issues", () => {
+  it("imports an open issue with no workspace binding as a plain backlog task", () => {
+    const issue = {
+      id: "pih-nobind",
+      title: "Pure backlog idea",
+      description: "just an idea",
+      status: "open",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    };
+    const plan = planMigration({
+      piHome: { workspaceBindings: [], temporaryWorkspaces: [] },
+      beadsIssuesById: new Map([[issue.id, issue]]),
+      alreadyImported: new Set(),
+      worktreeExists: new Map(),
+      nextId: () => "task-1",
+    });
+    expect(plan.toImport).toHaveLength(1);
+    const candidate = plan.toImport[0];
+    expect(candidate?.binding).toBeUndefined();
+    expect(candidate?.task).toMatchObject({
+      title: "Pure backlog idea",
+      state: "backlog",
+      pihomeIssueId: "pih-nobind",
+    });
+  });
+
+  it("skips bindingless issues already imported", () => {
+    const issue = {
+      id: "pih-nobind",
+      title: "Pure backlog idea",
+      description: "",
+      status: "open",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    };
+    const plan = planMigration({
+      piHome: { workspaceBindings: [], temporaryWorkspaces: [] },
+      beadsIssuesById: new Map([[issue.id, issue]]),
+      alreadyImported: new Set(["pih-nobind"]),
+      worktreeExists: new Map(),
+      nextId: () => "task-1",
+    });
+    expect(plan.toImport).toHaveLength(0);
+  });
+});

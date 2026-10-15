@@ -22,7 +22,8 @@ import {
 
 export interface MigrationCandidate {
   task: Task;
-  binding: WorkspaceBinding;
+  /** Absent for Beads issues that never had a pi-home workspace (pure backlog ideas, long-cleaned tasks). */
+  binding?: WorkspaceBinding;
 }
 
 export interface MigrationPlan {
@@ -55,6 +56,19 @@ export function planMigration(input: PlanMigrationInput): MigrationPlan {
 
   for (const workspace of input.piHome.temporaryWorkspaces) {
     const result = planTemporaryTask(workspace, input);
+    results.push(result.result);
+    if (result.candidate) toImport.push(result.candidate);
+  }
+
+  // Beads issues with no workspace binding at all: pure backlog ideas and
+  // tasks whose binding was cleaned up long ago. They still belong on the
+  // board; they just arrive without a workspace or session.
+  const boundIssueIds = new Set(
+    input.piHome.workspaceBindings.map((binding) => binding.issueId),
+  );
+  for (const issue of input.beadsIssuesById.values()) {
+    if (boundIssueIds.has(issue.id)) continue;
+    const result = planBindinglessIssue(issue, input);
     results.push(result.result);
     if (result.candidate) toImport.push(result.candidate);
   }
@@ -247,4 +261,57 @@ function normalizeRepository(repository: PiHomeRepositoryRef): string {
   return repository.remote
     ? normalizeRemoteIdentity(repository.remote)
     : repository.id;
+}
+
+function planBindinglessIssue(
+  issue: BeadsIssue,
+  input: PlanMigrationInput,
+): { candidate?: MigrationCandidate; result: MigrationItemResult } {
+  if (input.alreadyImported.has(issue.id)) {
+    return {
+      result: {
+        pihomeIssueId: issue.id,
+        title: issue.title,
+        status: "skipped",
+        reason: "already imported (pihomeIssueId matches an existing task)",
+      },
+    };
+  }
+  let normalized: ReturnType<typeof normalizeBeadsStatus>;
+  try {
+    normalized = normalizeBeadsStatus(issue.status);
+  } catch (error) {
+    return {
+      result: {
+        pihomeIssueId: issue.id,
+        title: issue.title,
+        status: "warning",
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+  const task: Task = {
+    id: input.nextId(),
+    kind: "task",
+    title: issue.title,
+    initialPrompt: issue.description,
+    state: normalized.state,
+    ...(normalized.state === "awaiting" && normalized.awaitingKind
+      ? { awaiting: mapAwaitingKind(normalized.awaitingKind, undefined) }
+      : {}),
+    createdAt: issue.createdAt,
+    updatedAt: issue.updatedAt,
+    stateChangedAt: issue.updatedAt,
+    ...(issue.closedAt ? { completedAt: issue.closedAt } : {}),
+    pihomeIssueId: issue.id,
+  };
+  return {
+    candidate: { task },
+    result: {
+      pihomeIssueId: issue.id,
+      title: issue.title,
+      status: "imported",
+      reason: "no pi-home workspace binding — imported without a workspace",
+    },
+  };
 }
