@@ -26,6 +26,8 @@ export function defaultTerminalTitle(params: {
 
 /** The title a primary (pi) pane shows once pi has emitted an OSC title. */
 export function piTerminalTitle(title: string): string {
+  // pi's own OSC title already starts with "π - …"; don't stack prefixes.
+  if (title.trimStart().startsWith("π")) return title;
   return `π ${title}`;
 }
 

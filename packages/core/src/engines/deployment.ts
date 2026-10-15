@@ -19,17 +19,21 @@ export interface DeployedVersion {
 
 export function parseDeployedVersion(document: string): DeployedVersion {
   const raw = document.trim();
-  const match = raw.match(/^v?(\d+)\.(\d+)\.(\d+)\+([0-9a-fA-F]{7,40})$/);
-  const commitOid = match?.[4];
+  // Accept semver (v0.115.20+sha) AND calendar/CI versions with any number
+  // of numeric segments (2026.10.15.019+sha) — Fordefi switched to the latter,
+  // which silently broke pi-home's stricter three-segment regex.
+  const match = raw.match(/^v?(\d+(?:\.\d+)*)\+([0-9a-fA-F]{7,40})$/);
+  const commitOid = match?.[2];
   if (!match || !commitOid) {
     throw new Error(
       `Unrecognized deployed version document: ${JSON.stringify(raw.slice(0, 80))}`,
     );
   }
+  const segments = (match[1] ?? "").split(".").map(Number);
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
+    major: segments[0] ?? 0,
+    minor: segments[1] ?? 0,
+    patch: segments[2] ?? 0,
     commitOid: commitOid.toLowerCase(),
     raw,
   };
