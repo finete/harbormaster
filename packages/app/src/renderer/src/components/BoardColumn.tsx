@@ -5,6 +5,7 @@ import type {
   PresenceChangedPayload,
 } from "../../../preload/api";
 import { visibleGroupsForColumn } from "../lib/board-selection";
+import { repoColorClass } from "../lib/repo-color";
 import { cn } from "../lib/utils";
 import { TaskCard } from "./TaskCard";
 import { Button } from "./ui/button";
@@ -76,7 +77,7 @@ export function BoardColumn({
         </div>
       </div>
       <div
-        className="flex min-h-[40px] flex-col gap-3"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5"
         data-testid={`column-${column.state}-cards`}
       >
         {visibleGroups.map((group) => (
@@ -97,7 +98,10 @@ export function BoardColumn({
                 )}
                 {group.repoLabel && (
                   <span
-                    className="text-[11px] text-muted-foreground"
+                    className={cn(
+                      "text-xs font-semibold",
+                      repoColorClass(group.repoLabel),
+                    )}
                     data-testid="group-repo-label"
                   >
                     {group.repoLabel}
