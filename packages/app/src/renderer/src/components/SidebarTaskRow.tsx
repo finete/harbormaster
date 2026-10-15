@@ -155,7 +155,6 @@ export function SidebarTaskRow({
   onRenameRequest,
   onContextMenu,
   rowRef,
-  flash = false,
 }: {
   row: SidebarRow;
   selected: boolean;
@@ -177,7 +176,6 @@ export function SidebarTaskRow({
   /** Lets the owning Sidebar track this row's DOM node for scroll-into-view/reveal (item 1). */
   rowRef?: (taskId: string, node: HTMLDivElement | null) => void;
   /** Brief highlight after a reveal/scroll-to-current (item 1); self-clears in the parent. */
-  flash?: boolean;
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
@@ -275,7 +273,6 @@ export function SidebarTaskRow({
           "group flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
           "hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/60",
           selected && "bg-accent/70 hover:bg-accent/70",
-          flash && "ring-2 ring-primary/70 bg-primary/10",
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5">

@@ -3,7 +3,6 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Crosshair,
   LayoutGrid,
   Pin,
   Plus,
@@ -54,8 +53,6 @@ const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
 /** Relative times ("now", "3m", ...) re-render at least this often. */
 const CLOCK_TICK_MS = 30_000;
-/** How long a revealed row stays highlighted (item 1). */
-const REVEAL_FLASH_MS = 900;
 
 function readStoredWidth(): number {
   try {
@@ -167,14 +164,6 @@ export function Sidebar({
     y: number;
     worktreePath?: string;
   } | null>(null);
-  // Scroll-to-current / reveal (item 1): the task id to scroll into view +
-  // flash, bumped by a nonce so repeated requests for the same task
-  // (clicking the crosshair twice) still re-trigger.
-  const [revealRequest, setRevealRequest] = useState<{
-    taskId: string;
-    nonce: number;
-  } | null>(null);
-  const [flashTaskId, setFlashTaskId] = useState<string | null>(null);
   const rowNodes = useRef(new Map<string, HTMLDivElement>());
   const setRowRef = useCallback(
     (taskId: string, node: HTMLDivElement | null): void => {
@@ -240,59 +229,22 @@ export function Sidebar({
     });
   };
 
-  // --- Scroll-to-current / reveal (Orca polish item 1) ---------------------
-  const requestReveal = useCallback((taskId: string): void => {
-    setRevealRequest((current) => ({
-      taskId,
-      nonce: (current?.nonce ?? 0) + 1,
-    }));
-  }, []);
-
+  // Quiet scroll-to-current: when focus moves to another task, make sure its
+  // row is on screen. No button, no flash, no filter-clearing — the reveal
+  // feature confused more than it helped (and its flash could stick).
   const prevFocusedRef = useRef(focusedTaskId);
   useEffect(() => {
     if (focusedTaskId && focusedTaskId !== prevFocusedRef.current) {
-      requestReveal(focusedTaskId);
+      const raf = requestAnimationFrame(() => {
+        rowNodes.current
+          .get(focusedTaskId)
+          ?.scrollIntoView({ block: "nearest" });
+      });
+      prevFocusedRef.current = focusedTaskId;
+      return () => cancelAnimationFrame(raf);
     }
     prevFocusedRef.current = focusedTaskId;
-  }, [focusedTaskId, requestReveal]);
-
-  // Only depends on the request itself and `query`: a filter that's hiding
-  // the target gets cleared here, and the effect re-runs (query changed) to
-  // finish the scroll+flash once the row is actually in the DOM. Does *not*
-  // depend on `rows`/`visibleOrder` so an unrelated presence push can't
-  // re-trigger (and re-scroll/re-flash) an already-handled request. Crucially,
-  // a handled request is cleared (`setRevealRequest(null)`) once it's either
-  // resolved or dropped: left set, it would re-fire on *any later* unrelated
-  // query edit (e.g. the very next time the user types a search that happens
-  // to hide whatever task was last revealed) and silently stomp the user's
-  // own filter back to empty.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately keyed on [revealRequest, query] only, see the comment above.
-  useEffect(() => {
-    if (!revealRequest) return;
-    const { taskId } = revealRequest;
-    const existsAtAll = rows.some((row) => row.task.id === taskId);
-    if (!existsAtAll) {
-      setRevealRequest(null);
-      return;
-    }
-    const isVisible = visibleOrder.includes(taskId);
-    if (!isVisible) {
-      if (searching) setQuery("");
-      return; // wait for the query-clear to commit; this effect reruns on `query`.
-    }
-    setRevealRequest(null);
-    const raf = requestAnimationFrame(() => {
-      rowNodes.current.get(taskId)?.scrollIntoView({ block: "nearest" });
-      setFlashTaskId(taskId);
-    });
-    const timer = window.setTimeout(() => {
-      setFlashTaskId((current) => (current === taskId ? null : current));
-    }, REVEAL_FLASH_MS);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(timer);
-    };
-  }, [revealRequest, query]);
+  }, [focusedTaskId]);
 
   // --- Keyboard cycling (Orca polish item 5) --------------------------------
   // Main intercepts Cmd/Ctrl+Shift+Up/Down ahead of the terminal (see
@@ -415,7 +367,6 @@ export function Sidebar({
         onRenameRequest={setRenamingTaskId}
         onContextMenu={openContextMenu}
         rowRef={setRowRef}
-        flash={flashTaskId === row.task.id}
       />
     );
   }
@@ -559,17 +510,6 @@ export function Sidebar({
         >
           {rows.length}
         </span>
-        <button
-          type="button"
-          data-testid="sidebar-reveal-button"
-          aria-label="Reveal current task"
-          title="Scroll to the focused task"
-          disabled={!focusedTaskId}
-          onClick={() => focusedTaskId && requestReveal(focusedTaskId)}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-        >
-          <Crosshair className="h-3.5 w-3.5" aria-hidden />
-        </button>
         <button
           type="button"
           data-testid="sidebar-collapse"
