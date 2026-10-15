@@ -196,12 +196,16 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         </div>
       )}
       <div
-        ref={containerRef}
         data-testid="terminal-panel"
         data-panel-id={props.api.id}
         data-received-output={hasReceivedOutput}
         className="terminal-host min-h-0 flex-1 bg-[#0b0f14] py-1.5 pl-3"
-      />
+      >
+        {/* xterm mounts here; padding lives on the wrapper above so the
+            FitAddon measures the true content box — padding on the measured
+            element makes fit overshoot and clip the bottom row (pi's footer). */}
+        <div ref={containerRef} className="h-full w-full" />
+      </div>
     </div>
   );
 }
