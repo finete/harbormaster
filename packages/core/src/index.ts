@@ -33,6 +33,7 @@ export * from "./contracts/index.js";
 export * from "./engines/index.js";
 export * from "./harness/index.js";
 export * from "./manager/index.js";
+export * from "./migration/index.js";
 export * from "./utilities/index.js";
 
 export interface CoreOptions {

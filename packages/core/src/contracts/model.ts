@@ -129,6 +129,14 @@ export interface Task {
   pr?: TaskPullRequest;
   /** Opaque reference to a tracked issue (Beads/GitHub), resolved in a later phase. */
   issueRef?: string;
+  /**
+   * Idempotency marker set by `migration/` when this task was imported from
+   * pi-home: the source pi-home Beads issue id (permanent tasks) or
+   * temporary-workspace id (scratch tasks). Re-running the migration tool
+   * matches on this to skip already-imported tasks. Unset for tasks created
+   * natively in Harbormaster.
+   */
+  pihomeIssueId?: string;
   /** Set only while `state === "awaiting"`; cleared on any move out of it. */
   awaiting?: AwaitingKind;
   createdAt: string;

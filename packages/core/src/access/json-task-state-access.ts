@@ -168,6 +168,7 @@ function validTask(value: unknown): value is Task {
     isOptionalString(value.branch) &&
     isOptionalString(value.targetBranch) &&
     isOptionalString(value.issueRef) &&
+    isOptionalString(value.pihomeIssueId) &&
     isValidPr(value.pr) &&
     isValidAwaiting(value.awaiting) &&
     isString(value.createdAt) &&
