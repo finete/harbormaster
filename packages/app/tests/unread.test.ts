@@ -55,6 +55,52 @@ describe("unreadTransitions", () => {
     });
     expect(marked).toEqual([]);
   });
+
+  it("marks a task whose presence outcome just arrived blocked", () => {
+    const marked = unreadTransitions({
+      previous: { a: { runningTurn: false } },
+      next: {
+        a: { runningTurn: false, ended: { status: "blocked", note: "stuck" } },
+      },
+      focusedTaskId: null,
+      windowFocused: true,
+    });
+    expect(marked).toEqual(["a"]);
+  });
+
+  it("does not re-mark a task that was already blocked (no new edge)", () => {
+    const marked = unreadTransitions({
+      previous: {
+        a: { runningTurn: false, ended: { status: "blocked" } },
+      },
+      next: {
+        a: { runningTurn: false, ended: { status: "blocked" } },
+      },
+      focusedTaskId: null,
+      windowFocused: true,
+    });
+    expect(marked).toEqual([]);
+  });
+
+  it("does not mark a blocked outcome for the currently-focused, window-focused task", () => {
+    const marked = unreadTransitions({
+      previous: { a: { runningTurn: false } },
+      next: { a: { runningTurn: false, ended: { status: "blocked" } } },
+      focusedTaskId: "a",
+      windowFocused: true,
+    });
+    expect(marked).toEqual([]);
+  });
+
+  it("ignores a done outcome (only blocked is unread-worthy on its own)", () => {
+    const marked = unreadTransitions({
+      previous: { a: { runningTurn: false } },
+      next: { a: { runningTurn: false, ended: { status: "done" } } },
+      focusedTaskId: null,
+      windowFocused: true,
+    });
+    expect(marked).toEqual([]);
+  });
 });
 
 describe("applyUnreadTransition", () => {

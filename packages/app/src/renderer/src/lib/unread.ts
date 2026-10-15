@@ -7,10 +7,23 @@
 // without a browser (see tests/unread.test.ts). The owning hook
 // (useUnreadTaskIds in core-client.ts) just calls this on every presence
 // push and folds the result into a Set.
+//
+// Extended for OS notifications (daily-driver switch, task B): a presence
+// outcome arriving with `ended.status === "blocked"` is also an unread-
+// worthy transition ("needs your attention"), independent of `runningTurn`
+// — a headless run can self-report blocked without ever flipping
+// runningTurn back to false first. `lib/notifications.ts` reuses
+// `unreadTransitions` so both the unread dot and the OS notification fire
+// on exactly the same edges, deduped the same way.
 
 /** Minimal presence shape this module needs (matches `PresenceBadge`). */
 export interface RunningPresence {
   runningTurn: boolean;
+  /** Terminal outcome of a headless run, once reported (see `PresenceBadge.ended`). */
+  ended?: {
+    status: "done" | "blocked" | "unreported";
+    note?: string;
+  };
 }
 
 export interface UnreadTransitionInput {
@@ -34,7 +47,11 @@ export function unreadTransitions(input: UnreadTransitionInput): string[] {
   for (const taskId of Object.keys(next)) {
     const was = previous[taskId]?.runningTurn === true;
     const is = next[taskId]?.runningTurn === true;
-    if (!was || is) continue; // only true -> false transitions count
+    const finished = was && !is; // true -> false transition
+    const prevBlocked = previous[taskId]?.ended?.status === "blocked";
+    const nowBlocked = next[taskId]?.ended?.status === "blocked";
+    const blocked = nowBlocked && !prevBlocked; // outcome just arrived
+    if (!finished && !blocked) continue;
     const looking = windowFocused && focusedTaskId === taskId;
     if (!looking) marked.push(taskId);
   }
