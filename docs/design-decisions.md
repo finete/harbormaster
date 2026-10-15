@@ -134,7 +134,8 @@ difference not listed here is a bug.
   names end in a 6-character task-id suffix.
 - **Movers tick only in the app.** The Electron app is the single automation
   host; the Pi extension never runs movers or refreshes.
-- **The in-session widget is read-only.** The extension's task widget shows
-  task/PR/awaiting context but offers no board actions (pi-home's
-  `/todev`, `/toreview`, `/towaitprod`, ... commands are app actions — the
-  three verbs, with review/deploy as awaiting kinds).
+- **The in-session surface is the three verbs.** The extension's task widget
+  shows task/PR/awaiting context, and the extension registers exactly
+  `/todev`, `/toawait`, `/todone` plus the `harbormaster_report_status` tool
+  (decision #16: kinds are data, never commands). Board automation still
+  lives only in the app.

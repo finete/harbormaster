@@ -11,6 +11,10 @@ import type {
   Task,
   TaskState,
 } from "../../preload/api";
+import {
+  notificationsDisabled,
+  notifyTransitionEvents,
+} from "./lib/notifications";
 import { applyUnreadTransition, clearUnread } from "./lib/unread";
 
 export type {
@@ -153,6 +157,70 @@ export function useUnreadTaskIds(
   }, [focusedTaskId]);
 
   return unread;
+}
+
+/**
+ * OS-notification half of the "finished while you weren't looking" feature
+ * (daily-driver switch, task B): a second, self-contained subscription to
+ * the same ~5s presence push `useUnreadTaskIds` watches, folding each push
+ * through `notifyTransitionEvents` (lib/notifications.ts "- the exact same
+ * transition edges the unread dot lights up on) and calling `app.notify`
+ * for each. Deliberately a separate subscription rather than a callback
+ * threaded through `useUnreadTaskIds`, matching that hook's own
+ * self-contained pattern "- callers never fight over shared subscription
+ * state. Call once (e.g. from App.tsx), not per sidebar row/board card.
+ */
+export function useTaskNotifications(
+  focusedTaskId: string | null,
+  getTaskTitle: (taskId: string) => string,
+): void {
+  const previousRef = useRef<PresenceChangedPayload>({});
+  const focusedTaskIdRef = useRef(focusedTaskId);
+  focusedTaskIdRef.current = focusedTaskId;
+  const windowFocusedRef = useRef(
+    typeof document === "undefined" ? true : document.hasFocus(),
+  );
+  const getTaskTitleRef = useRef(getTaskTitle);
+  getTaskTitleRef.current = getTaskTitle;
+
+  useEffect(() => {
+    function onFocus(): void {
+      windowFocusedRef.current = true;
+    }
+    function onBlur(): void {
+      windowFocusedRef.current = false;
+    }
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.harbormaster.core.onPresenceChanged(
+      (payload) => {
+        const previous = previousRef.current;
+        previousRef.current = payload;
+        if (notificationsDisabled(window.localStorage)) return;
+        const events = notifyTransitionEvents({
+          previous,
+          next: payload,
+          focusedTaskId: focusedTaskIdRef.current,
+          windowFocused: windowFocusedRef.current,
+        });
+        for (const event of events) {
+          void window.harbormaster.app.notify({
+            taskId: event.taskId,
+            title: getTaskTitleRef.current(event.taskId),
+            body: event.body,
+          });
+        }
+      },
+    );
+    return unsubscribe;
+  }, []);
 }
 
 export function useManualRefresh(): { busy: boolean; refresh: () => void } {

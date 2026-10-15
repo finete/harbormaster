@@ -12,7 +12,13 @@ import { Button } from "./components/ui/button";
 import { Dialog, DialogFooter } from "./components/ui/dialog";
 import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
-import { flattenBoard, useBoard, useManualRefresh } from "./core-client";
+import {
+  flattenBoard,
+  useBoard,
+  useManualRefresh,
+  useTaskNotifications,
+  useUnreadTaskIds,
+} from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
 import { cn } from "./lib/utils";
 import { describeThrown, pushToast } from "./toast";
@@ -38,6 +44,21 @@ export function App(): JSX.Element {
   const taskTitleRef = useRef<Map<string, string>>(new Map());
   for (const { task } of flatRows)
     taskTitleRef.current.set(task.id, task.title);
+  const getTaskTitle = useCallback(
+    (taskId: string) => taskTitleRef.current.get(taskId) ?? "Task",
+    [],
+  );
+
+  // OS notifications + dock badge (daily-driver switch, task B). Unread
+  // state is still fully owned here through the same hook Sidebar/Board use
+  // (see lib/unread.ts); this instance only ever feeds the dock badge count
+  // and the `useTaskNotifications` subscription below "- it never renders
+  // anything itself.
+  const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
+  useEffect(() => {
+    void window.harbormaster.app.setBadgeCount(unreadTaskIds.size);
+  }, [unreadTaskIds]);
+  useTaskNotifications(focusedTaskId, getTaskTitle);
 
   // Takeover-offer guard state (see /AGENTS.md "Attachment safety",
   // /docs/design-decisions.md #8, components/TakeoverDialog.tsx): set only
@@ -194,6 +215,19 @@ export function App(): JSX.Element {
         }
       }),
     [view, focusedTaskId, requestCloseTask],
+  );
+
+  // Clicking an OS notification: main pushes the clicked task's id (see
+  // main/index.ts's `app:notify` click handler), reusing `selectTask` "- the
+  // exact same guarded open/focus path a sidebar row or board card click
+  // uses, same pattern as `app:cycle-task`.
+  useEffect(
+    () =>
+      window.harbormaster.app.onOpenTask((taskId) => {
+        selectTask(taskId);
+        setView("workspace");
+      }),
+    [selectTask],
   );
 
   // Main's 30s automation-refresh loop (see main/index.ts's refreshOnce)

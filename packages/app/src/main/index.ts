@@ -17,7 +17,7 @@ import {
   PiHarnessAdapter,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Notification, shell } from "electron";
 import type {
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -231,12 +231,24 @@ async function pollPresenceOnce(): Promise<void> {
     tasks.map(async (task) => {
       const status = await harness.presence(task.id);
       const heartbeatAt = status.live ? status.record?.heartbeatAt : undefined;
+      const ended = status.record?.ended;
       return [
         task.id,
         {
           live: status.live,
           runningTurn: status.runningTurn,
           ...(heartbeatAt ? { heartbeatAt } : {}),
+          // Status + note only: `ended.notified` is main's own one-shot
+          // bookkeeping (see access/session-presence-access.ts) and never
+          // crosses the bridge.
+          ...(ended
+            ? {
+                ended: {
+                  status: ended.status,
+                  ...(ended.note ? { note: ended.note } : {}),
+                },
+              }
+            : {}),
         },
       ] as const;
     }),
@@ -542,9 +554,60 @@ function registerShellIpc(): void {
   );
 }
 
+/**
+ * OS notifications + dock badge (daily-driver switch, task B). The renderer
+ * owns every bit of *when* decision logic (unread transitions, the
+ * `harbormaster.notifications` localStorage escape hatch "- see
+ * lib/unread.ts and lib/notifications.ts); main only ever displays what it
+ * is told to, plus its own independent `HARBORMASTER_NOTIFICATIONS=off` kill
+ * switch (so a notification can be silenced at the process level even if a
+ * renderer bug ever called this anyway).
+ */
+function registerAppIpc(): void {
+  ipcMain.handle(
+    "app:notify",
+    (event, payload: { taskId: string; title: string; body: string }): void => {
+      // Logged unconditionally (ahead of every flag/support check) so e2e can
+      // assert the renderer->main IPC fired without asserting real OS
+      // notification display (Electron has no notification inspection API,
+      // and CI machines often have no notification center at all).
+      console.log(
+        `[main] app:notify received: ${payload.taskId} ${JSON.stringify(payload.title)}`,
+      );
+      if (process.env.HARBORMASTER_NOTIFICATIONS === "off") return;
+      if (!Notification.isSupported()) return;
+      const notification = new Notification({
+        title: payload.title,
+        body: payload.body,
+      });
+      const senderId = event.sender.id;
+      notification.on("click", () => {
+        const win = BrowserWindow.getAllWindows().find(
+          (candidate) => candidate.webContents.id === senderId,
+        );
+        if (!win || win.isDestroyed()) return;
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+        // Same pattern as `app:cycle-task`: main only ever pushes the taskId,
+        // the renderer's existing guarded `selectTask` path does the rest.
+        safeSend(win.webContents, "app:open-task", payload.taskId);
+      });
+      notification.show();
+    },
+  );
+
+  ipcMain.handle("app:setBadgeCount", (_event, count: unknown): void => {
+    if (process.platform !== "darwin") return;
+    const safeCount = typeof count === "number" && count > 0 ? count : 0;
+    app.dock?.setBadge(safeCount > 0 ? String(safeCount) : "");
+  });
+}
+
 registerCoreIpc();
 registerPtyIpc();
 registerShellIpc();
+registerAppIpc();
 
 app.whenReady().then(() => {
   createWindow();

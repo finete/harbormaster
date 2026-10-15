@@ -148,6 +148,23 @@ const api: HarbormasterApi = {
       return () => ipcRenderer.removeListener("app:cycle-task", handler);
     },
   },
+  app: {
+    notify: (input: {
+      taskId: string;
+      title: string;
+      body: string;
+    }): Promise<void> => ipcRenderer.invoke("app:notify", input),
+    setBadgeCount: (count: number): Promise<void> =>
+      ipcRenderer.invoke("app:setBadgeCount", count),
+    onOpenTask: (listener: (taskId: string) => void): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        taskId: string,
+      ): void => listener(taskId);
+      ipcRenderer.on("app:open-task", handler);
+      return () => ipcRenderer.removeListener("app:open-task", handler);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("harbormaster", api);

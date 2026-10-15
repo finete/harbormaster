@@ -74,6 +74,16 @@ export interface PresenceBadge {
   runningTurn: boolean;
   /** Last heartbeat of the live attachment (ISO); set only while `live`. Drives the sidebar's relative-time column. */
   heartbeatAt?: string;
+  /**
+   * Terminal outcome of a headless run, once reported (status/note only "-
+   * the one-shot `notified` flag is main's own bookkeeping and never
+   * crosses the bridge). Drives the unread dot and OS notification for a
+   * "blocked" outcome (see lib/unread.ts, lib/notifications.ts).
+   */
+  ended?: {
+    status: "done" | "blocked" | "unreported";
+    note?: string;
+  };
 }
 
 /** Pushed every poll tick (~5s) for every non-done task; badge-sized only (see Sidebar/TaskCard). */
@@ -222,5 +232,36 @@ export interface HarbormasterApi {
     updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
     /** Cmd/Ctrl+Shift+ArrowUp/Down intercepted in main; renderer cycles sidebar focus. */
     onCycleTask(listener: (direction: "up" | "down") => void): () => void;
+  };
+  app: {
+    /**
+     * Ask main to show a native OS notification for `taskId` (an unread
+     * transition "-" finished or blocked, see lib/notifications.ts). Main
+     * owns the actual `Notification` display (and its own
+     * `HARBORMASTER_NOTIFICATIONS=off` kill switch); the renderer only ever
+     * decides *when* to call this, never shows anything itself. Resolves
+     * once main has handled the request (shown, suppressed by a flag, or
+     * skipped because the platform doesn't support notifications) "-" never
+     * rejects.
+     */
+    notify(input: {
+      taskId: string;
+      title: string;
+      body: string;
+    }): Promise<void>;
+    /**
+     * Push the current unread count to the dock badge (macOS only; a no-op
+     * elsewhere). The renderer owns unread state (see useUnreadTaskIds); this
+     * is the one small IPC that hands the count to main, which clears the
+     * badge at zero.
+     */
+    setBadgeCount(count: number): Promise<void>;
+    /**
+     * Clicking a notification focuses the window and pushes the clicked
+     * task's id here, through the exact same guarded open path
+     * `app:cycle-task` uses (see App.tsx's subscription, which calls the
+     * same `selectTask` a sidebar row click does).
+     */
+    onOpenTask(listener: (taskId: string) => void): () => void;
   };
 }

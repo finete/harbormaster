@@ -38,6 +38,23 @@ function watchForMainProcessErrors(
   child.stderr?.on("data", onChunk);
 }
 
+/**
+ * Collects every stdout chunk main prints (see `watchForMainProcessErrors`
+ * above for the stderr-focused counterpart). Used to assert the
+ * renderer->main `app:notify` IPC fired "- main logs receipt unconditionally
+ * (see main/index.ts's `registerAppIpc`), ahead of any flag/support check,
+ * specifically so this is observable without asserting real OS notification
+ * display (Electron has no notification-inspection API, and CI machines
+ * often have no notification center at all).
+ */
+function collectMainStdout(electronApp: ElectronApplication): string[] {
+  const lines: string[] = [];
+  electronApp.process().stdout?.on("data", (chunk: Buffer) => {
+    lines.push(chunk.toString());
+  });
+  return lines;
+}
+
 function rowLocator(window: Page, title: string): Locator {
   return window
     .locator('[data-testid^="sidebar-task-row-"]')
@@ -240,6 +257,70 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     // Focusing the target task clears its unread flag.
     await target.click();
     await expect(target.getByTestId("sidebar-row-unread-dot")).toHaveCount(0);
+  });
+
+  test("a finished-while-unfocused transition fires the renderer->main notify IPC", async () => {
+    await createScratchTask(window, "Notify Target");
+    await createScratchTask(window, "Notify Looker");
+
+    const target = rowLocator(window, "Notify Target");
+    const looker = rowLocator(window, "Notify Looker");
+    await expect(target).toBeVisible();
+    await expect(looker).toBeVisible();
+    const targetId = await rowTaskId(target);
+
+    // Focus the *other* task, then blur the window itself too (the test
+    // hook: a plain DOM `blur` dispatch, exactly what `useTaskNotifications`
+    // / `useUnreadTaskIds` already listen for "- see lib/unread.ts's
+    // `windowFocused`) so neither "looking" condition holds.
+    await looker.click();
+    await expect(looker).toHaveAttribute("data-selected", "true");
+    await window.evaluate(() => window.dispatchEvent(new Event("blur")));
+
+    const stdout = collectMainStdout(app);
+
+    const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
+    await presence.register({
+      taskId: targetId,
+      sessionPath: "/tmp/fake-session-notify.jsonl",
+      pid: process.pid,
+      mode: "interactive",
+      at: new Date().toISOString(),
+    });
+    await presence.setTurnActive(
+      targetId,
+      process.pid,
+      true,
+      new Date().toISOString(),
+    );
+    await expect(target.getByTestId("sidebar-row-spinner")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Turn ends while unfocused (window blurred, a different task selected):
+    // the unread transition should push `app:notify`, which main logs
+    // receipt of unconditionally (see main/index.ts's `registerAppIpc`).
+    await presence.setTurnActive(
+      targetId,
+      process.pid,
+      false,
+      new Date().toISOString(),
+    );
+    await expect(target.getByTestId("sidebar-row-unread-dot")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await expect(() => {
+      expect(
+        stdout.some(
+          (line) =>
+            line.includes("app:notify received") && line.includes(targetId),
+        ),
+      ).toBe(true);
+    }).toPass({ timeout: 10_000 });
+
+    // Restore window focus so later tests in this suite aren't affected.
+    await window.evaluate(() => window.dispatchEvent(new Event("focus")));
   });
 });
 
