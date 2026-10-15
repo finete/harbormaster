@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import { useBoard, usePresenceMap, useUnreadTaskIds } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
 import {
   readCollapsedGroups,
@@ -674,7 +675,16 @@ export function Sidebar({
                 ) : (
                   <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
                 )}
-                <span className="truncate normal-case">{group.label}</span>
+                <span
+                  className={cn(
+                    "truncate normal-case",
+                    group.label !== "Pinned" &&
+                      group.label !== "scratch" &&
+                      repoColorClass(group.label),
+                  )}
+                >
+                  {group.label}
+                </span>
                 <span
                   className="ml-auto font-normal tabular-nums text-muted-foreground/70"
                   data-testid="sidebar-group-count"
