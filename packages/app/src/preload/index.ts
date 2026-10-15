@@ -3,6 +3,8 @@
 // `require`, `process`, or any other Node global.
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  AwaitingKindId,
+  AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
   CreateTaskInput,
@@ -18,6 +20,7 @@ import type {
   TerminalCreateResult,
   TerminalDataEvent,
   TerminalExitEvent,
+  ToAwaitOptions,
   ToDoneForce,
   ToDoneResult,
   UpdateTaskInput,
@@ -77,8 +80,14 @@ const api: HarbormasterApi = {
     ): Promise<Task> => ipcRenderer.invoke("core:moveTask", id, state, options),
     startTask: (taskId: string): Promise<Task> =>
       ipcRenderer.invoke("core:startTask", taskId),
-    toReview: (taskId: string): Promise<Task> =>
-      ipcRenderer.invoke("core:toReview", taskId),
+    listAwaitingKinds: (taskId?: string): Promise<AwaitingKindOption[]> =>
+      ipcRenderer.invoke("core:listAwaitingKinds", taskId),
+    toAwait: (
+      taskId: string,
+      kindId: AwaitingKindId,
+      options?: ToAwaitOptions,
+    ): Promise<Task> =>
+      ipcRenderer.invoke("core:toAwait", taskId, kindId, options),
     toDone: (
       taskId: string,
       options?: { force?: ToDoneForce },

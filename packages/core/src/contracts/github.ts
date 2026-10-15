@@ -55,6 +55,16 @@ export interface PullRequestAccess {
     body: string,
     baseBranch: string,
   ): Promise<PullRequestStatus>;
+  /**
+   * Squash-merge PR `pullRequestNumber` (`gh pr merge <n> --squash`) and
+   * return its post-merge status; rejects unless GitHub then reports it
+   * MERGED. Ported from pi-home's `squashMerge`.
+   */
+  squashMerge(
+    repositoryId: string,
+    pullRequestNumber: number,
+    branch: string,
+  ): Promise<PullRequestStatus>;
   /** Whether `ancestorOid` is contained in `descendantOid` on GitHub (memoized: ancestry is immutable). */
   containsCommit(
     repositoryId: string,

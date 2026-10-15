@@ -25,6 +25,13 @@ export type AwaitingKind =
   | { kind: "deploy"; stageId: string; stageLabel: string };
 
 /**
+ * Identifier of a registered awaiting kind (see
+ * `engines/awaiting-kinds.ts`). Kinds are data the one `toAwait` verb is
+ * parameterized with — never verbs of their own.
+ */
+export type AwaitingKindId = AwaitingKind["kind"];
+
+/**
  * Pull-request linkage and GitHub review/merge snapshot for a task, as
  * refreshed by `CoreCommands.refresh()`. Ported and pruned from pi-home's
  * richer `PullRequestMeta` (src/contracts/model.ts): no Slack-thread or

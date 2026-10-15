@@ -75,6 +75,9 @@ const noGithub = {
   ensureOpen: async () => {
     throw new Error("unused");
   },
+  squashMerge: async () => {
+    throw new Error("unused");
+  },
   containsCommit: async () => false,
   commitLog: async () => [],
   fetchText: async () => "",

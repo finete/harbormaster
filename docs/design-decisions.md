@@ -39,6 +39,36 @@ control the other:
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
 | 15 | Internal architecture | Volatility-based layering per `ai/prds/architecture.md` (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
+| 16 | Workflow verbs | Exactly three invariant verbs — **todev / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
+
+## Three verbs, awaiting kinds are data
+
+The workflow surface (commands, buttons, keys, IPC names) has exactly three
+invariant verbs — **todev** (`startTask` / `moveTask(…, "dev")`),
+**toawait** (`toAwait(taskId, kindId, options)`), **todone** (`toDone`) —
+plus **reopen** (`reopenTask`) for Done work. *Why* a task is awaiting is
+not a verb: it is an **awaiting kind**, a record in core's registry
+(`engines/awaiting-kinds.ts`: id, label, optional input fields, optional
+`onEnter` action) that the one toawait verb is parameterized with. Kinds
+are built-in data today and shaped so configured kinds can slot in later
+without new commands; movers already consume kinds purely as data.
+
+- **Review is a built-in default kind, not a verb.** Its `onEnter` pushes
+  the branch and opens or reuses the PR (the former `toReview` body) for a
+  repository-backed task; a repository-less task simply waits. Pickers
+  preselect it, so the board's `r` (Await… picker, review preselected) +
+  Enter keeps the old muscle memory without hardwiring a kind.
+- **Slack** takes an optional permalink input and has no action.
+- **Deploy** requires a PR: its `onEnter` squash-merges a still-open PR
+  (`GithubPrAccess.squashMerge`, `gh pr merge <n> --squash`), then the task
+  enters the repository's first deployment stage — or the stage-less
+  `__production` wait when it has no pipeline. pi-home's `/towaitprod`
+  merge behavior lives here now.
+- Frontends render the registry (`listAwaitingKinds`: labels, inputs,
+  per-task availability and side-effect notices) and never branch on kind
+  names for controls. Kind-specific *display* (group headings, state chips)
+  is fine. Board cards carry no action buttons: the verbs live in the
+  workspace header, the board keys, and drag-and-drop.
 
 ## Verified facts the design rests on
 
@@ -65,7 +95,7 @@ control the other:
 
 Board with live badges (presence spinner, PR number+state, stage label) ·
 click→open/focus pty pane in the right worktree · split shell pane per task ·
-takeover-offer flow · task creation + toreview/todone as buttons · movers
+takeover-offer flow · task creation + todev/toawait/todone as buttons · movers
 ticking in-app.
 
 **Out of v1:** diff viewer, structured timeline, notifications, themes,
@@ -87,7 +117,7 @@ Deliberate differences from pi-home's behavior, confirmed in the
 behavioral-parity audit. Everything else is meant to match pi-home; a
 difference not listed here is a bug.
 
-- **Always push before `ensureOpen`.** To review pushes the task branch
+- **Always push before `ensureOpen`.** The review kind's onEnter pushes the task branch
   every time before reusing or opening the PR (pi-home pushed only when
   creating one), so a reused PR always shows the latest local commits.
 - **The auto path never force-deletes.** A mover-proposed landing (after the
@@ -106,4 +136,5 @@ difference not listed here is a bug.
   host; the Pi extension never runs movers or refreshes.
 - **The in-session widget is read-only.** The extension's task widget shows
   task/PR/awaiting context but offers no board actions (pi-home's
-  `/todev`, `/toreview`, ... commands are app actions).
+  `/todev`, `/toreview`, `/towaitprod`, ... commands are app actions — the
+  three verbs, with review/deploy as awaiting kinds).

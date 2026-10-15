@@ -258,6 +258,60 @@ describe("GithubPrAccess fixtures", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("squash-merges by number with the host-qualified --repo form, then returns the merged status", async () => {
+    const calls: string[][] = [];
+    const execute = vi.fn(async (_command: string, args: string[]) => {
+      calls.push(args);
+      if (args[1] === "list") {
+        return JSON.stringify([
+          {
+            number: 21,
+            url: "https://github.com/acme/widgets/pull/21",
+            state: "MERGED",
+            mergeCommit: { oid: "abc1234def5678" },
+            baseRefName: "main",
+          },
+        ]);
+      }
+      return "";
+    });
+    const status = await new GithubPrAccess(execute).squashMerge(
+      repositoryId,
+      21,
+      "feature",
+    );
+    expect(calls[0]).toEqual([
+      "pr",
+      "merge",
+      "21",
+      "--repo",
+      "github.com/acme/widgets",
+      "--squash",
+    ]);
+    // The follow-up lookup includes merged PRs (state all) for the branch.
+    expect(calls[1]).toEqual(
+      expect.arrayContaining(["list", "--head", "feature", "--state", "all"]),
+    );
+    expect(status).toMatchObject({
+      number: 21,
+      state: "MERGED",
+      mergeCommit: { oid: "abc1234def5678", targetBranch: "main" },
+    });
+  });
+
+  it("rejects a squash merge GitHub does not then report as merged", async () => {
+    const execute = vi.fn(async (_command: string, args: string[]) =>
+      args[1] === "list"
+        ? JSON.stringify([
+            { number: 21, url: "https://github/pr/21", state: "OPEN" },
+          ])
+        : "",
+    );
+    await expect(
+      new GithubPrAccess(execute).squashMerge(repositoryId, 21, "feature"),
+    ).rejects.toThrow("squash merge did not complete");
+  });
+
   it("maps the merge commit and base branch with a PR-derived commit URL", async () => {
     const execute = vi.fn(async (_command: string, args: string[]) => {
       expect(args.join(" ")).toContain("mergeCommit,baseRefName");

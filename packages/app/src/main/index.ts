@@ -3,10 +3,12 @@
 import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
+  AwaitingKindId,
   CreateTaskInput,
   MoveTaskOptions,
   ReopenTaskInput,
   TaskState,
+  ToAwaitOptions,
   UpdateTaskInput,
 } from "@harbormaster/core";
 import {
@@ -130,8 +132,17 @@ function registerCoreIpc(): void {
       options: MoveTaskOptions | undefined,
     ) => core.commands.moveTask(id, state, options),
   );
-  ipcMain.handle("core:toReview", (_event, taskId: string) =>
-    core.commands.toReview(taskId),
+  ipcMain.handle("core:listAwaitingKinds", (_event, taskId?: string) =>
+    core.commands.listAwaitingKinds(taskId),
+  );
+  ipcMain.handle(
+    "core:toAwait",
+    (
+      _event,
+      taskId: string,
+      kindId: AwaitingKindId,
+      options: ToAwaitOptions | undefined,
+    ) => core.commands.toAwait(taskId, kindId, options),
   );
   ipcMain.handle("core:startTask", (_event, taskId: string) =>
     core.commands.startTask(taskId),

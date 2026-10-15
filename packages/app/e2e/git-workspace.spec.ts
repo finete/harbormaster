@@ -15,6 +15,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { dragTo } from "./board-gestures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -147,8 +148,9 @@ test("creating a task with the repo shows a derived branch subline on its card",
   await window.getByTestId("board-button").click();
   const card = cardLocator("Add git workspace");
   await expect(card).toBeVisible();
-  // Parked in Backlog above: starting it derives the branch + worktree.
-  await card.locator('[data-testid^="start-task-button-"]').click();
+  // Parked in Backlog above: starting it (a drop on Dev — cards carry no
+  // buttons) derives the branch + worktree.
+  await dragTo(window, card, window.getByTestId("column-dev"));
 
   // TaskCard renders "<branch> \u2192 <targetBranch>" in a font-mono subline
   // once task.branch is set (see components/TaskCard.tsx).

@@ -7,6 +7,8 @@
 // processes, ...) ever ends up in the renderer's web bundle "- only its
 // plain data shapes cross the bridge.
 import type {
+  AwaitingKindId,
+  AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
   CreateTaskInput,
@@ -16,6 +18,7 @@ import type {
   RepositoryInfo,
   Task,
   TaskState,
+  ToAwaitOptions,
   ToDoneResult,
   UpdateTaskInput,
   WorkspaceBinding,
@@ -23,6 +26,9 @@ import type {
 
 export type {
   AwaitingKind,
+  AwaitingKindField,
+  AwaitingKindId,
+  AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
   BoardGroup,
@@ -34,6 +40,7 @@ export type {
   RepositoryInfo,
   Task,
   TaskState,
+  ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneResult,
   UpdateTaskInput,
@@ -146,12 +153,22 @@ export interface HarbormasterApi {
      */
     startTask(taskId: string): Promise<Task>;
     /**
-     * Push the task's branch, open/reuse its PR, and move it to
-     * `awaiting`/`{ kind: "review" }`. Rejects (no warning shape) for
-     * scratch tasks or tasks with no bound worktree/branch; see
-     * `CoreCommands.toReview`.
+     * The registered awaiting kinds (review first), resolved against the
+     * task: availability and what entering each will do. See
+     * `CoreCommands.listAwaitingKinds`.
      */
-    toReview(taskId: string): Promise<Task>;
+    listAwaitingKinds(taskId?: string): Promise<AwaitingKindOption[]>;
+    /**
+     * The one "await" verb: run the kind's onEnter action (review: push +
+     * open/reuse the PR; deploy: squash-merge + enter the pipeline) and move
+     * the task to `awaiting` with that kind. Rejects (task unmoved) when the
+     * action fails. See `CoreCommands.toAwait`.
+     */
+    toAwait(
+      taskId: string,
+      kindId: AwaitingKindId,
+      options?: ToAwaitOptions,
+    ): Promise<Task>;
     /**
      * Move a task to `done`. Uncommitted changes or an unmerged branch come
      * back as a confirmation question (task NOT moved); answer it by calling

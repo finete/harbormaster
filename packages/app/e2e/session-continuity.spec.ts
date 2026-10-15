@@ -231,7 +231,10 @@ test("reopening a Done task restores a workspace directory and forks the previou
 
   await window.getByTestId("board-button").click();
   const card = cardLocator("Continuity");
-  await card.getByTestId(`to-done-button-${taskId}`).click();
+  // The only card on the board, so it is the keyboard selection: x = Done
+  // (cards carry no buttons).
+  await expect(card).toHaveAttribute("data-selected", "true");
+  await window.keyboard.press("x");
   // No PR ever merged: pi-home's "Delete unmerged task workspace?" question.
   const confirm = window.getByTestId("confirm-dialog");
   await expect(confirm).toContainText("Delete unmerged task workspace?");
@@ -245,7 +248,13 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await expect.poll(() => existsSync(oldWorktree)).toBe(false);
   expect(bindingFor(taskId)?.sessionPath).toBe(sessionFile);
 
-  await card.getByTestId(`reopen-task-button-${taskId}`).click();
+  // Reopen lives in the workspace header: open the Done task (no worktree,
+  // so its pane is a plain shell — no pi launch) and reopen from there.
+  await openTask("Continuity");
+  await window
+    .getByTestId(`task-workspace-${taskId}`)
+    .getByTestId(`reopen-task-button-${taskId}`)
+    .click();
   const dialog = window.getByTestId("reopen-task-dialog");
   await expect(dialog).toBeVisible();
   await window
@@ -254,6 +263,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await window.getByTestId("reopen-task-confirm").click();
   await expect(dialog).toHaveCount(0);
 
+  await window.getByTestId("board-button").click();
   await expect(
     window
       .getByTestId("column-dev-cards")
@@ -270,7 +280,8 @@ test("reopening a Done task restores a workspace directory and forks the previou
   expect(newSessionId).not.toBe("");
   expect(newSessionId).not.toBe(sessionId);
 
-  await openTask("Continuity");
+  // The still-open workspace picked up the new cycle's worktree and gave
+  // it a pi pane, which forked the previous conversation.
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(4);
   expect(launches()[3]).toEqual([
     "--fork",
@@ -282,6 +293,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   ]);
 
   // The fork is handed out once: the next open resumes the new session.
+  await window.getByTestId("workspace-button").click();
   await closeWorkspace();
   await openTask("Continuity");
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(5);

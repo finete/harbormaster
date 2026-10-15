@@ -1,12 +1,16 @@
 // Shared task-action rules + mutations: the pure "is this action allowed"
-// checks and the IPC-calling mutations behind Start/To review/Done (see
+// checks and the IPC-calling mutations behind the three workflow verbs
+// (Start/todev, Await…/toawait, Done/todone) plus Reopen (see
 // TaskActions.tsx), extracted so Board.tsx's single-key shortcuts (s/r/x)
-// drive the exact same path the buttons do — no second implementation to
-// drift out of sync.
+// and drag gestures drive the exact same path the buttons do — no second
+// implementation to drift out of sync. Awaiting *kinds* (review, Slack,
+// deployment) are data passed to the one await verb, never verbs here.
 import type {
+  AwaitingKindId,
   MoveTaskOptions,
   Task,
   TaskState,
+  ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneForce,
 } from "../../../preload/api";
@@ -17,13 +21,9 @@ export function canStart(task: Pick<Task, "state">): boolean {
   return task.state === "backlog";
 }
 
-export function canReview(
-  task: Pick<Task, "repositoryId" | "branch" | "state">,
-): boolean {
-  return (
-    Boolean(task.repositoryId && task.branch) &&
-    (task.state === "dev" || task.state === "awaiting")
-  );
+/** Whether the Await… picker applies (which kinds fit is core's call, per kind). */
+export function canAwait(task: Pick<Task, "state">): boolean {
+  return task.state === "dev" || task.state === "awaiting";
 }
 
 export function canDone(task: Pick<Task, "state">): boolean {
@@ -56,10 +56,14 @@ export async function startTaskMutation(taskId: string): Promise<void> {
   }
 }
 
-/** Move a task to the "awaiting review" column (reason defaults to plain review, same as the button). */
-export async function toReviewMutation(taskId: string): Promise<void> {
+/** Await: move a task to Awaiting with the picked kind, running that kind's onEnter action in core. */
+export async function toAwaitMutation(
+  taskId: string,
+  kindId: AwaitingKindId,
+  options?: ToAwaitOptions,
+): Promise<void> {
   try {
-    await window.harbormaster.core.toReview(taskId);
+    await window.harbormaster.core.toAwait(taskId, kindId, options);
   } catch (error) {
     pushToast(describeThrown(error), "error");
   }

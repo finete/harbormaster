@@ -110,6 +110,10 @@ class SlowFakePullRequests implements PullRequestAccess {
     throw new Error("ensureOpen not used here");
   }
 
+  async squashMerge(): Promise<PullRequestStatus> {
+    throw new Error("squashMerge not used here");
+  }
+
   async containsCommit(): Promise<boolean> {
     return true;
   }
@@ -585,7 +589,7 @@ describe("mover config parity (#12, #13, #14)", () => {
 });
 
 describe("no-remote repositories (#9)", () => {
-  it("are skipped silently by refresh and rejected by toReview with a clear error", async () => {
+  it("are skipped silently by refresh and rejected by toAwait(review) with a clear error", async () => {
     const f = await fixture();
     const local = join(f.codeRoot, "local-only");
     await git(["init", "-q", "-b", "main", local]);
@@ -605,7 +609,7 @@ describe("no-remote repositories (#9)", () => {
 
     expect(warnings).toEqual([]);
     expect(f.pullRequests.statusCalls).not.toContain(task.branch);
-    await expect(f.core.commands.toReview(task.id)).rejects.toThrow(
+    await expect(f.core.commands.toAwait(task.id, "review")).rejects.toThrow(
       /no origin remote/,
     );
   });

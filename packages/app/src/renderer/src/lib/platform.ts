@@ -1,5 +1,5 @@
 // Platform-aware modifier-key label for kbd hints/tooltips (Board button,
-// New task, Done/Review/Start chips, ...). Takes the platform string as a
+// New task, Start/Await/Done chips, ...). Takes the platform string as a
 // parameter (defaulting to `navigator.platform`) so it's unit-testable
 // without a DOM/Electron environment.
 export function isMacPlatform(platform: string = navigator.platform): boolean {

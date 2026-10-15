@@ -1,43 +1,40 @@
 import { Loader2, Play, RotateCcw } from "lucide-react";
-import type { JSX, MouseEvent, PointerEvent } from "react";
+import type { JSX, MouseEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
 import {
+  canAwait,
   canDone,
   canReopen,
-  canReview,
   reopenTaskMutation,
   startTaskMutation,
+  toAwaitMutation,
   toDoneMutation,
-  toReviewMutation,
 } from "../lib/task-mutations";
+import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { ReopenTaskDialog } from "./ReopenTaskDialog";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
 /**
- * Compact "Start" (backlog only) / "To review" / "Done" actions, shared by `TaskCard` (board) and
- * `TaskWorkspace`'s header (the focused task). Both call straight through
- * the IPC bridge (same pattern as `Board.tsx`/`Sidebar.tsx`'s `moveTask`
- * calls) — the board always re-renders from the next `board-changed` push,
- * never from a locally-applied result. Thrown errors and `toDone`'s returned
- * `warning` both surface as a toast (see `toast.ts`); nothing here
- * special-cases *which* failure it was.
+ * The focused task's workflow verbs in `TaskWorkspace`'s header — the only
+ * place action buttons live (board cards carry none; the board drives the
+ * same verbs by key and drag): Start (backlog) · Await… · Done, or Reopen
+ * once Done. Await… opens the shared kind picker (`AwaitDialog`); which
+ * awaiting kinds exist and what each does is core's registry, never a
+ * button here. Everything calls straight through the IPC bridge — the
+ * board re-renders from the next `board-changed` push, never from a
+ * locally-applied result. Thrown errors and returned warnings surface as a
+ * toast (see `toast.ts`).
  */
-export function TaskActions({
-  task,
-  onPointerDownCapture,
-}: {
-  task: Task;
-  /** Stops dnd-kit's drag-activation listeners (spread on the whole TaskCard) from treating a button press as a drag gesture start. */
-  onPointerDownCapture?: (event: PointerEvent) => void;
-}): JSX.Element {
+export function TaskActions({ task }: { task: Task }): JSX.Element {
   const [busy, setBusy] = useState<
-    "start" | "review" | "done" | "reopen" | null
+    "start" | "await" | "done" | "reopen" | null
   >(null);
   const [reopenOpen, setReopenOpen] = useState(false);
+  const [awaitOpen, setAwaitOpen] = useState(false);
 
-  const reviewAllowed = canReview(task);
+  const awaitAllowed = canAwait(task);
   const doneAllowed = canDone(task);
 
   function stopClick(event: MouseEvent<HTMLButtonElement>): void {
@@ -57,14 +54,18 @@ export function TaskActions({
     }
   }
 
-  async function handleToReview(
-    event: MouseEvent<HTMLButtonElement>,
-  ): Promise<void> {
+  function handleAwaitClick(event: MouseEvent<HTMLButtonElement>): void {
     stopClick(event);
     if (busy) return;
-    setBusy("review");
+    setAwaitOpen(true);
+  }
+
+  async function handleAwaitConfirm(choice: AwaitChoice): Promise<void> {
+    setAwaitOpen(false);
+    if (busy) return;
+    setBusy("await");
     try {
-      await toReviewMutation(task.id);
+      await toAwaitMutation(task.id, choice.kindId, choice.options);
     } finally {
       setBusy(null);
     }
@@ -105,7 +106,6 @@ export function TaskActions({
       <div
         className="flex items-center gap-1.5"
         data-testid={`task-actions-${task.id}`}
-        onPointerDownCapture={onPointerDownCapture}
       >
         <Button
           size="sm"
@@ -122,7 +122,7 @@ export function TaskActions({
           )}
           Reopen
         </Button>
-        {/* Clicks inside the dialog must not bubble to the card (which opens the task). */}
+        {/* Clicks inside the dialog must not bubble to the header's hosts. */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: event-propagation boundary only, not an interactive element. */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: same — keyboard events are handled by the dialog itself. */}
         <div onClick={(event) => event.stopPropagation()}>
@@ -141,7 +141,6 @@ export function TaskActions({
     <div
       className="flex items-center gap-1.5"
       data-testid={`task-actions-${task.id}`}
-      onPointerDownCapture={onPointerDownCapture}
     >
       {task.state === "backlog" && (
         <Button
@@ -163,13 +162,13 @@ export function TaskActions({
       <Button
         size="sm"
         variant="outline"
-        disabled={!reviewAllowed || busy !== null}
-        onClick={handleToReview}
-        data-testid={`to-review-button-${task.id}`}
-        title="Move to Awaiting review (r)"
+        disabled={!awaitAllowed || busy !== null}
+        onClick={handleAwaitClick}
+        data-testid={`await-button-${task.id}`}
+        title="Move to Awaiting: pick why (r on the board)"
       >
-        {busy === "review" && <Loader2 className="h-3 w-3 animate-spin" />}
-        To review
+        {busy === "await" && <Loader2 className="h-3 w-3 animate-spin" />}
+        Await…
         <Kbd>r</Kbd>
       </Button>
       <Button
@@ -184,6 +183,11 @@ export function TaskActions({
         Done
         <Kbd>x</Kbd>
       </Button>
+      <AwaitDialog
+        taskId={awaitOpen ? task.id : null}
+        onCancel={() => setAwaitOpen(false)}
+        onConfirm={(choice) => void handleAwaitConfirm(choice)}
+      />
     </div>
   );
 }
