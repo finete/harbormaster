@@ -14,6 +14,7 @@
 
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -22,7 +23,13 @@ import {
   resolveStatePaths,
   SessionPresenceAccess,
 } from "@harbormaster/core";
+import { Type } from "typebox";
 import { PresenceReporter } from "./presence-reporter.js";
+import {
+  runToAwaitCommand,
+  runToDevCommand,
+  runToDoneCommand,
+} from "./task-commands.js";
 import { buildTaskWidgetLines } from "./task-widget.js";
 
 /** Idle heartbeat cadence; well under PRESENCE_STALE_MS (3 minutes) so a live process never looks dead. */
@@ -42,6 +49,10 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
   const paths = resolveStatePaths(stateDir);
   const presence = new SessionPresenceAccess(paths.presenceDir);
   const reporter = new PresenceReporter({ presence, pid: process.pid });
+  // One core instance for the whole process: frontends call the command API,
+  // movers tick only in the app — `createCore` registers no timers of its
+  // own, so holding onto this instance does nothing automatic.
+  const core = createCore({ stateDir });
   // Read-only: the task-widget refresh never writes task state (accessor
   // rules hold — Managers/Engines own task mutation; this is a plain,
   // read-only use of the same JSON accessor core's manager uses).
@@ -81,8 +92,8 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     // session file it opened, so it reports it through core's command API
     // (never by writing the binding itself). Core records it only for the
     // task's bound session id, so resuming later uses `pi --session <file>`.
-    await createCore({ stateDir })
-      .commands.recordTaskSession(taskId, {
+    await core.commands
+      .recordTaskSession(taskId, {
         sessionId: ctx.sessionManager.getSessionId(),
         sessionPath,
       })
@@ -132,5 +143,84 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     stopHeartbeat();
     stopWidgetRefresh();
     await reporter.end().catch(() => {});
+  });
+
+  // The three invariant verbs (decision #16 in /docs/design-decisions.md):
+  // todev / toawait / todone. No kind-named commands — awaiting kinds are
+  // data the one /toawait verb is parameterized with (`listAwaitingKinds`).
+  // Each command calls the command API (never touches state directly) and
+  // refreshes the task widget right after, so the compact PR/column summary
+  // reflects the move without waiting for the next turn boundary or the 30s
+  // idle timer.
+  pi.registerCommand("todev", {
+    description: "Move this task to Dev",
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      await runToDevCommand(core, taskId, ctx.ui);
+      await refreshWidget(ctx).catch(() => {});
+    },
+  });
+  pi.registerCommand("toawait", {
+    description: "Choose what this task is awaiting",
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      await runToAwaitCommand(core, taskId, ctx.ui);
+      await refreshWidget(ctx).catch(() => {});
+    },
+  });
+  pi.registerCommand("todone", {
+    description: "Complete this task and clean its workspace",
+    handler: async (_args, ctx: ExtensionCommandContext) => {
+      await runToDoneCommand(core, taskId, ctx.ui);
+      await refreshWidget(ctx).catch(() => {});
+    },
+  });
+
+  // Agent-facing status tool — the replacement for pi-home's
+  // `pihome_report_status` muscle memory in resumed sessions. Writes through
+  // the same `PresenceAccess` the reporter above registers with, so the
+  // app's unread/attention surfaces (which read presence, not the command
+  // API — presence is still a phase-2 seam in `createCore`, see its
+  // comment) pick the outcome up; `reporter.isAttached` guards against
+  // reporting onto a registration that failed or already ended.
+  pi.registerTool({
+    name: "harbormaster_report_status",
+    label: "Harbormaster report status",
+    description:
+      "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. Only valid inside a session linked to a Harbormaster task.",
+    parameters: Type.Object({
+      status: Type.Union([Type.Literal("done"), Type.Literal("blocked")], {
+        description:
+          "done = objective delivered; blocked = cannot proceed without help",
+      }),
+      note: Type.Optional(
+        Type.String({
+          description:
+            "One-line summary (done) or the concrete blocker (blocked)",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      if (!reporter.isAttached) {
+        throw new Error(
+          "This session is not linked to a Harbormaster task; status was not recorded.",
+        );
+      }
+      const note = params.note?.trim() || undefined;
+      await presence.reportOutcome(
+        taskId,
+        process.pid,
+        params.status,
+        note,
+        new Date().toISOString(),
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Recorded ${params.status}${note ? `: ${note}` : ""}`,
+          },
+        ],
+        details: undefined,
+      };
+    },
   });
 }

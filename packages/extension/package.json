@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Slim Pi extension: presence reporting for Harbormaster-hosted sessions. Adoption commands, temp write-guard, and the frozen TUI board land in a later wave.",
+  "description": "Pi extension: in-session command surface (/todev, /toawait, /todone, harbormaster_report_status) plus presence reporting for Harbormaster-hosted sessions. The temp write-guard and the frozen TUI board land in a later wave.",
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -15,7 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@harbormaster/core": "0.0.1"
+    "@harbormaster/core": "0.0.1",
+    "typebox": "1.3.27"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.3",
