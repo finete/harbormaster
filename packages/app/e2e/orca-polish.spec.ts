@@ -98,6 +98,7 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -373,6 +374,7 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);

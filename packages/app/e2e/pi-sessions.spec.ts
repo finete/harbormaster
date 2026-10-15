@@ -138,6 +138,7 @@ test.describe("a bound task's primary pane launches HARBORMASTER_PI_COMMAND with
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_PI_COMMAND: fakePiPath,
       },
     });
@@ -196,6 +197,7 @@ test.describe("a missing pi binary falls back to a plain shell with a dismissibl
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_PI_COMMAND: path.join(
           root,
           "definitely-not-a-real-binary",
@@ -252,6 +254,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);

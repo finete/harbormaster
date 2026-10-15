@@ -120,6 +120,7 @@ test.beforeAll(async () => {
       ...process.env,
       HARBORMASTER_STATE_DIR: stateDir,
       HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      HARBORMASTER_WINDOW_OFFSCREEN: "1",
     },
   });
   watchForMainProcessErrors(app);
