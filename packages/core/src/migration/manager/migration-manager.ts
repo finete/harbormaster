@@ -148,7 +148,7 @@ export async function runMigration(
 
   for (const candidate of plan.toImport) {
     await tasks.createTask(candidate.task);
-    await bindings.attachBinding(candidate.binding);
+    if (candidate.binding) await bindings.attachBinding(candidate.binding);
   }
 
   let automationDisabledInPiHome = false;
