@@ -32,6 +32,24 @@ npm run install-extension
 (falling back to a plain shell with a dismissible warning if `pi` itself
 isn't on PATH), but presence/running badges have nothing to report.
 
+## Migrating from pi-home
+
+`npm run migrate-from-pihome` one-way-migrates pi-home's tasks (permanent and
+temporary, including done/archived work) into Harbormaster's task store.
+Task identity/state/titles are read out of pi-home's Beads database (the same
+`bd` CLI pi-home itself shells out to); workspace bindings, PR state, and
+awaiting context come from pi-home's `state.json`. It is read-only toward
+pi-home with exactly one exception: after a successful `--apply` it sets
+`automation: false` in pi-home's `config.json` so pi-home's own movers stop
+touching migrated tasks (reversible — set it back to `true` by hand).
+
+- Dry run by default; pass `--apply` to actually write.
+- Idempotent: already-imported tasks (matched on a stored pi-home id) are
+  skipped on re-run.
+- Refuses `--apply` if pi-home shows a live session attached to a task
+  (close that pane, or pass `--force` once you've confirmed it's fine).
+- `npm run migrate-from-pihome -- --help` for all options.
+
 ## Status
 
 Pre-alpha. See `docs/design-decisions.md` for the full design record and

@@ -14,13 +14,15 @@
     "test": "vitest run",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "install-extension": "pi install \"$(pwd)/packages/extension\""
+    "install-extension": "pi install \"$(pwd)/packages/extension\"",
+    "migrate-from-pihome": "tsx packages/core/src/migration/cli.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   }
