@@ -162,6 +162,7 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_PI_COMMAND: fakePiPath,
         // Plain-shell panels spawn `$SHELL` with no args (see
         // ptySessions.ts's `defaultShell()`); on a dev machine whose real

@@ -226,6 +226,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_GH_COMMAND: fakeGh,
       },
     });
@@ -550,6 +551,7 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_GH_COMMAND: fakeGh,
       },
     });
@@ -665,6 +667,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_GH_COMMAND: fakeGh,
       },
     });
@@ -769,6 +772,7 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
         ...process.env,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);

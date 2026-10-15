@@ -1,5 +1,6 @@
 // Electron main process entry — see /AGENTS.md for the fixed UI stack.
 
+import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
@@ -207,6 +208,46 @@ function registerCoreIpc(): void {
       safeSend(win.webContents, "core:board-changed", payload);
     }
   });
+
+  // External writers share the state files with this process: the pi
+  // extension's /todev//toawait//todone and the migration CLI write through
+  // their own core instances, which emit events only in *their* process.
+  // Watch the state files and republish a fresh board so in-session commands
+  // reflect here in ~moments instead of on the next 30s refresh tick
+  // (the missing half of the design's "frontends never poll files" rule).
+  watchStateFiles();
+}
+
+let stateWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+function watchStateFiles(): void {
+  let watcher: FSWatcher;
+  try {
+    // A fresh install has no state dir until core's first write; watch()
+    // throws ENOENT on a missing path and the watcher would never arm.
+    mkdirSync(activeStateDir, { recursive: true });
+    watcher = watch(activeStateDir, (_event, filename) => {
+      if (!filename || !/^(tasks|workspace-bindings)\.json$/.test(filename)) {
+        return;
+      }
+      clearTimeout(stateWatchDebounce);
+      stateWatchDebounce = setTimeout(() => {
+        void core.commands
+          .listBoard()
+          .then((columns) => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              safeSend(win.webContents, "core:board-changed", { columns });
+            }
+          })
+          .catch(() => {
+            // A half-written file mid-atomic-rename can fail a read; the next
+            // watch event (the rename completing) retries.
+          });
+      }, 150);
+    });
+  } catch {
+    return; // state dir may not exist yet on a totally fresh install
+  }
+  app.on("before-quit", () => watcher.close());
 }
 
 let presencePollTimer: ReturnType<typeof setInterval> | undefined;
@@ -429,10 +470,15 @@ function registerPtyIpc(): void {
 }
 
 function createWindow(): void {
+  // E2e runs on a developer's live desktop: park fixture windows far
+  // offscreen so a human can't wander into a throwaway instance and "use" it
+  // (it happened — a real task was typed into a test window's fake board).
+  const offscreen = Boolean(process.env.HARBORMASTER_WINDOW_OFFSCREEN);
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     show: false,
+    ...(offscreen ? { x: -4200, y: -4200, skipTaskbar: true } : {}),
     backgroundColor: "#0b0f14",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),

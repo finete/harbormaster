@@ -148,6 +148,7 @@ test.beforeAll(async () => {
       ...process.env,
       HARBORMASTER_STATE_DIR: stateDir,
       HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PI_COMMAND: fakePi,
       HARBORMASTER_GH_COMMAND: fakeGh,
     },
