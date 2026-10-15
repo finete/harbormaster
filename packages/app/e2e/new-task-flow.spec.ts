@@ -24,6 +24,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { selectCard } from "./board-gestures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
@@ -278,10 +279,12 @@ test("parking a repo task lands in Backlog and creates no branch or worktree", a
   ).toBe("main");
 });
 
-test("the Start button on a parked card creates its worktree and moves it to Dev", async () => {
+test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Dev", async () => {
   const card = cardLocator("Parked Work");
   const taskId = await cardTaskId(card);
-  await card.getByTestId(`start-task-button-${taskId}`).click();
+  await expect(card.locator("button")).toHaveCount(0);
+  await selectCard(window, taskId);
+  await window.keyboard.press("s");
 
   await expect(
     window
@@ -289,7 +292,6 @@ test("the Start button on a parked card creates its worktree and moves it to Dev
       .locator(`[data-testid="card-${taskId}"]`),
   ).toBeVisible();
   await expect(card).toContainText(/parked-work-[a-z0-9]{6}/);
-  await expect(card.getByTestId(`start-task-button-${taskId}`)).toHaveCount(0);
   expect(taskWorktrees()).toHaveLength(1);
   expect(taskWorktrees()[0]).toContain("parked-work-");
 });

@@ -1,5 +1,6 @@
 // Keyboard-layer e2e lane: board navigation (arrow keys + Enter), the
-// TUI-style single-key shortcuts (n/x/r/s/g/a/Escape), the pi-home-style key
+// TUI-style single-key shortcuts (n/x/r/s/g/a/Escape; r opens the Await
+// picker with review preselected), the pi-home-style key
 // legend, kbd hint chips on the Board/New task buttons, and the guard that
 // keeps every shortcut out of the way while a dialog is open or the
 // terminal is focused (see lib/keyboard-guard.ts, lib/board-selection.ts).
@@ -104,7 +105,9 @@ test("the key legend renders at the top of the board view", async () => {
   await expect(legend).toContainText("Open");
   await expect(legend).toContainText("New");
   await expect(legend).toContainText("Done");
-  await expect(legend).toContainText("Review");
+  await expect(legend).toContainText("Await (review)");
+  // The workflow keys are verbs; no awaiting kind is a key of its own.
+  await expect(legend).not.toContainText("Review");
   await expect(legend).toContainText("Start");
   await expect(legend).toContainText("Refresh");
   await expect(legend).toContainText("Archived");
@@ -210,6 +213,92 @@ test('"x" moves the selected card to Done', async () => {
   await expect(window.getByTestId("column-backlog-cards")).not.toContainText(
     "Keyboard Gamma",
   );
+});
+
+test("board cards carry no action buttons (the verbs live in the workspace header, keys, and drags)", async () => {
+  const cards = window
+    .getByTestId("board-view")
+    .locator('[data-testid^="card-"]');
+  expect(await cards.count()).toBeGreaterThan(0);
+  await expect(cards.locator("button")).toHaveCount(0);
+  await expect(
+    window.getByTestId("board-view").locator('[data-testid^="task-actions-"]'),
+  ).toHaveCount(0);
+});
+
+test('"r" opens the Await picker with review preselected; Enter (the fast path) moves the card to Awaiting / Review', async () => {
+  // Keyboard Alpha sits at the top of the backlog column: s starts it.
+  for (let i = 0; i < 4; i++) await window.keyboard.press("ArrowLeft");
+  for (let i = 0; i < 3; i++) await window.keyboard.press("ArrowUp");
+  await expect(cardLocator("Keyboard Alpha")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  // A backlog card can't await yet: r is inert there.
+  await window.keyboard.press("r");
+  await expect(window.getByTestId("await-picker")).toHaveCount(0);
+  await window.keyboard.press("s");
+  await expect(window.getByTestId("column-dev-cards")).toContainText(
+    "Keyboard Alpha",
+  );
+
+  await window.keyboard.press("r");
+  const picker = window.getByTestId("await-picker");
+  await expect(picker).toBeVisible();
+  await expect(window.getByTestId("await-picker-kind-review")).toBeChecked();
+  // Single keys are dead while the picker is open (no stray Done).
+  await window.keyboard.press("x");
+  await expect(window.getByTestId("column-done-cards")).not.toContainText(
+    "Keyboard Alpha",
+  );
+  await window.keyboard.press("Enter");
+  await expect(picker).toHaveCount(0);
+  await expect(window.getByTestId("column-awaiting-cards")).toContainText(
+    "Keyboard Alpha",
+  );
+  await expect(
+    window
+      .getByTestId("column-awaiting-cards")
+      .getByTestId("group-primary-label")
+      .first(),
+  ).toHaveText("Review");
+});
+
+test("the Await picker's slack kind shows its permalink field and stores it", async () => {
+  // Keyboard Alpha is still selected (now in Awaiting / Review).
+  await expect(cardLocator("Keyboard Alpha")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await window.keyboard.press("r");
+  await expect(window.getByTestId("await-picker")).toBeVisible();
+  await expect(window.getByTestId("await-picker-field-permalink")).toHaveCount(
+    0,
+  );
+  await window.getByTestId("await-picker-kind-slack").check();
+  const permalink = window.getByTestId("await-picker-field-permalink");
+  await expect(permalink).toBeVisible();
+  await permalink.fill("https://acme.slack.com/archives/C1/p2");
+  await permalink.press("Enter");
+  await expect(window.getByTestId("await-picker")).toHaveCount(0);
+  await expect(
+    window
+      .getByTestId("column-awaiting-cards")
+      .getByTestId("group-primary-label")
+      .first(),
+  ).toHaveText("Slack response");
+  const id = (
+    await cardLocator("Keyboard Alpha").getAttribute("data-testid")
+  )?.replace("card-", "");
+  const awaiting = await window.evaluate(
+    async (taskId) =>
+      (await window.harbormaster.core.getTask(taskId ?? ""))?.awaiting,
+    id,
+  );
+  expect(awaiting).toEqual({
+    kind: "slack",
+    permalink: "https://acme.slack.com/archives/C1/p2",
+  });
 });
 
 test('"Escape" returns to the workspace view', async () => {

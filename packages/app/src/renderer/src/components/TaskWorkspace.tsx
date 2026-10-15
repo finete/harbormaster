@@ -72,7 +72,7 @@ export function TaskWorkspace({
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
   const apiRef = useRef<DockviewApi | null>(null);
-  // Live task record for the header's "To review"/"Done" actions; the same
+  // Live task record for the header's Start/Await…/Done/Reopen actions; the same
   // live board every other view reads (see core-client.ts), so the actions'
   // enabled state always reflects the latest state/branch/repositoryId.
   const columns = useBoard();

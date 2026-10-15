@@ -22,6 +22,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { dragTo } from "./board-gestures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -90,7 +91,8 @@ async function createTaskWithRepo(
   const cardTestId = await card.getAttribute("data-testid");
   if (!cardTestId) throw new Error("card missing data-testid");
   const taskId = cardTestId.replace("card-", "");
-  await card.locator('[data-testid^="start-task-button-"]').click();
+  // Start it (a drop on Dev — cards carry no buttons).
+  await dragTo(window, card, window.getByTestId("column-dev"));
   await expect(window.getByTestId("column-dev-cards")).toContainText(title);
   // `startTask` moves the card optimistically; the worktree/workspace
   // binding that gives the primary pane its real cwd finishes slightly

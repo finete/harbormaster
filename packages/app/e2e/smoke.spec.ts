@@ -425,7 +425,7 @@ test("the rail lists only opened tasks: a parked backlog task stays off the rail
   ).toHaveCount(2);
 });
 
-test("dragging a card into awaiting opens the reason dialog; cancel keeps the card in place", async () => {
+test("dragging a card into awaiting opens the Await picker; cancel keeps the card in place", async () => {
   await window.getByTestId("board-button").click();
 
   // "Task Alpha" is still in backlog; move it to dev first (allowed
@@ -439,10 +439,10 @@ test("dragging a card into awaiting opens the reason dialog; cancel keeps the ca
     cardLocator("Task Alpha"),
     window.getByTestId("column-awaiting"),
   );
-  await expect(window.getByTestId("awaiting-reason-dialog")).toBeVisible();
+  await expect(window.getByTestId("await-picker")).toBeVisible();
 
-  await window.getByTestId("awaiting-reason-cancel").click();
-  await expect(window.getByTestId("awaiting-reason-dialog")).toHaveCount(0);
+  await window.getByTestId("await-picker-cancel").click();
+  await expect(window.getByTestId("await-picker")).toHaveCount(0);
 
   // card stayed in dev; it was never moved.
   await expect(window.getByTestId("column-dev-cards")).toContainText(
@@ -453,16 +453,21 @@ test("dragging a card into awaiting opens the reason dialog; cancel keeps the ca
   );
 });
 
-test("confirming the awaiting reason dialog (Review) moves the card and shows the Review group header", async () => {
+test("confirming the Await picker (review preselected) moves the card and shows the Review group header", async () => {
   await dragTo(
     cardLocator("Task Alpha"),
     window.getByTestId("column-awaiting"),
   );
-  await expect(window.getByTestId("awaiting-reason-dialog")).toBeVisible();
+  await expect(window.getByTestId("await-picker")).toBeVisible();
 
-  // "Review" is the default-selected radio option.
-  await window.getByTestId("awaiting-reason-confirm").click();
-  await expect(window.getByTestId("awaiting-reason-dialog")).toHaveCount(0);
+  // Review is the preselected kind; the registry lists all three.
+  await expect(window.getByTestId("await-picker-kind-review")).toBeChecked();
+  await expect(window.getByTestId("await-picker-kind-slack")).toBeVisible();
+  await expect(window.getByTestId("await-picker-kind-deploy")).toBeVisible();
+  // A repository-less task has no PR to merge: deploy doesn't apply.
+  await expect(window.getByTestId("await-picker-kind-deploy")).toBeDisabled();
+  await window.getByTestId("await-picker-confirm").click();
+  await expect(window.getByTestId("await-picker")).toHaveCount(0);
 
   await expect(window.getByTestId("column-awaiting-cards")).toContainText(
     "Task Alpha",
@@ -476,6 +481,36 @@ test("confirming the awaiting reason dialog (Review) moves the card and shows th
       .getByTestId("group-primary-label")
       .first(),
   ).toHaveText("Review");
+});
+
+test("the workspace header keeps the verbs (Await… · Done, no kind names) and Await… opens the same kind picker", async () => {
+  const alphaCard = cardLocator("Task Alpha");
+  const taskId = (await alphaCard.getAttribute("data-testid"))?.replace(
+    "card-",
+    "",
+  );
+  if (!taskId) throw new Error("card missing data-testid");
+  await alphaCard.click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  const actions = window
+    .getByTestId(`task-workspace-${taskId}`)
+    .getByTestId(`task-actions-${taskId}`);
+  await expect(actions).toBeVisible();
+  await expect(actions.getByTestId(`await-button-${taskId}`)).toContainText(
+    "Await…",
+  );
+  await expect(actions.getByTestId(`to-done-button-${taskId}`)).toBeVisible();
+  await expect(actions).not.toContainText("review");
+  await expect(actions).not.toContainText("Review");
+
+  await actions.getByTestId(`await-button-${taskId}`).click();
+  await expect(window.getByTestId("await-picker")).toBeVisible();
+  await expect(window.getByTestId("await-picker-kind-review")).toBeChecked();
+  await window.getByTestId("await-picker-cancel").click();
+  await expect(window.getByTestId("await-picker")).toHaveCount(0);
+
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
 test("Cmd+B toggles between board and workspace views", async () => {

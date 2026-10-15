@@ -1,9 +1,9 @@
-// Wave 5b e2e lane: toReview/toDone/refresh wired end-to-end through the
+// Wave 5b e2e lane: toAwait/toDone/refresh wired end-to-end through the
 // real @harbormaster/core command API. `HARBORMASTER_GH_COMMAND` (mirrors
 // `HARBORMASTER_PI_COMMAND`, see packages/core/src/access
 // /github-pr-access.ts) stands in a tiny fake `gh` CLI so these tests never
 // touch the network or a real GitHub account. The fixture repo's `origin`
-// is a local bare repo (file path) so `toReview`'s branch push succeeds
+// is a local bare repo (file path) so the review kind's branch push succeeds
 // offline, same as core's own git-backed tests.
 import { execFileSync } from "node:child_process";
 import {
@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -24,6 +25,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { selectCard } from "./board-gestures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -91,7 +93,7 @@ async function dragTo(
 
 /**
  * Seeds a tmp codeRoot with a git fixture repo whose `origin` is a local
- * bare repo (not a real GitHub URL): `toReview`'s `git push` needs a remote
+ * bare repo (not a real GitHub URL): the review kind's `git push` needs a remote
  * that actually accepts a push offline.
  */
 function seedFixtureRepoWithBareRemote(root: string, codeRoot: string): void {
@@ -120,31 +122,42 @@ function seedFixtureRepoWithBareRemote(root: string, codeRoot: string): void {
   git(["push", "-q", "origin", "main"], repoCheckout);
 }
 
-/** A fake `gh` that answers `pr list`/`pr create` with a canned open PR, ignoring every other argument (repo id, branch, ...). */
+/**
+ * A fake `gh` that answers `pr list`/`pr create` with a canned open PR,
+ * ignoring every other argument (repo id, branch, ...). `pr merge` flips
+ * it to MERGED (with a merge commit) from then on, and every `pr merge`
+ * argv is appended to `gh-merge.log` next to the script.
+ */
 function writeFakeGhSucceeding(root: string): string {
   const ghPath = path.join(root, "fake-gh");
-  const prJson = JSON.stringify([
-    {
-      number: 42,
-      url: "https://example.invalid/fixture/pull/42",
-      state: "OPEN",
-      isDraft: false,
-      author: { login: "e2e" },
-      reviewRequests: [],
-      reviews: [],
-      headRefOid: "abc1234",
-      mergeCommit: null,
-      baseRefName: "main",
-    },
-  ]).replace(/'/g, "'\\''");
+  const prPayload = (merged: boolean): string =>
+    JSON.stringify([
+      {
+        number: 42,
+        url: "https://example.invalid/fixture/pull/42",
+        state: merged ? "MERGED" : "OPEN",
+        isDraft: false,
+        author: { login: "e2e" },
+        reviewRequests: [],
+        reviews: [],
+        headRefOid: "abc1234",
+        mergeCommit: merged ? { oid: "fedcba9876543" } : null,
+        baseRefName: "main",
+      },
+    ]).replace(/'/g, "'\\''");
+  const prJson = prPayload(false);
+  const mergedJson = prPayload(true);
   writeFileSync(
     ghPath,
     [
       "#!/bin/sh",
       'created_marker="$(dirname "$0")/pr-created"',
+      'merged_marker="$(dirname "$0")/pr-merged"',
       'case "$1 $2" in',
       '  "pr list")',
-      '    if [ -f "$created_marker" ]; then',
+      '    if [ -f "$merged_marker" ]; then',
+      `      printf '%s' '${mergedJson}'`,
+      '    elif [ -f "$created_marker" ]; then',
       `      printf '%s' '${prJson}'`,
       "    else",
       "      printf '[]'",
@@ -155,6 +168,10 @@ function writeFakeGhSucceeding(root: string): string {
       '    printf "https://example.invalid/fixture/pull/42\\n"',
       "    ;;",
       '  "pr ready")',
+      "    ;;",
+      '  "pr merge")',
+      '    echo "$*" >> "$(dirname "$0")/gh-merge.log"',
+      '    touch "$merged_marker"',
       "    ;;",
       "  *)",
       "    printf '[]'",
@@ -180,7 +197,7 @@ function writeFakeGhFailing(root: string): string {
   return ghPath;
 }
 
-test.describe("toReview and toDone drive the board through the real core command API", () => {
+test.describe("toAwait and toDone drive the board through the real core command API", () => {
   let app: ElectronApplication;
   let window: Page;
   let root: string;
@@ -223,7 +240,7 @@ test.describe("toReview and toDone drive the board through the real core command
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("creating a repo task then clicking To review pushes the branch, opens a PR, and moves the card into Awaiting / Review", async () => {
+  test("creating a repo task, then r on the board + Enter (the Await picker's review fast path) pushes the branch, opens a PR, and moves the card into Awaiting / Review", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-dialog")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Ship Feature");
@@ -236,10 +253,13 @@ test.describe("toReview and toDone drive the board through the real core command
     const card = cardLocator(window, "Ship Feature");
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
+    // Cards carry no action buttons: the verbs are keys, drags, and the
+    // workspace header.
+    await expect(card.locator("button")).toHaveCount(0);
 
-    // toReview requires a "dev" (or "awaiting") task with a worktree; the
-    // task was parked in Backlog above, so start it (creates the worktree
-    // and moves it to dev), same as a user dragging the card over.
+    // Await needs a "dev" (or "awaiting") task with a worktree; the task
+    // was parked in Backlog above, so start it (creates the worktree and
+    // moves it to dev), same as a user dragging the card over.
     await window.evaluate(
       (id) => window.harbormaster.core.startTask(id),
       taskId,
@@ -250,9 +270,16 @@ test.describe("toReview and toDone drive the board through the real core command
         .locator(`[data-testid="card-${taskId}"]`),
     ).toBeVisible();
 
-    const reviewButton = card.getByTestId(`to-review-button-${taskId}`);
-    await expect(reviewButton).toBeEnabled();
-    await reviewButton.click();
+    await selectCard(window, taskId);
+    await window.keyboard.press("r");
+    const picker = window.getByTestId("await-picker");
+    await expect(picker).toBeVisible();
+    await expect(window.getByTestId("await-picker-kind-review")).toBeChecked();
+    await expect(window.getByTestId("await-picker-notice")).toContainText(
+      "Pushes",
+    );
+    await window.keyboard.press("Enter");
+    await expect(picker).toHaveCount(0);
 
     const awaitingCard = window
       .getByTestId("column-awaiting-cards")
@@ -337,9 +364,10 @@ test.describe("toReview and toDone drive the board through the real core command
         .locator(`[data-testid="card-${taskId}"]`),
     ).toBeVisible();
 
-    const doneButton = card.getByTestId(`to-done-button-${taskId}`);
-    await expect(doneButton).toBeEnabled();
-    await doneButton.click();
+    // Done from the board: select the card and press x (cards carry no
+    // buttons; `x` runs the same toDone path as the workspace header).
+    await selectCard(window, taskId);
+    await window.keyboard.press("x");
 
     const doneCard = window
       .getByTestId("column-done-cards")
@@ -349,7 +377,7 @@ test.describe("toReview and toDone drive the board through the real core command
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
 
-  test("dragging a branch-backed Dev card to Awaiting and confirming Review runs To review: the branch is pushed and the PR badge appears", async () => {
+  test("dragging a branch-backed Dev card to Awaiting opens the Await picker; confirming the preselected review kind pushes the branch and the PR badge appears", async () => {
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Review");
@@ -376,15 +404,16 @@ test.describe("toReview and toDone drive the board through the real core command
     );
 
     await dragTo(window, devCard, window.getByTestId("column-awaiting"));
-    await expect(window.getByTestId("awaiting-reason-dialog")).toBeVisible();
-    await window.getByTestId("awaiting-reason-confirm").click();
+    await expect(window.getByTestId("await-picker")).toBeVisible();
+    await expect(window.getByTestId("await-picker-kind-review")).toBeChecked();
+    await window.getByTestId("await-picker-confirm").click();
 
     const awaitingCard = window
       .getByTestId("column-awaiting-cards")
       .locator(`[data-testid="card-${taskId}"]`);
     await expect(awaitingCard).toBeVisible({ timeout: 15_000 });
     await expect(awaitingCard.getByTestId("badge-pr")).toContainText("PR #42");
-    // toReview pushed the branch (a plain moveTask never would).
+    // The review kind's onEnter pushed the branch (a plain moveTask never would).
     const remoteRefs = execFileSync(
       "git",
       ["ls-remote", "--heads", path.join(root, "bare-origin.git")],
@@ -443,6 +472,50 @@ test.describe("toReview and toDone drive the board through the real core command
     );
     expect(binding).toBeDefined();
     expect(binding?.worktreePath).toBeUndefined();
+    await expect(window.getByTestId("toast-error")).toHaveCount(0);
+  });
+
+  // Last in this lane on purpose: the fake gh's PR #42 is shared by every
+  // task here and stays MERGED once merged.
+  test("the Await picker's deploy kind squash-merges the open PR via gh and lands the card in the stage-less Production deploy group", async () => {
+    // The board button lives in the workspace sidebar (hidden on the board).
+    if (!(await window.getByTestId("board-view").isVisible())) {
+      await window.getByTestId("board-button").click();
+    }
+    await expect(window.getByTestId("board-view")).toBeVisible();
+    const card = cardLocator(window, "Ship Feature");
+    const taskId = await cardTaskId(card);
+    await expect(
+      window
+        .getByTestId("column-awaiting-cards")
+        .locator(`[data-testid="card-${taskId}"]`),
+    ).toBeVisible();
+
+    await selectCard(window, taskId);
+    await window.keyboard.press("r");
+    await expect(window.getByTestId("await-picker")).toBeVisible();
+    const deploy = window.getByTestId("await-picker-kind-deploy");
+    await expect(deploy).toBeEnabled();
+    await deploy.check();
+    await expect(window.getByTestId("await-picker-notice")).toContainText(
+      "Squash-merges PR #42 and enters the deployment pipeline",
+    );
+    await window.getByTestId("await-picker-confirm").click();
+    await expect(window.getByTestId("await-picker")).toHaveCount(0);
+
+    const deployGroup = window
+      .getByTestId("column-awaiting-cards")
+      .getByTestId("group-primary-label")
+      .filter({ hasText: "Production deploy" });
+    await expect(deployGroup).toBeVisible({ timeout: 15_000 });
+    await expect(
+      window
+        .getByTestId("column-awaiting-cards")
+        .locator(`[data-testid="card-${taskId}"]`)
+        .getByTestId("badge-pr"),
+    ).toContainText("merged");
+    const mergeLog = readFileSync(path.join(root, "gh-merge.log"), "utf8");
+    expect(mergeLog).toMatch(/^pr merge 42 --repo \S+ --squash$/m);
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
 });
@@ -525,7 +598,8 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     await window.getByTestId("board-button").click();
 
     const confirm = window.getByTestId("confirm-dialog");
-    await devCard.getByTestId(`to-done-button-${taskId}`).click();
+    await selectCard(window, taskId);
+    await window.keyboard.press("x");
     await expect(confirm).toContainText("Discard uncommitted changes?");
     await expect(window.getByTestId("confirm-dialog-message")).toContainText(
       "uncommitted changes",
@@ -536,7 +610,7 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     await expect(devCard).toBeVisible();
     expect(existsSync(dirtyFile)).toBe(true);
 
-    await devCard.getByTestId(`to-done-button-${taskId}`).click();
+    await window.keyboard.press("x");
     await expect(confirm).toContainText("Discard uncommitted changes?");
     await window.getByTestId("confirm-dialog-confirm").click();
     // Next question, same as pi-home: the branch never merged.

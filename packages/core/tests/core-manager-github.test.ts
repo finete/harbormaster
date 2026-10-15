@@ -1,4 +1,4 @@
-// Integration tests: CoreManager.toReview/toDone/refresh wired to real git
+// Integration tests: CoreManager.toAwait/toDone/refresh wired to real git
 // repository/worktree access (createCore()'s actual wiring) against real
 // temp git repos — same fixture pattern as tests/task-workspace-manager.test.ts
 // — with a fake PullRequestAccess/VersionAccess injected via CoreOptions so
@@ -124,6 +124,33 @@ class FakePullRequestAccess implements PullRequestAccess {
     return this.containsCommitResult(ancestorOid, descendantOid);
   }
 
+  squashMergeCalls: Array<{
+    repositoryId: string;
+    pullRequestNumber: number;
+    branch: string;
+  }> = [];
+  squashMergeError: Error | undefined;
+
+  async squashMerge(
+    repositoryId: string,
+    pullRequestNumber: number,
+    branch: string,
+  ): Promise<PullRequestStatus> {
+    this.squashMergeCalls.push({ repositoryId, pullRequestNumber, branch });
+    if (this.squashMergeError) throw this.squashMergeError;
+    const merged = pr({
+      number: pullRequestNumber,
+      state: "MERGED",
+      mergeCommit: {
+        oid: "abcdef1234567",
+        targetBranch: "main",
+        url: "https://github.example/acme/harbor-repo/commit/abcdef1234567",
+      },
+    });
+    this.statusByBranch.set(branch, merged);
+    return merged;
+  }
+
   async commitLog(): Promise<CommitLogEntry[]> {
     return [];
   }
@@ -187,7 +214,7 @@ async function fixture(): Promise<Fixture> {
   await gitCommit(checkout, "initial commit");
   await git(["push", "origin", "main"], checkout);
   // Deliberately left pointing at the local bare repo (not a GitHub URL):
-  // toReview's push verb needs a remote it can actually reach, and the
+  // the review kind's push verb needs a remote it can actually reach, and the
   // fake PullRequestAccess never shells out to `gh`, so no real GitHub
   // identity is needed for these tests.
 
@@ -229,7 +256,7 @@ async function writeConfig(
   );
 }
 
-describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
+describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
   it("pushes the branch, opens a PR, stores task.pr, and moves the task to awaiting/review", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
@@ -244,7 +271,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
 
     f.pullRequests.ensureOpenResult = pr({ reviewRequested: false });
 
-    const result = await f.core.commands.toReview(task.id);
+    const result = await f.core.commands.toAwait(task.id, "review");
 
     expect(result.state).toBe("awaiting");
     expect(result.awaiting).toEqual({ kind: "review" });
@@ -256,6 +283,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
       title: task.title,
       baseBranch: "main",
     });
+    expect(f.pullRequests.squashMergeCalls).toEqual([]);
 
     // The branch really was pushed to the fixture's own remote.
     const remoteBranches = await git(["branch", "-r"], f.checkout);
@@ -276,7 +304,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
 
     f.pullRequests.ensureOpenError = new Error("gh: network unreachable");
 
-    await expect(f.core.commands.toReview(task.id)).rejects.toThrow(
+    await expect(f.core.commands.toAwait(task.id, "review")).rejects.toThrow(
       "network unreachable",
     );
 
@@ -285,7 +313,7 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
     expect(reloaded?.pr).toBeUndefined();
   });
 
-  it("rejects a scratch (repository-less) task", async () => {
+  it("moves a repository-less task straight to awaiting/review: nothing to push, no PR (pi-home's scratch path)", async () => {
     const f = await fixture();
     const task = await f.core.commands.createTask({
       title: "Scratch",
@@ -293,9 +321,244 @@ describe.skipIf(!gitAvailable)("CoreManager toReview", () => {
       kind: "temp_task",
     });
     await f.core.commands.moveTask(task.id, "dev");
-    await expect(f.core.commands.toReview(task.id)).rejects.toThrow(
-      "repository-backed task",
+    const result = await f.core.commands.toAwait(task.id, "review");
+    expect(result.state).toBe("awaiting");
+    expect(result.awaiting).toEqual({ kind: "review" });
+    expect(result.pr).toBeUndefined();
+    expect(f.pullRequests.ensureOpenCalls).toEqual([]);
+  });
+
+  it("rejects a repository-backed backlog task (no branch yet) and unknown kinds, leaving the task unmoved", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const parked = await f.core.commands.createTask({
+      title: "Parked",
+      initialPrompt: "",
+      repositoryId: repo.id,
+    });
+    // backlog -> awaiting is not an allowed transition at all.
+    await expect(f.core.commands.toAwait(parked.id, "review")).rejects.toThrow(
+      /Cannot move a task from "backlog"/,
     );
+    const started = await f.core.commands.startTask(parked.id);
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid kind id.
+      f.core.commands.toAwait(started.id, "carrier-pigeon" as any),
+    ).rejects.toThrow("Unknown awaiting kind: carrier-pigeon");
+    expect((await f.core.commands.getTask(started.id))?.state).toBe("dev");
+  });
+});
+
+describe.skipIf(!gitAvailable)("CoreManager toAwait: slack kind", () => {
+  it("stores the trimmed permalink without any external call; a blank permalink is omitted", async () => {
+    const f = await fixture();
+    const task = await f.core.commands.createTask({
+      title: "Ask in Slack",
+      initialPrompt: "",
+      start: true,
+    });
+    const withLink = await f.core.commands.toAwait(task.id, "slack", {
+      inputs: { permalink: "  https://acme.slack.com/archives/C1/p2  " },
+    });
+    expect(withLink.state).toBe("awaiting");
+    expect(withLink.awaiting).toEqual({
+      kind: "slack",
+      permalink: "https://acme.slack.com/archives/C1/p2",
+    });
+
+    const other = await f.core.commands.createTask({
+      title: "Ask again",
+      initialPrompt: "",
+      start: true,
+    });
+    const blank = await f.core.commands.toAwait(other.id, "slack", {
+      inputs: { permalink: "   ", unrelated: "ignored" },
+    });
+    expect(blank.awaiting).toEqual({ kind: "slack" });
+    expect(f.pullRequests.ensureOpenCalls).toEqual([]);
+    expect(f.pullRequests.squashMergeCalls).toEqual([]);
+  });
+});
+
+describe.skipIf(!gitAvailable)("CoreManager toAwait: deploy kind", () => {
+  async function reviewedTask(f: Fixture) {
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const task = await f.core.commands.createTask({
+      title: "Ship widget",
+      initialPrompt: "do it",
+      repositoryId: repo.id,
+      start: true,
+    });
+    f.pullRequests.ensureOpenResult = pr();
+    await f.core.commands.toAwait(task.id, "review");
+    f.pullRequests.statusByBranch.set(task.branch!, pr());
+    return { repo, task };
+  }
+
+  it("squash-merges a still-open PR, then waits at the stage-less production wait when the repository has no pipeline", async () => {
+    const f = await fixture();
+    const { repo, task } = await reviewedTask(f);
+
+    const result = await f.core.commands.toAwait(task.id, "deploy");
+
+    expect(f.pullRequests.squashMergeCalls).toEqual([
+      { repositoryId: repo.id, pullRequestNumber: 7, branch: task.branch },
+    ]);
+    expect(result.state).toBe("awaiting");
+    expect(result.awaiting).toEqual({
+      kind: "deploy",
+      stageId: "__production",
+      stageLabel: "Production deploy",
+    });
+    expect(result.pr).toMatchObject({
+      number: 7,
+      state: "merged",
+      mergeCommit: { oid: "abcdef1234567", targetBranch: "main" },
+    });
+  });
+
+  it("enters the first configured deployment stage", async () => {
+    const f = await fixture();
+    const { repo, task } = await reviewedTask(f);
+    await writeConfig(f, {
+      repositories: {
+        [repo.id]: {
+          deployment: {
+            stages: [
+              { id: "pre", label: "Preprod deploy" },
+              { id: "prod", label: "Production" },
+            ],
+          },
+        },
+      },
+    });
+
+    const result = await f.core.commands.toAwait(task.id, "deploy");
+
+    expect(f.pullRequests.squashMergeCalls).toHaveLength(1);
+    expect(result.awaiting).toEqual({
+      kind: "deploy",
+      stageId: "pre",
+      stageLabel: "Preprod deploy",
+    });
+    // The next refresh keeps it there (the movers consume the kind as data).
+    await f.core.commands.refresh();
+    expect((await f.core.commands.getTask(task.id))?.awaiting).toMatchObject({
+      stageId: "pre",
+    });
+  });
+
+  it("never merges an already-merged PR; it just enters the pipeline", async () => {
+    const f = await fixture();
+    const { task } = await reviewedTask(f);
+    f.pullRequests.statusByBranch.set(
+      task.branch!,
+      pr({
+        state: "MERGED",
+        mergeCommit: { oid: "fedcba7654321", targetBranch: "main", url: "u" },
+      }),
+    );
+
+    const result = await f.core.commands.toAwait(task.id, "deploy");
+
+    expect(f.pullRequests.squashMergeCalls).toEqual([]);
+    expect(result.awaiting).toMatchObject({ stageId: "__production" });
+    expect(result.pr).toMatchObject({ state: "merged" });
+  });
+
+  it("rejects without a PR, or when the merge fails, leaving the task unmoved", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const task = await f.core.commands.createTask({
+      title: "No PR",
+      initialPrompt: "",
+      repositoryId: repo.id,
+      start: true,
+    });
+    await expect(f.core.commands.toAwait(task.id, "deploy")).rejects.toThrow(
+      "Task has no pull request to merge",
+    );
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+
+    const reviewed = await reviewedTask(f);
+    f.pullRequests.squashMergeError = new Error("gh: merge conflict");
+    await expect(
+      f.core.commands.toAwait(reviewed.task.id, "deploy"),
+    ).rejects.toThrow("merge conflict");
+    const reloaded = await f.core.commands.getTask(reviewed.task.id);
+    expect(reloaded?.awaiting).toEqual({ kind: "review" });
+    expect(reloaded?.pr?.state).toBe("open");
+  });
+
+  it("refuses to re-enter the pipeline from a deployment wait (it would reset to stage 1)", async () => {
+    const f = await fixture();
+    const { task } = await reviewedTask(f);
+    await f.core.commands.toAwait(task.id, "deploy");
+    await expect(f.core.commands.toAwait(task.id, "deploy")).rejects.toThrow(
+      "already awaiting deployment",
+    );
+    await expect(f.core.commands.toAwait(task.id, "review")).rejects.toThrow(
+      "already merged",
+    );
+  });
+});
+
+describe.skipIf(!gitAvailable)("CoreManager listAwaitingKinds", () => {
+  it("lists the built-in kinds in picker order with review first; no task = all available, no notices", async () => {
+    const f = await fixture();
+    const kinds = await f.core.commands.listAwaitingKinds();
+    expect(kinds.map((kind) => kind.id)).toEqual(["review", "slack", "deploy"]);
+    expect(kinds.every((kind) => kind.available && !kind.notice)).toBe(true);
+    expect(kinds[1]?.fields).toEqual([
+      expect.objectContaining({ id: "permalink", optional: true }),
+    ]);
+  });
+
+  it("resolves availability and the side-effect notice for a task", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const scratch = await f.core.commands.createTask({
+      title: "Scratch",
+      initialPrompt: "",
+      start: true,
+    });
+    const scratchKinds = await f.core.commands.listAwaitingKinds(scratch.id);
+    expect(scratchKinds.find((k) => k.id === "review")).toMatchObject({
+      available: true,
+    });
+    expect(scratchKinds.find((k) => k.id === "review")?.notice).toBeUndefined();
+    expect(scratchKinds.find((k) => k.id === "deploy")).toMatchObject({
+      available: false,
+    });
+
+    const task = await f.core.commands.createTask({
+      title: "Ship",
+      initialPrompt: "",
+      repositoryId: repo.id,
+      start: true,
+    });
+    f.pullRequests.ensureOpenResult = pr({ number: 12 });
+    await f.core.commands.toAwait(task.id, "review");
+    await writeConfig(f, {
+      repositories: {
+        [repo.id]: {
+          deployment: { stages: [{ id: "pre", label: "Preprod deploy" }] },
+        },
+      },
+    });
+    const kinds = await f.core.commands.listAwaitingKinds(task.id);
+    expect(kinds.find((k) => k.id === "review")?.notice).toContain(
+      `Pushes ${task.branch}`,
+    );
+    expect(kinds.find((k) => k.id === "deploy")).toMatchObject({
+      available: true,
+      notice:
+        "Squash-merges PR #12 and enters the deployment pipeline (first stage: Preprod deploy)",
+    });
   });
 });
 

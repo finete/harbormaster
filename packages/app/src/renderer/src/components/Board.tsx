@@ -7,7 +7,7 @@ import {
 } from "@dnd-kit/core";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { AwaitingKind, TaskState } from "../../../preload/api";
+import type { TaskState } from "../../../preload/api";
 import { isConfirmOpen } from "../confirm";
 import {
   flattenBoard,
@@ -24,14 +24,14 @@ import {
 import { isTypingTarget } from "../lib/keyboard-guard";
 import { modKeyLabel } from "../lib/platform";
 import {
-  canReview,
+  canAwait,
   canStart,
   moveTaskMutation,
   startTaskMutation,
+  toAwaitMutation,
   toDoneMutation,
-  toReviewMutation,
 } from "../lib/task-mutations";
-import { AwaitingReasonDialog } from "./AwaitingReasonDialog";
+import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
@@ -42,16 +42,17 @@ import { Kbd } from "./ui/kbd";
  * Kanban board — renders @harbormaster/core's live board projection exactly
  * as returned (columns -> groups -> tasks; see /packages/core/src/engines
  * /board-grouping.ts). The board never holds its own copy of task
- * placement: every drag routes through the same mutation its button/key
- * uses (`startTask` for backlog -> dev, `toDone` for Done, `toReview` for
- * Awaiting / Review on a branch-backed task, `moveTask` otherwise) and
- * waits for the "board-changed" push to re-render, so there is nothing to
- * roll back if a move is rejected (e.g. an illegal transition): the UI
- * simply doesn't change and the error surfaces as a toast.
+ * placement: every drag routes through the same verb its key uses
+ * (`startTask` for backlog -> dev, the Await… picker + `toAwait` for
+ * Awaiting, `toDone` for Done, `moveTask` otherwise) and waits for the
+ * "board-changed" push to re-render, so there is nothing to roll back if a
+ * move is rejected (e.g. an illegal transition): the UI simply doesn't
+ * change and the error surfaces as a toast. Cards carry no buttons.
  *
  * Also owns the pi-home-style TUI keymap (see lib/board-selection.ts):
- * arrow keys move a keyboard-selected card, Enter opens it, n/g/a/x/r/s
- * mirror the on-card buttons, Escape returns to the workspace view. Only
+ * arrow keys move a keyboard-selected card, Enter opens it, s/r/x drive
+ * the start/await/done verbs (r opens the Await… picker with review
+ * preselected), n/g/a, Escape returns to the workspace view. Only
  * live while `active` (the board is the visible view, per App.tsx) and
  * never while a dialog is open or focus is in a text field/the terminal
  * (lib/keyboard-guard.ts).
@@ -79,9 +80,8 @@ export function Board({
   const presence = usePresenceMap();
   const manualRefresh = useManualRefresh();
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
-  const [pendingDrop, setPendingDrop] = useState<{
-    taskId: string;
-  } | null>(null);
+  // The task the Await… picker is open for (a drop on Awaiting, or `r`).
+  const [awaitTaskId, setAwaitTaskId] = useState<string | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Done-column-only toggle (see BoardColumn.tsx); archived tasks are hidden
@@ -134,7 +134,7 @@ export function Board({
     if (!row || row.state === targetState) return;
 
     if (targetState === "awaiting") {
-      setPendingDrop({ taskId });
+      setAwaitTaskId(taskId);
       return;
     }
 
@@ -158,19 +158,11 @@ export function Board({
     void moveTaskMutation(taskId, targetState);
   }
 
-  function confirmAwaiting(awaiting: AwaitingKind): void {
-    const taskId = pendingDrop?.taskId;
-    setPendingDrop(null);
+  function confirmAwait(choice: AwaitChoice): void {
+    const taskId = awaitTaskId;
+    setAwaitTaskId(null);
     if (!taskId) return;
-    const task = flattenBoard(columns).find((r) => r.task.id === taskId)?.task;
-    // "Review" for a branch-backed task is the To review action (push +
-    // open/reuse the PR), exactly like the button / `r`; Slack and deploy
-    // reasons (and review for scratch work) are plain column moves.
-    if (awaiting.kind === "review" && task && canReview(task)) {
-      void toReviewMutation(taskId);
-      return;
-    }
-    void moveTaskMutation(taskId, "awaiting", { awaiting });
+    void toAwaitMutation(taskId, choice.kindId, choice.options);
   }
 
   // Keyboard selection follows the live board: starts at the first card,
@@ -207,7 +199,7 @@ export function Board({
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent): void {
-      if (newTaskOpen || pendingDrop || isConfirmOpen()) return;
+      if (newTaskOpen || awaitTaskId || isConfirmOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
@@ -254,9 +246,11 @@ export function Board({
           }
           return;
         case "r":
-          if (selectedTask && canReview(selectedTask)) {
+          // Muscle-memory fast path: opens the Await… picker with review
+          // preselected (r, Enter) — never a hardwired kind.
+          if (selectedTask && canAwait(selectedTask)) {
             event.preventDefault();
-            void toReviewMutation(selectedTask.id);
+            setAwaitTaskId(selectedTask.id);
           }
           return;
         case "s":
@@ -280,7 +274,7 @@ export function Board({
   }, [
     active,
     newTaskOpen,
-    pendingDrop,
+    awaitTaskId,
     columns,
     showArchived,
     selectedTaskId,
@@ -324,10 +318,10 @@ export function Board({
           ))}
         </div>
       </DndContext>
-      <AwaitingReasonDialog
-        open={pendingDrop !== null}
-        onCancel={() => setPendingDrop(null)}
-        onConfirm={confirmAwaiting}
+      <AwaitDialog
+        taskId={awaitTaskId}
+        onCancel={() => setAwaitTaskId(null)}
+        onConfirm={confirmAwait}
       />
       <NewTaskDialog
         open={newTaskOpen}

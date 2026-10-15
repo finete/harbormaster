@@ -10,6 +10,7 @@ import type {
   MoverTaskView,
 } from "../contracts/addons.js";
 import type {
+  AwaitingKindOption,
   CoreCommands,
   CreateTaskInput,
   DeleteTaskOptions,
@@ -17,6 +18,7 @@ import type {
   RecordTaskSessionInput,
   RefreshOptions,
   ReopenTaskInput,
+  ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneOptions,
   ToDoneResult,
@@ -29,7 +31,9 @@ import type {
 } from "../contracts/github.js";
 import type { SessionLaunch } from "../contracts/harness.js";
 import type {
+  AwaitingKindId,
   BoardColumn,
+  DeploymentStageConfig,
   GlobalConfig,
   Task,
   TaskPullRequest,
@@ -50,6 +54,12 @@ import type {
   GitWorktreeAccess,
   RepositoryInfo,
 } from "../contracts/workspace.js";
+import {
+  builtinAwaitingKinds,
+  describeAwaitingKind,
+  findAwaitingKind,
+  normalizeAwaitingInputs,
+} from "../engines/awaiting-kinds.js";
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
 import {
@@ -581,44 +591,71 @@ export class CoreManager implements CoreCommands {
     await this.publishBoard();
   }
 
-  async toReview(taskId: string): Promise<Task> {
+  async listAwaitingKinds(taskId?: string): Promise<AwaitingKindOption[]> {
+    const task = taskId ? await this.requireTask(taskId) : undefined;
+    const env = task
+      ? { stages: this.deploymentStages(task, await this.deps.config.load()) }
+      : { stages: [] };
+    return builtinAwaitingKinds.map((kind) =>
+      describeAwaitingKind(kind, task, env),
+    );
+  }
+
+  async toAwait(
+    taskId: string,
+    kindId: AwaitingKindId,
+    options?: ToAwaitOptions,
+  ): Promise<Task> {
+    const kind = findAwaitingKind(kindId);
+    if (!kind) throw new Error(`Unknown awaiting kind: ${kindId}`);
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "awaiting");
-    if (!task.repositoryId || !task.branch) {
+    const config = await this.deps.config.load();
+    const env = { stages: this.deploymentStages(task, config) };
+    const assessment = kind.assess(task, env);
+    if (!assessment.available) {
       throw new Error(
-        `toReview requires a repository-backed task with a branch: ${taskId}`,
+        `Cannot await ${kind.label.toLowerCase()}: ${assessment.reason ?? "not available for this task"}`,
       );
     }
-    const repo = await this.findRepository(task.repositoryId);
-    if (!repo.remoteUrl) {
-      throw new Error(
-        `Cannot open a pull request: ${repo.root} has no origin remote`,
-      );
-    }
-    const binding = await this.deps.bindings.getBindingForTask(taskId);
-    if (!binding?.worktreePath) {
-      throw new Error(`No worktree bound for task: ${taskId}`);
-    }
-    await this.deps.worktrees.pushBranch(binding.worktreePath, task.branch);
-    const targetBranch = task.targetBranch ?? repo.defaultBranch;
-    const status = await this.deps.pullRequests.ensureOpen(
-      task.repositoryId,
-      task.branch,
-      binding.worktreePath,
-      task.title,
-      task.initialPrompt,
-      targetBranch,
-    );
+    const inputs = normalizeAwaitingInputs(kind, options?.inputs);
+    const entered = kind.onEnter
+      ? await kind.onEnter({
+          task,
+          inputs,
+          ...env,
+          resolveWorkspace: async () => {
+            if (!task.repositoryId) {
+              throw new Error(`Task has no repository: ${taskId}`);
+            }
+            const repo = await this.findRepository(task.repositoryId, config);
+            const binding = await this.deps.bindings.getBindingForTask(taskId);
+            return {
+              repo,
+              ...(binding?.worktreePath
+                ? { worktreePath: binding.worktreePath }
+                : {}),
+            };
+          },
+          worktrees: this.deps.worktrees,
+          pullRequests: this.deps.pullRequests,
+        })
+      : {};
+    const awaiting = kind.awaitingFor(task, inputs, env);
     const now = this.deps.clock.now().toISOString();
-    // Push + PR creation take a while: apply the move to the task as
-    // persisted now, not the snapshot read before the slow calls.
+    // The action (push, PR creation, merge) takes a while: apply the move
+    // to the task as persisted now, not the snapshot read before it.
     const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
       assertAllowedTransition(fresh.state, "awaiting");
       return {
         ...fresh,
-        pr: toTaskPullRequest(status, targetBranch),
+        ...(entered.pullRequest
+          ? {
+              pr: toTaskPullRequest(entered.pullRequest, entered.targetBranch),
+            }
+          : {}),
         state: "awaiting",
-        awaiting: { kind: "review" },
+        awaiting,
         updatedAt: now,
         stateChangedAt: fresh.state !== "awaiting" ? now : fresh.stateChangedAt,
       };
@@ -626,6 +663,21 @@ export class CoreManager implements CoreCommands {
     if (!next) throw new Error(`Task not found: ${taskId}`);
     await this.publishTaskChange(next);
     return next;
+  }
+
+  /** The task's repository's effective deployment stages (empty without a pipeline). */
+  private deploymentStages(
+    task: Task,
+    config: GlobalConfig,
+  ): readonly DeploymentStageConfig[] {
+    return (
+      effectivePipeline(
+        task.repositoryId
+          ? config.repositories?.[task.repositoryId]?.deployment
+          : undefined,
+        builtinAutomationNames,
+      )?.stages ?? []
+    );
   }
 
   async toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {

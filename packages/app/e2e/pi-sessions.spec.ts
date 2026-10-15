@@ -22,6 +22,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { dragTo } from "./board-gestures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -87,9 +88,12 @@ async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   // Parked in Backlog: Start creates the worktree the pi pane runs in.
-  await cardLocator(window, title)
-    .locator('[data-testid^="start-task-button-"]')
-    .click();
+  // (a drop on Dev — cards carry no buttons).
+  await dragTo(
+    window,
+    cardLocator(window, title),
+    window.getByTestId("column-dev"),
+  );
   await expect(window.getByTestId("column-dev-cards")).toContainText(title);
 }
 

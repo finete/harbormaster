@@ -5,6 +5,7 @@
 import type { SessionLaunch } from "./harness.js";
 import type {
   AwaitingKind,
+  AwaitingKindId,
   BoardColumn,
   Task,
   TaskKind,
@@ -104,6 +105,40 @@ export interface RefreshOptions {
 export interface MoveTaskOptions {
   /** Required when moving to "awaiting"; the reason the task is blocked. */
   awaiting?: AwaitingKind;
+}
+
+/** One free-text input an awaiting kind accepts (e.g. Slack's permalink). */
+export interface AwaitingKindField {
+  /** Key of this field's value in `ToAwaitOptions.inputs`. */
+  id: string;
+  label: string;
+  placeholder?: string;
+  optional: boolean;
+}
+
+/**
+ * One registered awaiting kind as a picker shows it, resolved for a
+ * specific task (see `CoreCommands.listAwaitingKinds`): what it is, which
+ * inputs it takes, whether it applies to that task, and what entering it
+ * will do. Plain data so any frontend can render the same picker.
+ */
+export interface AwaitingKindOption {
+  id: AwaitingKindId;
+  label: string;
+  /** One-line explanation of the wait. */
+  description: string;
+  fields: AwaitingKindField[];
+  /** Whether `toAwait(taskId, id)` can currently succeed for the task. */
+  available: boolean;
+  /** Why it is unavailable, when `available` is false. */
+  unavailableReason?: string;
+  /** The side effect entering it will have for this task (e.g. "Squash-merges PR #12 …"), if any. */
+  notice?: string;
+}
+
+export interface ToAwaitOptions {
+  /** Values for the kind's `AwaitingKindField`s, keyed by field id; blank values are ignored. */
+  inputs?: Record<string, string>;
 }
 
 export interface DeleteTaskOptions {
@@ -210,13 +245,28 @@ export interface CoreCommands {
   updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
   deleteTask(id: string, options?: DeleteTaskOptions): Promise<void>;
   /**
-   * Push the task's branch, create or reuse its pull request (draft→ready
-   * reuse semantics: an existing draft is marked ready, otherwise a fresh PR
-   * is opened), store `task.pr`, and move the task to `awaiting` /
-   * `{ kind: "review" }`. Requires a repository-backed task with a bound
-   * worktree and branch.
+   * The registered awaiting kinds in picker order (the default kind,
+   * `review`, first), each resolved against `taskId` when given:
+   * availability and the side-effect notice. Without a task every kind is
+   * reported available with no notice.
    */
-  toReview(taskId: string): Promise<Task>;
+  listAwaitingKinds(taskId?: string): Promise<AwaitingKindOption[]>;
+  /**
+   * The one "await" verb: move a task to `awaiting` with the given kind,
+   * running that kind's `onEnter` action first (see
+   * `engines/awaiting-kinds.ts`). Built-ins: `review` pushes the branch and
+   * creates or reuses its PR (draft→ready) for a repository-backed task (a
+   * repository-less task simply waits); `slack` stores the optional
+   * `permalink` input; `deploy` squash-merges a still-open PR and enters the
+   * repository's first deployment stage (or the stage-less production wait
+   * when it has no pipeline). A failing action leaves the task unmoved.
+   * Unknown kinds and illegal transitions reject.
+   */
+  toAwait(
+    taskId: string,
+    kindId: AwaitingKindId,
+    options?: ToAwaitOptions,
+  ): Promise<Task>;
   /**
    * Move a task to `done`, cleaning up its workspace (pi-home's `complete`):
    * remove the worktree and delete the branch. Destroying work needs the

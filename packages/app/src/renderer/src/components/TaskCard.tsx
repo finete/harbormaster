@@ -5,10 +5,14 @@ import type { JSX } from "react";
 import type { Task } from "../../../preload/api";
 import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
-import { TaskActions } from "./TaskActions";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
+/**
+ * One board card: title, branch, PR/presence/unread chrome only. Cards
+ * carry no action buttons — the workflow verbs live in the workspace
+ * header, the board's keys (s/r/x, see BoardKeyLegend), and drag-and-drop.
+ */
 export function TaskCard({
   task,
   presence,
@@ -107,12 +111,6 @@ export function TaskCard({
           </Badge>
         )}
       </CardContent>
-      <div className="px-3 pb-2">
-        <TaskActions
-          task={task}
-          onPointerDownCapture={(event) => event.stopPropagation()}
-        />
-      </div>
     </Card>
   );
 }

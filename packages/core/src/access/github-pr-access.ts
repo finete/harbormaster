@@ -193,6 +193,26 @@ export class GithubPrAccess implements PullRequestAccess {
     };
   }
 
+  async squashMerge(
+    repositoryId: string,
+    pullRequestNumber: number,
+    branch: string,
+  ): Promise<PullRequestStatus> {
+    await this.execute("gh", [
+      "pr",
+      "merge",
+      String(pullRequestNumber),
+      "--repo",
+      this.ghRepo(repositoryId),
+      "--squash",
+    ]);
+    const merged = await this.find(repositoryId, branch, "all");
+    if (merged?.state !== "MERGED") {
+      throw new Error("Pull request squash merge did not complete");
+    }
+    return merged;
+  }
+
   private async markReady(
     repositoryId: string,
     branch: string,
