@@ -1,135 +1,126 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import type { IDockviewPanelProps } from "dockview-react";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { csiUSequenceForKeyEvent } from "../lib/terminal-key-sequences";
+import {
+  createTerminalOptions,
+  type HostContext,
+  installHostIntegrations,
+  type SearchHandle,
+} from "../lib/terminal-host";
 import {
   createTitleThrottle,
   defaultTerminalTitle,
   piTerminalTitle,
 } from "../lib/terminal-title";
+import { TerminalContextMenu } from "./TerminalContextMenu";
+import { TerminalSearchBar } from "./TerminalSearchBar";
 
 /**
  * One xterm.js terminal wired over the narrow `window.harbormaster.terminal`
  * IPC bridge to a node-pty `$SHELL` process spawned in the main process.
+ *
+ * xterm 6.0.0, with:
+ * - Unicode11Addon (item #13)
+ * - WebLinksAddon + OSC 8 handler (items #10, #11)
+ * - SearchAddon + TerminalSearchBar (item #12)
+ * - Cmd+K clear, mac text-editing sequences, extended CSI-u (items #7, #6, #8)
+ * - Clipboard paste: image → tmp file, Finder files → paths (items #1, #2)
+ * - Drag-and-drop files → paths (item #3)
+ * - Right-click context menu (item #16)
+ * - convertEol removed (item #25)
+ * - macOptionClickForcesSelection: true (item #21)
+ * - PTY env hygiene: TERM_PROGRAM, COLORTERM, LANG (item #24) — in ptySessions.ts
  */
 export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // Flips once the pty has written any bytes back to this pane. Exposed as a
-  // data attribute so e2e tests can assert on "pty is alive and talking"
-  // without depending on xterm's canvas-rendered internals.
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
-  // Set when this panel tried to launch pi and fell back to a plain shell
-  // (pi not installed/found on PATH); renders a dismissible warning strip.
   const [fellBackToShell, setFellBackToShell] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
 
-  // Mount-only: this pty is spawned exactly once for this panel's
-  // lifetime, with the cwd dockview assigned it at creation time (see
-  // TaskWorkspace.tsx) — a panel's params never change after that.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect, see comment above.
+  // Search bar state.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchHandleRef = useRef<SearchHandle | null>(null);
+
+  // Context menu state.
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    ctx: HostContext;
+  } | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const terminal = new Terminal({
-      convertEol: true,
-      cursorBlink: true,
-      // Nerd Font first so powerline/p10k prompts render their glyphs; the
-      // fallbacks keep the terminal usable on machines without it.
-      fontFamily:
-        '"Hack Nerd Font Mono", "HackNerdFontMono", "MesloLGS NF", Menlo, monospace',
-      fontSize: 13,
-      // No lineHeight multiplier: fractional cell heights (13 * 1.25 = 16.25px)
-      // land the WebGL glyph atlas on subpixel boundaries and blur every
-      // glyph, especially on retina. Integer cells = Ghostty-crisp text.
-      lineHeight: 1,
-      scrollback: 10_000,
-      macOptionIsMeta: true,
-      // Never let xterm recolor output for contrast; themes own their colors.
-      minimumContrastRatio: 1,
-      // Keeps an accessible text mirror of the terminal's rendered rows in
-      // the DOM alongside the canvas paint, so e2e tests can assert on
-      // terminal contents (shell output, prompts) via plain text matchers.
-      screenReaderMode: true,
-      theme: {
-        background: "#0b0f14",
-        foreground: "#d7dde3",
-        cursor: "#d7dde3",
-        cursorAccent: "#0b0f14",
-        selectionBackground: "#2c3a4d",
-        black: "#1c2126",
-        red: "#f2777a",
-        green: "#99cc99",
-        yellow: "#ffcc66",
-        blue: "#6699cc",
-        magenta: "#cc99cc",
-        cyan: "#66cccc",
-        white: "#d7dde3",
-        brightBlack: "#4a5561",
-        brightRed: "#f99157",
-        brightGreen: "#b5e0a6",
-        brightYellow: "#ffd98c",
-        brightBlue: "#8ab6e8",
-        brightMagenta: "#e0b3e0",
-        brightCyan: "#8ce0e0",
-        brightWhite: "#f2f6fa",
-      },
-    });
+    const terminal = new Terminal(createTerminalOptions());
+
+    // Unicode 11 width tables — must be loaded before open() so the first
+    // render uses the correct glyph widths.
+    const unicode11 = new Unicode11Addon();
+    terminal.loadAddon(unicode11);
+    terminal.unicode.activeVersion = "11";
+
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
-    // WebGL paints crisper and faster than the DOM renderer; fall back
-    // silently when the context is unavailable (rare: headless GL limits,
-    // too many live contexts). On context loss, dispose so xterm returns to
-    // its default renderer instead of a frozen canvas.
+
+    // Add a data attribute so e2e can assert the unicode version without
+    // relying on canvas internals.
+    container
+      .closest("[data-testid='terminal-panel']")
+      ?.setAttribute("data-unicode-version", "11");
+
+    // WebGL renderer — fall back silently if context is unavailable.
+    let webgl: WebglAddon | undefined;
     try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl?.dispose());
       terminal.loadAddon(webgl);
     } catch {
       // DOM renderer fallback is fine.
     }
+
     fitAddon.fit();
 
     let disposed = false;
     let sessionId: string | undefined;
-
-    // pi's documented embedded-terminal workaround (xterm.js can't speak the
-    // Kitty keyboard protocol): translate the handful of extended combos pi
-    // distinguishes from plain Enter into explicit CSI-u writes to the pty,
-    // and tell xterm not to also process the keydown itself (no collapsed
-    // `\r`/`ESC \r` double-send). Every other key returns `true` and flows
-    // through xterm's normal pipeline untouched.
-    terminal.attachCustomKeyEventHandler((event) => {
-      const sequence = csiUSequenceForKeyEvent(event);
-      if (sequence === null) return true;
-      if (sessionId) window.harbormaster.terminal.write(sessionId, sequence);
-      event.preventDefault();
-      return false;
-    });
-    let unsubscribeData: (() => void) | undefined;
-    let unsubscribeExit: (() => void) | undefined;
 
     const params = props.params as
       | { cwd?: string; taskId?: string; primary?: boolean }
       | undefined;
     const cwd = params?.cwd;
     const isPrimary = !!params?.primary;
+    const isMac = /mac/i.test(navigator.platform);
 
-    // Live tab title (cmux parity): default to "π" (primary/pi panes) or
-    // the cwd's basename (plain shells) until xterm reports the shell's
-    // first OSC title, then track every change verbatim (prefixed "π " for
-    // primary panes). Routed through dockview's panel api, not React state,
-    // so a title change never re-renders/remounts this panel.
-    //
-    // Throttled (leading + trailing, latest wins, unchanged skipped): a
-    // streaming agent can retitle many times a second, and each applied
-    // title re-renders the tab and re-saves the workspace layout (dockview
-    // counts a title change as a layout change; see TaskWorkspace.tsx).
+    // HostContext ties together all feature installers.
+    const ctx: HostContext = {
+      terminal,
+      container,
+      write: (data: string) => {
+        if (sessionId) window.harbormaster.terminal.write(sessionId, data);
+      },
+      isPrimary,
+      isMac,
+      openSearch: () => setSearchOpen(true),
+      openContextMenu: (x, y) => setContextMenu({ x, y, ctx }),
+      // registerKeyHandler is populated by installKeys() during installHostIntegrations().
+      registerKeyHandler: () => {},
+    };
+
+    // Install all host integrations (keys, paste, drop, links, search, context-menu).
+    const integrations = installHostIntegrations(ctx);
+    searchHandleRef.current = integrations.search;
+
+    let unsubscribeData: (() => void) | undefined;
+    let unsubscribeExit: (() => void) | undefined;
+
+    // Tab title (cmux parity).
     const initialTitle = defaultTerminalTitle({ cwd, primary: isPrimary });
     props.api.setTitle(initialTitle);
     const titleThrottle = createTitleThrottle(
@@ -141,11 +132,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       titleThrottle.update(isPrimary ? piTerminalTitle(title) : title);
     });
 
-    // Deferred one macrotask: React StrictMode (dev) double-mounts effects,
-    // and spawning on the throwaway first mount consumed the task's one-shot
-    // session/prompt claims — pi #1 claimed the initial prompt, got torn down
-    // instantly, and pi #2 started blank. The timer never fires on the
-    // StrictMode throwaway because its cleanup clears it synchronously.
+    // Deferred one macrotask: React StrictMode (dev) double-mounts effects.
     const createTimer = window.setTimeout(() => {
       void window.harbormaster.terminal
         .create({
@@ -163,10 +150,6 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           sessionId = id;
           if (fellBack) setFellBackToShell(true);
 
-          // Hot path (one call per ~16ms batch from main): no per-chunk
-          // React work - the "received output" flag flips state exactly
-          // once - and each chunk is acknowledged back to main once xterm
-          // has parsed it (flow control, see main/pty-data-batcher.ts).
           let receivedOutput = false;
           unsubscribeData = window.harbormaster.terminal.onData((event) => {
             if (event.id !== id) return;
@@ -211,12 +194,27 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       titleDisposable.dispose();
       titleThrottle.dispose();
       resizeObserver.disconnect();
+      integrations.dispose();
       unsubscribeData?.();
       unsubscribeExit?.();
       if (sessionId) void window.harbormaster.terminal.dispose(sessionId);
-      // xterm's dispose cascades into loaded addons; the WebGL addon can
-      // throw when its context is already torn down. A throw inside a React
-      // cleanup unmounts the entire tree, so never let it escape.
+
+      // Workaround for addon-webgl ≤0.19 cursor-blink-manager leak (Tabby
+      // webglAddon.ts workaround; remove once addon-webgl ≥0.20 is adopted):
+      if (webgl) {
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: internal workaround
+          (webgl as any)._renderer?._cursorBlinkStateManager?.dispose();
+        } catch {
+          // Safe to ignore.
+        }
+        try {
+          webgl.dispose();
+        } catch {
+          // Context already lost.
+        }
+      }
+
       try {
         terminal.dispose();
       } catch {
@@ -247,11 +245,34 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         data-testid="terminal-panel"
         data-panel-id={props.api.id}
         data-received-output={hasReceivedOutput}
-        className="terminal-host min-h-0 flex-1 bg-[#0b0f14] py-1.5 pl-3"
+        className="terminal-host relative min-h-0 flex-1 bg-[#0b0f14] py-1.5 pl-3"
       >
+        {/* Search bar (item #12) */}
+        {searchOpen && searchHandleRef.current && (
+          <TerminalSearchBar
+            search={searchHandleRef.current}
+            onClose={() => {
+              setSearchOpen(false);
+              // Restore terminal focus when search closes.
+              containerRef.current
+                ?.querySelector<HTMLElement>(".xterm-helper-textarea")
+                ?.focus();
+            }}
+          />
+        )}
+
+        {/* Context menu (item #16) */}
+        {contextMenu && (
+          <TerminalContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            ctx={contextMenu.ctx}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
+
         {/* xterm mounts here; padding lives on the wrapper above so the
-            FitAddon measures the true content box — padding on the measured
-            element makes fit overshoot and clip the bottom row (pi's footer). */}
+            FitAddon measures the true content box. */}
         <div ref={containerRef} className="h-full w-full" />
       </div>
     </div>

@@ -1,7 +1,7 @@
 // Preload script — runs in a sandboxed, isolated context. It exposes only
 // the narrow typed `window.harbormaster` API; the renderer never gets
 // `require`, `process`, or any other Node global.
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AwaitingKindId,
   AwaitingKindOption,
@@ -178,6 +178,13 @@ const api: HarbormasterApi = {
       ipcRenderer.on("app:open-task", handler);
       return () => ipcRenderer.removeListener("app:open-task", handler);
     },
+  },
+  terminalHost: {
+    resolveClipboardPaste: (): Promise<string | null> =>
+      ipcRenderer.invoke("terminalHost:resolveClipboardPaste"),
+    openLink: (url: string): Promise<boolean> =>
+      ipcRenderer.invoke("terminalHost:openLink", url),
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   },
 };
 

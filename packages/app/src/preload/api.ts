@@ -144,6 +144,24 @@ export interface TerminalExitEvent {
   exitCode: number;
 }
 
+export interface TerminalHostApi {
+  /**
+   * Resolve what to paste when the user hits Cmd+V in a terminal pane.
+   * Handles image → temp-file path and Finder file → shell-escaped path (P0).
+   */
+  resolveClipboardPaste(): Promise<string | null>;
+  /**
+   * Open an http/https link in the user's default browser via the main process.
+   * Returns false when the URL is not allowed (only http/https are permitted).
+   */
+  openLink(url: string): Promise<boolean>;
+  /**
+   * Resolve the absolute file-system path for a File from a drop event.
+   * Uses Electron's `webUtils.getPathForFile` from the preload context.
+   */
+  getPathForFile(file: File): string;
+}
+
 export interface HarbormasterApi {
   shell: {
     /**
@@ -271,6 +289,7 @@ export interface HarbormasterApi {
     /** Cmd/Ctrl+Shift+ArrowUp/Down intercepted in main; renderer cycles sidebar focus. */
     onCycleTask(listener: (direction: "up" | "down") => void): () => void;
   };
+  terminalHost: TerminalHostApi;
   app: {
     /**
      * Ask main to show a native OS notification for `taskId` (an unread

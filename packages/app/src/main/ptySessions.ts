@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
+import { app } from "electron";
 import * as pty from "node-pty";
 import {
   createPtyDataBatcher,
@@ -16,6 +17,7 @@ import {
   type PtyDataBatcher,
   type PtyFlowControl,
 } from "./pty-data-batcher";
+import { buildPtyEnv } from "./pty-env";
 
 export interface PtySessionCallbacks {
   onData: (data: string) => void;
@@ -127,20 +129,31 @@ export function createSession(
   const fellBackToShell = !!spec && !useSpec;
 
   const spawnCwd = useSpec ? spec.cwd || cwd : cwd;
+  const appVersion = (() => {
+    try {
+      return app.getVersion();
+    } catch {
+      return "0.0.1";
+    }
+  })();
+  const baseEnv = buildPtyEnv(process.env, useSpec ? spec.env : undefined, {
+    appVersion,
+    hyperlinks: true,
+  });
   const ptyProcess = useSpec
     ? pty.spawn(spec.command, spec.args, {
         name: "xterm-256color",
         cols,
         rows,
         cwd: spawnCwd,
-        env: { ...(process.env as Record<string, string>), ...spec.env },
+        env: baseEnv,
       })
     : pty.spawn(defaultShell(), [], {
         name: "xterm-256color",
         cols,
         rows,
         cwd,
-        env: process.env as Record<string, string>,
+        env: baseEnv,
       });
 
   // Subscriptions are owned by the session record so `disposeSession` can
