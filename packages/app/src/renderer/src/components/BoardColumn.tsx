@@ -77,7 +77,7 @@ export function BoardColumn({
         </div>
       </div>
       <div
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5"
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-0.5"
         data-testid={`column-${column.state}-cards`}
       >
         {visibleGroups.map((group) => (
