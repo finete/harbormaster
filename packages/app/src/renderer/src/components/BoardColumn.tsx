@@ -185,7 +185,7 @@ export function BoardColumn({
       data-board-column={column.state}
       data-testid={`column-${column.state}`}
       className={cn(
-        "flex min-w-[240px] max-w-[480px] flex-1 flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2 transition-[flex-basis,width] duration-200 ease-in-out",
+        "flex min-w-[240px] max-w-[720px] flex-1 flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2 transition-[flex-basis,width] duration-200 ease-in-out",
         isOver && "ring-1 ring-primary",
       )}
     >
