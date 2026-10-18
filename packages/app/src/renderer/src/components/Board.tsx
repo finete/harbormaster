@@ -1,12 +1,22 @@
 import {
+  type Announcements,
+  type CollisionDetection,
   DndContext,
   type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  getClientRect,
+  type MeasuringConfiguration,
+  MeasuringStrategy,
   PointerSensor,
+  pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { TaskState } from "../../../preload/api";
 import { isConfirmOpen } from "../confirm";
 import {
@@ -17,12 +27,17 @@ import {
   useUnreadTaskIds,
 } from "../core-client";
 import {
+  boardGroupKey,
   buildSelectionGrid,
   moveSelection,
   resolveSelection,
 } from "../lib/board-selection";
 import { isTypingTarget } from "../lib/keyboard-guard";
 import { modKeyLabel } from "../lib/platform";
+import {
+  readBoardCollapsedGroups,
+  storeBoardCollapsedGroups,
+} from "../lib/sidebar-persistence";
 import {
   canAwait,
   canStart,
@@ -35,8 +50,44 @@ import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
+import { TaskCard } from "./TaskCard";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
+
+/**
+ * Column-level drops (every droppable is a whole column): the pointer's
+ * column wins (`pointerWithin`, dnd-kit's multi-container recommendation —
+ * it never picks a neighbour just because the wide card overlaps it more).
+ * When the pointer is in a gutter between columns or the board padding,
+ * fall back to the drag preview's best rect overlap (`rectIntersection`,
+ * the same fallback dnd-kit's multiple-containers example uses). Unlike a
+ * `closestCorners`/`closestCenter` fallback this can still return nothing,
+ * so releasing over the sidebar/toolbar cancels instead of committing a
+ * move — a Done drop runs the destructive worktree cleanup.
+ */
+const columnCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) return pointerCollisions;
+  return rectIntersection(args);
+};
+
+/**
+ * Droppables are re-measured on every render while dragging
+ * (`MeasuringStrategy.Always`): columns scroll (auto-scroll) and groups can
+ * collapse mid-drag, and stale rects would mis-target drops. Each droppable
+ * node sits inside its column's cards scroller (see BoardColumn.tsx — that
+ * is what lets the auto-scroller find the scroller), so `measure` resolves
+ * the full column element for the hit area.
+ */
+const boardMeasuring: MeasuringConfiguration = {
+  droppable: {
+    strategy: MeasuringStrategy.Always,
+    measure: (node) =>
+      getClientRect(node.closest("[data-board-column]") ?? node, {
+        ignoreTransform: true,
+      }),
+  },
+};
 
 /**
  * Kanban board — renders @harbormaster/core's live board projection exactly
@@ -87,6 +138,24 @@ export function Board({
   // Done-column-only toggle (see BoardColumn.tsx); archived tasks are hidden
   // by default, sidebar excludes them always regardless of this.
   const [showArchived, setShowArchived] = useState(false);
+  // Board group collapse (rail parity): `boardGroupKey(column, group)` ids,
+  // persisted with the sidebar's localStorage pattern so it survives relaunch.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
+    readBoardCollapsedGroups(window.localStorage),
+  );
+  // The card being dragged, rendered as the portaled DragOverlay preview.
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+
+  function toggleGroup(state: TaskState, groupId: string): void {
+    setCollapsedGroups((current) => {
+      const key = boardGroupKey(state, groupId);
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      storeBoardCollapsedGroups(window.localStorage, next);
+      return next;
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -99,9 +168,29 @@ export function Board({
   // doesn't also trigger TaskCard's onClick "select" handler; a plain
   // click (never reaching onDragStart) still selects normally.
   const draggedRef = useRef(false);
+  // True for the whole pointer drag *and* the rest of the event dispatch
+  // that ended it: dnd-kit's PointerSensor cancels on an Escape keydown at
+  // the document, synchronously, before this board's window-level keymap
+  // sees the same event — which must not then also run Escape's "back to
+  // workspace" (or arrow-key selection moves mid-drag).
+  const dragKeyGuardRef = useRef(false);
 
-  function handleDragStart(): void {
+  function handleDragStart(event: DragStartEvent): void {
     draggedRef.current = true;
+    dragKeyGuardRef.current = true;
+    setActiveTaskId(String(event.active.id));
+  }
+
+  function releaseDragKeyGuardSoon(): void {
+    setTimeout(() => {
+      dragKeyGuardRef.current = false;
+    }, 0);
+  }
+
+  function handleDragCancel(): void {
+    setActiveTaskId(null);
+    clearDraggedSoon();
+    releaseDragKeyGuardSoon();
   }
 
   function handleSelectTask(taskId: string): void {
@@ -123,7 +212,9 @@ export function Board({
   }
 
   function handleDragEnd(event: DragEndEvent): void {
+    setActiveTaskId(null);
     clearDraggedSoon();
+    releaseDragKeyGuardSoon();
     const { active, over } = event;
     if (!over) return;
 
@@ -171,9 +262,29 @@ export function Board({
   // (archived-hidden, moved to a filtered-out state, etc) — see
   // lib/board-selection.ts's resolveSelection.
   useEffect(() => {
-    const grid = buildSelectionGrid(columns, showArchived);
+    const grid = buildSelectionGrid(columns, showArchived, collapsedGroups);
     setSelectedTaskId((previous) => resolveSelection(grid, previous));
-  }, [columns, showArchived]);
+  }, [columns, showArchived, collapsedGroups]);
+
+  // Board-axis scrolling (item 12): trackpads and horizontal wheels scroll
+  // the column row natively; Shift+wheel is only converted to horizontal
+  // scrolling by some platforms (macOS does it in the OS, so its events
+  // already arrive with deltaX). Map a purely vertical Shift+wheel onto the
+  // row so it works everywhere; a non-passive native listener, since
+  // React's onWheel is passive and can't stop the column's vertical scroll.
+  const columnsRowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const row = columnsRowRef.current;
+    if (!row) return;
+    function onWheel(event: WheelEvent): void {
+      if (!event.shiftKey || event.deltaX !== 0 || event.deltaY === 0) return;
+      if (!row) return;
+      event.preventDefault();
+      row.scrollLeft += event.deltaY;
+    }
+    row.addEventListener("wheel", onWheel, { passive: false });
+    return () => row.removeEventListener("wheel", onWheel);
+  }, []);
 
   // Cmd/Ctrl+N from App.tsx while this board is the active view.
   const openNewTaskSignalRef = useRef(openNewTaskSignal);
@@ -190,6 +301,30 @@ export function Board({
   const selectedTask = flattenBoard(columns).find(
     (row) => row.task.id === selectedTaskId,
   )?.task;
+  const activeTask = activeTaskId
+    ? flattenBoard(columns).find((row) => row.task.id === activeTaskId)?.task
+    : undefined;
+
+  // Screen-reader announcements (item 15) in board terms — task titles and
+  // column names instead of dnd-kit's default raw draggable/droppable ids.
+  const taskTitle = (id: string | number): string =>
+    flattenBoard(columns).find((row) => row.task.id === String(id))?.task
+      .title ?? "task";
+  const columnTitle = (id: string | number | undefined): string =>
+    columns.find((column) => column.state === id)?.title ?? String(id);
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${taskTitle(active.id)}.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${taskTitle(active.id)} is over the ${columnTitle(over.id)} column.`
+        : `${taskTitle(active.id)} is no longer over a column.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `${taskTitle(active.id)} dropped on the ${columnTitle(over.id)} column.`
+        : `${taskTitle(active.id)} dropped outside the board; nothing moved.`,
+    onDragCancel: ({ active }) =>
+      `Moving ${taskTitle(active.id)} was cancelled; nothing moved.`,
+  };
 
   // The TUI-style single-key board keymap (pi-home parity, see
   // lib/board-selection.ts and AGENTS.md's "port the spirit" brief): only
@@ -200,10 +335,11 @@ export function Board({
     if (!active) return;
     function onKeyDown(event: KeyboardEvent): void {
       if (newTaskOpen || awaitTaskId || isConfirmOpen()) return;
+      if (dragKeyGuardRef.current) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
-      const grid = buildSelectionGrid(columns, showArchived);
+      const grid = buildSelectionGrid(columns, showArchived, collapsedGroups);
       switch (event.key) {
         case "ArrowLeft":
           event.preventDefault();
@@ -277,6 +413,7 @@ export function Board({
     awaitTaskId,
     columns,
     showArchived,
+    collapsedGroups,
     selectedTaskId,
     selectedTask,
     onSelectTask,
@@ -299,11 +436,24 @@ export function Board({
       </div>
       <DndContext
         sensors={sensors}
+        collisionDetection={columnCollisionDetection}
+        measuring={boardMeasuring}
+        accessibility={{
+          announcements,
+          screenReaderInstructions: {
+            draggable:
+              "Drag with a pointer to move this task to another column; Escape cancels. From the keyboard, arrow keys select a card and s, r, x start, await or finish it.",
+          },
+        }}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
-        onDragCancel={clearDraggedSoon}
+        onDragCancel={handleDragCancel}
       >
-        <div className="flex h-full gap-3 overflow-x-auto p-3">
+        <div
+          ref={columnsRowRef}
+          className="flex h-full gap-3 overflow-x-auto p-3"
+          data-testid="board-columns"
+        >
           {columns.map((column) => (
             <BoardColumn
               key={column.state}
@@ -314,9 +464,28 @@ export function Board({
               onToggleArchived={() => setShowArchived((prev) => !prev)}
               selectedTaskId={selectedTaskId}
               unreadTaskIds={unreadTaskIds}
+              collapsedGroups={collapsedGroups}
+              onToggleGroup={(groupId) => toggleGroup(column.state, groupId)}
+              dragTask={activeTask}
             />
           ))}
         </div>
+        {/* dnd-kit's canonical drag preview, portaled out of every column's
+          overflow scroller so it is never clipped and never stretches a
+          scroll container (the in-flow card just dims; see TaskCard.tsx). */}
+        {createPortal(
+          <DragOverlay>
+            {activeTask ? (
+              <TaskCard
+                overlay
+                task={activeTask}
+                presence={presence[activeTask.id]}
+                unread={unreadTaskIds.has(activeTask.id)}
+              />
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
       </DndContext>
       <AwaitDialog
         taskId={awaitTaskId}

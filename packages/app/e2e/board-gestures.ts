@@ -6,18 +6,41 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
+ * What the board looked like mid-drag, just before the pointer is released
+ * (see Board.tsx's portaled DragOverlay): the preview lives directly under
+ * `document.body`, outside the board, while the in-flow source card stays
+ * untransformed and no column scroller overflows horizontally.
+ */
+export interface DragProbe {
+  /** A `drag-overlay-card` exists in `document.body`… */
+  overlayInBody: boolean;
+  /** …and is outside the board view (i.e. portaled, never clipped by a column scroller). */
+  overlayOutsideBoard: boolean;
+  /** The overlay's task id (`data-task-id`). */
+  overlayTaskId: string | null;
+  /** The in-flow source card's computed `transform` (`"none"` = never moved). */
+  sourceTransform: string | null;
+  /** Column card scrollers whose content overflows horizontally (phantom scrollbar). */
+  horizontallyOverflowingColumns: string[];
+}
+
+/**
  * Simulates a dnd-kit drag: real pointer down/move/up, grabbing the card by
  * its title strip, in small steps so the activation constraint (4px) and
- * droppable collision detection both see a genuine gesture.
+ * droppable collision detection both see a genuine gesture. Grab/drop
+ * geometry only reads the source card's and target's resting boxes (the
+ * source card never moves during a drag — the DragOverlay follows the
+ * pointer). Returns a mid-drag `DragProbe` for lanes that assert on it.
  */
 export async function dragTo(
   window: Page,
   card: Locator,
   target: Locator,
-): Promise<void> {
+): Promise<DragProbe> {
   const cardBox = await card.boundingBox();
   const targetBox = await target.boundingBox();
   if (!cardBox || !targetBox) throw new Error("drag source/target not visible");
+  const sourceTestId = await card.getAttribute("data-testid");
   const startX = cardBox.x + cardBox.width / 2;
   const startY = cardBox.y + 12;
   const endX = targetBox.x + targetBox.width / 2;
@@ -34,8 +57,40 @@ export async function dragTo(
     await window.waitForTimeout(20);
   }
   await window.waitForTimeout(50);
+  const probe = await probeDrag(window, sourceTestId);
   await window.mouse.up();
   await window.waitForTimeout(250);
+  return probe;
+}
+
+/** Snapshot of the mid-drag DOM (see `DragProbe`). */
+export async function probeDrag(
+  window: Page,
+  sourceTestId: string | null,
+): Promise<DragProbe> {
+  return window.evaluate((sourceId) => {
+    const overlay = document.querySelector<HTMLElement>(
+      '[data-testid="drag-overlay-card"]',
+    );
+    const board = document.querySelector('[data-testid="board-view"]');
+    const source = sourceId
+      ? document.querySelector<HTMLElement>(`[data-testid="${sourceId}"]`)
+      : null;
+    const overflowing = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-testid^="column-"][data-testid$="-cards"]',
+      ),
+    ]
+      .filter((el) => el.scrollWidth > el.clientWidth)
+      .map((el) => el.dataset.testid ?? "");
+    return {
+      overlayInBody: !!overlay && document.body.contains(overlay),
+      overlayOutsideBoard: !!overlay && !board?.contains(overlay),
+      overlayTaskId: overlay?.dataset.taskId ?? null,
+      sourceTransform: source ? getComputedStyle(source).transform : null,
+      horizontallyOverflowingColumns: overflowing,
+    };
+  }, sourceTestId);
 }
 
 const COLUMNS = ["backlog", "dev", "awaiting", "done"] as const;

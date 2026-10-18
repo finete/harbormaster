@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOARD_COLLAPSED_GROUPS_KEY,
+  readBoardCollapsedGroups,
   readCollapsedGroups,
   readPinnedTaskIds,
+  SIDEBAR_COLLAPSED_GROUPS_KEY,
   type StorageLike,
+  storeBoardCollapsedGroups,
   storeCollapsedGroups,
   storePinnedTaskIds,
   togglePinned,
@@ -68,5 +72,28 @@ describe("togglePinned", () => {
     const current = new Set(["t1"]);
     togglePinned(current, "t2");
     expect(current).toEqual(new Set(["t1"]));
+  });
+});
+
+describe("board collapsed groups persistence", () => {
+  it("round-trips a stored set under its own key, independent of the rail's", () => {
+    const storage = fakeStorage();
+    storeCollapsedGroups(storage, new Set(["rail-group"]));
+    storeBoardCollapsedGroups(
+      storage,
+      new Set(["backlog:scratch", "awaiting:Review::scratch"]),
+    );
+    expect(readBoardCollapsedGroups(storage)).toEqual(
+      new Set(["backlog:scratch", "awaiting:Review::scratch"]),
+    );
+    expect(readCollapsedGroups(storage)).toEqual(new Set(["rail-group"]));
+    expect(BOARD_COLLAPSED_GROUPS_KEY).not.toBe(SIDEBAR_COLLAPSED_GROUPS_KEY);
+  });
+
+  it("reads back empty when never written or corrupt", () => {
+    const storage = fakeStorage();
+    expect(readBoardCollapsedGroups(storage)).toEqual(new Set());
+    storage.setItem(BOARD_COLLAPSED_GROUPS_KEY, "{nope");
+    expect(readBoardCollapsedGroups(storage)).toEqual(new Set());
   });
 });
