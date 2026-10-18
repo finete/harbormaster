@@ -247,7 +247,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (!(event.metaKey || event.ctrlKey)) return;
+      // On macOS, app shortcuts require Cmd (metaKey), not Ctrl — Ctrl belongs
+      // to the pty (tmux prefix, cursor motion, etc.).
+      const isMac = /mac/i.test(navigator.platform);
+      const mod = isMac ? event.metaKey : event.ctrlKey;
+      if (!mod) return;
+      // Guard: don't fire when the other platform modifier is held alone
+      // (e.g. Ctrl on mac — let it reach the pty).
+      if (isMac && event.ctrlKey && !event.metaKey) return;
       const key = event.key.toLowerCase();
       if (key === "b") {
         event.preventDefault();

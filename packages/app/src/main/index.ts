@@ -36,6 +36,7 @@ import type {
   TerminalCreateResult,
   ToDoneForce,
 } from "../preload/api";
+import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import type { ConnectivityState } from "./connectivity-loop";
 import { createConnectivityLoop } from "./connectivity-loop";
 import {
@@ -58,6 +59,7 @@ import {
   writeToSession,
 } from "./ptySessions";
 import { isAllowedRevealPath } from "./reveal-path";
+import { registerTerminalHostIpc } from "./terminal-host-ipc";
 
 // Surface main-process crashes to stderr instead of letting Electron's
 // default "uncaught exception" dialog pop up in front of the user. Node only
@@ -627,38 +629,33 @@ function createWindow(): void {
   );
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
-  // Cmd/Ctrl+W closes the focused task workspace (cmux-style), not the
-  // window: Electron's default menu owns the accelerator, so intercept it
-  // before the menu sees it and let the renderer decide what "close" means.
+  // Cmd+W (mac) or Ctrl+W (other) closes the focused task workspace, not the
+  // window.  Using `isCloseTabChord` scopes Ctrl+W to mac-only for pty
+  // (delete-word-backward) — it must not be intercepted on darwin.
   win.webContents.on("before-input-event", (event, input) => {
-    if (
-      input.type === "keyDown" &&
-      (input.meta || input.control) &&
-      !input.alt &&
-      !input.shift &&
-      input.key.toLowerCase() === "w"
-    ) {
+    if (isCloseTabChord(input, process.platform)) {
       event.preventDefault();
       safeSend(win.webContents, "app:close-tab", undefined);
       return;
     }
-    // Sidebar keyboard cycling (Orca polish item 5): Cmd/Ctrl+Shift+Up/Down
-    // cycles focus through the rail's visible rows. The terminal panes keep
-    // raw keyboard focus most of the time (lib/keyboard-guard.ts deliberately
-    // never intercepts inside xterm), so "-" exactly like the Cmd+W handler
-    // above "-" this has to be caught here in main, ahead of the renderer/pty,
-    // or it would just be typed into whichever terminal has focus.
-    if (
-      input.type === "keyDown" &&
-      (input.meta || input.control) &&
-      input.shift &&
-      !input.alt &&
-      (input.key === "ArrowUp" || input.key === "ArrowDown")
-    ) {
+    // Sidebar keyboard cycling: Cmd+Shift+Up/Down on mac, Ctrl+Shift elsewhere.
+    // Scoped to Cmd-only on darwin so Ctrl+Shift+Up/Down reaches the pty.
+    if (isSidebarCycleChord(input, process.platform)) {
       event.preventDefault();
       const direction = input.key === "ArrowUp" ? "up" : "down";
       safeSend(win.webContents, "app:cycle-task", direction);
     }
+  });
+
+  // Navigation guard (checklist §0.7): prevent Chromium from navigating the
+  // renderer to file:// URLs (e.g. when the user drops a Finder file onto
+  // the window outside a handled drop zone).  Allow the dev-server URL.
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL;
+  win.webContents.on("will-navigate", (navEvent, url) => {
+    const current = win.webContents.getURL();
+    if (url === current) return;
+    if (rendererUrl && url.startsWith(rendererUrl)) return;
+    navEvent.preventDefault();
   });
 
   // Dispose this window's ptys as soon as it closes — ahead of (and
@@ -786,6 +783,7 @@ registerCoreIpc();
 registerPtyIpc();
 registerShellIpc();
 registerAppIpc();
+registerTerminalHostIpc();
 
 app.whenReady().then(() => {
   createWindow();

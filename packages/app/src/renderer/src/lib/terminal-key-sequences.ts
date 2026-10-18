@@ -21,6 +21,8 @@
 export interface TerminalKeyEventInput {
   type: string;
   key: string;
+  /** `event.code` — physical key position, unaffected by Shift/Alt glyph changes. */
+  code?: string;
   shiftKey: boolean;
   altKey: boolean;
   ctrlKey: boolean;
@@ -79,5 +81,76 @@ export function csiUSequenceForKeyEvent(
     return csiU(CSI_U_KEYCODE_MINUS, CSI_U_MOD_CTRL);
   }
 
+  // Ctrl+Shift+<letter a-z>: CSI [<codepoint>;6u (Modifier 6 = Ctrl+Shift).
+  // Match on `code` (e.g. "KeyF") because Shift changes `key` to uppercase
+  // and Alt changes the glyph on mac keyboards.
+  // Only when no other modifiers are held.
+  if (event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
+    const code = event.code ?? "";
+    const letterMatch = /^Key([A-Z])$/.exec(code);
+    if (letterMatch) {
+      const codepoint =
+        (letterMatch[1] ?? "a").toLowerCase().codePointAt(0) ?? 0;
+      if (codepoint >= 97 && codepoint <= 122) {
+        return csiU(codepoint, 6);
+      }
+    }
+  }
+
+  // Ctrl+Alt+]: CSI [93;7u (pi terminal-setup.md, Zed section).
+  // e.code = "BracketRight"; e.key is "]" on US, but "\'" or other on mac with Alt.
+  if (
+    event.ctrlKey &&
+    event.altKey &&
+    !event.shiftKey &&
+    !event.metaKey &&
+    (event.code === "BracketRight" || event.key === "]")
+  ) {
+    return csiU(93, 7);
+  }
+
   return null;
+}
+
+// CSI-u modifier value 7 = Ctrl+Alt (1 + ctrl=4 + alt=2).
+// (Documented above; exported for tests.)
+
+/**
+ * macOS text-editing sequences (checklist item #6).
+ *
+ * Returns the sequence to send for Mac-native word/line navigation combos, or
+ * `null` when the event is not one of those combos (including non-mac).
+ *
+ * Rules (Ghostty Config.zig:7391-7419, VS Code sendSequence, Hyper darwin.json):
+ * - Meta+ArrowLeft  \ u0001 (Ctrl-A = line start)
+ * - Meta+ArrowRight \ u0005 (Ctrl-E = line end)
+ * - Meta+Backspace  \ u0015 (Ctrl-U = kill to line start)
+ * - Meta+Delete     \ u000b (Ctrl-K = kill to line end)
+ * - Meta+Shift+{direction} \ null (selection gestures, leave for xterm)
+ */
+export function macTextEditingSequence(
+  event: TerminalKeyEventInput,
+  opts: { isMac: boolean },
+): string | null {
+  if (!opts.isMac) return null;
+  if (event.type !== "keydown") return null;
+  if (event.isComposing) return null;
+  if (!event.metaKey) return null;
+  // Selection gestures (Shift held) \ pass through.
+  if (event.shiftKey) return null;
+  // No Ctrl/Alt should modify these combos.
+  if (event.ctrlKey || event.altKey) return null;
+
+  switch (event.key) {
+    case "ArrowLeft":
+      return "\x01"; // Ctrl-A
+    case "ArrowRight":
+      return "\x05"; // Ctrl-E
+    case "Backspace":
+      return "\x15"; // Ctrl-U
+    case "Delete":
+      return "\x0b"; // Ctrl-K
+    default:
+      return null;
+  }
 }
