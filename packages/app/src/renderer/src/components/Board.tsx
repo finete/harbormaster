@@ -506,7 +506,7 @@ export function Board({
       >
         <div
           ref={columnsRowRef}
-          className="flex h-full gap-3 overflow-x-auto p-3"
+          className="flex h-full gap-3 overflow-x-auto p-3 [justify-content:safe_center]"
           data-testid="board-columns"
         >
           {columns.map((column) => (
