@@ -154,20 +154,52 @@ export function App(): JSX.Element {
       return;
     }
     const savedFocused = readFocusedTaskId(storage);
-    void window.harbormaster.core.listBoard().then((cols) => {
-      if (cancelled) return;
-      const known = new Set(flattenBoard(cols).map((row) => row.task.id));
-      const restored = new Set([...savedOpened].filter((id) => known.has(id)));
-      if (restored.size > 0) {
-        setOpenedTaskIds(restored);
-        setFocusedTaskId(
-          savedFocused && restored.has(savedFocused)
-            ? savedFocused
-            : (restored.values().next().value ?? ""),
-        );
-      }
-      setRestoreComplete(true);
-    });
+    // The board fetch can fail or stall during a heavy boot (dependency
+    // re-optimization reloads, core still initializing). A single unguarded
+    // attempt once left restoreComplete false for the whole session: nothing
+    // restored AND nothing persisted. Retry with backoff; never give up on
+    // the saved set, and never let live persistence stay disabled.
+    const attempt = (tryNumber: number): void => {
+      Promise.race([
+        window.harbormaster.core.listBoard(),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(
+            () => reject(new Error("listBoard timed out")),
+            10_000,
+          ),
+        ),
+      ])
+        .then((cols) => {
+          if (cancelled) return;
+          const known = new Set(flattenBoard(cols).map((row) => row.task.id));
+          const restored = new Set(
+            [...savedOpened].filter((id) => known.has(id)),
+          );
+          if (restored.size > 0) {
+            setOpenedTaskIds(restored);
+            setFocusedTaskId(
+              savedFocused && restored.has(savedFocused)
+                ? savedFocused
+                : (restored.values().next().value ?? ""),
+            );
+          }
+          setRestoreComplete(true);
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          console.error(
+            `workspace restore: listBoard failed (try ${tryNumber}):`,
+            error,
+          );
+          window.setTimeout(
+            () => {
+              if (!cancelled) attempt(tryNumber + 1);
+            },
+            Math.min(500 * 2 ** tryNumber, 5000),
+          );
+        });
+    };
+    attempt(0);
     return () => {
       cancelled = true;
     };
