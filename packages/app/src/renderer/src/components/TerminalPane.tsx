@@ -5,6 +5,7 @@ import type { IDockviewPanelProps } from "dockview-react";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
+import { csiUSequenceForKeyEvent } from "../lib/terminal-key-sequences";
 import { defaultTerminalTitle, piTerminalTitle } from "../lib/terminal-title";
 
 /**
@@ -92,6 +93,20 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
     let disposed = false;
     let sessionId: string | undefined;
+
+    // pi's documented embedded-terminal workaround (xterm.js can't speak the
+    // Kitty keyboard protocol): translate the handful of extended combos pi
+    // distinguishes from plain Enter into explicit CSI-u writes to the pty,
+    // and tell xterm not to also process the keydown itself (no collapsed
+    // `\r`/`ESC \r` double-send). Every other key returns `true` and flows
+    // through xterm's normal pipeline untouched.
+    terminal.attachCustomKeyEventHandler((event) => {
+      const sequence = csiUSequenceForKeyEvent(event);
+      if (sequence === null) return true;
+      if (sessionId) window.harbormaster.terminal.write(sessionId, sequence);
+      event.preventDefault();
+      return false;
+    });
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeExit: (() => void) | undefined;
 
