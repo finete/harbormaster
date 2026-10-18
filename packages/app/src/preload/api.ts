@@ -24,6 +24,13 @@ import type {
   WorkspaceBinding,
 } from "@harbormaster/core";
 
+/** Mirrors `main/connectivity-loop.ts`'s `ConnectivityState`; kept local so the renderer never imports main-process code. */
+export type ConnectivityState =
+  | "online"
+  | "offline"
+  | "reconnecting"
+  | "restored";
+
 export type {
   AwaitingKind,
   AwaitingKindField,
@@ -212,6 +219,14 @@ export interface HarbormasterApi {
      * Returns an unsubscribe fn.
      */
     onRefreshWarning(listener: (warning: string) => void): () => void;
+    /**
+     * Subscribes to the main process's offline/reconnecting/restored banner
+     * push channel (see `main/connectivity-loop.ts`): one state per actual
+     * transition, never a toast. Returns an unsubscribe fn.
+     */
+    onConnectivityChanged(
+      listener: (state: ConnectivityState) => void,
+    ): () => void;
     /** Cmd/Ctrl+W intercepted in main; renderer closes the focused task workspace. */
     onCloseTabShortcut(listener: () => void): () => void;
     /** On-demand liveness snapshot for the takeover guard; see `PresenceSnapshot`. */

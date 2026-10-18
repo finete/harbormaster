@@ -17,6 +17,7 @@ import type {
   MoveTaskOptions,
   RecordTaskSessionInput,
   RefreshOptions,
+  RefreshResult,
   ReopenTaskInput,
   ToAwaitOptions,
   ToDoneConfirmation,
@@ -62,6 +63,7 @@ import {
 } from "../engines/awaiting-kinds.js";
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
+import { isConnectivityError } from "../engines/connectivity.js";
 import {
   activeMoverOrder,
   arbitrateMove,
@@ -106,7 +108,7 @@ const REFRESH_CONCURRENCY = 4;
 
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
-  private refreshInFlight: Promise<{ warnings: string[] }> | undefined;
+  private refreshInFlight: Promise<RefreshResult> | undefined;
   /** Serialized config whose problems were last reported (once per distinct config). */
   private lastValidatedConfig: string | undefined;
   /** Last reported done-cleanup retry failure per task (dedupe). */
@@ -696,7 +698,7 @@ export class CoreManager implements CoreCommands {
     };
   }
 
-  refresh(options?: RefreshOptions): Promise<{ warnings: string[] }> {
+  refresh(options?: RefreshOptions): Promise<RefreshResult> {
     // Single-flight: the 30s timer and a manual refresh must never run two
     // observations of the same task side by side (each would decide moves
     // off its own reading); a call made mid-run joins the running one.
@@ -710,9 +712,14 @@ export class CoreManager implements CoreCommands {
 
   private async runRefresh(
     protectedPaths: readonly string[],
-  ): Promise<{ warnings: string[] }> {
+  ): Promise<RefreshResult> {
     const config = await this.deps.config.load();
     const warnings: string[] = [...this.configWarningsOnce(config)];
+    // Connectivity-class failures (offline, DNS down, ...) are counted here
+    // instead of pushed onto `warnings`: one tick talking to a dead network
+    // produces one `connectivity` marker, never a per-task warning (see
+    // `engines/connectivity.ts` and `refreshTask`/`retryDoneCleanups` below).
+    const connectivity = { failedChecks: 0 };
     const tasks = await this.deps.tasks.listTasks();
     const repositories = await this.repositoryIndex(config);
     let changed = false;
@@ -735,6 +742,7 @@ export class CoreManager implements CoreCommands {
         repositories,
         protectedPaths,
         warnings,
+        connectivity,
       );
       if (moved) changed = true;
     });
@@ -745,13 +753,44 @@ export class CoreManager implements CoreCommands {
         repositories,
         protectedPaths,
         warnings,
+        connectivity,
       )
     ) {
       changed = true;
     }
     if (await this.archiveDoneTasks()) changed = true;
     if (changed) await this.publishBoard();
-    return { warnings };
+    return {
+      warnings,
+      ...(connectivity.failedChecks > 0
+        ? {
+            connectivity: {
+              offline: true as const,
+              failedChecks: connectivity.failedChecks,
+            },
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Classify one failure: connectivity-class errors increment the tick's
+   * shared counter instead of ever reaching `warnings` (never a per-task
+   * toast for "the laptop is offline"); anything else behaves exactly as
+   * before.
+   */
+  private recordFailure(
+    title: string,
+    error: unknown,
+    warnings: string[],
+    connectivity: { failedChecks: number },
+  ): void {
+    const message = describeError(error);
+    if (isConnectivityError(message)) {
+      connectivity.failedChecks += 1;
+      return;
+    }
+    warnings.push(`${title}: ${message}`);
   }
 
   /** Observe one task's PR and apply at most one mover step; returns whether anything changed. */
@@ -761,6 +800,7 @@ export class CoreManager implements CoreCommands {
     repositories: Map<string, RepositoryInfo> | undefined,
     protectedPaths: readonly string[],
     warnings: string[],
+    connectivity: { failedChecks: number },
   ): Promise<boolean> {
     const repositoryId = snapshot.repositoryId;
     const branch = snapshot.branch;
@@ -797,7 +837,7 @@ export class CoreManager implements CoreCommands {
         current = await this.deps.tasks.getTask(snapshot.id);
       }
     } catch (error) {
-      warnings.push(`${snapshot.title}: ${describeError(error)}`);
+      this.recordFailure(snapshot.title, error, warnings, connectivity);
       // Errors never move anything: skip the mover step for this task too.
       return false;
     }
@@ -814,7 +854,7 @@ export class CoreManager implements CoreCommands {
       );
       if (moved) changed = true;
     } catch (error) {
-      warnings.push(`${snapshot.title}: ${describeError(error)}`);
+      this.recordFailure(snapshot.title, error, warnings, connectivity);
     }
     return changed;
   }
@@ -1127,6 +1167,7 @@ export class CoreManager implements CoreCommands {
     repositories: Map<string, RepositoryInfo> | undefined,
     protectedPaths: readonly string[],
     warnings: string[],
+    connectivity: { failedChecks: number },
   ): Promise<boolean> {
     for (const task of tasks) {
       if (
@@ -1168,6 +1209,12 @@ export class CoreManager implements CoreCommands {
       }
       if (!failure) {
         this.cleanupWarnings.delete(task.id);
+        continue;
+      }
+      if (isConnectivityError(failure)) {
+        // Same split as refreshTask: a dead network retrying this cleanup
+        // is an environmental state, never a per-task warning.
+        connectivity.failedChecks += 1;
         continue;
       }
       if (this.cleanupWarnings.get(task.id) !== failure) {

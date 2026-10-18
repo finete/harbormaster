@@ -291,7 +291,17 @@ export interface CoreCommands {
    * flags `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
    * `board-changed` when anything changed. This is what the app polls; a
    * call made while another refresh is still running joins that run
-   * instead of overlapping it.
+   * instead of overlapping it. Connectivity-shaped failures (offline, DNS
+   * down, connection refused/reset — see `engines/connectivity.ts`) never
+   * become per-task warnings: they roll up into `connectivity`, a single
+   * marker the app turns into one neutral banner instead of a warning per
+   * failed task.
    */
-  refresh(options?: RefreshOptions): Promise<{ warnings: string[] }>;
+  refresh(options?: RefreshOptions): Promise<RefreshResult>;
+}
+
+export interface RefreshResult {
+  warnings: string[];
+  /** Present only when one or more checks this tick failed as a connectivity error. */
+  connectivity?: { offline: true; failedChecks: number };
 }

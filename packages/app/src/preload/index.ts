@@ -7,6 +7,7 @@ import type {
   AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
+  ConnectivityState,
   CreateTaskInput,
   HarbormasterApi,
   MoveTaskOptions,
@@ -129,6 +130,16 @@ const api: HarbormasterApi = {
       ): void => listener(warning);
       ipcRenderer.on("core:refresh-warning", handler);
       return () => ipcRenderer.removeListener("core:refresh-warning", handler);
+    },
+    onConnectivityChanged: (
+      listener: (state: ConnectivityState) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        state: ConnectivityState,
+      ): void => listener(state);
+      ipcRenderer.on("core:connectivity", handler);
+      return () => ipcRenderer.removeListener("core:connectivity", handler);
     },
     onCloseTabShortcut: (listener: () => void): (() => void) => {
       const handler = (): void => listener();
