@@ -250,6 +250,61 @@ describe("collapsed board groups", () => {
   });
 });
 
+describe("collapsed columns (slim rail)", () => {
+  it("drops a collapsed column's cards entirely from the grid", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      undefined,
+      new Set(["backlog"]),
+    );
+    expect(grid).toEqual([
+      { state: "backlog", taskIds: [] },
+      { state: "dev", taskIds: [] },
+      { state: "awaiting", taskIds: ["a1", "a2"] },
+      { state: "done", taskIds: ["d2"] },
+    ]);
+  });
+
+  it("left/right crosses a collapsed column to the next expanded one", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      undefined,
+      new Set(["backlog"]),
+    );
+    // dev is empty and backlog is collapsed: right from a1 still only has
+    // done beyond it; left from a1 skips both and lands nowhere, so it stays.
+    expect(moveSelection(grid, "a1", "left")).toBe("a1");
+    expect(moveSelection(grid, "a2", "right")).toBe("d2");
+  });
+
+  it("is independent of group collapse: both can apply to the same column", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      new Set([boardGroupKey("awaiting", "review")]),
+      new Set(["backlog", "done"]),
+    );
+    expect(grid).toEqual([
+      { state: "backlog", taskIds: [] },
+      { state: "dev", taskIds: [] },
+      { state: "awaiting", taskIds: ["a2"] },
+      { state: "done", taskIds: [] },
+    ]);
+  });
+
+  it("resolveSelection falls back to the first visible card once a column collapses", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      undefined,
+      new Set(["backlog"]),
+    );
+    expect(resolveSelection(grid, "b1")).toBe("a1");
+  });
+});
+
 describe("columnCountLabel", () => {
   it("is a plain count when nothing is filtered out", () => {
     expect(columnCountLabel(3, 0)).toEqual({ text: "3", title: "3 tasks" });

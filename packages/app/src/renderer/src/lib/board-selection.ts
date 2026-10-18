@@ -58,21 +58,28 @@ export function isBoardGroupCollapsed(
 /**
  * Builds the keyboard-navigable grid from the live board, in column order.
  * Cards inside a collapsed group (see `boardGroupKey`) are off screen, so
- * the grid skips them exactly like BoardColumn.tsx hides them.
+ * the grid skips them exactly like BoardColumn.tsx hides them. A fully
+ * collapsed column (the slim rail, see `boardGroupKey`'s column-level
+ * sibling in sidebar-persistence.ts) contributes no cards at all, the same
+ * treatment an empty column already gets from `moveSelection`'s left/right
+ * skip.
  */
 export function buildSelectionGrid(
   columns: BoardColumn[],
   showArchived: boolean,
   collapsedGroups?: ReadonlySet<string>,
+  collapsedColumns?: ReadonlySet<BoardColumn["state"]>,
 ): SelectionGrid {
   return columns.map((column) => ({
     state: column.state,
-    taskIds: visibleGroupsForColumn(column, showArchived)
-      .filter(
-        (group) =>
-          !isBoardGroupCollapsed(collapsedGroups, column.state, group.id),
-      )
-      .flatMap((group) => group.tasks.map((task) => task.id)),
+    taskIds: collapsedColumns?.has(column.state)
+      ? []
+      : visibleGroupsForColumn(column, showArchived)
+          .filter(
+            (group) =>
+              !isBoardGroupCollapsed(collapsedGroups, column.state, group.id),
+          )
+          .flatMap((group) => group.tasks.map((task) => task.id)),
   }));
 }
 

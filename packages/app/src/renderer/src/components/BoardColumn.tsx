@@ -1,6 +1,12 @@
 import { useDroppable } from "@dnd-kit/core";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 import type { JSX } from "react";
+import { useEffect } from "react";
 import type {
   BoardColumn as BoardColumnData,
   PresenceChangedPayload,
@@ -52,6 +58,9 @@ export function BoardColumn({
   collapsedGroups,
   onToggleGroup,
   dragTask,
+  collapsed = false,
+  onToggleCollapse,
+  onAutoExpandPeek,
 }: {
   column: BoardColumnData;
   presence: PresenceChangedPayload;
@@ -68,6 +77,11 @@ export function BoardColumn({
   onToggleGroup?: (groupId: string) => void;
   /** The task currently being dragged (Board.tsx), for the drop-placement preview. */
   dragTask?: Task | undefined;
+  /** Whole-column collapse (the slim rail; see Board.tsx's `collapsedColumns`). Independent of group collapse. */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  /** Fired after ~500ms of a drag hovering this column while it's collapsed (Azure DevOps-style auto-expand peek); Board.tsx re-collapses it on drag end/cancel. */
+  onAutoExpandPeek?: () => void;
 }): JSX.Element {
   // The droppable's *node* is the content wrapper inside the cards scroller
   // (so dnd-kit's auto-scroller, which walks the hovered droppable's
@@ -76,6 +90,16 @@ export function BoardColumn({
   // resolves the whole `data-board-column` element — so the drop target is
   // still the entire column, header included.
   const { setNodeRef, isOver } = useDroppable({ id: column.state });
+
+  // Azure DevOps-style auto-expand peek: a sustained ~500ms hover over a
+  // collapsed column's rail while a card is being dragged expands it so the
+  // drop target is visible; Board.tsx clears the peek (re-collapsing) on
+  // drag end/cancel, never this component on its own.
+  useEffect(() => {
+    if (!collapsed || !isOver || !dragTask || !onAutoExpandPeek) return;
+    const timer = setTimeout(onAutoExpandPeek, 500);
+    return () => clearTimeout(timer);
+  }, [collapsed, isOver, dragTask, onAutoExpandPeek]);
 
   const archivedCount = column.groups.reduce(
     (total, group) =>
@@ -117,12 +141,51 @@ export function BoardColumn({
         !isBoardGroupCollapsed(collapsedGroups, column.state, group.id),
     );
 
+  // Collapsed form (the slim rail): same droppable id as the expanded
+  // column (`useDroppable({ id: column.state })` above never changes), so
+  // drops still land here — only the rendered content differs. The cards
+  // scroller (and every testid inside it) simply doesn't mount while
+  // collapsed, per the spec's "unmount, don't just hide" rule.
+  if (collapsed) {
+    return (
+      <button
+        ref={setNodeRef}
+        type="button"
+        data-board-column={column.state}
+        data-testid={`column-${column.state}`}
+        title={`${column.title} \u00b7 ${count.title}`}
+        aria-label={`Expand ${column.title}`}
+        onClick={onToggleCollapse}
+        className={cn(
+          "flex w-11 shrink-0 flex-none flex-col items-center gap-2 rounded-lg border border-border bg-muted/30 py-2 text-muted-foreground transition-[flex-basis,width] duration-200 ease-in-out hover:bg-muted/50 hover:text-foreground",
+          isOver && "bg-primary/10 ring-1 ring-primary",
+        )}
+      >
+        <span data-testid={`column-rail-${column.state}`} className="contents">
+          <ChevronsRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span
+            className="min-h-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wide [writing-mode:vertical-rl]"
+            style={{ transform: "rotate(180deg)" }}
+          >
+            {column.title}
+          </span>
+          <span
+            className="text-[11px] tabular-nums text-muted-foreground"
+            data-testid={`column-${column.state}-count`}
+          >
+            {count.text}
+          </span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div
       data-board-column={column.state}
       data-testid={`column-${column.state}`}
       className={cn(
-        "flex min-w-[240px] max-w-[480px] flex-1 flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2",
+        "flex min-w-[240px] max-w-[480px] flex-1 flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2 transition-[flex-basis,width] duration-200 ease-in-out",
         isOver && "ring-1 ring-primary",
       )}
     >
@@ -149,6 +212,16 @@ export function BoardColumn({
           >
             {count.text}
           </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-5 w-5 p-0 text-muted-foreground"
+            data-testid={`column-collapse-${column.state}`}
+            aria-label={`Collapse ${column.title}`}
+            onClick={onToggleCollapse}
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" aria-hidden />
+          </Button>
         </div>
       </div>
       <div
@@ -157,7 +230,7 @@ export function BoardColumn({
       >
         <div ref={setNodeRef} className="flex min-h-full flex-col gap-3">
           {visibleGroups.map((group) => {
-            const collapsed = isBoardGroupCollapsed(
+            const groupCollapsed = isBoardGroupCollapsed(
               collapsedGroups,
               column.state,
               group.id,
@@ -167,7 +240,7 @@ export function BoardColumn({
                 key={group.id}
                 className="flex flex-col gap-2"
                 data-testid={`group-${column.state}-${group.id}`}
-                data-collapsed={collapsed ? "true" : "false"}
+                data-collapsed={groupCollapsed ? "true" : "false"}
               >
                 {/* Sticky (item 10): pins to the top of the column scroller
                   while its group's cards scroll underneath. Opaque fill =
@@ -175,11 +248,11 @@ export function BoardColumn({
                 <button
                   type="button"
                   data-testid={`group-toggle-${column.state}-${group.id}`}
-                  aria-expanded={!collapsed}
+                  aria-expanded={!groupCollapsed}
                   onClick={() => onToggleGroup?.(group.id)}
                   className="sticky top-0 z-10 flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors [background:linear-gradient(hsl(var(--muted)/0.3),hsl(var(--muted)/0.3)),hsl(var(--background))] hover:text-foreground"
                 >
-                  {collapsed ? (
+                  {groupCollapsed ? (
                     <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
                   ) : (
                     <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
@@ -212,7 +285,7 @@ export function BoardColumn({
                     {group.tasks.length}
                   </span>
                 </button>
-                {!collapsed && (
+                {!groupCollapsed && (
                   <div className="flex flex-col gap-2">
                     {group.tasks.map((task) => (
                       <TaskCard

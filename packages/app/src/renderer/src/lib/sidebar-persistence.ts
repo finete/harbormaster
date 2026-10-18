@@ -16,6 +16,9 @@ export const SIDEBAR_COLLAPSED_GROUPS_KEY =
 export const SIDEBAR_PINNED_TASKS_KEY = "harbormaster.sidebar.pinnedTaskIds";
 /** Board group-collapse state: `boardGroupKey(column, group)` entries (see board-selection.ts). */
 export const BOARD_COLLAPSED_GROUPS_KEY = "harbormaster.board.collapsedGroups";
+/** Board column-collapse (slim rail) state: raw `TaskState` entries, independent of group collapse. */
+export const BOARD_COLLAPSED_COLUMNS_KEY =
+  "harbormaster.board.collapsedColumns";
 
 function readStringArray(storage: StorageLike, key: string): string[] {
   try {
@@ -65,6 +68,19 @@ export function storeBoardCollapsedGroups(
   collapsed: ReadonlySet<string>,
 ): void {
   writeStringArray(storage, BOARD_COLLAPSED_GROUPS_KEY, collapsed);
+}
+
+/** Restores the board's collapsed column (rail) set persisted by `storeBoardCollapsedColumns`. */
+export function readBoardCollapsedColumns(storage: StorageLike): Set<string> {
+  return new Set(readStringArray(storage, BOARD_COLLAPSED_COLUMNS_KEY));
+}
+
+/** Persists the board's full collapsed-column (rail) set. */
+export function storeBoardCollapsedColumns(
+  storage: StorageLike,
+  collapsed: ReadonlySet<string>,
+): void {
+  writeStringArray(storage, BOARD_COLLAPSED_COLUMNS_KEY, collapsed);
 }
 
 /** Restores the pinned task id set persisted by `storePinnedTaskIds`. */
