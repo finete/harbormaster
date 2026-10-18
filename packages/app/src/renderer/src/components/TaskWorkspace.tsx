@@ -12,6 +12,11 @@ import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
 import { defaultTerminalTitle } from "../lib/terminal-title";
 import { cn } from "../lib/utils";
+import {
+  readWorkspaceLayout,
+  storeWorkspaceLayout,
+  withLivePrimaryCwd,
+} from "../lib/workspace-persistence";
 import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { TaskActions } from "./TaskActions";
 import { TerminalPane } from "./TerminalPane";
@@ -102,6 +107,26 @@ export function TaskWorkspace({
     if (!initialPanelCreatedRef.current) {
       initialPanelCreatedRef.current = true;
       piPanelCwdRef.current = cwd;
+      // Restore (task A): a saved layout replaces the single default panel
+      // with every panel + split/tab arrangement this task had open last
+      // run. Dockview's own `fromJSON` round-trips the "terminal" component
+      // and its `{cwd, taskId, primary}` params cleanly on the installed
+      // version (verified against `SerializedDockview`/`GroupviewPanelState`
+      // typings — no custom layout schema needed). The primary pi pane's
+      // `cwd` is patched to the task's *current* worktree first so it
+      // resumes through the normal claimSessionLaunch path even if the
+      // worktree changed since the layout was saved (e.g. a Done-task
+      // reopen); extra shell panels respawn in their saved cwds untouched.
+      const saved = readWorkspaceLayout(window.localStorage, taskId);
+      if (saved) {
+        try {
+          api.fromJSON(withLivePrimaryCwd(saved, taskId, cwd));
+          return;
+        } catch {
+          // Corrupt/incompatible saved layout: fall through to the default
+          // single-panel bootstrap below instead of leaving an empty dockview.
+        }
+      }
       api.addPanel({
         id: `${taskId}-terminal-${nextPanelId++}`,
         component: "terminal",
@@ -128,6 +153,21 @@ export function TaskWorkspace({
       });
     }
   }, [api, cwdLoaded, cwd, taskId]);
+
+  // Live layout persistence (task A item 3): every panel add/remove/move
+  // (splits, tab drags, closes) re-saves this task's full dockview layout,
+  // not just on a clean shutdown "- the app can be SIGKILLed by launchctl
+  // kickstart with no exit hook to flush state from, so the source of truth
+  // must stay current at all times. Dropped on workspace close by App.tsx's
+  // `closeTask` (see lib/workspace-persistence), so a closed task never
+  // resurrects a stale layout on a later reopen.
+  useEffect(() => {
+    if (!api) return;
+    const disposable = api.onDidLayoutChange(() => {
+      storeWorkspaceLayout(window.localStorage, taskId, api.toJSON());
+    });
+    return () => disposable.dispose();
+  }, [api, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
     apiRef.current = event.api;

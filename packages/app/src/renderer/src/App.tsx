@@ -22,6 +22,13 @@ import {
 } from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
 import { cn } from "./lib/utils";
+import {
+  readFocusedTaskId,
+  readOpenedTaskIds,
+  removeWorkspaceLayout,
+  storeFocusedTaskId,
+  storeOpenedTaskIds,
+} from "./lib/workspace-persistence";
 import { describeThrown, pushToast } from "./toast";
 
 type View = "board" | "workspace";
@@ -82,7 +89,10 @@ export function App(): JSX.Element {
 
   // Closing unmounts the TaskWorkspace, which disposes every pane's pty
   // (TerminalPane unmount cleanup); the pi session ends, cmux-style. The
-  // task itself stays on the board; reopening starts fresh panes.
+  // task itself stays on the board; reopening starts fresh panes. Also
+  // drops the task's persisted dockview layout (lib/workspace-persistence)
+  // so a later reopen never resurrects a stale one — relaunching after a
+  // close must not restore it (restore only replays what was open at exit).
   const closeTask = useCallback((taskId: string) => {
     setOpenedTaskIds((prev) => {
       if (!prev.has(taskId)) return prev;
@@ -93,6 +103,7 @@ export function App(): JSX.Element {
       );
       return next;
     });
+    removeWorkspaceLayout(window.localStorage, taskId);
   }, []);
 
   const requestCloseTask = useCallback(
@@ -108,10 +119,74 @@ export function App(): JSX.Element {
     [closeTask],
   );
 
-  // No auto-open on launch: opening a task spawns its pi session, and doing
-  // that for whatever happens to sort first on the board meant every app
-  // restart started an agent session nobody asked for. Launch lands on the
-  // empty workspace hint; the user picks from the board or rail.
+  // No auto-open *by board order* on launch: opening a task spawns its pi
+  // session, and doing that for whatever happens to sort first on the board
+  // meant every app restart started an agent session nobody asked for.
+  // Restoring the *previously open* rail (below) is a different thing: it
+  // only reopens tasks the user had already opened before the app went
+  // away, same set, same focus "- an iTerm-style window restore, not an
+  // arbitrary auto-pick.
+
+  // Restore-on-launch (task A): reopens the rail tab + focus set persisted
+  // by the effects further down. Runs once; waits for `listBoard` directly
+  // (not `useBoard`'s own fetch above) so filtering against *current* tasks
+  // never races a still-empty `columns` on first render "- deleted/archived
+  // tasks are silently dropped from the restored set here.
+  //
+  // Restored tasks are opened directly into `openedTaskIds`, bypassing
+  // `selectTask`'s presence check entirely: this is safe *because* it is
+  // restore, not a fresh pick "- any record that was open in an app that no
+  // longer exists is either this exact app's own now-dead pane (no takeover
+  // possible, nothing to attach to) or a genuinely external session, for
+  // which opening a plain viewer pane is still the correct outcome, not an
+  // error. Either way there is no live "this app already owns it" conflict
+  // to dialog about "- that guard exists for *other* surfaces racing this
+  // app's live panes, not for this app reopening its own dead ones.
+  const [restoreComplete, setRestoreComplete] = useState(false);
+  // Deliberate run-once-at-mount effect, before any user action can touch
+  // openedTaskIds/focusedTaskId.
+  useEffect(() => {
+    let cancelled = false;
+    const storage = window.localStorage;
+    const savedOpened = readOpenedTaskIds(storage);
+    if (savedOpened.size === 0) {
+      setRestoreComplete(true);
+      return;
+    }
+    const savedFocused = readFocusedTaskId(storage);
+    void window.harbormaster.core.listBoard().then((cols) => {
+      if (cancelled) return;
+      const known = new Set(flattenBoard(cols).map((row) => row.task.id));
+      const restored = new Set([...savedOpened].filter((id) => known.has(id)));
+      if (restored.size > 0) {
+        setOpenedTaskIds(restored);
+        setFocusedTaskId(
+          savedFocused && restored.has(savedFocused)
+            ? savedFocused
+            : (restored.values().next().value ?? ""),
+        );
+      }
+      setRestoreComplete(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Live persistence (task A item 3): the open set, focus, and layout must
+  // reflect current state at all times, not just on a clean shutdown "- the
+  // app can be SIGKILLed by launchctl kickstart with no exit hook to flush
+  // from. Gated on `restoreComplete` so the empty initial state never
+  // clobbers a just-read saved set before restoration has had a chance to
+  // apply it.
+  useEffect(() => {
+    if (!restoreComplete) return;
+    storeOpenedTaskIds(window.localStorage, openedTaskIds);
+  }, [restoreComplete, openedTaskIds]);
+  useEffect(() => {
+    if (!restoreComplete) return;
+    storeFocusedTaskId(window.localStorage, focusedTaskId);
+  }, [restoreComplete, focusedTaskId]);
 
   const openTask = useCallback((taskId: string) => {
     setFocusedTaskId(taskId);
