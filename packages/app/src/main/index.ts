@@ -571,7 +571,13 @@ function createWindow(): void {
     width: 1280,
     height: 800,
     show: false,
-    ...(offscreen ? { x: -4200, y: -4200, skipTaskbar: true } : {}),
+    // focusable:false matters as much as the position: an offscreen window
+    // that takes key focus swallows the developer's real keystrokes into
+    // test fixtures (observed: stray typed chars inside an e2e task title).
+    // Playwright input is CDP-synthetic and needs no OS focus.
+    ...(offscreen
+      ? { x: -4200, y: -4200, skipTaskbar: true, focusable: false }
+      : {}),
     backgroundColor: "#0b0f14",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -585,7 +591,9 @@ function createWindow(): void {
   // may already be destroyed/inaccessible.
   const webContentsId = win.webContents.id;
 
-  win.once("ready-to-show", () => win.show());
+  win.once("ready-to-show", () =>
+    offscreen ? win.showInactive() : win.show(),
+  );
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   // Cmd/Ctrl+W closes the focused task workspace (cmux-style), not the
