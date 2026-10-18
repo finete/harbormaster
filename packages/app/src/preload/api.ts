@@ -165,6 +165,12 @@ export interface HarbormasterApi {
     create(options: TerminalCreateOptions): Promise<TerminalCreateResult>;
     write(id: string, data: string): void;
     resize(id: string, cols: number, rows: number): void;
+    /**
+     * Flow control: reports that `chars` of this session's output have been
+     * fully processed by the pane's terminal emulator, so main can resume a
+     * pty it paused for being too far ahead of the renderer.
+     */
+    ack(id: string, chars: number): void;
     dispose(id: string): Promise<void>;
     onData(listener: (event: TerminalDataEvent) => void): () => void;
     onExit(listener: (event: TerminalExitEvent) => void): () => void;

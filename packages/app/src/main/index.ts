@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
   AwaitingKindId,
+  BoardColumn,
   CreateTaskInput,
   MoveTaskOptions,
   ReopenTaskInput,
@@ -44,6 +45,7 @@ import {
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import {
+  acknowledgeSessionData,
   activeSessionCwds,
   activeSessionPids,
   commandExists,
@@ -125,7 +127,13 @@ const core = createCore({ stateDir: activeStateDir });
 const harness = new PiHarnessAdapter({ stateDir: activeStateDir });
 
 function registerCoreIpc(): void {
-  ipcMain.handle("core:listBoard", () => core.commands.listBoard());
+  ipcMain.handle("core:listBoard", () => {
+    // A window that fetched the board itself may now hold a snapshot newer
+    // than the last push; never let the watcher's unchanged-board skip
+    // (see `pushBoardToWindows`) suppress the next push against it.
+    lastPushedBoardJson = undefined;
+    return core.commands.listBoard();
+  });
   ipcMain.handle("core:getTask", (_event, id: string) =>
     core.commands.getTask(id),
   );
@@ -222,9 +230,7 @@ function registerCoreIpc(): void {
   // guards against sending to a webContents destroyed mid-flight (window
   // closed, app quitting) — same guard the pty IPC uses above.
   core.events.on("board-changed", (payload) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      safeSend(win.webContents, "core:board-changed", payload);
-    }
+    pushBoardToWindows(payload.columns, { force: true });
   });
 
   // External writers share the state files with this process: the pi
@@ -234,6 +240,29 @@ function registerCoreIpc(): void {
   // reflect here in ~moments instead of on the next 30s refresh tick
   // (the missing half of the design's "frontends never poll files" rule).
   watchStateFiles();
+}
+
+// Serialized form of the last board pushed to windows. The state-file
+// watcher fires for *every* write to tasks.json/workspace-bindings.json -
+// this process's own mutations (already pushed through core's
+// `board-changed` event) and an extension re-saving unchanged bindings
+// mid-turn alike - and each push replaces the board wholesale in every
+// renderer hook (App, Sidebar, Board, each TaskWorkspace), re-rendering the
+// whole UI. Measured ~2-3 redundant pushes/s while an agent streams (see
+// e2e/perf-flood.spec.ts); the watcher path skips a board identical to the
+// last one pushed.
+let lastPushedBoardJson: string | undefined;
+
+function pushBoardToWindows(
+  columns: BoardColumn[],
+  options: { force?: boolean } = {},
+): void {
+  const json = JSON.stringify(columns);
+  if (!options.force && json === lastPushedBoardJson) return;
+  lastPushedBoardJson = json;
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "core:board-changed", { columns });
+  }
 }
 
 let stateWatchDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -251,11 +280,7 @@ function watchStateFiles(): void {
       stateWatchDebounce = setTimeout(() => {
         void core.commands
           .listBoard()
-          .then((columns) => {
-            for (const win of BrowserWindow.getAllWindows()) {
-              safeSend(win.webContents, "core:board-changed", { columns });
-            }
-          })
+          .then((columns) => pushBoardToWindows(columns))
           .catch(() => {
             // A half-written file mid-atomic-rename can fail a read; the next
             // watch event (the rename completing) retries.
@@ -552,6 +577,12 @@ function registerPtyIpc(): void {
 
   ipcMain.on("pty:resize", (_event, id: string, cols: number, rows: number) => {
     resizeSession(id, cols, rows);
+  });
+
+  // Flow control (see main/pty-data-batcher.ts): the pane acks each chunk
+  // once xterm has parsed it.
+  ipcMain.on("pty:ack", (_event, id: string, chars: number) => {
+    acknowledgeSessionData(id, chars);
   });
 
   ipcMain.handle("pty:dispose", (event, id: string) => {

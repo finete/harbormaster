@@ -44,6 +44,9 @@ const api: HarbormasterApi = {
     resize: (id: string, cols: number, rows: number): void => {
       ipcRenderer.send("pty:resize", id, cols, rows);
     },
+    ack: (id: string, chars: number): void => {
+      ipcRenderer.send("pty:ack", id, chars);
+    },
     dispose: (id: string): Promise<void> =>
       ipcRenderer.invoke("pty:dispose", id),
     onData: (listener: (event: TerminalDataEvent) => void): (() => void) => {
