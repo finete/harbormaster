@@ -10,6 +10,12 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
 import * as pty from "node-pty";
+import {
+  createPtyDataBatcher,
+  createPtyFlowControl,
+  type PtyDataBatcher,
+  type PtyFlowControl,
+} from "./pty-data-batcher";
 
 export interface PtySessionCallbacks {
   onData: (data: string) => void;
@@ -23,6 +29,10 @@ interface PtySessionRecord {
   cwd: string;
   dataDisposable: pty.IDisposable;
   exitDisposable: pty.IDisposable;
+  /** Coalesces this session's output into ~16ms flushes (see pty-data-batcher.ts). */
+  batcher: PtyDataBatcher;
+  /** Pauses the pty while too much output is unacknowledged by the renderer (see `acknowledgeSessionData`). */
+  flow: PtyFlowControl;
   /** Set only for a task workspace's primary panel (see `PtySessionOptions.taskId`/`primary`). */
   taskId?: string;
 }
@@ -138,8 +148,39 @@ export function createSession(
   // guarantee node-pty won't deliver one more queued onData/onExit event to
   // a callback that (if it forwarded straight to webContents.send) could
   // throw on an already-destroyed window.
-  const dataDisposable = ptyProcess.onData((data) => callbacks.onData(data));
+  //
+  // Output is coalesced per session (one `onData` per ~16ms flush, not per
+  // OS read chunk) - see pty-data-batcher.ts for the measured why.
+  // Flow control: every flush counts as outstanding until the renderer
+  // acknowledges it (`acknowledgeSessionData`, after xterm parsed it); too
+  // much outstanding pauses the pty, which just blocks the writer.
+  const flow = createPtyFlowControl({
+    pause: () => {
+      try {
+        ptyProcess.pause();
+      } catch {
+        // Already gone; nothing to throttle.
+      }
+    },
+    resume: () => {
+      try {
+        ptyProcess.resume();
+      } catch {
+        // Already gone; nothing to resume.
+      }
+    },
+  });
+  const batcher = createPtyDataBatcher({
+    send: (data) => {
+      flow.sent(data.length);
+      callbacks.onData(data);
+    },
+  });
+  const dataDisposable = ptyProcess.onData((data) => batcher.push(data));
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+    // Deliver every byte the process wrote before announcing its exit, so
+    // the pane never prints "[process exited]" ahead of its last output.
+    batcher.flush();
     // The OS process is confirmed dead the instant this fires (node-pty's
     // own exit event, independent of whether/when `disposeSession` is ever
     // called) — drop this session's pane-pid-registry entry right here, so
@@ -165,6 +206,8 @@ export function createSession(
     cwd: spawnCwd,
     dataDisposable,
     exitDisposable,
+    batcher,
+    flow,
     ...(registerAsPane ? { taskId: options.taskId } : {}),
   });
   if (registerAsPane && options?.taskId) {
@@ -179,6 +222,15 @@ export function getSession(id: string): PtySessionRecord | undefined {
 
 export function writeToSession(id: string, data: string): void {
   sessions.get(id)?.process.write(data);
+}
+
+/**
+ * The renderer finished processing `chars` of this session's output (xterm's
+ * write callback). Resumes a pty paused by flow control once the backlog
+ * drains. Unknown/disposed ids are ignored.
+ */
+export function acknowledgeSessionData(id: string, chars: number): void {
+  sessions.get(id)?.flow.acknowledged(chars);
 }
 
 export function resizeSession(id: string, cols: number, rows: number): void {
@@ -207,6 +259,9 @@ export function disposeSession(id: string): void {
   }
   session.dataDisposable.dispose();
   session.exitDisposable.dispose();
+  // The renderer asked for (or is gone with) this pane: pending output has
+  // nowhere to go, and a late timer flush must not outlive the session.
+  session.batcher.dispose();
   try {
     session.process.kill();
   } catch {

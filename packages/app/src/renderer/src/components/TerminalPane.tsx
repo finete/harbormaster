@@ -6,7 +6,11 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { csiUSequenceForKeyEvent } from "../lib/terminal-key-sequences";
-import { defaultTerminalTitle, piTerminalTitle } from "../lib/terminal-title";
+import {
+  createTitleThrottle,
+  defaultTerminalTitle,
+  piTerminalTitle,
+} from "../lib/terminal-title";
 
 /**
  * One xterm.js terminal wired over the narrow `window.harbormaster.terminal`
@@ -121,10 +125,20 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     // first OSC title, then track every change verbatim (prefixed "π " for
     // primary panes). Routed through dockview's panel api, not React state,
     // so a title change never re-renders/remounts this panel.
-    props.api.setTitle(defaultTerminalTitle({ cwd, primary: isPrimary }));
+    //
+    // Throttled (leading + trailing, latest wins, unchanged skipped): a
+    // streaming agent can retitle many times a second, and each applied
+    // title re-renders the tab and re-saves the workspace layout (dockview
+    // counts a title change as a layout change; see TaskWorkspace.tsx).
+    const initialTitle = defaultTerminalTitle({ cwd, primary: isPrimary });
+    props.api.setTitle(initialTitle);
+    const titleThrottle = createTitleThrottle(
+      (title) => props.api.setTitle(title),
+      { initial: initialTitle },
+    );
     const titleDisposable = terminal.onTitleChange((title) => {
       if (!title) return;
-      props.api.setTitle(isPrimary ? piTerminalTitle(title) : title);
+      titleThrottle.update(isPrimary ? piTerminalTitle(title) : title);
     });
 
     // Deferred one macrotask: React StrictMode (dev) double-mounts effects,
@@ -149,9 +163,19 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           sessionId = id;
           if (fellBack) setFellBackToShell(true);
 
+          // Hot path (one call per ~16ms batch from main): no per-chunk
+          // React work - the "received output" flag flips state exactly
+          // once - and each chunk is acknowledged back to main once xterm
+          // has parsed it (flow control, see main/pty-data-batcher.ts).
+          let receivedOutput = false;
           unsubscribeData = window.harbormaster.terminal.onData((event) => {
-            if (event.id === id) {
-              terminal.write(event.data);
+            if (event.id !== id) return;
+            const chars = event.data.length;
+            terminal.write(event.data, () => {
+              if (!disposed) window.harbormaster.terminal.ack(id, chars);
+            });
+            if (!receivedOutput) {
+              receivedOutput = true;
               setHasReceivedOutput(true);
             }
           });
@@ -185,6 +209,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       disposed = true;
       window.clearTimeout(createTimer);
       titleDisposable.dispose();
+      titleThrottle.dispose();
       resizeObserver.disconnect();
       unsubscribeData?.();
       unsubscribeExit?.();
