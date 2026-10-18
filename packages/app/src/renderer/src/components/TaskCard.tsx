@@ -3,15 +3,26 @@ import { CSS } from "@dnd-kit/utilities";
 import { Loader2 } from "lucide-react";
 import type { JSX } from "react";
 import type { Task } from "../../../preload/api";
+import {
+  lastInteractionTimestamp,
+  relativeTime,
+  waitingDurationText,
+} from "../lib/time-format";
+import { useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 /**
- * One board card: title, branch, PR/presence/unread chrome only. Cards
- * carry no action buttons — the workflow verbs live in the workspace
- * header, the board's keys (s/r/x, see BoardKeyLegend), and drag-and-drop.
+ * One board card: title, branch, PR/presence/unread chrome only, plus a
+ * muted relative-time indicator (top-right of the title row) and, for
+ * Awaiting cards, a "waiting <duration>" fragment in the sub-line — ported
+ * from pi-home's card anatomy (`withLastInteraction` +
+ * `awaitingSourceText`, src/presentation/home-controller.ts and
+ * home-board.ts). Cards carry no action buttons — the workflow verbs live
+ * in the workspace header, the board's keys (s/r/x, see BoardKeyLegend),
+ * and drag-and-drop.
  */
 export function TaskCard({
   task,
@@ -21,8 +32,10 @@ export function TaskCard({
   unread,
 }: {
   task: Task;
-  /** Live/runningTurn snapshot from the ~5s presence poll; absent task ids are treated as not-present. */
-  presence?: { live: boolean; runningTurn: boolean } | undefined;
+  /** Live/runningTurn/heartbeat snapshot from the ~5s presence poll; absent task ids are treated as not-present. */
+  presence?:
+    | { live: boolean; runningTurn: boolean; heartbeatAt?: string }
+    | undefined;
   onSelect?: (taskId: string) => void;
   /** Keyboard-selected card (see Board.tsx); draws a visible ring, independent of mouse hover/click. */
   selected?: boolean;
@@ -42,6 +55,11 @@ export function TaskCard({
   // Live but idle = pi-home's ● "your move": the agent is waiting on you.
   const attention = !!presence?.live && !running;
 
+  // Same 30s tick the sidebar rail uses (lib/use-now.ts), so the card's
+  // relative time and waiting-duration stay fresh without a prop from Board.
+  const now = useNow();
+  const isAwaiting = task.state === "awaiting" && !!task.awaiting;
+
   return (
     <Card
       ref={setNodeRef}
@@ -58,25 +76,40 @@ export function TaskCard({
       {...listeners}
     >
       <CardHeader>
-        <CardTitle className="flex items-center gap-1.5">
-          {unread && (
-            <span
-              data-testid="badge-unread"
-              title="Finished while you weren't looking"
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
-              aria-hidden
-            />
-          )}
-          {task.title}
+        <CardTitle className="flex items-center justify-between gap-1.5">
+          <span className="flex min-w-0 items-center gap-1.5">
+            {unread && (
+              <span
+                data-testid="badge-unread"
+                title="Finished while you weren't looking"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
+                aria-hidden
+              />
+            )}
+            <span className="truncate">{task.title}</span>
+          </span>
+          <span
+            data-testid="card-time"
+            title={lastInteractionTimestamp(task, presence)}
+            className="shrink-0 font-mono text-[10px] font-normal text-muted-foreground"
+          >
+            {relativeTime(lastInteractionTimestamp(task, presence), now)}
+          </span>
         </CardTitle>
-        {task.branch && (
+        {(task.branch || isAwaiting) && (
           <p className="text-xs text-muted-foreground">
-            <span className="font-mono">{task.branch}</span>
-            {task.targetBranch && (
+            {task.branch && <span className="font-mono">{task.branch}</span>}
+            {task.branch && task.targetBranch && (
               <>
                 {" → "}
                 <span className="font-mono">{task.targetBranch}</span>
               </>
+            )}
+            {isAwaiting && (
+              <span data-testid="card-waiting-duration" className="font-mono">
+                {task.branch ? " · " : ""}
+                {waitingDurationText(task.stateChangedAt, now)}
+              </span>
             )}
           </p>
         )}

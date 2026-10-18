@@ -9,6 +9,9 @@ import type {
   Task,
   TaskState,
 } from "../../../preload/api";
+import { lastInteractionTimestamp, relativeTime } from "../lib/time-format";
+
+export { relativeTime };
 
 /** Group label for repository-less (scratch) tasks; always sorted last. */
 export const SCRATCH_GROUP = "scratch";
@@ -157,27 +160,7 @@ export function pullRequestUrl(task: Task): string | undefined {
 
 /** The timestamp the relative-time column shows: live heartbeat, else last task update. */
 export function activityTimestamp(row: SidebarRow): string {
-  return (
-    (row.presence?.live ? row.presence.heartbeatAt : undefined) ??
-    row.task.updatedAt
-  );
-}
-
-/** Compact age: "now" (<1m), "3m", "2h", "5d", "4w", "7mo", "2y". */
-export function relativeTime(iso: string, now: number): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "";
-  const seconds = Math.max(0, Math.floor((now - then) / 1000));
-  if (seconds < 60) return "now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  if (days < 30) return `${Math.floor(days / 7)}w`;
-  if (days < 365) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
+  return lastInteractionTimestamp(row.task, row.presence);
 }
 
 /** Sidebar width bounds (px) for drag-resize; persisted widths are clamped into range. */

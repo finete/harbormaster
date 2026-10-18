@@ -257,6 +257,9 @@ test.describe("toAwait and toDone drive the board through the real core command 
     // Cards carry no action buttons: the verbs are keys, drags, and the
     // workspace header.
     await expect(card.locator("button")).toHaveCount(0);
+    // Every card shows a last-interaction time indicator (ported from
+    // pi-home's withLastInteraction; see TaskCard.tsx).
+    await expect(card.getByTestId("card-time")).not.toBeEmpty();
 
     // Await needs a "dev" (or "awaiting") task with a worktree; the task
     // was parked in Backlog above, so start it (creates the worktree and
@@ -293,6 +296,11 @@ test.describe("toAwait and toDone drive the board through the real core command 
         .getByTestId("group-primary-label")
         .first(),
     ).toContainText("Review");
+    // Awaiting cards additionally show how long they've sat in the current
+    // awaiting kind (ported from pi-home's awaitingSourceText).
+    await expect(
+      awaitingCard.getByTestId("card-waiting-duration"),
+    ).toContainText("waiting");
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
 

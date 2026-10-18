@@ -27,6 +27,7 @@ import {
   storePinnedTaskIds,
   togglePinned,
 } from "../lib/sidebar-persistence";
+import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import {
@@ -51,8 +52,6 @@ import { Kbd } from "./ui/kbd";
 
 const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
-/** Relative times ("now", "3m", ...) re-render at least this often. */
-const CLOCK_TICK_MS = 30_000;
 
 function readStoredWidth(): number {
   try {
@@ -79,16 +78,6 @@ function store(key: string, value: string): void {
   } catch {
     // Storage unavailable/full: layout just won't persist this session.
   }
-}
-
-/** Wall-clock `Date.now()` that re-renders its caller every `intervalMs`. */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
 }
 
 /**
