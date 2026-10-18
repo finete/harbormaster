@@ -75,10 +75,27 @@ export interface PresenceSnapshot {
   ownedByApp: boolean;
 }
 
+/**
+ * How a task's badge was corroborated against the app's own pty registry
+ * (see `main/presence-corroboration.ts`):
+ * - `"record"`: the extension's record is trusted as-is (pid-matched pane,
+ *   or an external session beyond this app's panes).
+ * - `"pane-only"`: a pane of ours is open but its pid doesn't match the
+ *   record (stale record, impersonation, pre-guard leftovers) - attached
+ *   is trusted, the record's turn/outcome semantics are not.
+ * - `"none"`: no pane and no trustworthy record (absent, or its process is
+ *   confirmed dead).
+ * Not yet rendered distinctly (no renderer redesign) - carried through so
+ * a future UI pass can style a distrusted record differently.
+ */
+export type PresenceCorroboration = "record" | "pane-only" | "none";
+
 /** One task's entry in the ~5s presence push. */
 export interface PresenceBadge {
   live: boolean;
   runningTurn: boolean;
+  /** See `PresenceCorroboration`. */
+  corroboration: PresenceCorroboration;
   /** Last heartbeat of the live attachment (ISO); set only while `live`. Drives the sidebar's relative-time column. */
   heartbeatAt?: string;
   /**

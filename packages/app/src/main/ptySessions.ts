@@ -23,9 +23,23 @@ interface PtySessionRecord {
   cwd: string;
   dataDisposable: pty.IDisposable;
   exitDisposable: pty.IDisposable;
+  /** Set only for a task workspace's primary panel (see `PtySessionOptions.taskId`/`primary`). */
+  taskId?: string;
 }
 
 const sessions = new Map<string, PtySessionRecord>();
+
+/**
+ * Pane-pid registry: taskId -> the id of its one primary pty session, if
+ * any is currently live. A task has at most one primary pane, so this is
+ * the app's own ground truth for "which pid, right now" that presence
+ * corroboration (see `main/presence-corroboration.ts`) cross-checks the
+ * extension's self-reported records against. An entry is removed the
+ * instant its process exits (in the `onExit` subscription below, ahead of
+ * the caller's own exit callback) or `disposeSession` runs — never left
+ * pointing at a dead pid.
+ */
+const primaryTaskSessions = new Map<string, string>();
 
 function defaultShell(): string {
   if (process.platform === "win32") {
@@ -51,6 +65,18 @@ export interface PtySessionOptions {
    * the same cwd and `fellBackToShell` is `true` in the result.
    */
   spec?: LaunchSpecLike;
+  /**
+   * The task this session belongs to, combined with `primary`. Registered
+   * in the pane-pid registry (`lookupPanePid`) only when this session also
+   * ends up actually running `spec` (a real harness launch, not a shell
+   * fallback) - a "+ terminal" panel, a scratch task's shell, or a primary
+   * pane that fell back to `$SHELL` because its harness command was
+   * missing never has a presence record to corroborate against, and must
+   * never be mistaken for one by showing a false "attached" badge.
+   */
+  taskId?: string;
+  /** Whether this is the task's primary panel (see `taskId`). */
+  primary?: boolean;
 }
 
 /**
@@ -113,17 +139,37 @@ export function createSession(
   // a callback that (if it forwarded straight to webContents.send) could
   // throw on an already-destroyed window.
   const dataDisposable = ptyProcess.onData((data) => callbacks.onData(data));
-  const exitDisposable = ptyProcess.onExit(({ exitCode }) =>
-    callbacks.onExit(exitCode),
-  );
+  const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+    // The OS process is confirmed dead the instant this fires (node-pty's
+    // own exit event, independent of whether/when `disposeSession` is ever
+    // called) — drop this session's pane-pid-registry entry right here, so
+    // presence corroboration sees "no pane" immediately instead of however
+    // long it takes the renderer to call `terminal.dispose()` (or the
+    // window to close).
+    const taskId = sessions.get(id)?.taskId;
+    if (taskId && primaryTaskSessions.get(taskId) === id) {
+      primaryTaskSessions.delete(taskId);
+    }
+    callbacks.onExit(exitCode);
+  });
 
+  // Only register a session that actually ran the harness spec (a real `pi`
+  // launch, not a plain `$SHELL`) as the task's pane - a shell fallback
+  // (missing `pi` binary) or a scratch task's bare terminal never gets a
+  // presence record to corroborate against, and must never be mistaken for
+  // one (a false "attached" badge on a task with no agent at all).
+  const registerAsPane = useSpec && options?.primary && !!options?.taskId;
   sessions.set(id, {
     id,
     process: ptyProcess,
     cwd: spawnCwd,
     dataDisposable,
     exitDisposable,
+    ...(registerAsPane ? { taskId: options.taskId } : {}),
   });
+  if (registerAsPane && options?.taskId) {
+    primaryTaskSessions.set(options.taskId, id);
+  }
   return { id, pid: ptyProcess.pid, fellBackToShell };
 }
 
@@ -136,7 +182,17 @@ export function writeToSession(id: string, data: string): void {
 }
 
 export function resizeSession(id: string, cols: number, rows: number): void {
-  sessions.get(id)?.process.resize(cols, rows);
+  const session = sessions.get(id);
+  if (!session) return;
+  try {
+    session.process.resize(cols, rows);
+  } catch {
+    // The underlying process can die out from under this entry (a crash, an
+    // OOM kill, an external `kill -9`, ...) before the renderer's own exit
+    // handler or `disposeSession` ever runs - node-pty's resize ioctl
+    // throws on an already-gone fd (EBADF) in that window. Same "already
+    // gone, nothing left to do" guard as `disposeSession`'s own kill().
+  }
 }
 
 export function disposeSession(id: string): void {
@@ -146,6 +202,9 @@ export function disposeSession(id: string): void {
   // another onExit delivery, and we don't want a re-entrant disposeSession
   // call to find (and double-dispose) the same record.
   sessions.delete(id);
+  if (session.taskId && primaryTaskSessions.get(session.taskId) === id) {
+    primaryTaskSessions.delete(session.taskId);
+  }
   session.dataDisposable.dispose();
   session.exitDisposable.dispose();
   try {
@@ -186,4 +245,25 @@ export function activeSessionCwds(): string[] {
 
 export function hostShellLabel(): string {
   return `${defaultShell()} (${os.hostname()})`;
+}
+
+/**
+ * The app's own ground truth for a task's primary pane right now: its real
+ * child pid, if a primary session for `taskId` is currently live.
+ * `undefined` when the task has no open primary pane (never launched,
+ * closed, or its process already exited). Presence corroboration (see
+ * `main/presence-corroboration.ts`) treats that as "no pane" and falls back
+ * to trusting the extension's record exactly as the harness does today
+ * (external sessions: ssh, a bare terminal, an adopted session).
+ */
+export function lookupPanePid(
+  taskId: string,
+): { pid: number; alive: boolean } | undefined {
+  const sessionId = primaryTaskSessions.get(taskId);
+  if (!sessionId) return undefined;
+  const session = sessions.get(sessionId);
+  if (!session) return undefined;
+  const pid = session.process.pid;
+  if (typeof pid !== "number") return undefined;
+  return { pid, alive: true };
 }

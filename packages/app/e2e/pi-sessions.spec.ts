@@ -6,8 +6,10 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -341,5 +343,144 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await expect(row.getByTestId("sidebar-row-activity")).toContainText(
       "your move",
     );
+  });
+});
+
+test.describe("outside-observation corroboration: a pane-pid mismatch distrusts a stale record, and killing the real pane flips the row idle instantly", () => {
+  let app: ElectronApplication;
+  let window: Page;
+  let root: string;
+  let stateDir: string;
+  let pidFile: string;
+  const mainProcessErrors: string[] = [];
+
+  test.beforeAll(async () => {
+    root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-corroboration-"));
+    stateDir = path.join(root, "state");
+    const codeRoot = path.join(root, "Code");
+    mkdirSync(stateDir, { recursive: true });
+    mkdirSync(codeRoot, { recursive: true });
+    seedFixtureRepo(codeRoot);
+    writeFileSync(
+      path.join(stateDir, "config.json"),
+      JSON.stringify({
+        automation: true,
+        codeRoot,
+        branchPrefix: "",
+      }),
+    );
+
+    // A fake `pi` that writes its own (real) pid to a known file before
+    // dumping its env and idling: the test needs the actual OS pid of the
+    // pane's child process to exercise a real external kill below, which
+    // the harness env dump alone doesn't expose.
+    pidFile = path.join(root, "fake-pi.pid");
+    const fakePiPath = path.join(root, "fake-pi");
+    writeFileSync(
+      fakePiPath,
+      `#!/bin/sh\necho $$ > "${pidFile}"\nenv | grep ^HARBORMASTER\nwhile true; do sleep 3600; done\n`,
+    );
+    chmodSync(fakePiPath, 0o755);
+
+    app = await electron.launch({
+      args: [mainEntry],
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        HARBORMASTER_PI_COMMAND: fakePiPath,
+      },
+    });
+    watchForMainProcessErrors(app, mainProcessErrors);
+    window = await app.firstWindow();
+    await window.waitForLoadState("domcontentloaded");
+  });
+
+  test.afterAll(async () => {
+    await app.close();
+    expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("a bogus-pid record never shows the working spinner while the pane is open, and killing the pane's real process flips the row idle well under the poll interval", async () => {
+    // "Start now" (the dialog's default destination) lands the task
+    // straight in Dev with its worktree created immediately "- no Backlog
+    // detour needed (the sidebar's "Tasks" list only surfaces started
+    // tasks, same as `pollPresenceOnce`'s own non-done filter).
+    await window.getByTestId("sidebar-new-task-button").click();
+    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+    await window.getByTestId("new-task-title-input").fill("Corroboration Task");
+    await window
+      .getByTestId("new-task-repo-select")
+      .selectOption("github.com/test/fixture");
+    await window.getByTestId("new-task-submit").click();
+    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+
+    const row = window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Corroboration Task" });
+    await expect(row).toBeVisible();
+    const rowTestId = await row.getAttribute("data-testid");
+    if (!rowTestId) throw new Error("sidebar row missing data-testid");
+    const taskId = rowTestId.replace("sidebar-task-row-", "");
+
+    await row.click();
+    const panel = window.getByTestId("terminal-panel").first();
+    await expect(panel).toBeVisible();
+    // The fake pi's env dump only runs after it has already written its pid
+    // file, so this also proves the pid file is ready to read.
+    await expect(panel).toContainText("HARBORMASTER_TASK_ID", {
+      timeout: 20_000,
+    });
+    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    const realPid = Number(readFileSync(pidFile, "utf8").trim());
+    expect(Number.isInteger(realPid) && realPid > 0).toBe(true);
+
+    // A presence record self-reporting a running turn, but under a pid that
+    // is definitely not this pane's real process (impersonation/staleness,
+    // not an off-by-one): the app must not trust its "working" claim just
+    // because a pane for this task happens to be open.
+    const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
+    const bogusPid = 2_147_483_646; // outside any real pid range on this host
+    await presence.register({
+      taskId,
+      sessionPath: "/tmp/bogus-session.jsonl",
+      pid: bogusPid,
+      mode: "interactive",
+      at: new Date().toISOString(),
+    });
+    await presence.setTurnActive(
+      taskId,
+      bogusPid,
+      true,
+      new Date().toISOString(),
+    );
+
+    await window.getByTestId("board-button").click();
+    // Give the poll a few ticks to have definitely run at least once with
+    // the bogus record in place, then assert the spinner never appeared.
+    await window.waitForTimeout(6_000);
+    await expect(
+      cardLocator(window, "Corroboration Task").getByTestId("badge-running"),
+    ).toHaveCount(0);
+
+    // Kill the pane's real process out from under the app (a crash, an OOM
+    // kill, `kill -9` from outside, ...) "- physical process truth, not
+    // anything the extension reports.
+    process.kill(realPid, "SIGKILL");
+
+    // The row must flip to idle well under the ~5s poll interval (the
+    // instant-death push on the pane's own exit event), not on the next
+    // scheduled tick.
+    await window.getByTestId("workspace-button").click();
+    const row2 = window
+      .locator('[data-testid^="sidebar-task-row-"]')
+      .filter({ hasText: "Corroboration Task" });
+    await expect(row2.getByTestId("sidebar-row-status-dot")).toBeVisible({
+      timeout: 2_000,
+    });
+    await expect(row2.getByTestId("sidebar-row-spinner")).toHaveCount(0);
+    await expect(row2.getByTestId("sidebar-row-attention-dot")).toHaveCount(0);
   });
 });

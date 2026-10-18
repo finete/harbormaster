@@ -42,6 +42,7 @@ import {
   isAllowedExternalUrl,
 } from "./external-url";
 import { wirePowerGating } from "./power-gating";
+import { corroboratePresence } from "./presence-corroboration";
 import {
   activeSessionCwds,
   activeSessionPids,
@@ -50,6 +51,7 @@ import {
   disposeAllSessions,
   disposeSession,
   getSession,
+  lookupPanePid,
   resizeSession,
   writeToSession,
 } from "./ptySessions";
@@ -287,14 +289,21 @@ async function pollPresenceOnce(): Promise<void> {
   const entries = await Promise.all(
     tasks.map(async (task) => {
       const status = await harness.presence(task.id);
-      const heartbeatAt = status.live ? status.record?.heartbeatAt : undefined;
-      const ended = status.record?.ended;
+      // Outside-observation corroboration (see presence-corroboration.ts):
+      // cross-checks the extension's self-reported record against the
+      // app's own pane-pid registry before trusting its turn/outcome
+      // semantics.
+      const corroborated = corroboratePresence(status, lookupPanePid(task.id));
+      const ended = corroborated.ended;
       return [
         task.id,
         {
-          live: status.live,
-          runningTurn: status.runningTurn,
-          ...(heartbeatAt ? { heartbeatAt } : {}),
+          live: corroborated.live,
+          runningTurn: corroborated.runningTurn,
+          corroboration: corroborated.corroboration,
+          ...(corroborated.heartbeatAt
+            ? { heartbeatAt: corroborated.heartbeatAt }
+            : {}),
           // Status + note only: `ended.notified` is main's own one-shot
           // bookkeeping (see access/session-presence-access.ts) and never
           // crosses the bridge.
@@ -504,11 +513,22 @@ function registerPtyIpc(): void {
           onExit: (exitCode) => {
             safeSend(sender, "pty:exit", { id, exitCode });
             untrackSession(sender.id, id);
+            // Instant death: the pane-pid registry entry is already gone by
+            // now (ptySessions drops it synchronously on the process's own
+            // exit, ahead of this callback) "- re-run the full presence
+            // computation right away instead of waiting out the ~5s poll
+            // tick, so a task whose primary pane just died (or ended) shows
+            // idle/ended immediately. `usePresenceMap` replaces its state
+            // wholesale on every push, so this must recompute every task,
+            // not just this one.
+            if (options.primary && options.taskId) void pollPresenceOnce();
           },
         },
         {
           ...(options.cwd ? { cwd: options.cwd } : {}),
           ...(spec ? { spec } : {}),
+          ...(options.taskId ? { taskId: options.taskId } : {}),
+          ...(options.primary ? { primary: options.primary } : {}),
         },
       );
       trackSession(sender.id, id);
