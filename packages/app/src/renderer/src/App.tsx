@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
+import { ConnectivityBanner } from "./components/ConnectivityBanner";
 import type { NewTaskDialogResult } from "./components/NewTaskDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
@@ -229,135 +230,141 @@ export function App(): JSX.Element {
   );
 
   return (
-    <div className="flex h-screen w-screen bg-background text-foreground">
-      {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
+    <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+      {/* One sticky offline/reconnecting/restored strip above both views (see
+          ConnectivityBanner): an environmental state, never a per-task
+          warning toast. */}
+      <ConnectivityBanner />
+      <div className="flex min-h-0 flex-1">
+        {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
           (and its pty-backed terminals) alive across board/workspace switches. */}
-      {
-        <div
-          data-testid="board-view"
-          className={
-            view === "board" ? "flex h-full w-full flex-col" : "hidden"
-          }
-        >
-          <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="workspace-button"
-              onClick={() => setView("workspace")}
-              title="Back to workspace"
-            >
-              <PanelLeft className="mr-1.5 h-4 w-4" />
-              Workspace
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="board-refresh-button"
-              aria-busy={manualRefresh.busy}
-              disabled={manualRefresh.busy}
-              onClick={manualRefresh.refresh}
-              title="Refresh PR status and run movers now"
-            >
-              <RefreshCw
-                className={cn(
-                  "mr-1.5 h-4 w-4",
-                  manualRefresh.busy && "animate-spin",
-                )}
+        {
+          <div
+            data-testid="board-view"
+            className={
+              view === "board" ? "flex h-full w-full flex-col" : "hidden"
+            }
+          >
+            <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="workspace-button"
+                onClick={() => setView("workspace")}
+                title="Back to workspace"
+              >
+                <PanelLeft className="mr-1.5 h-4 w-4" />
+                Workspace
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="board-refresh-button"
+                aria-busy={manualRefresh.busy}
+                disabled={manualRefresh.busy}
+                onClick={manualRefresh.refresh}
+                title="Refresh PR status and run movers now"
+              >
+                <RefreshCw
+                  className={cn(
+                    "mr-1.5 h-4 w-4",
+                    manualRefresh.busy && "animate-spin",
+                  )}
+                />
+                Refresh
+                <Kbd>g</Kbd>
+              </Button>
+              <span className="text-sm font-medium text-muted-foreground">
+                Board
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
+            </header>
+            <div className="min-h-0 flex-1">
+              <Board
+                onSelectTask={selectTask}
+                onCreateTask={createTask}
+                active={view === "board"}
+                openNewTaskSignal={boardNewTaskSignal}
+                onBackToWorkspace={() => setView("workspace")}
+                focusedTaskId={focusedTaskId || null}
               />
-              Refresh
-              <Kbd>g</Kbd>
-            </Button>
-            <span className="text-sm font-medium text-muted-foreground">
-              Board
-            </span>
-            <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
-          </header>
-          <div className="min-h-0 flex-1">
-            <Board
+            </div>
+          </div>
+        }
+        {
+          <div
+            data-testid="workspace-view"
+            className={view === "workspace" ? "flex h-full w-full" : "hidden"}
+          >
+            <Sidebar
+              focusedTaskId={focusedTaskId}
+              openedTaskIds={openedTaskIds}
               onSelectTask={selectTask}
+              onCloseTask={requestCloseTask}
+              onShowBoard={() => setView("board")}
               onCreateTask={createTask}
-              active={view === "board"}
-              openNewTaskSignal={boardNewTaskSignal}
-              onBackToWorkspace={() => setView("workspace")}
-              focusedTaskId={focusedTaskId || null}
+              openNewTaskSignal={sidebarNewTaskSignal}
+            />
+            <WorkspaceView
+              focusedTaskId={focusedTaskId}
+              openedTaskIds={openedTaskIds}
+              onCloseTask={requestCloseTask}
             />
           </div>
-        </div>
-      }
-      {
-        <div
-          data-testid="workspace-view"
-          className={view === "workspace" ? "flex h-full w-full" : "hidden"}
-        >
-          <Sidebar
-            focusedTaskId={focusedTaskId}
-            openedTaskIds={openedTaskIds}
-            onSelectTask={selectTask}
-            onCloseTask={requestCloseTask}
-            onShowBoard={() => setView("board")}
-            onCreateTask={createTask}
-            openNewTaskSignal={sidebarNewTaskSignal}
-          />
-          <WorkspaceView
-            focusedTaskId={focusedTaskId}
-            openedTaskIds={openedTaskIds}
-            onCloseTask={requestCloseTask}
-          />
-        </div>
-      }
-      <TakeoverDialog
-        open={takeover !== null}
-        taskTitle={
-          takeover ? (taskTitleRef.current.get(takeover.taskId) ?? "") : ""
         }
-        presence={takeover?.presence ?? null}
-        onCancel={() => setTakeover(null)}
-        onAttachAnyway={() => {
-          if (!takeover) return;
-          const { taskId } = takeover;
-          setTakeover(null);
-          openTask(taskId);
-        }}
-      />
-      <Dialog
-        open={pendingClose !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingClose(null);
-        }}
-        title="Agent is still working"
-        testId="close-while-running-dialog"
-      >
-        <p className="text-sm text-muted-foreground">
-          “
-          {pendingClose
-            ? (taskTitleRef.current.get(pendingClose) ?? "This task")
-            : ""}
-          ” has an agent mid-turn. Closing the workspace ends its session.
-        </p>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setPendingClose(null)}
-            data-testid="close-while-running-cancel"
-          >
-            Keep it running
-          </Button>
-          <Button
-            variant="outline"
-            className="border-red-900/60 text-red-400 hover:bg-red-950/40"
-            data-testid="close-while-running-confirm"
-            onClick={() => {
-              if (pendingClose) closeTask(pendingClose);
-              setPendingClose(null);
-            }}
-          >
-            Close anyway
-          </Button>
-        </DialogFooter>
-      </Dialog>
-      <ToastHost />
-      <ConfirmHost />
+        <TakeoverDialog
+          open={takeover !== null}
+          taskTitle={
+            takeover ? (taskTitleRef.current.get(takeover.taskId) ?? "") : ""
+          }
+          presence={takeover?.presence ?? null}
+          onCancel={() => setTakeover(null)}
+          onAttachAnyway={() => {
+            if (!takeover) return;
+            const { taskId } = takeover;
+            setTakeover(null);
+            openTask(taskId);
+          }}
+        />
+        <Dialog
+          open={pendingClose !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingClose(null);
+          }}
+          title="Agent is still working"
+          testId="close-while-running-dialog"
+        >
+          <p className="text-sm text-muted-foreground">
+            “
+            {pendingClose
+              ? (taskTitleRef.current.get(pendingClose) ?? "This task")
+              : ""}
+            ” has an agent mid-turn. Closing the workspace ends its session.
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPendingClose(null)}
+              data-testid="close-while-running-cancel"
+            >
+              Keep it running
+            </Button>
+            <Button
+              variant="outline"
+              className="border-red-900/60 text-red-400 hover:bg-red-950/40"
+              data-testid="close-while-running-confirm"
+              onClick={() => {
+                if (pendingClose) closeTask(pendingClose);
+                setPendingClose(null);
+              }}
+            >
+              Close anyway
+            </Button>
+          </DialogFooter>
+        </Dialog>
+        <ToastHost />
+        <ConfirmHost />
+      </div>
     </div>
   );
 }

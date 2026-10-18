@@ -235,3 +235,63 @@ export function useManualRefresh(): { busy: boolean; refresh: () => void } {
   }, [busy]);
   return { busy, refresh };
 }
+
+/** What the connectivity banner should render; "hidden" renders nothing (the common, healthy case). */
+export type ConnectivityBannerState =
+  | "hidden"
+  | "offline"
+  | "reconnecting"
+  | "restored";
+
+/**
+ * Drives the one neutral offline banner (see ConnectivityBanner.tsx): the
+ * main process's offline/reconnecting/restored push channel is the source
+ * of truth (it is the one that actually talked, or failed to talk, to gh),
+ * but the renderer's own `window` online/offline events are layered on top
+ * as a fast local hint so the banner appears the instant the OS reports no
+ * network, without waiting for the next ~10s offline-poll tick. "restored"
+ * auto-hides itself after a few seconds; every other visible state stays
+ * until main says otherwise.
+ */
+export function useConnectivity(): ConnectivityBannerState {
+  const [mainState, setMainState] = useState<
+    "online" | "offline" | "reconnecting" | "restored"
+  >("online");
+  const [localOffline, setLocalOffline] = useState(() =>
+    typeof navigator === "undefined" ? false : !navigator.onLine,
+  );
+  const [restoredHidden, setRestoredHidden] = useState(false);
+
+  useEffect(
+    () =>
+      window.harbormaster.core.onConnectivityChanged((state) => {
+        setMainState(state);
+        if (state === "restored") setRestoredHidden(false);
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    const onOffline = (): void => setLocalOffline(true);
+    const onOnline = (): void => setLocalOffline(false);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mainState !== "restored") return;
+    const timer = window.setTimeout(() => setRestoredHidden(true), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [mainState]);
+
+  if (mainState === "restored") {
+    return restoredHidden ? "hidden" : "restored";
+  }
+  if (mainState === "reconnecting") return "reconnecting";
+  if (mainState === "offline" || localOffline) return "offline";
+  return "hidden";
+}

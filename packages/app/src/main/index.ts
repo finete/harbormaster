@@ -15,10 +15,19 @@ import type {
 import {
   createCore,
   DEFAULT_STATE_DIR,
+  isConnectivityError,
   PiHarnessAdapter,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
-import { app, BrowserWindow, ipcMain, Notification, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Notification,
+  net,
+  powerMonitor,
+  shell,
+} from "electron";
 import type {
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -26,10 +35,13 @@ import type {
   TerminalCreateResult,
   ToDoneForce,
 } from "../preload/api";
+import type { ConnectivityState } from "./connectivity-loop";
+import { createConnectivityLoop } from "./connectivity-loop";
 import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
+import { wirePowerGating } from "./power-gating";
 import {
   activeSessionCwds,
   activeSessionPids,
@@ -179,11 +191,15 @@ function registerCoreIpc(): void {
     (_event, id: string, patch: UpdateTaskInput) =>
       core.commands.updateTaskState(id, patch),
   );
-  // Funnels through the same warning-push path the 30s automation timer
-  // uses (see performRefresh below) so a manually-triggered refresh (tests,
-  // a future "refresh now" control) surfaces warnings identically instead
-  // of only returning them to this one caller.
-  ipcMain.handle("core:refresh", () => performRefresh());
+  // Goes through the same connectivity-loop state machine the automation
+  // timer runs on (see connectivityLoop.runOnce below) so a manually-
+  // triggered refresh (tests, the board's "g"/Refresh button) surfaces both
+  // warnings and the offline/restored banner identically instead of only
+  // returning warnings to this one caller.
+  ipcMain.handle("core:refresh", async (): Promise<{ warnings: string[] }> => {
+    const outcome = await connectivityLoop.runOnce();
+    return { warnings: outcome.warnings };
+  });
   ipcMain.handle(
     "core:presence",
     async (_event, taskId: string): Promise<PresenceSnapshot> => {
@@ -314,10 +330,10 @@ function stopPresencePolling(): void {
   presencePollTimer = undefined;
 }
 
-let refreshTimer: ReturnType<typeof setInterval> | undefined;
 // Last warning string pushed to windows, so an unbroken run of identical
-// failures (gh missing, network down) never spams the same banner every
-// tick -- only a changed (or newly-cleared) warning is pushed again.
+// failures (a real gh/API error, never connectivity -- see below) never
+// spams the same banner every tick -- only a changed (or newly-cleared)
+// warning is pushed again.
 let lastPushedRefreshWarning: string | undefined;
 
 function pushRefreshWarning(warning: string | undefined): void {
@@ -329,17 +345,39 @@ function pushRefreshWarning(warning: string | undefined): void {
   }
 }
 
+// Last connectivity state pushed to windows, deduped the same way as
+// refresh warnings: a long run of identical ticks (every offline poll, or
+// every healthy 30s tick) never re-announces a state the renderer's banner
+// is already showing.
+let lastPushedConnectivityState: ConnectivityState | undefined;
+
+function pushConnectivityState(state: ConnectivityState): void {
+  if (state === lastPushedConnectivityState) return;
+  lastPushedConnectivityState = state;
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "core:connectivity", state);
+  }
+}
+
 // One refresh: calls the core's refresh() (PR status + movers + archive
 // sweep; see CoreCommands.refresh) and pushes any warning to every open
-// window, deduped against the immediately preceding push. refresh() itself
-// never throws on a single task's PR failure (folded into its warnings
-// array instead), but a harder failure (gh entirely missing, config load
-// failure, ...) can still reject the promise -- caught here so the single
-// automation timer (see /AGENTS.md "Movers tick only in the app") never
-// dies and keeps ticking regardless. Shared by the 30s timer and the
-// `core:refresh` IPC handler, so a manually-triggered refresh pushes (and
-// returns) warnings exactly the same way.
-async function performRefresh(): Promise<{ warnings: string[] }> {
+// window, deduped against the immediately preceding push. Connectivity-class
+// failures (offline, DNS down, ...) never reach `warnings` -- core's
+// refresh() already separates those into `result.connectivity` (see
+// engines/connectivity.ts); this only has to forward that marker instead of
+// ever turning it into a warning toast. refresh() itself never throws on a
+// single task's PR failure, but a harder failure (gh entirely missing,
+// config load failure, ...) can still reject the promise -- caught here so
+// the single automation timer (see /AGENTS.md "Movers tick only in the
+// app") never dies and keeps ticking regardless; a thrown connectivity-
+// shaped message is classified the same way a per-task one would be.
+// Shared by the connectivity loop and the `core:refresh` IPC handler, so a
+// manually-triggered refresh pushes (and returns) warnings exactly the same
+// way.
+async function performRefresh(): Promise<{
+  warnings: string[];
+  connectivity?: { offline: true; failedChecks: number };
+}> {
   try {
     // Live pane cwds: neither a mover-driven landing nor the done-cleanup
     // retry may remove a worktree a pane is still running in. Overlapping
@@ -352,25 +390,60 @@ async function performRefresh(): Promise<{ warnings: string[] }> {
     );
     return result;
   } catch (error) {
-    console.error("[main] refresh failed:", error);
     const message = error instanceof Error ? error.message : String(error);
+    if (isConnectivityError(message)) {
+      return { warnings: [], connectivity: { offline: true, failedChecks: 1 } };
+    }
+    console.error("[main] refresh failed:", error);
     pushRefreshWarning(message);
     return { warnings: [message] };
   }
 }
 
+// Drives the 30s/10s refresh cadence and the offline/reconnecting/restored
+// banner state (see connectivity-loop.ts for the pure state machine this
+// wires up). `net.isOnline()` is a fast local hint checked before any gh
+// work: offline, every task's `gh` call is skipped outright instead of each
+// failing individually with "check your internet".
+const connectivityLoop = createConnectivityLoop({
+  isOnline: () => net.isOnline(),
+  performRefresh: async () => {
+    const result = await performRefresh();
+    return { offline: Boolean(result.connectivity), warnings: result.warnings };
+  },
+  onStateChange: pushConnectivityState,
+});
+
 function startRefreshLoop(): void {
-  if (refreshTimer) return;
-  refreshTimer = setInterval(() => {
-    void performRefresh();
-  }, 30_000);
-  void performRefresh();
+  connectivityLoop.start();
 }
 
 function stopRefreshLoop(): void {
-  if (!refreshTimer) return;
-  clearInterval(refreshTimer);
-  refreshTimer = undefined;
+  connectivityLoop.stop();
+}
+
+// Sleep/wake: a closed laptop lid stops both timers outright (no point
+// polling presence or hammering gh while asleep) and restarts them ~3s
+// after wake, since the network interface needs a beat to come back up --
+// an immediate tick right on resume would just fail the same way it did
+// before this feature existed. The real `suspend`/`resume` events are
+// main-process-only and exercised for real only by hand (sleep the laptop);
+// `wirePowerGating`'s state machine is what's unit-tested. Wired inside
+// `app.whenReady()` below: `powerMonitor` is only usable once Electron is
+// ready.
+function wireSleepWakeGating(): void {
+  wirePowerGating({
+    onSuspend: (cb) => powerMonitor.on("suspend", cb),
+    onResume: (cb) => powerMonitor.on("resume", cb),
+    stopAll: () => {
+      stopRefreshLoop();
+      stopPresencePolling();
+    },
+    startAll: () => {
+      startRefreshLoop();
+      startPresencePolling();
+    },
+  });
 }
 
 function registerPtyIpc(): void {
@@ -659,6 +732,7 @@ app.whenReady().then(() => {
   createWindow();
   startPresencePolling();
   startRefreshLoop();
+  wireSleepWakeGating();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
