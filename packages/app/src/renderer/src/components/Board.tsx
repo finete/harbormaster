@@ -35,7 +35,9 @@ import {
 import { isTypingTarget } from "../lib/keyboard-guard";
 import { modKeyLabel } from "../lib/platform";
 import {
+  readBoardCollapsedColumns,
   readBoardCollapsedGroups,
+  storeBoardCollapsedColumns,
   storeBoardCollapsedGroups,
 } from "../lib/sidebar-persistence";
 import {
@@ -143,6 +145,17 @@ export function Board({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readBoardCollapsedGroups(window.localStorage),
   );
+  // Whole-column collapse (the slim rail), persisted the same way as group
+  // collapse but under its own key (sidebar-persistence.ts) since it's an
+  // independent axis: a column can be collapsed with its groups left alone.
+  const [collapsedColumns, setCollapsedColumns] = useState<Set<TaskState>>(
+    () => readBoardCollapsedColumns(window.localStorage) as Set<TaskState>,
+  );
+  // Columns the current drag has auto-expanded for a peek (Azure DevOps-
+  // style hover-to-reveal, see BoardColumn.tsx's onAutoExpandPeek): an
+  // override on top of `collapsedColumns`, cleared on drag end/cancel so
+  // the column snaps back to collapsed without touching the saved state.
+  const [peekedColumns, setPeekedColumns] = useState<Set<TaskState>>(new Set());
   // The card being dragged, rendered as the portaled DragOverlay preview.
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
@@ -156,6 +169,32 @@ export function Board({
       return next;
     });
   }
+
+  function toggleColumn(state: TaskState): void {
+    setCollapsedColumns((current) => {
+      const next = new Set(current);
+      if (next.has(state)) next.delete(state);
+      else next.add(state);
+      storeBoardCollapsedColumns(window.localStorage, next);
+      return next;
+    });
+  }
+
+  function autoExpandPeek(state: TaskState): void {
+    setPeekedColumns((current) => {
+      if (current.has(state)) return current;
+      const next = new Set(current);
+      next.add(state);
+      return next;
+    });
+  }
+
+  // What's actually rendered collapsed right now: saved-collapsed minus any
+  // mid-drag peek override. Recomputed each render (cheap, small sets) so
+  // every consumer (the grid, the column list) always agrees.
+  const effectiveCollapsedColumns = new Set(
+    [...collapsedColumns].filter((state) => !peekedColumns.has(state)),
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -189,6 +228,7 @@ export function Board({
 
   function handleDragCancel(): void {
     setActiveTaskId(null);
+    setPeekedColumns(new Set());
     clearDraggedSoon();
     releaseDragKeyGuardSoon();
   }
@@ -213,6 +253,7 @@ export function Board({
 
   function handleDragEnd(event: DragEndEvent): void {
     setActiveTaskId(null);
+    setPeekedColumns(new Set());
     clearDraggedSoon();
     releaseDragKeyGuardSoon();
     const { active, over } = event;
@@ -261,10 +302,16 @@ export function Board({
   // another column), and resets to the first card if that task disappears
   // (archived-hidden, moved to a filtered-out state, etc) — see
   // lib/board-selection.ts's resolveSelection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effectiveCollapsedColumns is derived fresh every render from collapsedColumns/peekedColumns (a new Set each time, never reference-equal); depending on those two directly is what actually governs when this needs to re-run.
   useEffect(() => {
-    const grid = buildSelectionGrid(columns, showArchived, collapsedGroups);
+    const grid = buildSelectionGrid(
+      columns,
+      showArchived,
+      collapsedGroups,
+      effectiveCollapsedColumns,
+    );
     setSelectedTaskId((previous) => resolveSelection(grid, previous));
-  }, [columns, showArchived, collapsedGroups]);
+  }, [columns, showArchived, collapsedGroups, collapsedColumns, peekedColumns]);
 
   // Board-axis scrolling (item 12): trackpads and horizontal wheels scroll
   // the column row natively; Shift+wheel is only converted to horizontal
@@ -331,6 +378,7 @@ export function Board({
   // live while this board is the visible view, no dialog is open, and focus
   // isn't in a text field or the terminal (lib/keyboard-guard.ts) — the
   // xterm terminal must receive every keystroke verbatim when focused.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: collapsedColumns/peekedColumns are listed directly (not the derived effectiveCollapsedColumns the callback reads) since that Set is recreated every render and would never let this settle.
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent): void {
@@ -339,7 +387,12 @@ export function Board({
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
-      const grid = buildSelectionGrid(columns, showArchived, collapsedGroups);
+      const grid = buildSelectionGrid(
+        columns,
+        showArchived,
+        collapsedGroups,
+        effectiveCollapsedColumns,
+      );
       switch (event.key) {
         case "ArrowLeft":
           event.preventDefault();
@@ -414,6 +467,8 @@ export function Board({
     columns,
     showArchived,
     collapsedGroups,
+    collapsedColumns,
+    peekedColumns,
     selectedTaskId,
     selectedTask,
     onSelectTask,
@@ -467,6 +522,9 @@ export function Board({
               collapsedGroups={collapsedGroups}
               onToggleGroup={(groupId) => toggleGroup(column.state, groupId)}
               dragTask={activeTask}
+              collapsed={effectiveCollapsedColumns.has(column.state)}
+              onToggleCollapse={() => toggleColumn(column.state)}
+              onAutoExpandPeek={() => autoExpandPeek(column.state)}
             />
           ))}
         </div>

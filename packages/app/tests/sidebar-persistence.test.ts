@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOARD_COLLAPSED_COLUMNS_KEY,
   BOARD_COLLAPSED_GROUPS_KEY,
+  readBoardCollapsedColumns,
   readBoardCollapsedGroups,
   readCollapsedGroups,
   readPinnedTaskIds,
   SIDEBAR_COLLAPSED_GROUPS_KEY,
   type StorageLike,
+  storeBoardCollapsedColumns,
   storeBoardCollapsedGroups,
   storeCollapsedGroups,
   storePinnedTaskIds,
@@ -95,5 +98,25 @@ describe("board collapsed groups persistence", () => {
     expect(readBoardCollapsedGroups(storage)).toEqual(new Set());
     storage.setItem(BOARD_COLLAPSED_GROUPS_KEY, "{nope");
     expect(readBoardCollapsedGroups(storage)).toEqual(new Set());
+  });
+});
+
+describe("board collapsed columns (rail) persistence", () => {
+  it("round-trips a stored set under its own key, independent of group collapse", () => {
+    const storage = fakeStorage();
+    storeBoardCollapsedGroups(storage, new Set(["backlog:scratch"]));
+    storeBoardCollapsedColumns(storage, new Set(["backlog"]));
+    expect(readBoardCollapsedColumns(storage)).toEqual(new Set(["backlog"]));
+    expect(readBoardCollapsedGroups(storage)).toEqual(
+      new Set(["backlog:scratch"]),
+    );
+    expect(BOARD_COLLAPSED_COLUMNS_KEY).not.toBe(BOARD_COLLAPSED_GROUPS_KEY);
+  });
+
+  it("reads back empty when never written or corrupt", () => {
+    const storage = fakeStorage();
+    expect(readBoardCollapsedColumns(storage)).toEqual(new Set());
+    storage.setItem(BOARD_COLLAPSED_COLUMNS_KEY, "{nope");
+    expect(readBoardCollapsedColumns(storage)).toEqual(new Set());
   });
 });

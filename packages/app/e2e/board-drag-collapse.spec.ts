@@ -397,6 +397,125 @@ test("the collapsed state survives an app relaunch, and expanding restores the c
   ).toHaveCount(1);
 });
 
+test("collapsing a column renders the slim rail (chevron, rotated title, honest count, hover tooltip) and unmounts its cards", async () => {
+  const collapseButton = window.getByTestId("column-collapse-backlog");
+  await expect(collapseButton).toBeVisible();
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(FILLER_COUNT),
+  );
+
+  await collapseButton.click();
+
+  const rail = window.getByTestId("column-backlog");
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
+  await expect(rail).toHaveAttribute(
+    "title",
+    `Backlog · ${FILLER_COUNT} tasks`,
+  );
+  // The count badge keeps the same testid as the expanded header's.
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(FILLER_COUNT),
+  );
+  // Cards container unmounts entirely \u2014 not just visually hidden.
+  await expect(window.getByTestId("column-backlog-cards")).toHaveCount(0);
+  await expect(
+    window.locator('[data-testid^="card-"]').filter({ hasText: "Filler" }),
+  ).toHaveCount(0);
+});
+
+test("the collapsed column state survives an app relaunch, and clicking the rail expands it back", async () => {
+  await app.close();
+  assertNoMainProcessErrors();
+  await launch();
+
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(FILLER_COUNT),
+  );
+  await expect(window.getByTestId("column-backlog-cards")).toHaveCount(0);
+
+  await window.getByTestId("column-backlog").click();
+  await expect(window.getByTestId("column-rail-backlog")).toHaveCount(0);
+  await expect(window.getByTestId("column-collapse-backlog")).toBeVisible();
+  await expect(cardLocator("Filler 01")).toBeVisible();
+});
+
+test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the task, re-collapsing once the drag ends", async () => {
+  // "Drag Mover" stays put in Dev for the card-anatomy lane below; move a
+  // throwaway filler into Dev first so the rail-drop has a source card that
+  // isn't load-bearing for later tests.
+  await dragTo(
+    window,
+    cardLocator("Filler 02"),
+    window.getByTestId("column-dev"),
+  );
+  await expect(window.getByTestId("column-dev-cards")).toContainText(
+    "Filler 02",
+  );
+
+  await window.getByTestId("column-collapse-backlog").click();
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(FILLER_COUNT - 1),
+  );
+
+  const rail = window.getByTestId("column-backlog");
+  const from = await beginDrag(cardLocator("Filler 02"));
+  const railBox = await rail.boundingBox();
+  if (!railBox) throw new Error("backlog rail not visible");
+  await glide(from, {
+    x: railBox.x + railBox.width / 2,
+    y: railBox.y + railBox.height / 2,
+  });
+
+  // Sustained hover (>500ms) over the collapsed rail auto-expands it as a
+  // peek so the drop target is visible (Azure DevOps-style), without
+  // touching the saved collapsed preference.
+  await expect(window.getByTestId("column-backlog-cards")).toBeVisible({
+    timeout: 2_000,
+  });
+  await window.mouse.up();
+  await expect(window.getByTestId("drag-overlay-card")).toHaveCount(0);
+
+  // The peek re-collapses to the saved (still-collapsed) preference the
+  // instant the drag ends, so the proof the card actually landed is the
+  // rail's own honest count \u2014 the cards container never stays mounted
+  // long enough for a post-drop assertion to catch it.
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(FILLER_COUNT),
+  );
+  await expect(window.getByTestId("column-backlog-cards")).toHaveCount(0);
+  // Dev is back to just "Drag Mover".
+  await expect(window.getByTestId("column-dev-cards")).not.toContainText(
+    "Filler 02",
+  );
+  await expect(cardLocator("Drag Mover")).toBeVisible();
+});
+
+test("arrow navigation skips a collapsed column, crossing straight to the next expanded one", async () => {
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
+  // Backlog (collapsed) holds every filler; Dev holds only "Drag Mover".
+  // Left/right from it must skip straight over the collapsed column: there
+  // is nothing beyond it in either direction (Awaiting/Done are empty), so
+  // it stays selected rather than landing on a hidden card.
+  const mover = cardLocator("Drag Mover");
+  await expect(mover).toBeVisible();
+  await window.keyboard.press("ArrowLeft");
+  await expect(mover).toHaveAttribute("data-selected", "true");
+  await window.keyboard.press("ArrowRight");
+  await expect(mover).toHaveAttribute("data-selected", "true");
+  await expect(
+    window.locator('[data-testid^="card-"][data-selected="true"]'),
+  ).toHaveCount(1);
+
+  // Restore backlog to expanded so later lanes (card-anatomy below) see
+  // its cards again.
+  await window.getByTestId("column-backlog").click();
+  await expect(window.getByTestId("column-rail-backlog")).toHaveCount(0);
+  await expect(cardLocator("Filler 01")).toBeVisible();
+});
+
 /** Slot offsets inside one card element (see TaskCard.tsx's fixed skeleton). */
 async function cardAnatomy(card: Locator): Promise<{
   titleTop: number;
