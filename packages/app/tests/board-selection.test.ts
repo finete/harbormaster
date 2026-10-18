@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { BoardColumn, Task } from "../src/preload/api";
 import {
+  boardGroupKey,
   buildSelectionGrid,
+  columnCountLabel,
   firstSelectableTaskId,
+  isBoardGroupCollapsed,
   moveSelection,
   resolveSelection,
   visibleGroupsForColumn,
@@ -176,5 +179,86 @@ describe("moveSelection", () => {
     const grid = buildSelectionGrid(board(), false);
     expect(moveSelection(grid, "ghost", "right")).toBe("b1");
     expect(moveSelection(grid, null, "down")).toBe("b1");
+  });
+});
+
+describe("collapsed board groups", () => {
+  it("keys a group by column + group id so each column's copy is independent", () => {
+    expect(boardGroupKey("backlog", "scratch")).toBe("backlog:scratch");
+    const collapsed = new Set([boardGroupKey("backlog", "scratch")]);
+    expect(isBoardGroupCollapsed(collapsed, "backlog", "scratch")).toBe(true);
+    expect(isBoardGroupCollapsed(collapsed, "done", "scratch")).toBe(false);
+    expect(isBoardGroupCollapsed(undefined, "backlog", "scratch")).toBe(false);
+  });
+
+  it("drops a collapsed group's cards from the grid, leaving the rest in order", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      new Set([boardGroupKey("awaiting", "review")]),
+    );
+    expect(grid).toEqual([
+      { state: "backlog", taskIds: ["b1", "b2"] },
+      { state: "dev", taskIds: [] },
+      { state: "awaiting", taskIds: ["a2"] },
+      { state: "done", taskIds: ["d2"] },
+    ]);
+  });
+
+  it("only collapses the matching column's group", () => {
+    // "scratch" exists in backlog and done; collapsing done's leaves backlog's.
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      new Set([boardGroupKey("done", "scratch")]),
+    );
+    expect(grid.find((c) => c.state === "backlog")?.taskIds).toEqual([
+      "b1",
+      "b2",
+    ]);
+    expect(grid.find((c) => c.state === "done")?.taskIds).toEqual([]);
+  });
+
+  it("arrow navigation skips cards in collapsed groups", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      new Set([boardGroupKey("awaiting", "review")]),
+    );
+    // a1 is hidden: down from nothing above, right from b1 lands on a2.
+    expect(moveSelection(grid, "b1", "right")).toBe("a2");
+    expect(moveSelection(grid, "a2", "up")).toBe("a2");
+    // A fully collapsed column is skipped like an empty one.
+    const allCollapsed = buildSelectionGrid(
+      board(),
+      false,
+      new Set([
+        boardGroupKey("awaiting", "review"),
+        boardGroupKey("awaiting", "slack"),
+      ]),
+    );
+    expect(moveSelection(allCollapsed, "b1", "right")).toBe("d2");
+  });
+
+  it("drops the selection back to the first card once its group collapses", () => {
+    const grid = buildSelectionGrid(
+      board(),
+      false,
+      new Set([boardGroupKey("awaiting", "slack")]),
+    );
+    expect(resolveSelection(grid, "a2")).toBe("b1");
+  });
+});
+
+describe("columnCountLabel", () => {
+  it("is a plain count when nothing is filtered out", () => {
+    expect(columnCountLabel(3, 0)).toEqual({ text: "3", title: "3 tasks" });
+  });
+
+  it("reads shown/total while archived cards are hidden", () => {
+    expect(columnCountLabel(2, 5)).toEqual({
+      text: "2/7",
+      title: "2 shown · 5 archived hidden",
+    });
   });
 });

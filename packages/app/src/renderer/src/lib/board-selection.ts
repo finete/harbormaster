@@ -33,16 +33,46 @@ export function visibleGroupsForColumn(
     .filter((group) => group.tasks.length > 0);
 }
 
-/** Builds the keyboard-navigable grid from the live board, in column order. */
+/**
+ * Stable identity of one board group for its saved collapse state: the
+ * same core group id (a repository id, "scratch", or the awaiting column's
+ * `<reason>::<repo>`) can appear in several columns, and each column's copy
+ * collapses independently.
+ */
+export function boardGroupKey(
+  state: BoardColumn["state"],
+  groupId: BoardGroup["id"],
+): string {
+  return `${state}:${groupId}`;
+}
+
+/** Whether `group` in `state`'s column is collapsed per the saved key set. */
+export function isBoardGroupCollapsed(
+  collapsed: ReadonlySet<string> | undefined,
+  state: BoardColumn["state"],
+  groupId: BoardGroup["id"],
+): boolean {
+  return collapsed?.has(boardGroupKey(state, groupId)) ?? false;
+}
+
+/**
+ * Builds the keyboard-navigable grid from the live board, in column order.
+ * Cards inside a collapsed group (see `boardGroupKey`) are off screen, so
+ * the grid skips them exactly like BoardColumn.tsx hides them.
+ */
 export function buildSelectionGrid(
   columns: BoardColumn[],
   showArchived: boolean,
+  collapsedGroups?: ReadonlySet<string>,
 ): SelectionGrid {
   return columns.map((column) => ({
     state: column.state,
-    taskIds: visibleGroupsForColumn(column, showArchived).flatMap((group) =>
-      group.tasks.map((task) => task.id),
-    ),
+    taskIds: visibleGroupsForColumn(column, showArchived)
+      .filter(
+        (group) =>
+          !isBoardGroupCollapsed(collapsedGroups, column.state, group.id),
+      )
+      .flatMap((group) => group.tasks.map((task) => task.id)),
   }));
 }
 
@@ -121,4 +151,22 @@ export function moveSelection(
   }
   // No adjacent non-empty column in that direction: stay put.
   return currentTaskId;
+}
+
+/**
+ * A column header's count, honest about filters: while the Done column
+ * hides archived cards the header reads "shown/total" (with a tooltip
+ * spelling it out) instead of silently reporting only the filtered number.
+ */
+export function columnCountLabel(
+  shown: number,
+  hiddenArchived: number,
+): { text: string; title: string } {
+  if (hiddenArchived > 0) {
+    return {
+      text: `${shown}/${shown + hiddenArchived}`,
+      title: `${shown} shown · ${hiddenArchived} archived hidden`,
+    };
+  }
+  return { text: String(shown), title: `${shown} tasks` };
 }
