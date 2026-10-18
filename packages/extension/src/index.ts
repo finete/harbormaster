@@ -86,6 +86,20 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     const sessionPath = ctx.sessionManager.getSessionFile();
     if (!sessionPath) return;
+    // Inherited-env guard (pi-home stripped CMUX_* for the same reason):
+    // nested pi processes — pi-subagents children, nested `pi` runs — inherit
+    // HARBORMASTER_* but open their own sessions. Only the process whose
+    // session is the one the pane launched may own presence/binding/widget;
+    // everything else stands down. (Running /new inside a pane also
+    // mismatches: presence goes quiet until the pane is reopened — flagged
+    // tradeoff, far better than children overwriting the record.)
+    const expectedSessionId = process.env.HARBORMASTER_SESSION_ID;
+    if (
+      expectedSessionId &&
+      ctx.sessionManager.getSessionId() !== expectedSessionId
+    ) {
+      return;
+    }
     const mode = ctx.hasUI ? ("interactive" as const) : ("headless" as const);
     await reporter.start({ taskId, sessionPath, mode }).catch(() => {});
     // Session-binding capture point: only this Pi process knows the exact
