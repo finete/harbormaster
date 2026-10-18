@@ -41,6 +41,8 @@ export interface PiHarnessAdapterOptions {
 const MARKER_ENV = "HARBORMASTER";
 const TASK_ID_ENV = "HARBORMASTER_TASK_ID";
 const STATE_DIR_ENV = "HARBORMASTER_STATE_DIR";
+/** The exact session this pane launched: lets the extension ignore inherited env in nested pi processes (subagent children). */
+const SESSION_ID_ENV = "HARBORMASTER_SESSION_ID";
 /** Overrides the launched command (and only the command) for e2e: a tiny fake binary stands in for `pi`. */
 const PI_COMMAND_ENV = "HARBORMASTER_PI_COMMAND";
 
@@ -127,6 +129,14 @@ export class PiHarnessAdapter implements HarnessAdapter {
       [MARKER_ENV]: "1",
       [TASK_ID_ENV]: input.taskId,
       [STATE_DIR_ENV]: input.stateDir,
+      // Children spawned inside the pane (pi-subagents workers and the
+      // like) inherit this whole environment; the extension compares its
+      // actual session id against this value and stands down on mismatch,
+      // so a child can never stomp the pane's presence record with its own
+      // short-lived pid (the grey-dot-while-working bug).
+      ...(input.session && input.session.mode !== "continue"
+        ? { [SESSION_ID_ENV]: input.session.sessionId }
+        : {}),
     };
     return {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
