@@ -12,6 +12,7 @@ import type {
   BoardChangedPayload,
   BoardColumn,
   CreateTaskInput,
+  LaunchTaskInput,
   MoveTaskOptions,
   PresenceRecord,
   ReopenTaskInput,
@@ -40,6 +41,7 @@ export type {
   BoardColumn,
   BoardGroup,
   CreateTaskInput,
+  LaunchTaskInput,
   MoveTaskOptions,
   PresenceRecord,
   ReopenTaskInput,
@@ -110,6 +112,16 @@ export interface PresenceBadge {
     status: "done" | "blocked" | "unreported";
     note?: string;
   };
+  /**
+   * Live self-reported done/blocked verdict while the process is STILL
+   * attached (see `PresenceRecord.outcome`) "-" distinct from `ended`,
+   * which means the process is gone. Forwarded under the same
+   * corroboration trust rule as `ended` (see main/presence-corroboration.ts).
+   */
+  outcome?: {
+    status: "done" | "blocked";
+    note?: string;
+  };
 }
 
 /** Pushed every poll tick (~5s) for every non-done task; badge-sized only (see Sidebar/TaskCard). */
@@ -144,6 +156,13 @@ export interface TerminalDataEvent {
 export interface TerminalExitEvent {
   id: string;
   exitCode: number;
+}
+
+/** `terminal.attachPrimary`'s result when the task has a live, currently-unattached app-owned primary pty to rebind to this renderer. */
+export interface AttachPrimaryResult {
+  id: string;
+  /** The background session's screen, serialized (scrollback + viewport + cursor) — write this into the pane's xterm before switching to live streaming. */
+  snapshot: string;
 }
 
 export interface TerminalHostApi {
@@ -202,6 +221,22 @@ export interface HarbormasterApi {
     getScreenReaderMode(): Promise<boolean>;
     /** Subscribe to accessibility-support-changed pushes from main. */
     onScreenReaderModeChanged(cb: (enabled: boolean) => void): () => void;
+    /**
+     * Rebind a task's live, currently-unattached background-launched
+     * primary pty to this renderer (wave-2 task brief point 4): write the
+     * returned `snapshot` into the pane's xterm first, then behave exactly
+     * like a normal `create`d session (same `onData`/`onExit`/`write`/
+     * `resize`/`ack`/`dispose`). Resolves `undefined` when there is no live
+     * background primary for `taskId` (never launched, already exited, or
+     * already attached) "-" the caller falls back to `create` exactly as it
+     * would for a task launched the ordinary way. Main resizes the pty to
+     * `cols`/`rows` as part of the attach (Pi redraws on resize).
+     */
+    attachPrimary(
+      taskId: string,
+      cols: number,
+      rows: number,
+    ): Promise<AttachPrimaryResult | undefined>;
   };
   core: {
     listBoard(): Promise<BoardColumn[]>;
@@ -256,6 +291,21 @@ export interface HarbormasterApi {
       taskId: string,
       input?: ReopenTaskInput,
     ): Promise<{ task: Task; warning?: string }>;
+    /**
+     * The one launch primitive (see ai/prds/task-launching.md): creates a
+     * task and queues it to start running in the background "-" the app's
+     * background launcher (main/background-launcher.ts) starts its pty with
+     * no pane open; opening the task later attaches to it (see
+     * `terminal.attachPrimary`). See `CoreCommands.launchTask`.
+     */
+    launchTask(input: LaunchTaskInput): Promise<Task>;
+    /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
+    listChildren(parentTaskId: string): Promise<Task[]>;
+    /** Current effective launch settings (concurrency cap, default model), for a launch dialog to show/enforce without touching config files. See `CoreCommands.getLaunchSettings`. */
+    getLaunchSettings(): Promise<{
+      maxConcurrent: number;
+      defaultModel?: string;
+    }>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
     refresh(): Promise<{ warnings: string[] }>;
     /** Subscribes to the core's board-changed push channel; returns an unsubscribe fn. */

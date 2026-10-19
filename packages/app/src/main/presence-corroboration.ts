@@ -16,7 +16,11 @@
 // derived (heartbeat + its own pid-liveness probe), `pane` is a read of the
 // app's own in-memory pty registry (see `ptySessions.ts`).
 
-import type { PresenceOutcome, PresenceStatus } from "@harbormaster/core";
+import type {
+  PresenceOutcome,
+  PresenceRecord,
+  PresenceStatus,
+} from "@harbormaster/core";
 
 /**
  * How a presence push was corroborated against the app's own pty registry:
@@ -48,10 +52,28 @@ export interface CorroboratedPresence {
   heartbeatAt?: string;
   /** Terminal outcome of a headless run, carried through whenever the record is trusted (`"record"` or a confirmed-dead `"none"`) so the UI still shows what happened. Never forwarded for `"pane-only"`: a live pane in front of the user is not "ended". */
   ended?: PresenceOutcome;
+  /**
+   * Live self-reported done/blocked verdict (see `PresenceRecord.outcome`)
+   * while the process is STILL attached - distinct from `ended`, which
+   * means the process is gone. Carried through under the same trust rule
+   * as `ended`: forwarded only when the record itself is trusted, never
+   * for a `"pane-only"` verdict.
+   */
+  outcome?: { status: "done" | "blocked"; note?: string };
 }
 
 function endedFrom(ended: PresenceOutcome): PresenceOutcome {
   return { ...ended };
+}
+
+function outcomeFrom(outcome: NonNullable<PresenceRecord["outcome"]>): {
+  status: "done" | "blocked";
+  note?: string;
+} {
+  return {
+    status: outcome.status,
+    ...(outcome.note ? { note: outcome.note } : {}),
+  };
 }
 
 /**
@@ -87,6 +109,7 @@ export function corroboratePresence(
           ? { heartbeatAt: record.heartbeatAt }
           : {}),
         ...(record.ended ? { ended: endedFrom(record.ended) } : {}),
+        ...(record.outcome ? { outcome: outcomeFrom(record.outcome) } : {}),
       };
     }
     // A pane of ours exists, but the record either doesn't exist or points
@@ -109,6 +132,7 @@ export function corroboratePresence(
       corroboration: "record",
       ...(record.heartbeatAt ? { heartbeatAt: record.heartbeatAt } : {}),
       ...(record.ended ? { ended: endedFrom(record.ended) } : {}),
+      ...(record.outcome ? { outcome: outcomeFrom(record.outcome) } : {}),
     };
   }
 
@@ -120,5 +144,6 @@ export function corroboratePresence(
     runningTurn: false,
     corroboration: "none",
     ...(record.ended ? { ended: endedFrom(record.ended) } : {}),
+    ...(record.outcome ? { outcome: outcomeFrom(record.outcome) } : {}),
   };
 }

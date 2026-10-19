@@ -3,6 +3,7 @@
 // `require`, `process`, or any other Node global.
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AttachPrimaryResult,
   AwaitingKindId,
   AwaitingKindOption,
   BoardChangedPayload,
@@ -10,6 +11,7 @@ import type {
   ConnectivityState,
   CreateTaskInput,
   HarbormasterApi,
+  LaunchTaskInput,
   MoveTaskOptions,
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -82,6 +84,12 @@ const api: HarbormasterApi = {
           handler,
         );
     },
+    attachPrimary: (
+      taskId: string,
+      cols: number,
+      rows: number,
+    ): Promise<AttachPrimaryResult | undefined> =>
+      ipcRenderer.invoke("pty:attachPrimary", taskId, cols, rows),
   },
   core: {
     listBoard: (): Promise<BoardColumn[]> =>
@@ -121,6 +129,14 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:reopenTask", taskId, input),
     refresh: (): Promise<{ warnings: string[] }> =>
       ipcRenderer.invoke("core:refresh"),
+    launchTask: (input: LaunchTaskInput): Promise<Task> =>
+      ipcRenderer.invoke("core:launchTask", input),
+    listChildren: (parentTaskId: string): Promise<Task[]> =>
+      ipcRenderer.invoke("core:listChildren", parentTaskId),
+    getLaunchSettings: (): Promise<{
+      maxConcurrent: number;
+      defaultModel?: string;
+    }> => ipcRenderer.invoke("core:getLaunchSettings"),
     onBoardChanged: (
       listener: (payload: BoardChangedPayload) => void,
     ): (() => void) => {
