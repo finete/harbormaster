@@ -24,7 +24,14 @@ export function createTerminalOptions(): ITerminalOptions {
     macOptionClickForcesSelection: true,
     scrollOnUserInput: true,
     minimumContrastRatio: 1,
-    screenReaderMode: true,
+    // screenReaderMode is OFF by default in production (P1-1).
+    // It adds per-row forced layouts (AccessibilityManager.ts:422-433) that
+    // cost ~10-25% extra CPU on slow machines. The renderer enables it at
+    // runtime when (a) the OS reports an assistive technology via
+    // app.isAccessibilitySupportEnabled(), or (b) the e2e env var
+    // HARBORMASTER_TERMINAL_A11Y_MIRROR=1 is set (playwright.config.ts).
+    // See main/index.ts and TerminalPane.tsx for the IPC path.
+    screenReaderMode: false,
     // allowProposedApi is required for the (EXPERIMENTAL) terminal.unicode
     // property used by Unicode11Addon (item #13).
     allowProposedApi: true,

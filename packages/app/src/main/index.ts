@@ -1,5 +1,4 @@
 // Electron main process entry — see /AGENTS.md for the fixed UI stack.
-
 import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
@@ -60,6 +59,13 @@ import {
 } from "./ptySessions";
 import { isAllowedRevealPath } from "./reveal-path";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
+
+// Raise Chromium's WebGL context cap before the GPU process starts.
+// By default Chromium evicts the oldest context once 16 are active; with many
+// terminal panes that causes permanent DOM-renderer fallback (4-5
+// VS Code uses the same flag; see https://github.com/microsoft/vscode/pull/285575
+// Verified on Electron 33: 40 terminals lose 8 contexts instead of 24.
+app.commandLine.appendSwitch("max-active-webgl-contexts", "32");
 
 // Surface main-process crashes to stderr instead of letting Electron's
 // default "uncaught exception" dialog pop up in front of the user. Node only
@@ -786,6 +792,24 @@ function registerAppIpc(): void {
     if (process.platform !== "darwin") return;
     const safeCount = typeof count === "number" && count > 0 ? count : 0;
     app.dock?.setBadge(safeCount > 0 ? String(safeCount) : "");
+  });
+
+  // P1-1: screen-reader mode IPC.
+  // screenReaderMode is off by default (P1-1
+  // It is enabled when (a) the OS reports an AT via app.isAccessibilitySupportEnabled(),
+  // or (b) the HARBORMASTER_TERMINAL_A11Y_MIRROR=1 env var is set (e2e).
+  const forceA11yMirror = process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR === "1";
+
+  ipcMain.handle(
+    "terminal:screen-reader-mode",
+    (): boolean => forceA11yMirror || app.isAccessibilitySupportEnabled(),
+  );
+
+  app.on("accessibility-support-changed", (_e, enabled: boolean) => {
+    const value = forceA11yMirror || enabled;
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "terminal:screen-reader-mode-changed", value);
+    }
   });
 }
 

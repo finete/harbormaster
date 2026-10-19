@@ -76,20 +76,90 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       .closest("[data-testid='terminal-panel']")
       ?.setAttribute("data-unicode-version", "11");
 
-    // WebGL renderer — fall back silently if context is unavailable.
-    let webgl: WebglAddon | undefined;
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl?.dispose());
-      terminal.loadAddon(webgl);
-    } catch {
-      // DOM renderer fallback is fine.
-    }
-
-    fitAddon.fit();
+    // WebGL renderer with LRU-friendly re-acquisition (P0-3).
+    // See terminal-perf-checklist.md §c P0-3 for the full rationale.
+    //
+    // 1. Set data-renderer on the terminal-panel element for e2e/diagnostics.
+    // 2. On context loss: dispose, switch to DOM, refit for correct cell metrics,
+    //    note timestamp.
+    // 3. Re-acquire WebGL lazily when visible again (ResizeObserver fires with
+    //    non-zero rect after being hidden), provided < 3 losses in 5 minutes.
+    // After 3 losses in 5 min we stay on DOM (likely a sick GPU — VS Code's
+    // _suggestedRendererType='dom' idea). We do NOT dispose on every hide
+    // (that leaks contexts per xterm #6068 and rebuilds the atlas).
 
     let disposed = false;
     let sessionId: string | undefined;
+
+    const terminalPanel = container.closest(
+      "[data-testid='terminal-panel']",
+    ) as HTMLElement | null;
+
+    const losses: number[] = [];
+    let webglLost = false;
+
+    function setRenderer(r: "webgl" | "dom"): void {
+      terminalPanel?.setAttribute("data-renderer", r);
+    }
+
+    let webgl: WebglAddon | undefined;
+
+    function disposeWebgl(): void {
+      if (!webgl) return;
+      // Tabby cursor-blink-manager workaround (addon-webgl ≤0.19).
+      try {
+        // biome-ignore lint/suspicious/noExplicitAny: internal workaround
+        (webgl as any)._renderer?._cursorBlinkStateManager?.dispose();
+      } catch {}
+      try {
+        webgl.dispose();
+      } catch {}
+      webgl = undefined;
+    }
+
+    function loadWebgl(): void {
+      if (disposed) return;
+      try {
+        disposeWebgl();
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          if (disposed) return;
+          webglLost = true;
+          losses.push(Date.now());
+          disposeWebgl();
+          setRenderer("dom");
+          fitAddon.fit(); // DOM cell metrics differ from WebGL
+          const recentLosses = losses.filter(
+            (t) => Date.now() - t < 5 * 60 * 1000,
+          );
+          if (recentLosses.length >= 3) {
+            console.warn(
+              "[terminal] WebGL context lost 3+ times in 5 min; staying on DOM renderer",
+            );
+          }
+        });
+        terminal.loadAddon(webgl);
+        webglLost = false;
+        setRenderer("webgl");
+      } catch {
+        setRenderer("dom");
+      }
+    }
+
+    // P1-1: Enable screenReaderMode when OS reports AT or e2e env knob is set.
+    // xterm supports runtime toggling; the mirror back-fills current rows when
+    // enabled late (AccessibilityManager.ts:121-122), so enabling after open() is safe.
+    void window.harbormaster.terminal.getScreenReaderMode().then((enabled) => {
+      if (!disposed) terminal.options.screenReaderMode = enabled;
+    });
+    const unsubscribeA11y =
+      window.harbormaster.terminal.onScreenReaderModeChanged((enabled) => {
+        if (!disposed) terminal.options.screenReaderMode = enabled;
+      });
+
+    loadWebgl();
+
+    fitAddon.fit();
 
     const params = props.params as
       | { cwd?: string; taskId?: string; primary?: boolean }
@@ -176,14 +246,36 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         });
     }, 0);
 
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
+    // P0-2: forward pty resizes only when xterm's cols/rows actually change.
+    // xterm fires onResize only on real dimension changes, so this naturally
+    // deduplicates. We do NOT call pty.resize from the ResizeObserver
+    // that would send garbage 11x6 sizes when the pane is hidden/display:none.
+    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
       if (sessionId) {
-        window.harbormaster.terminal.resize(
-          sessionId,
-          terminal.cols,
-          terminal.rows,
+        window.harbormaster.terminal.resize(sessionId, cols, rows);
+      }
+    });
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      // Guard: skip when hidden/detached (P0-2 fix). A zero-area contentRect
+      // means display:none or no layout; fitting would propose a garbage 11x6
+      // size (verified SIGWINCH in real app).
+      const r = entries[entries.length - 1]?.contentRect;
+      if (!container.isConnected || !r || r.width === 0 || r.height === 0) {
+        return;
+      }
+      fitAddon.fit();
+      // pty resize is forwarded by terminal.onResize above.
+
+      // P0-3: re-acquire WebGL when this pane becomes visible after a
+      // context loss, if we haven't hit the 3-loss-in-5-min threshold.
+      if (webglLost && !disposed) {
+        const recentLosses = losses.filter(
+          (t) => Date.now() - t < 5 * 60 * 1000,
         );
+        if (recentLosses.length < 3) {
+          loadWebgl();
+        }
       }
     });
     resizeObserver.observe(container);
@@ -193,27 +285,17 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       window.clearTimeout(createTimer);
       titleDisposable.dispose();
       titleThrottle.dispose();
+      resizeDisposable.dispose();
       resizeObserver.disconnect();
       integrations.dispose();
       unsubscribeData?.();
       unsubscribeExit?.();
+      unsubscribeA11y();
       if (sessionId) void window.harbormaster.terminal.dispose(sessionId);
 
-      // Workaround for addon-webgl ≤0.19 cursor-blink-manager leak (Tabby
-      // webglAddon.ts workaround; remove once addon-webgl ≥0.20 is adopted):
-      if (webgl) {
-        try {
-          // biome-ignore lint/suspicious/noExplicitAny: internal workaround
-          (webgl as any)._renderer?._cursorBlinkStateManager?.dispose();
-        } catch {
-          // Safe to ignore.
-        }
-        try {
-          webgl.dispose();
-        } catch {
-          // Context already lost.
-        }
-      }
+      // P0-3: disposeWebgl() handles the Tabby cursor-blink-manager workaround
+      // (addon-webgl ≤0.19) and is a no-op when webgl is null.
+      disposeWebgl();
 
       try {
         terminal.dispose();

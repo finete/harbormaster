@@ -1,5 +1,13 @@
 import { defineConfig } from "@playwright/test";
 
+// Enable xterm's a11y mirror for the full e2e suite so `toContainText`
+// assertions can read terminal text via the accessibility tree (xterm renders
+// to a <canvas> in WebGL mode, giving no DOM text otherwise).
+// Performance specs that measure production config pass
+// HARBORMASTER_TERMINAL_A11Y_MIRROR=0 in their own env to override this.
+// See P1-1 in terminal-perf-checklist.md.
+process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR ??= "1";
+
 // Smoke-lane e2e config for the Electron app shell. Playwright drives the
 // already-built electron-vite output (`out/main/index.js`) via its Electron
 // support (`_electron.launch`) — see e2e/smoke.spec.ts. `npm run build` must

@@ -192,6 +192,14 @@ export interface HarbormasterApi {
     dispose(id: string): Promise<void>;
     onData(listener: (event: TerminalDataEvent) => void): () => void;
     onExit(listener: (event: TerminalExitEvent) => void): () => void;
+    /**
+     * P1-1: Query whether screenReaderMode should be enabled for terminal
+     * panes. Returns true when the OS reports an AT or the e2e env var
+     * HARBORMASTER_TERMINAL_A11Y_MIRROR=1 is set.
+     */
+    getScreenReaderMode(): Promise<boolean>;
+    /** Subscribe to accessibility-support-changed pushes from main. */
+    onScreenReaderModeChanged(cb: (enabled: boolean) => void): () => void;
   };
   core: {
     listBoard(): Promise<BoardColumn[]>;
