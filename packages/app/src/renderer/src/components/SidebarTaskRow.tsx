@@ -288,7 +288,7 @@ export function SidebarTaskRow({
             <span
               data-testid="sidebar-row-unread-dot"
               aria-hidden
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground"
             />
           )}
           {isRenaming ? (

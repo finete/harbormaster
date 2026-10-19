@@ -131,7 +131,7 @@ function TaskCardFace({
             <span
               data-testid="badge-unread"
               title="Finished while you weren't looking"
-              className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-sky-400"
+              className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-foreground"
               aria-hidden
             />
           )}
