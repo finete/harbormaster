@@ -6,8 +6,10 @@ import type {
   AwaitingKindId,
   BoardColumn,
   CreateTaskInput,
+  LaunchTaskInput,
   MoveTaskOptions,
   ReopenTaskInput,
+  Task,
   TaskState,
   ToAwaitOptions,
   UpdateTaskInput,
@@ -36,6 +38,7 @@ import type {
   ToDoneForce,
 } from "../preload/api";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
+import { createBackgroundLauncher } from "./background-launcher";
 import type { ConnectivityState } from "./connectivity-loop";
 import { createConnectivityLoop } from "./connectivity-loop";
 import {
@@ -44,11 +47,13 @@ import {
 } from "./external-url";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
+import { resolvePrimaryLaunch } from "./primary-launch";
 import {
   acknowledgeSessionData,
   activeSessionCwds,
   activeSessionPids,
-  commandExists,
+  attachPrimarySession,
+  createBackgroundPrimarySession,
   createSession,
   disposeAllSessions,
   disposeSession,
@@ -134,6 +139,81 @@ const core = createCore({ stateDir: activeStateDir });
 // `presence`, never the presence access layer directly.
 const harness = new PiHarnessAdapter({ stateDir: activeStateDir });
 
+/** Every task across every board column, flattened (groups carry no ordering meaning here). */
+function flattenTasks(columns: BoardColumn[]): Task[] {
+  return columns.flatMap((column) =>
+    column.groups.flatMap((group) => group.tasks),
+  );
+}
+
+/**
+ * Actually starts one claimed launch's background pty (wave-2 task brief
+ * point 1): shares the exact launch-spec resolution the renderer-driven
+ * `pty:create` primary path uses (`resolvePrimaryLaunch`), so a background
+ * launch resumes/forks/news the same conversation a manual open would. A
+ * task whose binding has no worktree yet, or whose harness command is
+ * missing, is logged and left alone with a `lastError` "-" background
+ * launches never fall back to a shell.
+ */
+async function startBackgroundLaunch(taskId: string): Promise<void> {
+  const resolution = await resolvePrimaryLaunch(
+    taskId,
+    activeStateDir,
+    core.commands,
+    harness,
+  );
+  if (!resolution.binding?.worktreePath) {
+    console.error(
+      `[background-launcher] task ${taskId} has no worktree to launch in`,
+    );
+    await core.commands
+      .updateTaskState(taskId, {
+        lastError: "Launch failed: no worktree is bound to this task yet.",
+      })
+      .catch(() => {});
+    return;
+  }
+  if (resolution.commandMissing || !resolution.spec) {
+    console.error(
+      `[background-launcher] task ${taskId}: harness command not found; refusing to fall back to a shell for a background launch`,
+    );
+    await core.commands
+      .updateTaskState(taskId, {
+        lastError: "Launch failed: the pi command could not be found on PATH.",
+      })
+      .catch(() => {});
+    return;
+  }
+  createBackgroundPrimarySession(taskId, resolution.spec, (_exitCode) => {
+    void pollPresenceOnce();
+    void backgroundLauncher.runPass();
+  });
+}
+
+const backgroundLauncher = createBackgroundLauncher({
+  listStartedLaunches: async () =>
+    flattenTasks(await core.commands.listBoard()).filter(
+      (task) => task.launch?.status === "started",
+    ),
+  getLaunchSettings: () => core.commands.getLaunchSettings(),
+  hasLivePane: (taskId) => Boolean(lookupPanePid(taskId)),
+  getPresence: async (taskId) => {
+    const status = await harness.presence(taskId);
+    return {
+      runningTurn: status.runningTurn,
+      hasPresenceRecord: status.record !== undefined,
+    };
+  },
+  claimPendingLaunches: (limit) => core.commands.claimPendingLaunches(limit),
+  startSession: (task) => startBackgroundLaunch(task.id),
+  onStartError: (task, error) => {
+    console.error(
+      `[background-launcher] starting task ${task.id} failed:`,
+      error,
+    );
+  },
+});
+
 function registerCoreIpc(): void {
   ipcMain.handle("core:listBoard", () => {
     // A window that fetched the board itself may now hold a snapshot newer
@@ -200,6 +280,22 @@ function registerCoreIpc(): void {
     (_event, taskId: string, input: ReopenTaskInput | undefined) =>
       core.commands.reopenTask(taskId, input),
   );
+  // The one launch primitive (see ai/prds/task-launching.md): creates a
+  // task and queues it for the background launcher below. Wave 3's launch
+  // dialog calls this; it never starts a pty itself "-" `backgroundLauncher`
+  // picks the queued task up on its next pass (triggered right after, so a
+  // launch starts promptly instead of waiting for the next external trigger).
+  ipcMain.handle("core:launchTask", async (_event, input: LaunchTaskInput) => {
+    const task = await core.commands.launchTask(input);
+    void backgroundLauncher.runPass();
+    return task;
+  });
+  ipcMain.handle("core:listChildren", (_event, parentTaskId: string) =>
+    core.commands.listChildren(parentTaskId),
+  );
+  ipcMain.handle("core:getLaunchSettings", () =>
+    core.commands.getLaunchSettings(),
+  );
   // Sidebar inline rename (Orca polish item 4): patches title (or any other
   // non-state field) and publishes the same `board-changed` event every
   // other mutation does "-" the board card picks up the new title through
@@ -239,6 +335,10 @@ function registerCoreIpc(): void {
   // closed, app quitting) — same guard the pty IPC uses above.
   core.events.on("board-changed", (payload) => {
     pushBoardToWindows(payload.columns, { force: true });
+    // A board change can mean a launch was just queued (or a launched
+    // task's slot just freed up elsewhere) "-" see
+    // background-launcher.ts's "on every core 'board-changed' event" trigger.
+    void backgroundLauncher.runPass();
   });
 
   // External writers share the state files with this process: the pi
@@ -293,6 +393,12 @@ function watchStateFiles(): void {
             // A half-written file mid-atomic-rename can fail a read; the next
             // watch event (the rename completing) retries.
           });
+        // External writers (the pi extension's own launchTask calls, the
+        // migration CLI) queue launches through their own core instance,
+        // which never emits our `board-changed` event "-" this state-file
+        // watcher push is this process's only signal that a new launch may
+        // be waiting (see background-launcher.ts's matching trigger).
+        void backgroundLauncher.runPass();
       }, 150);
     });
   } catch {
@@ -348,6 +454,9 @@ async function pollPresenceOnce(): Promise<void> {
                 },
               }
             : {}),
+          // Live self-reported done/blocked verdict (distinct from `ended`
+          // "-" see `CorroboratedPresence.outcome`'s doc comment).
+          ...(corroborated.outcome ? { outcome: corroborated.outcome } : {}),
         },
       ] as const;
     }),
@@ -356,6 +465,10 @@ async function pollPresenceOnce(): Promise<void> {
   for (const win of windows) {
     safeSend(win.webContents, "core:presence-changed", payload);
   }
+  // Launched tasks' working-ness can only change here between other
+  // triggers (a turn started/ended with no board/pty-exit event of its
+  // own) "-" see background-launcher.ts's "on each presence poll tick".
+  void backgroundLauncher.runPass();
 }
 
 /**
@@ -512,41 +625,20 @@ function registerPtyIpc(): void {
       // in); "+ terminal" panels and scratch tasks always get a plain
       // `$SHELL` in the same cwd (see AGENTS.md: harnesses are adapters,
       // core only ever hands back a launch spec "-" this is the one place
-      // that spec is turned into a pty).
-      const binding =
+      // that spec is turned into a pty). Shared with the background
+      // launcher (see primary-launch.ts) so a task launches identically
+      // whichever path started it.
+      const spec =
         options.primary && options.taskId
-          ? await core.commands.getTaskWorkspace(options.taskId)
+          ? (
+              await resolvePrimaryLaunch(
+                options.taskId,
+                activeStateDir,
+                core.commands,
+                harness,
+              )
+            ).spec
           : undefined;
-      const baseSpecInput =
-        binding?.worktreePath && options.taskId
-          ? {
-              taskId: options.taskId,
-              workspacePath: binding.worktreePath,
-              stateDir: activeStateDir,
-            }
-          : undefined;
-      let spec = baseSpecInput
-        ? harness.buildLaunchSpec(baseSpecInput)
-        : undefined;
-      // Only once pi is actually launchable (a shell fallback must not burn
-      // either claim): core decides which conversation the pane opens —
-      // the task's bound session on every reopen, a pre-assigned new one on
-      // first launch, or the previous cycle's fork after a Done reopen
-      // (claimSessionLaunch) — and hands the task's initial prompt out
-      // exactly once (claimInitialPrompt).
-      if (spec && baseSpecInput && commandExists(spec.command)) {
-        const session = await core.commands
-          .claimSessionLaunch(baseSpecInput.taskId)
-          .catch(() => undefined);
-        const initialPrompt = await core.commands
-          .claimInitialPrompt(baseSpecInput.taskId)
-          .catch(() => undefined);
-        spec = harness.buildLaunchSpec({
-          ...baseSpecInput,
-          ...(session ? { session } : {}),
-          ...(initialPrompt ? { initialPrompt } : {}),
-        });
-      }
 
       const { id, fellBackToShell } = createSession(
         options.cols,
@@ -564,7 +656,12 @@ function registerPtyIpc(): void {
             // idle/ended immediately. `usePresenceMap` replaces its state
             // wholesale on every push, so this must recompute every task,
             // not just this one.
-            if (options.primary && options.taskId) void pollPresenceOnce();
+            if (options.primary && options.taskId) {
+              void pollPresenceOnce();
+              // A primary pty exiting frees a launch slot "-" see
+              // background-launcher.ts's "on each ... pty exit" trigger.
+              void backgroundLauncher.runPass();
+            }
           },
         },
         {
@@ -586,6 +683,54 @@ function registerPtyIpc(): void {
       });
 
       return { id, fellBackToShell };
+    },
+  );
+
+  // Attach (wave-2 task brief point 4): the primary TerminalPane tries this
+  // first. If the task has a live app-owned primary pty with no renderer
+  // attached yet (a background launch nobody has opened), rebind its
+  // data/exit callbacks to this webContents "-" same safeSend/track/
+  // destroyed-cleanup semantics as `pty:create` "-" and return its
+  // snapshot + pid. `undefined` when there is nothing to attach to (never
+  // launched, already exited, or already attached); the renderer falls
+  // back to `pty:create` exactly as it would for a task launched the
+  // ordinary way. The takeover guard treats this as "ours" because
+  // `core:presence`'s `ownedByApp` is already true the moment the
+  // background session starts (it is in the same pane-pid registry a
+  // renderer-launched primary uses) "-" it never shows the takeover dialog
+  // for a paneless app-owned pty, and never spawns a second pi for the same
+  // task.
+  ipcMain.handle(
+    "pty:attachPrimary",
+    (
+      event,
+      taskId: string,
+      cols: number,
+      rows: number,
+    ): { id: string; snapshot: string } | undefined => {
+      const sender = event.sender;
+      // `attachPrimarySession` resolves (and may deliver pty output) fully
+      // synchronously from here, but the callbacks it's given need the
+      // session id it's about to return "-" captured through this mutable
+      // box instead of a forward reference to the not-yet-assigned result.
+      const ref: { id: string } = { id: "" };
+      const attached = attachPrimarySession(taskId, cols, rows, {
+        onData: (data) => safeSend(sender, "pty:data", { id: ref.id, data }),
+        onExit: (exitCode) => {
+          safeSend(sender, "pty:exit", { id: ref.id, exitCode });
+          untrackSession(sender.id, ref.id);
+          void pollPresenceOnce();
+          void backgroundLauncher.runPass();
+        },
+      });
+      if (!attached) return undefined;
+      ref.id = attached.id;
+      trackSession(sender.id, attached.id);
+      sender.once("destroyed", () => {
+        untrackSession(sender.id, attached.id);
+        disposeSession(attached.id);
+      });
+      return { id: attached.id, snapshot: attached.snapshot };
     },
   );
 
@@ -824,6 +969,10 @@ app.whenReady().then(() => {
   startPresencePolling();
   startRefreshLoop();
   wireSleepWakeGating();
+  // Queued launches (from a previous run, or an extension launchTask call
+  // that landed before this app ever started) start right away "-" see
+  // background-launcher.ts's "on app ready" trigger.
+  void backgroundLauncher.runPass();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -833,12 +982,87 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  disposeAllSessions();
   stopPresencePolling();
   stopRefreshLoop();
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin") {
+    // Real quit: route through `before-quit` below so the mid-turn
+    // interrupt sweep runs before any pty (including a background launch's)
+    // is disposed "-" `app.quit()` fires `before-quit` synchronously before
+    // this handler returns.
+    app.quit();
+    return;
+  }
+  // Mac: the app keeps running with no window (dock icon stays); this
+  // matches the app's pre-existing "no pane left open, nothing to show it
+  // in" behavior for every session, background launches included. Mid-turn
+  // launches are marked interrupted first, exactly like a real quit.
+  void interruptMidTurnLaunches()
+    .catch(() => {})
+    .finally(() => disposeAllSessions());
 });
 
-app.on("before-quit", () => {
-  disposeAllSessions();
+/**
+ * Races a promise against a timeout, resolving `undefined` instead of
+ * hanging the quit path forever on a core call that never settles.
+ */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | undefined> {
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => {
+      setTimeout(() => resolve(undefined), ms);
+    }),
+  ]);
+}
+
+/**
+ * Marks every launched task that is mid-turn right now `interrupted` (wave-2
+ * task brief point 5), attached or not "-" ahead of `disposeAllSessions()`
+ * killing every pty on quit. Bounded to ~2s (`withTimeout`) so a slow/stuck
+ * core call never hangs app quit indefinitely; a timed-out or failed sweep
+ * just means the next run's tasks stay `started` instead of `interrupted`
+ * (core only ever flips `queued` -> `started` on its own, so this never
+ * causes a double-launch "-" at worst a stale `started` that a later manual
+ * check corrects).
+ */
+async function interruptMidTurnLaunches(): Promise<void> {
+  await withTimeout(
+    (async () => {
+      const columns = await core.commands.listBoard();
+      const started = flattenTasks(columns).filter(
+        (task) => task.launch?.status === "started",
+      );
+      const midTurnIds: string[] = [];
+      for (const task of started) {
+        const status = await harness.presence(task.id).catch(() => undefined);
+        if (status?.runningTurn) midTurnIds.push(task.id);
+      }
+      if (midTurnIds.length > 0) {
+        await core.commands.markLaunchesInterrupted(midTurnIds);
+      }
+    })(),
+    2_000,
+  );
+}
+
+let quitting = false;
+app.on("before-quit", (event) => {
+  // `app.quit()` below re-fires this same event; let that second pass
+  // through once the interrupt sweep (and the ptys it depends on) is done.
+  if (quitting) return;
+  quitting = true;
+  event.preventDefault();
+  void interruptMidTurnLaunches()
+    .catch((error) => {
+      console.error(
+        "[main] interruptMidTurnLaunches failed (quitting anyway):",
+        error,
+      );
+    })
+    .finally(() => {
+      disposeAllSessions();
+      app.quit();
+    });
 });

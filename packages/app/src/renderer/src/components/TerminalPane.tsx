@@ -202,48 +202,85 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       titleThrottle.update(isPrimary ? piTerminalTitle(title) : title);
     });
 
+    // Shared wiring for whichever path actually starts streaming (a fresh
+    // `create`, or an `attachPrimary` rebind to an already-running
+    // background session) "-" same onData/onExit/write subscriptions either
+    // way, so the pane behaves identically from here on (closing it kills
+    // the pty, same as any normal primary pane).
+    function wireSession(id: string): void {
+      sessionId = id;
+      let receivedOutput = false;
+      unsubscribeData = window.harbormaster.terminal.onData((event) => {
+        if (event.id !== id) return;
+        const chars = event.data.length;
+        terminal.write(event.data, () => {
+          if (!disposed) window.harbormaster.terminal.ack(id, chars);
+        });
+        if (!receivedOutput) {
+          receivedOutput = true;
+          setHasReceivedOutput(true);
+        }
+      });
+      unsubscribeExit = window.harbormaster.terminal.onExit((event) => {
+        if (event.id === id) {
+          terminal.writeln(`\r\n[process exited with code ${event.exitCode}]`);
+        }
+      });
+
+      terminal.onData((data) => {
+        window.harbormaster.terminal.write(id, data);
+      });
+    }
+
     // Deferred one macrotask: React StrictMode (dev) double-mounts effects.
     const createTimer = window.setTimeout(() => {
-      void window.harbormaster.terminal
-        .create({
-          cols: terminal.cols,
-          rows: terminal.rows,
-          ...(cwd ? { cwd } : {}),
-          ...(params?.taskId ? { taskId: params.taskId } : {}),
-          ...(params?.primary ? { primary: true } : {}),
-        })
-        .then(({ id, fellBackToShell: fellBack }) => {
-          if (disposed) {
-            void window.harbormaster.terminal.dispose(id);
-            return;
-          }
-          sessionId = id;
-          if (fellBack) setFellBackToShell(true);
+      // The primary pane always tries to attach to an already-running
+      // background launch first (wave-2 task brief point 4): if the task has
+      // a live app-owned primary pty with no renderer attached yet, this
+      // rebinds to it and returns its serialized screen instead of starting
+      // a second process "-" the takeover guard never shows a dialog for it
+      // (see core-client/App.tsx's `ownedByApp`) and this is what makes that
+      // guarantee actually attach instead of silently doing nothing. Any
+      // other pane (non-primary, no taskId, or a primary with nothing to
+      // attach to) falls through to `create` exactly as before.
+      const attachAttempt =
+        isPrimary && params?.taskId
+          ? window.harbormaster.terminal.attachPrimary(
+              params.taskId,
+              terminal.cols,
+              terminal.rows,
+            )
+          : Promise.resolve(undefined);
 
-          let receivedOutput = false;
-          unsubscribeData = window.harbormaster.terminal.onData((event) => {
-            if (event.id !== id) return;
-            const chars = event.data.length;
-            terminal.write(event.data, () => {
-              if (!disposed) window.harbormaster.terminal.ack(id, chars);
-            });
-            if (!receivedOutput) {
-              receivedOutput = true;
-              setHasReceivedOutput(true);
+      void attachAttempt.then((attached) => {
+        if (disposed) {
+          if (attached) void window.harbormaster.terminal.dispose(attached.id);
+          return;
+        }
+        if (attached) {
+          // Write the missed screen before switching to live streaming "-"
+          // same recommendation as `@xterm/addon-serialize`'s own docs.
+          terminal.write(attached.snapshot);
+          wireSession(attached.id);
+          return;
+        }
+        void window.harbormaster.terminal
+          .create({
+            cols: terminal.cols,
+            rows: terminal.rows,
+            ...(cwd ? { cwd } : {}),
+            ...(params?.taskId ? { taskId: params.taskId } : {}),
+            ...(params?.primary ? { primary: true } : {}),
+          })
+          .then(({ id, fellBackToShell: fellBack }) => {
+            if (disposed) {
+              void window.harbormaster.terminal.dispose(id);
+              return;
             }
+            if (fellBack) setFellBackToShell(true);
+            wireSession(id);
           });
-          unsubscribeExit = window.harbormaster.terminal.onExit((event) => {
-            if (event.id === id) {
-              terminal.writeln(
-                `\r\n[process exited with code ${event.exitCode}]`,
-              );
-            }
-          });
-
-          terminal.onData((data) => {
-            window.harbormaster.terminal.write(id, data);
-          });
-        });
+      });
     }, 0);
 
     // P0-2: forward pty resizes only when xterm's cols/rows actually change.

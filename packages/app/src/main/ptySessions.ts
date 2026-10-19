@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { app } from "electron";
 import * as pty from "node-pty";
 import {
@@ -24,6 +26,35 @@ export interface PtySessionCallbacks {
   onExit: (exitCode: number) => void;
 }
 
+/**
+ * Mutable output routing for one session, kept on the session record so a
+ * paneless background session can be rebound to a renderer later
+ * (`attachPrimarySession`) without tearing down its single `onData`/`onExit`
+ * pty subscription. `sink`/`exitSink` always exist; `flow`/`batcher` exist
+ * only while a renderer is actually attached — a background session must
+ * never pause the pty (no acks will ever come for it), so it has neither.
+ */
+interface SessionIO {
+  /** Receives every chunk from the pty's `onData`, in arrival order. */
+  sink: (data: string) => void;
+  /** Receives the pty's exit code exactly once. */
+  exitSink: (exitCode: number) => void;
+  /** Pauses/resumes the pty against renderer backpressure (see pty-data-batcher.ts); present only while attached. */
+  flow?: PtyFlowControl;
+  /** Coalesces output into ~16ms flushes for the attached renderer; present only while attached. */
+  batcher?: PtyDataBatcher;
+}
+
+/** A background (paneless) primary session's screen mirror: kept current from the pty's own output so a later `attachPrimarySession` can hand the attaching renderer a snapshot of what it missed. Disposed the instant a renderer attaches — it is pointless once real output streams straight through. */
+interface HeadlessHost {
+  terminal: HeadlessTerminal;
+  serialize: SerializeAddon;
+}
+
+/** Default terminal size for a background-launched primary session, before any renderer has attached to resize it (wave-2 task brief point 3). */
+export const BACKGROUND_SESSION_COLS = 120;
+export const BACKGROUND_SESSION_ROWS = 40;
+
 interface PtySessionRecord {
   id: string;
   process: pty.IPty;
@@ -31,12 +62,14 @@ interface PtySessionRecord {
   cwd: string;
   dataDisposable: pty.IDisposable;
   exitDisposable: pty.IDisposable;
-  /** Coalesces this session's output into ~16ms flushes (see pty-data-batcher.ts). */
-  batcher: PtyDataBatcher;
-  /** Pauses the pty while too much output is unacknowledged by the renderer (see `acknowledgeSessionData`). */
-  flow: PtyFlowControl;
-  /** Set only for a task workspace's primary panel (see `PtySessionOptions.taskId`/`primary`). */
+  /** Output routing; see `SessionIO`. */
+  io: SessionIO;
+  /** Set only for a task workspace's primary panel (see `PtySessionOptions.taskId`/`primary`, or a background launch's `taskId`). */
   taskId?: string;
+  /** Whether a renderer is currently attached and receiving this session's output. Always `true` for a renderer-created session (`createSession`); `false` for a background-launched primary until `attachPrimarySession` rebinds it. */
+  attached: boolean;
+  /** Present only while `attached` is `false` for a background-launched primary (see `HeadlessHost`). Explicitly `undefined` once `attachPrimarySession` disposes it. */
+  headless?: HeadlessHost | undefined;
 }
 
 const sessions = new Map<string, PtySessionRecord>();
@@ -129,13 +162,7 @@ export function createSession(
   const fellBackToShell = !!spec && !useSpec;
 
   const spawnCwd = useSpec ? spec.cwd || cwd : cwd;
-  const appVersion = (() => {
-    try {
-      return app.getVersion();
-    } catch {
-      return "0.0.1";
-    }
-  })();
+  const appVersion = safeAppVersion();
   const baseEnv = buildPtyEnv(process.env, useSpec ? spec.env : undefined, {
     appVersion,
     hyperlinks: true,
@@ -189,7 +216,13 @@ export function createSession(
       callbacks.onData(data);
     },
   });
-  const dataDisposable = ptyProcess.onData((data) => batcher.push(data));
+  const io: SessionIO = {
+    sink: (data) => batcher.push(data),
+    exitSink: (exitCode) => callbacks.onExit(exitCode),
+    flow,
+    batcher,
+  };
+  const dataDisposable = ptyProcess.onData((data) => io.sink(data));
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
     // Deliver every byte the process wrote before announcing its exit, so
     // the pane never prints "[process exited]" ahead of its last output.
@@ -204,7 +237,7 @@ export function createSession(
     if (taskId && primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
     }
-    callbacks.onExit(exitCode);
+    io.exitSink(exitCode);
   });
 
   // Only register a session that actually ran the harness spec (a real `pi`
@@ -219,14 +252,183 @@ export function createSession(
     cwd: spawnCwd,
     dataDisposable,
     exitDisposable,
-    batcher,
-    flow,
+    io,
+    attached: true,
     ...(registerAsPane ? { taskId: options.taskId } : {}),
   });
   if (registerAsPane && options?.taskId) {
     primaryTaskSessions.set(options.taskId, id);
   }
   return { id, pid: ptyProcess.pid, fellBackToShell };
+}
+
+function safeAppVersion(): string {
+  try {
+    return app.getVersion();
+  } catch {
+    return "0.0.1";
+  }
+}
+
+/**
+ * Starts a task's primary pane in the background, with no renderer
+ * attached (wave-2 task brief point 3): the background launcher's only way
+ * to run a claimed launch. Spawns `spec` directly — never a shell fallback
+ * (the caller, `primary-launch.ts`'s `resolvePrimaryLaunch`, already
+ * verified the harness command exists; a background launch that can't run
+ * it must be left alone with a `lastError`, never silently handed a plain
+ * shell). Output feeds a `@xterm/headless` mirror (+ `addon-serialize`) so
+ * a later `attachPrimarySession` can hand the attaching renderer a
+ * snapshot of everything it missed; no flow control runs while unattached
+ * (nobody will ever ack it) — the pty is never paused.
+ *
+ * Registered in the pane-pid registry exactly like an interactive primary
+ * launch, so presence corroboration and `activeSessionPids`/
+ * `activeSessionCwds` (protectedPaths) see it from the moment it starts,
+ * not just once a renderer attaches.
+ */
+export function createBackgroundPrimarySession(
+  taskId: string,
+  spec: LaunchSpecLike,
+  onExit: (exitCode: number) => void,
+  options?: { cols?: number; rows?: number },
+): { id: string; pid: number } {
+  const id = randomUUID();
+  const cols = options?.cols ?? BACKGROUND_SESSION_COLS;
+  const rows = options?.rows ?? BACKGROUND_SESSION_ROWS;
+  const env = buildPtyEnv(process.env, spec.env, {
+    appVersion: safeAppVersion(),
+    hyperlinks: true,
+  });
+  const ptyProcess = pty.spawn(spec.command, spec.args, {
+    name: "xterm-256color",
+    cols,
+    rows,
+    cwd: spec.cwd,
+    env,
+  });
+
+  const headlessTerminal = new HeadlessTerminal({
+    cols,
+    rows,
+    allowProposedApi: true,
+  });
+  const serialize = new SerializeAddon();
+  headlessTerminal.loadAddon(serialize);
+
+  const io: SessionIO = {
+    sink: (data) => {
+      try {
+        headlessTerminal.write(data);
+      } catch (error) {
+        // A malformed/edge-case escape sequence must never crash the host
+        // process over a paneless mirror nobody is looking at yet.
+        console.error(
+          `[ptySessions] background headless write failed for ${taskId}:`,
+          error,
+        );
+      }
+    },
+    exitSink: () => {
+      // No renderer attached yet: nothing further to notify beyond `onExit`
+      // below (which fires regardless of attach state).
+    },
+  };
+  const dataDisposable = ptyProcess.onData((data) => io.sink(data));
+  const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+    if (primaryTaskSessions.get(taskId) === id) {
+      primaryTaskSessions.delete(taskId);
+    }
+    sessions.get(id)?.headless?.terminal.dispose();
+    onExit(exitCode);
+    io.exitSink(exitCode);
+  });
+
+  sessions.set(id, {
+    id,
+    process: ptyProcess,
+    cwd: spec.cwd,
+    dataDisposable,
+    exitDisposable,
+    io,
+    attached: false,
+    taskId,
+    headless: { terminal: headlessTerminal, serialize },
+  });
+  primaryTaskSessions.set(taskId, id);
+  return { id, pid: ptyProcess.pid };
+}
+
+export interface AttachPrimaryResult {
+  id: string;
+  pid: number;
+  /** The background session's current screen, serialized (scrollback + viewport + cursor position) — write this into the attaching renderer's xterm before switching to live streaming. */
+  snapshot: string;
+}
+
+/**
+ * Rebinds a task's live, currently-unattached background primary pty to a
+ * requesting renderer (wave-2 task brief point 4): returns its serialized
+ * screen (written into the renderer's xterm first) and its pid, resizes the
+ * pty to the pane's actual size (Pi redraws on resize), and switches its
+ * output to stream straight through `callbacks` with real flow control from
+ * here on — exactly like a renderer-created session. Returns `undefined`
+ * when there is no live background primary for `taskId` (never launched,
+ * already exited, or already attached) — the caller falls back to
+ * `pty:create` exactly as it would for a task with no background launch at
+ * all.
+ */
+export function attachPrimarySession(
+  taskId: string,
+  cols: number,
+  rows: number,
+  callbacks: PtySessionCallbacks,
+): AttachPrimaryResult | undefined {
+  const sessionId = primaryTaskSessions.get(taskId);
+  if (!sessionId) return undefined;
+  const session = sessions.get(sessionId);
+  if (!session || session.attached) return undefined;
+
+  const snapshot = session.headless?.serialize.serialize() ?? "";
+  session.headless?.terminal.dispose();
+  session.headless = undefined;
+
+  const flow = createPtyFlowControl({
+    pause: () => {
+      try {
+        session.process.pause();
+      } catch {
+        // Already gone; nothing to throttle.
+      }
+    },
+    resume: () => {
+      try {
+        session.process.resume();
+      } catch {
+        // Already gone; nothing to resume.
+      }
+    },
+  });
+  const batcher = createPtyDataBatcher({
+    send: (data) => {
+      flow.sent(data.length);
+      callbacks.onData(data);
+    },
+  });
+  session.io.sink = (data) => batcher.push(data);
+  session.io.exitSink = (exitCode) => callbacks.onExit(exitCode);
+  session.io.flow = flow;
+  session.io.batcher = batcher;
+  session.attached = true;
+
+  try {
+    session.process.resize(cols, rows);
+  } catch {
+    // The process can die between the registry lookup above and here; its
+    // own exit disposable (already wired at creation) reports that separately.
+  }
+
+  return { id: session.id, pid: session.process.pid, snapshot };
 }
 
 export function getSession(id: string): PtySessionRecord | undefined {
@@ -243,7 +445,7 @@ export function writeToSession(id: string, data: string): void {
  * drains. Unknown/disposed ids are ignored.
  */
 export function acknowledgeSessionData(id: string, chars: number): void {
-  sessions.get(id)?.flow.acknowledged(chars);
+  sessions.get(id)?.io.flow?.acknowledged(chars);
 }
 
 export function resizeSession(id: string, cols: number, rows: number): void {
@@ -274,7 +476,8 @@ export function disposeSession(id: string): void {
   session.exitDisposable.dispose();
   // The renderer asked for (or is gone with) this pane: pending output has
   // nowhere to go, and a late timer flush must not outlive the session.
-  session.batcher.dispose();
+  session.io.batcher?.dispose();
+  session.headless?.terminal.dispose();
   try {
     session.process.kill();
   } catch {
