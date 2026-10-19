@@ -14,7 +14,7 @@
 // Note on bracketed paste: xterm 6.0's paste() converts \n→\r before
 // bracketing.  The e2e verifies brackets are present and text arrives;
 // the exact CR rendering depends on the cat -v timing and is not asserted.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -175,6 +175,76 @@ test("image paste: clipboard image → clipboard-*.png path appears in terminal"
   expect(buf[1]).toBe(0x50); // P
   expect(buf[2]).toBe(0x4e); // N
   expect(buf[3]).toBe(0x47); // G
+
+  await window.keyboard.press("Control+c");
+  await window.waitForTimeout(200);
+  await clearClipboard();
+});
+
+test("Finder file paste: NSFilenamesPboardType plist  escaped path inserted", async () => {
+  test.skip(
+    process.platform !== "darwin",
+    "NSFilenamesPboardType is macOS-specific",
+  );
+
+  // Create a real temp file whose path contains a space \ exactly as Finder would.
+  const fileDir = path.join(stateDir, "finder-files");
+  mkdirSync(fileDir, { recursive: true });
+  const filePath = path.join(fileDir, "my paste file.txt");
+  writeFileSync(filePath, "finder paste test");
+
+  // Build the Apple XML plist that Finder writes to NSFilenamesPboardType.
+  // Verified on this machine: clipboard.read("NSFilenamesPboardType") returns
+  // an XML plist <array><string>/path</string></array> after a Finder copy.
+  // parsePlistStrings() in clipboard-paste.ts matches <string>\u2026</string>.
+  const plist = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
+    `<plist version="1.0">`,
+    `<array>`,
+    `<string>${filePath}</string>`,
+    `</array>`,
+    `</plist>`,
+  ].join("\n");
+
+  const panel = window.getByTestId("terminal-panel").first();
+  await startRawReader(panel);
+
+  // Seed the clipboard using the injected electron module arg.
+  // require() is unavailable inside app.evaluate; use the { electron } arg.
+  // IMPORTANT: clipboard.writeText() clears all other formats, so we write
+  // ONLY NSFilenamesPboardType here.  If the NSFilenamesPboardType branch
+  // fails the resolver returns null → nothing is pasted → toContainText fails.
+  await app.evaluate(({ clipboard }, plistData) => {
+    clipboard.clear();
+    // Write the raw plist bytes to NSFilenamesPboardType exactly as Finder.
+    // Verified: clipboard.read("NSFilenamesPboardType") returns the plist
+    // after this call.  Calling writeText() after would clear it.
+    clipboard.writeBuffer(
+      "NSFilenamesPboardType",
+      Buffer.from(plistData, "utf8"),
+    );
+  }, plist);
+
+  // Trigger paste via webContents (same path as Cmd+V via the native menu).
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.paste();
+  });
+
+  // The resolver reads NSFilenamesPboardType, extracts the path, verifies the
+  // file exists (it does), and returns shellEscapePaths([filePath]).  Spaces
+  // in the path become backslash-space: "my paste file.txt" \ "my\ paste\ file.txt".
+  // cat -v shows this literally in the terminal.
+  await expect(panel).toContainText("my\\ paste\\ file.txt", {
+    timeout: 15_000,
+  });
+
+  // Negative: the plain-text fallback (bare filename without escaping) must
+  // NOT appear, which would indicate the NSFilenamesPboardType branch was skipped.
+  const panelText = (await panel.textContent()) ?? "";
+  // shell-escaped "my\ paste\ file.txt" does not contain "my paste file.txt"
+  // as a contiguous substring, so this regex catches the wrong branch.
+  expect(panelText).not.toMatch(/my paste file\.txt/);
 
   await window.keyboard.press("Control+c");
   await window.waitForTimeout(200);
