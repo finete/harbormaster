@@ -13,6 +13,7 @@ import {
   JsonWorkspaceBindingAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
   SessionPresenceAccess,
 } from "./access/index.js";
@@ -71,6 +72,7 @@ export function createCore(options: CoreOptions = {}): Core {
   const config = new JsonConfigAccess(paths.configFile);
   const repositories = new LocalGitRepositoryAccess();
   const worktrees = new LocalGitWorktreeAccess();
+  const scratch = new LocalScratchWorkspaceAccess(paths.scratchDir);
   const pullRequests = options.pullRequests ?? new GithubPrAccess();
   const versions = options.versions ?? new HttpVersionAccess();
 
@@ -88,6 +90,7 @@ export function createCore(options: CoreOptions = {}): Core {
     worktrees,
     bindings: workspaceBindings,
     sessions: new LocalSessionFileAccess(),
+    scratch,
     pullRequests,
     versions,
   });

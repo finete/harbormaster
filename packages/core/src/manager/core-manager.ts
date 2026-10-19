@@ -14,6 +14,7 @@ import type {
   CoreCommands,
   CreateTaskInput,
   DeleteTaskOptions,
+  LaunchTaskInput,
   MoveTaskOptions,
   RecordTaskSessionInput,
   RefreshOptions,
@@ -37,15 +38,20 @@ import type {
   DeploymentStageConfig,
   GlobalConfig,
   Task,
+  TaskLaunch,
   TaskPullRequest,
   TaskState,
   WorkspaceBinding,
 } from "../contracts/model.js";
-import { TASK_STATES } from "../contracts/model.js";
+import {
+  DEFAULT_LAUNCH_MAX_CONCURRENT,
+  TASK_STATES,
+} from "../contracts/model.js";
 import type {
   Clock,
   ConfigAccess,
   IdGenerator,
+  ScratchWorkspaceAccess,
   SessionFileAccess,
   TaskStateAccess,
   WorkspaceBindingAccess,
@@ -64,6 +70,7 @@ import {
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
 import { isConnectivityError } from "../engines/connectivity.js";
+import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
   activeMoverOrder,
   arbitrateMove,
@@ -92,6 +99,8 @@ export interface CoreManagerDependencies {
   bindings: WorkspaceBindingAccess;
   /** Existence checks for harness session files before resuming/forking them. */
   sessions: SessionFileAccess;
+  /** Scratch-directory workspace for `launchTask`'s `{ none: true }` repository-less tasks. */
+  scratch: ScratchWorkspaceAccess;
   pullRequests: PullRequestAccess;
   versions: VersionAccess;
 }
@@ -246,6 +255,8 @@ export class CoreManager implements CoreCommands {
     branch: string,
     now: string,
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
+    /** Branch the worktree off this ref instead of the repository's default branch (`launchTask`'s `baseBranch: "parent"`). */
+    baseRef: string = repo.defaultBranch,
   ): Promise<void> {
     // Branch collision, dirty baseRef, missing repo, ... — createTaskWorktree
     // itself guarantees no leftover directory/bookkeeping on failure, so
@@ -253,7 +264,7 @@ export class CoreManager implements CoreCommands {
     const worktree = await this.deps.worktrees.createTaskWorktree(
       repo,
       branch,
-      repo.defaultBranch,
+      baseRef,
     );
     // Undo both halves of `git worktree add -b`: the directory and the
     // freshly-created (commit-less) branch, so a retry never collides with
@@ -303,10 +314,25 @@ export class CoreManager implements CoreCommands {
   }
 
   async claimSessionLaunch(taskId: string): Promise<SessionLaunch | undefined> {
-    const task = await this.requireTask(taskId);
+    let task = await this.requireTask(taskId);
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (!binding?.worktreePath) return undefined;
     const now = this.deps.clock.now().toISOString();
+
+    // A task that was `interrupted` (the app quit mid-turn) clears the
+    // marker on its next session launch, resume or fresh "- it never
+    // auto-resumes on its own, but opening it again means it is no longer
+    // stuck "interrupted".
+    if (task.launch?.status === "interrupted") {
+      const launch: TaskLaunch = { ...task.launch, status: "started" };
+      delete launch.interruptedAt;
+      const next = await this.deps.tasks.patchTask(taskId, (fresh) =>
+        fresh.launch?.status === "interrupted"
+          ? { ...fresh, launch, updatedAt: now }
+          : undefined,
+      );
+      if (next) task = next;
+    }
 
     // First launch after `reopenTask`: hand the pending fork out exactly
     // once, so later launches resume the forked session instead of forking
@@ -350,7 +376,18 @@ export class CoreManager implements CoreCommands {
       sessionId,
       updatedAt: now,
     });
-    return { mode: "new", sessionId };
+    // First-ever launch of a `launchTask` task: pass its model through to
+    // the harness (per-launch override, else the configured default), never
+    // on a later resume/fork/continue.
+    let model: string | undefined;
+    if (task.launch) {
+      model = task.launch.model;
+      if (!model) {
+        const config = await this.deps.config.load();
+        model = config.launch?.defaultModel;
+      }
+    }
+    return { mode: "new", sessionId, ...(model ? { model } : {}) };
   }
 
   async recordTaskSession(
@@ -698,6 +735,192 @@ export class CoreManager implements CoreCommands {
     };
   }
 
+  async launchTask(input: LaunchTaskInput): Promise<Task> {
+    const now = this.deps.clock.now().toISOString();
+    const id = this.deps.ids.next();
+    const config = await this.deps.config.load();
+
+    let parentTaskId: string | undefined;
+    let launchedFromTaskId: string | undefined;
+    let parentTask: Task | undefined;
+    if (input.relation === "child") {
+      if (!input.fromTaskId) {
+        throw new Error(
+          'launchTask requires "fromTaskId" when relation is "child"',
+        );
+      }
+      parentTask = await this.deps.tasks.getTask(input.fromTaskId);
+      if (!parentTask) throw new Error(`Task not found: ${input.fromTaskId}`);
+      if (parentTask.parentTaskId) {
+        throw new Error(
+          "A child task cannot launch further children (one level only); launch a standalone task instead",
+        );
+      }
+      parentTaskId = parentTask.id;
+    } else if (input.fromTaskId) {
+      launchedFromTaskId = input.fromTaskId;
+    }
+
+    if (input.baseBranch === "parent" && input.relation !== "child") {
+      throw new Error('baseBranch "parent" is only valid for a child task');
+    }
+
+    let repo: RepositoryInfo | undefined;
+    let hasRepository = true;
+    if ("repositoryId" in input.repository) {
+      repo = await this.findRepository(input.repository.repositoryId, config);
+    } else if ("cloneUrl" in input.repository) {
+      if (!config.codeRoot) {
+        throw new Error(
+          "launchTask with a cloneUrl requires codeRoot to be configured",
+        );
+      }
+      repo = await this.deps.repositories.cloneRepository(
+        config.codeRoot,
+        input.repository.cloneUrl,
+      );
+    } else {
+      hasRepository = false;
+    }
+
+    let baseRef: string | undefined;
+    let dependencyBranch: string | undefined;
+    if (input.baseBranch === "parent") {
+      if (!repo || !parentTask || parentTask.repositoryId !== repo.id) {
+        throw new Error(
+          'baseBranch "parent" requires the child to launch in the same repository as its parent',
+        );
+      }
+      if (!parentTask.branch) {
+        throw new Error(
+          "The parent task has no branch yet to base this child on",
+        );
+      }
+      baseRef = parentTask.branch;
+      dependencyBranch = parentTask.branch;
+    }
+
+    const kickoff = buildLaunchKickoffPrompt({
+      hasRepository,
+      ...(parentTask
+        ? { parent: { title: parentTask.title, id: parentTask.id } }
+        : {}),
+      ...(dependencyBranch ? { dependencyBranch } : {}),
+    });
+    const initialPrompt = `${input.prompt.trim()}\n\n${kickoff}`;
+
+    const launch: TaskLaunch = {
+      status: "queued",
+      requestedAt: now,
+      ...(input.model ? { model: input.model } : {}),
+    };
+
+    const task: Task = {
+      id,
+      kind: hasRepository ? "task" : "temp_task",
+      state: "dev",
+      title: input.title,
+      initialPrompt,
+      ...(repo ? { repositoryId: repo.id } : {}),
+      ...(parentTaskId ? { parentTaskId } : {}),
+      ...(launchedFromTaskId ? { launchedFromTaskId } : {}),
+      launch,
+      createdAt: now,
+      updatedAt: now,
+      stateChangedAt: now,
+    };
+
+    if (repo) {
+      const branch = deriveTaskBranch(
+        input.title,
+        id,
+        config.branchPrefix ?? "",
+      );
+      const next: Task = { ...task, branch, targetBranch: repo.defaultBranch };
+      await this.provisionTaskWorkspace(
+        repo,
+        id,
+        branch,
+        now,
+        {
+          persist: () => this.deps.tasks.createTask(next),
+          undo: () => this.deps.tasks.removeTask(id),
+        },
+        baseRef ?? repo.defaultBranch,
+      );
+      await this.publishTaskChange(next);
+      return next;
+    }
+
+    // Repository-less: a scratch directory stands in for a worktree, so the
+    // app's existing "launch pi when a binding has worktreePath" path works
+    // unchanged.
+    const scratchPath = await this.deps.scratch.ensureScratchDirectory(id);
+    await this.deps.tasks.createTask(task);
+    try {
+      await this.deps.bindings.attachBinding({
+        id: this.deps.ids.next(),
+        taskId: id,
+        worktreePath: scratchPath,
+        scratch: true,
+        detached: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      await this.deps.tasks.removeTask(id).catch(() => {});
+      throw error;
+    }
+    await this.publishTaskChange(task);
+    return task;
+  }
+
+  async claimPendingLaunches(limit: number): Promise<Task[]> {
+    if (limit <= 0) return [];
+    const now = this.deps.clock.now().toISOString();
+    const claimed = await this.deps.tasks.claimQueuedLaunches(limit, now);
+    if (claimed.length > 0) await this.publishBoard();
+    return claimed;
+  }
+
+  async markLaunchesInterrupted(taskIds: string[]): Promise<void> {
+    const now = this.deps.clock.now().toISOString();
+    let changed = false;
+    for (const id of taskIds) {
+      const result = await this.deps.tasks.patchTask(id, (task) => {
+        if (task.launch?.status !== "started") return undefined;
+        return {
+          ...task,
+          launch: { ...task.launch, status: "interrupted", interruptedAt: now },
+          updatedAt: now,
+        };
+      });
+      if (result) changed = true;
+    }
+    if (changed) await this.publishBoard();
+  }
+
+  async listChildren(parentTaskId: string): Promise<Task[]> {
+    const tasks = await this.deps.tasks.listTasks();
+    return tasks
+      .filter((task) => task.parentTaskId === parentTaskId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getLaunchSettings(): Promise<{
+    maxConcurrent: number;
+    defaultModel?: string;
+  }> {
+    const config = await this.deps.config.load();
+    return {
+      maxConcurrent:
+        config.launch?.maxConcurrent ?? DEFAULT_LAUNCH_MAX_CONCURRENT,
+      ...(config.launch?.defaultModel
+        ? { defaultModel: config.launch.defaultModel }
+        : {}),
+    };
+  }
+
   refresh(options?: RefreshOptions): Promise<RefreshResult> {
     // Single-flight: the 30s timer and a manual refresh must never run two
     // observations of the same task side by side (each would decide moves
@@ -1030,6 +1253,30 @@ export class CoreManager implements CoreCommands {
     const addWarning = (text: string) => {
       warning = warning ? `${warning}; ${text}` : text;
     };
+    // A manual Done on a parent with active children asks first (children
+    // are never touched either way); auto-landing (mover-driven) never asks
+    // anyone, so it skips straight past this "- and a non-empty answer never
+    // blocks it.
+    if (how.mode === "manual" && !how.force.leaveChildren) {
+      const children = await this.listChildren(task.id);
+      const active = children.filter((child) => child.state !== "done");
+      if (active.length > 0) {
+        return {
+          confirm: {
+            requiresConfirmation: "activeChildren",
+            detail: `${task.title} has ${active.length} active child task${active.length === 1 ? "" : "s"}: ${active.map((child) => child.title).join(", ")}`,
+          },
+        };
+      }
+    }
+    if (!task.repositoryId) {
+      // Repository-less (scratch) task: there is no git here at all. The
+      // scratch directory stays on disk; only park the binding, exactly
+      // like a git worktree binding minus the git removal (never run
+      // worktree/branch verbs against a scratch binding).
+      const binding = await this.deps.bindings.getBindingForTask(task.id);
+      if (binding?.worktreePath) await this.parkBinding(binding);
+    }
     if (task.repositoryId && task.branch) {
       let repo: RepositoryInfo | undefined;
       try {

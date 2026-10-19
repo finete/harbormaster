@@ -97,7 +97,9 @@ export function piSessionArgs(session: SessionLaunch | undefined): string[] {
   if (!session) return [];
   switch (session.mode) {
     case "new":
-      return ["--session-id", session.sessionId];
+      return session.model
+        ? ["--session-id", session.sessionId, "--model", session.model]
+        : ["--session-id", session.sessionId];
     case "resume":
       return session.sessionPath
         ? ["--session", session.sessionPath]

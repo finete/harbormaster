@@ -367,3 +367,48 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     expect(await worktrees.branchExists(repo, "task/unmerged")).toBe(false);
   });
 });
+
+describe.skipIf(!gitAvailable)(
+  "LocalGitRepositoryAccess.cloneRepository",
+  () => {
+    it("clones a cloneUrl into <codeRoot>/<repo-name> and resolves its RepositoryInfo", async () => {
+      const f = await fixture();
+      const access = new LocalGitRepositoryAccess();
+      const repo = await access.cloneRepository(f.code, f.bare);
+      expect(repo.root).toBe(join(f.code, "upstream"));
+      expect(repo.defaultBranch).toBe("main");
+    });
+
+    it("reuses an existing clone whose origin matches the requested URL", async () => {
+      const f = await fixture();
+      const access = new LocalGitRepositoryAccess();
+      const first = await access.cloneRepository(f.code, f.bare);
+      const second = await access.cloneRepository(f.code, f.bare);
+      expect(second.root).toBe(first.root);
+    });
+
+    it("rejects when the target directory already exists with a different origin", async () => {
+      const f = await fixture();
+      const access = new LocalGitRepositoryAccess();
+      // Pre-create <codeRoot>/upstream as a checkout of a *different* remote.
+      const otherBare = join(f.root, "other.git");
+      await git(["init", "--bare", "-b", "main", otherBare]);
+      await git(["clone", otherBare, join(f.code, "upstream")]);
+
+      await expect(access.cloneRepository(f.code, f.bare)).rejects.toThrow(
+        /different origin/,
+      );
+    });
+
+    it("rejects when the target directory exists and isn't a git checkout", async () => {
+      const f = await fixture();
+      const access = new LocalGitRepositoryAccess();
+      await mkdir(join(f.code, "upstream"));
+      await writeFile(join(f.code, "upstream", "file.txt"), "not git\n");
+
+      await expect(access.cloneRepository(f.code, f.bare)).rejects.toThrow(
+        /not a Git checkout/,
+      );
+    });
+  },
+);

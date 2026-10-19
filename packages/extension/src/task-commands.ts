@@ -167,6 +167,10 @@ export const DONE_QUESTIONS: Record<
     title: "Delete unmerged task workspace?",
     flag: "deleteUnmerged",
   },
+  activeChildren: {
+    title: "Complete with active children?",
+    flag: "leaveChildren",
+  },
 };
 
 export const DONE_MESSAGES: Record<
@@ -176,6 +180,8 @@ export const DONE_MESSAGES: Record<
   dirty: "The worktree has uncommitted changes — remove it anyway?",
   unmerged:
     "The branch isn't merged — delete the worktree and local branch anyway?",
+  activeChildren:
+    "This task has active child tasks — complete it anyway? They keep running, nested under it.",
 };
 
 /**

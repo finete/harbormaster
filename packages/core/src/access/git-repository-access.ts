@@ -15,7 +15,7 @@
 // which happens to prefer the "plain" `arnac` over `arnac2`/`arnac3`).
 
 import type { Dirent } from "node:fs";
-import { readdir, realpath } from "node:fs/promises";
+import { access as fsAccess, mkdir, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type {
   GitRepositoryAccess,
@@ -120,6 +120,46 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
     return repos.sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  async cloneRepository(
+    codeRoot: string,
+    cloneUrl: string,
+  ): Promise<RepositoryInfo> {
+    const root = resolve(codeRoot);
+    const target = join(root, repoNameFromUrl(cloneUrl));
+    const wantedId = normalizeRemoteIdentity(cloneUrl);
+    const alreadyThere = await fsAccess(target).then(
+      () => true,
+      () => false,
+    );
+    if (alreadyThere) {
+      const isWorkTree = await tryRun(
+        "git",
+        ["rev-parse", "--is-inside-work-tree"],
+        target,
+      );
+      if (isWorkTree !== "true") {
+        throw new Error(`"${target}" already exists and is not a Git checkout`);
+      }
+      const existingRemote = await tryRun(
+        "git",
+        ["remote", "get-url", "origin"],
+        target,
+      );
+      if (
+        !existingRemote ||
+        normalizeRemoteIdentity(existingRemote) !== wantedId
+      ) {
+        throw new Error(
+          `"${target}" already exists with a different origin (expected ${cloneUrl})`,
+        );
+      }
+      return this.resolveRepository(target);
+    }
+    await mkdir(root, { recursive: true });
+    await run("git", ["clone", cloneUrl, target]);
+    return this.resolveRepository(target);
+  }
+
   async resolveRepository(cwd: string): Promise<RepositoryInfo> {
     const topLevel = await tryRun("git", ["rev-parse", "--show-toplevel"], cwd);
     if (!topLevel) throw new Error(`Not inside a Git repository: ${cwd}`);
@@ -193,6 +233,17 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
  * `git@github.com:org/repo.git`, `https://github.com/org/repo.git`, and
  * `https://user@github.com/org/repo` all normalize to `github.com/org/repo`.
  */
+/** The last path segment of a clone URL, `.git` stripped (`cloneRepository`'s target directory name). */
+function repoNameFromUrl(url: string): string {
+  const trimmed = url
+    .trim()
+    .replace(/\.git\/?$/i, "")
+    .replace(/\/+$/, "");
+  const name = trimmed.split(/[/:]/).filter(Boolean).pop();
+  if (!name) throw new Error(`Cannot derive a repository name from "${url}"`);
+  return name;
+}
+
 export function normalizeRemoteIdentity(remote: string): string {
   let value = remote
     .trim()

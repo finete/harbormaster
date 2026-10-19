@@ -71,12 +71,19 @@ export class SessionPresenceAccess implements PresenceAccess {
     running: boolean,
     at: string,
   ): Promise<void> {
-    // A turn boundary also refreshes the heartbeat: it proves liveness.
-    await this.mutate(taskId, pid, (record) =>
-      record.ended
-        ? undefined
-        : { ...record, runningTurn: running, heartbeatAt: at },
-    );
+    // A turn boundary also refreshes the heartbeat: it proves liveness. A
+    // turn starting again means the user (or the next step) replied: any
+    // previously reported outcome is stale and must not linger.
+    await this.mutate(taskId, pid, (record) => {
+      if (record.ended) return undefined;
+      const next: PresenceRecord = {
+        ...record,
+        runningTurn: running,
+        heartbeatAt: at,
+      };
+      if (running) delete next.outcome;
+      return next;
+    });
   }
 
   async reportOutcome(
@@ -86,10 +93,13 @@ export class SessionPresenceAccess implements PresenceAccess {
     note: string | undefined,
     at: string,
   ): Promise<void> {
+    // Recorded on the STILL-LIVE record, never `ended`: the task stays live
+    // ("your move" for a finished/blocked child) until the process actually
+    // exits (see `end`).
     await this.mutate(taskId, pid, (record) => ({
       ...record,
       heartbeatAt: at,
-      ended: { status, ...(note ? { note } : {}), at },
+      outcome: { status, ...(note ? { note } : {}), at },
     }));
   }
 

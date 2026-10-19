@@ -75,6 +75,60 @@ describe("SessionPresenceAccess", () => {
     expect(record?.ended).toEqual({ status: "unreported", at: "t1" });
   });
 
+  it("reportOutcome records outcome without ending the attachment", async () => {
+    await access.register({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      pid: 1,
+      mode: "headless",
+      at: "t0",
+    });
+    await access.reportOutcome("task-1", 1, "done", "all good", "t1");
+
+    const record = await access.read("task-1");
+    expect(record?.outcome).toEqual({
+      status: "done",
+      note: "all good",
+      at: "t1",
+    });
+    expect(record?.ended).toBeUndefined();
+    expect(record?.heartbeatAt).toBe("t1");
+  });
+
+  it("a reported outcome is cleared when the next turn starts", async () => {
+    await access.register({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      pid: 1,
+      mode: "interactive",
+      at: "t0",
+    });
+    await access.reportOutcome("task-1", 1, "blocked", "need input", "t1");
+    expect((await access.read("task-1"))?.outcome).toBeDefined();
+
+    await access.setTurnActive("task-1", 1, true, "t2");
+
+    const record = await access.read("task-1");
+    expect(record?.outcome).toBeUndefined();
+    expect(record?.runningTurn).toBe(true);
+  });
+
+  it("setTurnActive(false) never clears a reported outcome (the turn just ended)", async () => {
+    await access.register({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      pid: 1,
+      mode: "interactive",
+      at: "t0",
+    });
+    await access.reportOutcome("task-1", 1, "done", undefined, "t1");
+    await access.setTurnActive("task-1", 1, false, "t2");
+
+    const record = await access.read("task-1");
+    expect(record?.outcome?.status).toBe("done");
+    expect(record?.runningTurn).toBe(false);
+  });
+
   it("clear removes a record outright", async () => {
     await access.register({
       taskId: "task-1",

@@ -55,12 +55,14 @@ export class JsonConfigAccess implements ConfigAccess {
     try {
       const repositories = normalizeRepositories(raw.repositories);
       const movers = normalizeMovers("movers", raw.movers);
+      const launch = normalizeLaunch(raw.launch);
       return {
         automation: normalizeAutomation(raw.automation),
         ...(movers ? { movers } : {}),
         codeRoot: normalizeCodeRoot(raw.codeRoot),
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
         ...(repositories ? { repositories } : {}),
+        ...(launch ? { launch } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
@@ -210,6 +212,35 @@ function normalizeDeployment(
       : {}),
     stages,
   };
+}
+
+/**
+ * Validated leniently like the rest of this file: `maxConcurrent` a positive
+ * integer, `defaultModel` a non-empty string, both optional. Unset
+ * `maxConcurrent` defaults at read time (`DEFAULT_LAUNCH_MAX_CONCURRENT`),
+ * not here, so the default can change without a config rewrite.
+ */
+function normalizeLaunch(value: unknown): GlobalConfig["launch"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("launch must be an object");
+  const launch: NonNullable<GlobalConfig["launch"]> = {};
+  if (value.maxConcurrent !== undefined) {
+    if (
+      typeof value.maxConcurrent !== "number" ||
+      !Number.isInteger(value.maxConcurrent) ||
+      value.maxConcurrent <= 0
+    ) {
+      throw new Error("launch.maxConcurrent must be a positive integer");
+    }
+    launch.maxConcurrent = value.maxConcurrent;
+  }
+  if (value.defaultModel !== undefined) {
+    if (typeof value.defaultModel !== "string" || !value.defaultModel.trim()) {
+      throw new Error("launch.defaultModel must be a non-empty string");
+    }
+    launch.defaultModel = value.defaultModel.trim();
+  }
+  return launch;
 }
 
 function normalizeAutomation(value: unknown): boolean {

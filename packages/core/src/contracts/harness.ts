@@ -29,7 +29,18 @@ import type { PresenceRecord } from "./model.js";
  *   that is the task's conversation).
  */
 export type SessionLaunch =
-  | { mode: "new"; sessionId: string }
+  | {
+      mode: "new";
+      sessionId: string;
+      /**
+       * Pi `--model <pattern>` override for this first launch only (see
+       * `CoreCommands.claimSessionLaunch`: `task.launch.model ??
+       * GlobalConfig.launch.defaultModel`). Never applied to a
+       * resume/fork/continue "- the harness adapter maps it to `--model` only
+       * here.
+       */
+      model?: string;
+    }
   | { mode: "resume"; sessionId: string; sessionPath?: string }
   | { mode: "fork"; sessionId: string; forkFrom: string }
   | { mode: "continue" };
