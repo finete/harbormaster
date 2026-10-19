@@ -4,6 +4,7 @@
 // nearest adjacent non-empty column). Kept dependency-free from React so it
 // is cheaply unit-testable (see tests/board-selection.test.ts).
 import type { BoardColumn, BoardGroup } from "../../../preload/api";
+import { hiddenNestedChildIds } from "./task-lineage";
 
 export type MoveDirection = "left" | "right" | "up" | "down";
 
@@ -69,6 +70,8 @@ export function buildSelectionGrid(
   showArchived: boolean,
   collapsedGroups?: ReadonlySet<string>,
   collapsedColumns?: ReadonlySet<BoardColumn["state"]>,
+  /** Lineage "N children" collapse state (see lib/task-lineage.ts); a collapsed parent's same-group children are off screen, so they must never be selectable either. */
+  collapsedLineageParents?: ReadonlySet<string>,
 ): SelectionGrid {
   return columns.map((column) => ({
     state: column.state,
@@ -79,7 +82,17 @@ export function buildSelectionGrid(
             (group) =>
               !isBoardGroupCollapsed(collapsedGroups, column.state, group.id),
           )
-          .flatMap((group) => group.tasks.map((task) => task.id)),
+          .flatMap((group) => {
+            const hidden = collapsedLineageParents
+              ? hiddenNestedChildIds(
+                  group.tasks.map((task) => ({ task })),
+                  collapsedLineageParents,
+                )
+              : undefined;
+            return group.tasks
+              .filter((task) => !hidden?.has(task.id))
+              .map((task) => task.id);
+          }),
   }));
 }
 

@@ -139,3 +139,10 @@ difference not listed here is a bug.
   `/todev`, `/toawait`, `/todone` plus the `harbormaster_report_status` tool
   (decision #16: kinds are data, never commands). Board automation still
   lives only in the app.
+- **Launching replaces pi-home's subtasks and headless runner.** One
+  `launchTask` command with an explicit `child` / `standalone` relation
+  (`harbormaster_launch_task`, `harbormaster_subtask_status`; the launch tool
+  also works outside task sessions, standalone only). Launched tasks run as
+  ordinary interactive Pi sessions in app-owned ptys with no pane until
+  opened (attach, never takeover); quitting the app stops them, no detached
+  processes. See `ai/prds/task-launching.md`.

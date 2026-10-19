@@ -50,7 +50,9 @@ export function ToastHost(): JSX.Element {
             "pointer-events-auto flex max-w-sm items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-lg",
             toast.tone === "error"
               ? "border-red-900 bg-red-950 text-red-200"
-              : "border-yellow-900 bg-yellow-950 text-yellow-200",
+              : toast.tone === "success"
+                ? "border-emerald-900 bg-emerald-950 text-emerald-200"
+                : "border-yellow-900 bg-yellow-950 text-yellow-200",
           )}
         >
           <span className="flex-1">{toast.text}</span>

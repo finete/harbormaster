@@ -19,6 +19,14 @@ export const BOARD_COLLAPSED_GROUPS_KEY = "harbormaster.board.collapsedGroups";
 /** Board column-collapse (slim rail) state: raw `TaskState` entries, independent of group collapse. */
 export const BOARD_COLLAPSED_COLUMNS_KEY =
   "harbormaster.board.collapsedColumns";
+/**
+ * Lineage "N children" chip collapse state: parent task ids whose nested
+ * children are currently hidden (see lib/task-lineage.ts). One shared key
+ * for both the board and the sidebar — the same conceptual toggle, kept in
+ * sync between the two views rather than tracked twice.
+ */
+export const LINEAGE_COLLAPSED_PARENTS_KEY =
+  "harbormaster.lineage.collapsedParents";
 
 function readStringArray(storage: StorageLike, key: string): string[] {
   try {
@@ -105,4 +113,17 @@ export function togglePinned(
   if (next.has(taskId)) next.delete(taskId);
   else next.add(taskId);
   return next;
+}
+
+/** Restores the collapsed-parent task id set persisted by `storeCollapsedLineageParents`. */
+export function readCollapsedLineageParents(storage: StorageLike): Set<string> {
+  return new Set(readStringArray(storage, LINEAGE_COLLAPSED_PARENTS_KEY));
+}
+
+/** Persists the full collapsed-parent task id set (see `LINEAGE_COLLAPSED_PARENTS_KEY`). */
+export function storeCollapsedLineageParents(
+  storage: StorageLike,
+  collapsed: ReadonlySet<string>,
+): void {
+  writeStringArray(storage, LINEAGE_COLLAPSED_PARENTS_KEY, collapsed);
 }

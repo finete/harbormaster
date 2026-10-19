@@ -5,12 +5,14 @@ import {
   readBoardCollapsedColumns,
   readBoardCollapsedGroups,
   readCollapsedGroups,
+  readCollapsedLineageParents,
   readPinnedTaskIds,
   SIDEBAR_COLLAPSED_GROUPS_KEY,
   type StorageLike,
   storeBoardCollapsedColumns,
   storeBoardCollapsedGroups,
   storeCollapsedGroups,
+  storeCollapsedLineageParents,
   storePinnedTaskIds,
   togglePinned,
 } from "../src/renderer/src/lib/sidebar-persistence";
@@ -118,5 +120,22 @@ describe("board collapsed columns (rail) persistence", () => {
     expect(readBoardCollapsedColumns(storage)).toEqual(new Set());
     storage.setItem(BOARD_COLLAPSED_COLUMNS_KEY, "{nope");
     expect(readBoardCollapsedColumns(storage)).toEqual(new Set());
+  });
+});
+
+describe("lineage collapsed-parents persistence", () => {
+  it("round-trips a stored set, shared between board and sidebar", () => {
+    const storage = fakeStorage();
+    storeCollapsedLineageParents(storage, new Set(["parent-1", "parent-2"]));
+    expect(readCollapsedLineageParents(storage)).toEqual(
+      new Set(["parent-1", "parent-2"]),
+    );
+  });
+
+  it("reads back empty when never written or corrupt", () => {
+    const storage = fakeStorage();
+    expect(readCollapsedLineageParents(storage)).toEqual(new Set());
+    storage.setItem("harbormaster.lineage.collapsedParents", "{nope");
+    expect(readCollapsedLineageParents(storage)).toEqual(new Set());
   });
 });

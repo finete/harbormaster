@@ -15,7 +15,7 @@ import { isConnectivityError } from "./lib/connectivity-classifier";
 export interface ToastMessage {
   id: string;
   text: string;
-  tone: "error" | "warning";
+  tone: "error" | "warning" | "success";
 }
 
 type Listener = (toasts: ToastMessage[]) => void;
@@ -71,7 +71,7 @@ export function pushToast(
   toasts = [{ id, text, tone }, ...toasts];
   emit();
 
-  if (tone === "warning") {
+  if (tone === "warning" || tone === "success") {
     const timer = setTimeout(() => dismissToast(id), WARNING_AUTO_DISMISS_MS);
     autoDismissTimers.set(id, timer);
   }

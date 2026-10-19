@@ -1,0 +1,317 @@
+// Task-launching e2e lane (wave 3 / renderer UI + e2e, see
+// ai/prds/task-launching.md and the wave-3 task brief): the one integration
+// seam the renderer's lineage/queued/attach UI actually depends on. Real
+// @harbormaster/core + a real git fixture repo; `pi` and `gh` are tiny
+// fakes (HARBORMASTER_PI_COMMAND / HARBORMASTER_GH_COMMAND), so nothing
+// ever touches the network or a real GitHub account.
+//
+// `launch.maxConcurrent: 1` plus a "Blocker" standalone launch that starts
+// immediately (and never reports presence, so it counts as "working" for
+// the whole grace window — see background-launcher.ts's `isWorking`) keeps
+// the task-under-test's launch deterministically `queued` until the test
+// itself raises the cap and waits for the next presence-poll-driven
+// background-launcher pass (`HARBORMASTER_PRESENCE_POLL_MS` sped up to
+// 250ms) — no sleep-and-hope needed for the queued -> started edge.
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
+
+const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
+const REPO_ID = "github.com/test/fixture";
+
+function git(args: string[], cwd: string): string {
+  return execFileSync("git", args, { cwd }).toString();
+}
+
+let app: ElectronApplication;
+let window: Page;
+let root: string;
+let repoCheckout: string;
+let configPath: string;
+let invokeLogPath: string;
+const mainProcessErrors: string[] = [];
+
+function watchForMainProcessErrors(electronApp: ElectronApplication): void {
+  const child = electronApp.process();
+  const onChunk = (chunk: Buffer): void => {
+    const text = chunk.toString();
+    if (/\[main] uncaughtException/i.test(text)) {
+      mainProcessErrors.push(text.trim());
+    }
+  };
+  child.stdout?.on("data", onChunk);
+  child.stderr?.on("data", onChunk);
+}
+
+function cardLocator(title: string): Locator {
+  return window.locator('[data-testid^="card-"]').filter({ hasText: title });
+}
+
+async function cardTaskId(card: Locator): Promise<string> {
+  const testId = await card.getAttribute("data-testid");
+  if (!testId) throw new Error("card missing data-testid");
+  return testId.replace("card-", "");
+}
+
+function setMaxConcurrent(value: number): void {
+  const raw = JSON.parse(readFileSync(configPath, "utf8"));
+  raw.launch = { ...(raw.launch ?? {}), maxConcurrent: value };
+  writeFileSync(configPath, JSON.stringify(raw, null, 2));
+}
+
+/** Lines the fake pi appended to its invocation log whose cwd contains `needle` (e.g. a task's branch slug). */
+function invocationsFor(needle: string): string[] {
+  let raw: string;
+  try {
+    raw = readFileSync(invokeLogPath, "utf8");
+  } catch {
+    return [];
+  }
+  return raw
+    .split("\n")
+    .filter((line) => line.trim().length > 0 && line.includes(needle));
+}
+
+async function openLaunchDialog(
+  parentTaskId: string,
+  relation: "subtask" | "task",
+): Promise<void> {
+  const button =
+    relation === "subtask"
+      ? window.getByTestId(`launch-subtask-button-${parentTaskId}`)
+      : window.getByTestId(`launch-task-button-${parentTaskId}`);
+  await button.click();
+  await expect(window.getByTestId("launch-task-dialog")).toBeVisible();
+}
+
+test.beforeAll(async () => {
+  root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-launch-"));
+  const stateDir = path.join(root, "state");
+  const codeRoot = path.join(root, "Code");
+  mkdirSync(stateDir, { recursive: true });
+  mkdirSync(codeRoot, { recursive: true });
+
+  repoCheckout = path.join(codeRoot, "fixture-repo");
+  git(["init", "-q", "-b", "main", repoCheckout], root);
+  git(
+    [
+      "-c",
+      "user.name=Harbormaster E2E",
+      "-c",
+      "user.email=harbormaster-e2e@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init",
+    ],
+    repoCheckout,
+  );
+  git(
+    ["remote", "add", "origin", "https://github.com/test/fixture.git"],
+    repoCheckout,
+  );
+
+  configPath = path.join(stateDir, "config.json");
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      automation: true,
+      codeRoot,
+      branchPrefix: "",
+      // Deterministically queued (see module doc): the one slot goes to the
+      // "Blocker" standalone launch the first test starts.
+      launch: { maxConcurrent: 1 },
+    }),
+  );
+
+  invokeLogPath = path.join(root, "pi-invocations.log");
+
+  // Fake pi: records its own invocation (cwd + pid) to a shared log file —
+  // proof of exactly how many times pi actually started for a given
+  // worktree — then idles so the pty stays alive. No session/presence file
+  // is ever written (a real pi-session concern), which also means a
+  // launched task's grace-window "working" status never expires within
+  // this test's lifetime (see background-launcher.ts's `isWorking`).
+  const fakePi = path.join(root, "fake-pi");
+  writeFileSync(
+    fakePi,
+    [
+      "#!/bin/sh",
+      'printf "cwd:%s pid:%s\\n" "$PWD" "$$" >> "$PI_INVOKE_LOG"',
+      "while true; do sleep 3600; done",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakePi, 0o755);
+
+  const fakeGh = path.join(root, "fake-gh");
+  writeFileSync(fakeGh, ["#!/bin/sh", "printf '[]'", ""].join("\n"));
+  chmodSync(fakeGh, 0o755);
+
+  app = await electron.launch({
+    args: [mainEntry],
+    env: {
+      ...process.env,
+      HARBORMASTER_STATE_DIR: stateDir,
+      HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      HARBORMASTER_WINDOW_OFFSCREEN: "1",
+      HARBORMASTER_PI_COMMAND: fakePi,
+      HARBORMASTER_GH_COMMAND: fakeGh,
+      HARBORMASTER_PRESENCE_POLL_MS: "250",
+      PI_INVOKE_LOG: invokeLogPath,
+    },
+  });
+  watchForMainProcessErrors(app);
+  window = await app.firstWindow();
+  await window.waitForLoadState("domcontentloaded");
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+});
+
+test.afterEach(() => {
+  expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
+});
+
+test.afterAll(async () => {
+  await app.close();
+  expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("launching a subtask nests it under its parent, queued, starting in the background with no pane and no view switch; opening it attaches with exactly one pi process", async () => {
+  // --- Seed: a repo-backed parent task, started now (Dev + its own pi pane). ---
+  await window.getByTestId("board-new-task-button").click();
+  await window.getByTestId("new-task-destination-start").click();
+  await window.getByTestId("new-task-title-input").fill("Parent Task");
+  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("Coordinate the subtasks");
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+
+  const parentCard = cardLocator("Parent Task");
+  await expect(
+    window.getByTestId("column-dev-cards").filter({ has: parentCard }),
+  ).toBeVisible();
+  const parentId = await cardTaskId(parentCard);
+
+  await parentCard.click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId(`task-actions-${parentId}`)).toBeVisible();
+
+  // --- Consume the one concurrency slot with a standalone "Blocker" launch, ---
+  // --- so the real task-under-test's launch stays queued, not racy.       ---
+  await openLaunchDialog(parentId, "task");
+  await expect(
+    window.getByTestId("launch-task-relation-standalone"),
+  ).toHaveAttribute("data-selected", "true");
+  await window.getByTestId("launch-task-title-input").fill("Blocker");
+  await window
+    .getByTestId("launch-task-prompt-input")
+    .fill("Occupy the only concurrency slot");
+  // Repository: "None (general)" (default) — a scratch task is enough to
+  // occupy a launch slot and never touches the fixture repo's worktrees.
+  await window.getByTestId("launch-task-submit").click();
+  await expect(window.getByTestId("launch-task-dialog")).toHaveCount(0);
+  await expect(
+    window.getByTestId("toast-success").filter({ hasText: "Blocker" }),
+  ).toBeVisible();
+  // Give the background launcher a moment to claim+start it (so it's the
+  // one holding the slot, not our task-under-test, before that launches).
+  await window.waitForTimeout(500);
+
+  // --- The actual task-under-test: a child, same repo as its parent. ---
+  await openLaunchDialog(parentId, "subtask");
+  await expect(
+    window.getByTestId("launch-task-relation-child"),
+  ).toHaveAttribute("data-selected", "true");
+  await window.getByTestId("launch-task-title-input").fill("Child Under Test");
+  await window
+    .getByTestId("launch-task-prompt-input")
+    .fill("Fix the specific bug");
+  await window.getByTestId("launch-task-repo-select").selectOption(REPO_ID);
+  // Same repo as the parent + parent has a branch: the base-branch picker
+  // appears (wave-3 task brief item 5).
+  await expect(window.getByTestId("launch-task-base-branch")).toBeVisible();
+  await window.getByTestId("launch-task-submit").click();
+  await expect(window.getByTestId("launch-task-dialog")).toHaveCount(0);
+  await expect(
+    window.getByTestId("toast-success").filter({ hasText: "Child Under Test" }),
+  ).toBeVisible();
+
+  // Launching never steals focus/view (PRD): still the workspace view,
+  // still focused on the parent, and the child's workspace never mounted.
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("board-view")).toBeHidden();
+
+  // --- Nesting + the queued marker, on the board. ---
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+
+  const childCard = cardLocator("Child Under Test");
+  const childId = await cardTaskId(childCard);
+  await expect(window.getByTestId(`task-workspace-${childId}`)).toHaveCount(0);
+
+  const toggle = window.getByTestId(`lineage-children-toggle-${parentId}`);
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toContainText("1 child");
+  await expect(childCard).toBeVisible();
+  await expect(childCard.getByTestId("badge-launch-queued")).toBeVisible();
+
+  // Still queued: the fake pi was never invoked for the child's worktree.
+  expect(invocationsFor("child-under-test")).toEqual([]);
+
+  // --- Free up capacity; the background launcher starts it on the next ---
+  // --- presence-poll pass (250ms), no manual refresh needed.            ---
+  setMaxConcurrent(5);
+  await expect(childCard.getByTestId("badge-launch-queued")).toHaveCount(0, {
+    timeout: 10_000,
+  });
+
+  // Started in the background: exactly one pi process for it, no pane.
+  await expect
+    .poll(() => invocationsFor("child-under-test").length, {
+      timeout: 10_000,
+    })
+    .toBe(1);
+  await expect(window.getByTestId(`task-workspace-${childId}`)).toHaveCount(0);
+
+  // --- Opening it attaches: no takeover dialog, no second pi process. ---
+  await childCard.click();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("takeover-dialog")).toHaveCount(0);
+  await expect(
+    window
+      .getByTestId(`task-workspace-${childId}`)
+      .getByTestId("terminal-panel"),
+  ).toBeVisible();
+  // Give any (incorrect) second-spawn path a moment to show up before
+  // asserting the count stays at exactly one.
+  await window.waitForTimeout(500);
+  expect(invocationsFor("child-under-test")).toHaveLength(1);
+
+  // Outcome note: the fake pi never calls `harbormaster_report_status` (no
+  // extension/MCP wiring in this fixture), so there is nothing to assert
+  // here — the derivation itself is covered by
+  // tests/task-status-lines.test.ts's `deriveOutcomeLine` cases.
+});
