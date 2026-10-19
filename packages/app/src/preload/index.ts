@@ -65,6 +65,23 @@ const api: HarbormasterApi = {
       ipcRenderer.on("pty:exit", handler);
       return () => ipcRenderer.removeListener("pty:exit", handler);
     },
+    // P1-1: screen-reader mode (off by default; on when OS AT detected or e2e env set).
+    getScreenReaderMode: (): Promise<boolean> =>
+      ipcRenderer.invoke("terminal:screen-reader-mode"),
+    onScreenReaderModeChanged: (
+      cb: (enabled: boolean) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        enabled: boolean,
+      ): void => cb(enabled);
+      ipcRenderer.on("terminal:screen-reader-mode-changed", handler);
+      return () =>
+        ipcRenderer.removeListener(
+          "terminal:screen-reader-mode-changed",
+          handler,
+        );
+    },
   },
   core: {
     listBoard: (): Promise<BoardColumn[]> =>

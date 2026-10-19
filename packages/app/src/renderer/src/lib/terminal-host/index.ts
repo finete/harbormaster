@@ -13,6 +13,7 @@ import { installKeys } from "./keys";
 import { installLinks } from "./links";
 import { installPaste } from "./paste";
 import { installSearch } from "./search";
+import { installWheel } from "./wheel";
 
 export { dropInsertText } from "./drop";
 export { createTerminalOptions } from "./options";
@@ -37,6 +38,7 @@ export function installHostIntegrations(ctx: HostContext): HostIntegrations {
   const links = installLinks(ctx);
   const searchResult = installSearch(ctx);
   const contextMenu = installContextMenu(ctx);
+  const wheel = installWheel(ctx);
 
   const combined = combineDisposables(
     keys,
@@ -45,6 +47,7 @@ export function installHostIntegrations(ctx: HostContext): HostIntegrations {
     links,
     searchResult,
     contextMenu,
+    wheel,
   );
 
   return {
