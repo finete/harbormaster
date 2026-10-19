@@ -78,13 +78,13 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test.describe("Ctrl+W, Ctrl+B reach the pty on darwin (not stolen by app shortcuts)", () => {
+test.describe("Ctrl+W, Ctrl+B, Ctrl+Shift+Up reach the pty on darwin (not stolen by app shortcuts)", () => {
   test.skip(
     process.platform !== "darwin",
-    "darwin-only: Ctrl+W steal fix is darwin-specific",
+    "darwin-only: Ctrl+W/B steal fix is darwin-specific",
   );
 
-  test("Ctrl+W reaches the pty as ^W (not close-tab)", async () => {
+  test("Ctrl+W → ^W, Ctrl+B → ^B, Ctrl+Shift+Up → ^[[1;6A reach the pty; workspace stays visible", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-dialog")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Shortcut Test");
@@ -102,55 +102,25 @@ test.describe("Ctrl+W, Ctrl+B reach the pty on darwin (not stolen by app shortcu
     });
     await panel.click();
 
-    // Enter raw reader mode to capture raw pty bytes.
+    // One shared raw reader for all three combos.
     await window.keyboard.type("stty -icanon -echo; cat -v");
     await window.keyboard.press("Enter");
     await window.waitForTimeout(300);
 
-    // Press Ctrl+W — should send ^W to the pty, not close the task.
+    // Ctrl+W — regression: must send ^W to the pty, not close the task.
     await window.keyboard.press("Control+w");
     await expect(panel).toContainText("^W", { timeout: 10_000 });
-
-    // The workspace view must still be visible (task was not closed).
     await expect(window.getByTestId("workspace-view")).toBeVisible();
 
-    await window.keyboard.press("Control+c");
-  });
-
-  test("Ctrl+B reaches the pty as ^B (not toggle board)", async () => {
-    const panel = window.getByTestId("terminal-panel").first();
-    await panel.click();
-
-    // Enter raw reader mode.
-    await window.keyboard.type("stty -icanon -echo; cat -v");
-    await window.keyboard.press("Enter");
-    await window.waitForTimeout(300);
-
-    // Press Ctrl+B — should send ^B to the pty, not toggle the board view.
+    // Ctrl+B — regression: must send ^B to the pty, not toggle the board.
     await window.keyboard.press("Control+b");
     await expect(panel).toContainText("^B", { timeout: 10_000 });
-
-    // The workspace view must still be visible.
     await expect(window.getByTestId("workspace-view")).toBeVisible();
 
-    await window.keyboard.press("Control+c");
-  });
-
-  test("Ctrl+Shift+ArrowUp reaches the pty (not cycle sidebar)", async () => {
-    const panel = window.getByTestId("terminal-panel").first();
-    await panel.click();
-
-    // Enter raw reader mode.
-    await window.keyboard.type("stty -icanon -echo; cat -v");
-    await window.keyboard.press("Enter");
-    await window.waitForTimeout(300);
-
-    // Ctrl+Shift+Up should send the raw CSI sequence, not cycle the sidebar.
+    // Ctrl+Shift+Up: must send the raw CSI sequence, not cycle the sidebar.
     await window.keyboard.press("Control+Shift+ArrowUp");
-    // CSI [1;6A = Ctrl+Shift+Up: 1;6 means modifier 6 (ctrl+shift), A = up
+    // CSI [1;6A = Ctrl+Shift+Up: modifier 6 (ctrl+shift), A = up.
     await expect(panel).toContainText("^[[1;6A", { timeout: 10_000 });
-
-    // Workspace still visible (no cycling away from it).
     await expect(window.getByTestId("workspace-view")).toBeVisible();
 
     await window.keyboard.press("Control+c");

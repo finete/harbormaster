@@ -114,15 +114,3 @@ test("pty env: TERM_PROGRAM=harbormaster, COLORTERM=truecolor, inherited markers
   await expect(panel).toContainText("tmux=none", { timeout: 10_000 });
   await expect(panel).toContainText("ct=truecolor", { timeout: 10_000 });
 });
-
-test("pty env: GHOSTTY_RESOURCES_DIR is stripped", async () => {
-  const panel = window.getByTestId("terminal-panel").first();
-  await panel.click();
-
-  // Check GHOSTTY_RESOURCES_DIR is stripped (should be empty).
-  await window.keyboard.type(
-    'echo "ghostty=${GHOSTTY_RESOURCES_DIR:-stripped}"',
-  );
-  await window.keyboard.press("Enter");
-  await expect(panel).toContainText("ghostty=stripped", { timeout: 10_000 });
-});

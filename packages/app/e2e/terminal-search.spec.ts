@@ -110,95 +110,39 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("Cmd+F opens the search bar", async () => {
-  test.skip(
-    process.platform !== "darwin",
-    "Cmd+F is darwin-specific; on other platforms it's Ctrl+F",
-  );
-
-  const panel = window.getByTestId("terminal-panel").first();
-  await panel.click();
-
-  // Open search.
-  await window.keyboard.press("Meta+f");
-
-  const searchBar = window.getByTestId("terminal-search");
-  await expect(searchBar).toBeVisible({ timeout: 5_000 });
-});
-
-test("typing in search finds printed text", async () => {
+test("terminal search: open, find text, no-results indicator, Esc restores focus", async () => {
   test.skip(process.platform !== "darwin", "Cmd+F is darwin-specific");
 
   const panel = window.getByTestId("terminal-panel").first();
   await panel.click();
 
+  // Open the search bar.
   await window.keyboard.press("Meta+f");
   const searchBar = window.getByTestId("terminal-search");
   await expect(searchBar).toBeVisible({ timeout: 5_000 });
 
-  // Type the search term.
+  // Type a term that IS present — no empty indicator.
   const searchInput = window.getByTestId("terminal-search-input");
   await searchInput.fill("needle-9");
-
-  // The search bar should still be visible (focus stays in the bar).
   await expect(searchBar).toBeVisible();
-
-  // The "No results" indicator should NOT be shown (we have "needle-9").
-  const emptyIndicator = window.getByTestId("terminal-search-empty");
-  await expect(emptyIndicator).toHaveCount(0);
-
-  // The search term must NOT appear in the prompt line (it was not typed into the pty).
-  // Give a moment to ensure no keystroke leaked to the terminal.
+  await expect(window.getByTestId("terminal-search-empty")).toHaveCount(0);
   await window.waitForTimeout(300);
-});
 
-test("Esc closes the search bar and returns focus to xterm", async () => {
-  test.skip(process.platform !== "darwin", "Cmd+F is darwin-specific");
-
-  const panel = window.getByTestId("terminal-panel").first();
-  await panel.click();
-
-  // Open search.
-  await window.keyboard.press("Meta+f");
-  await expect(window.getByTestId("terminal-search")).toBeVisible({
+  // Switch to a term that does NOT exist — empty indicator appears.
+  await searchInput.fill("zzz-absolutely-not-there-xyz");
+  await window.waitForTimeout(300);
+  await expect(window.getByTestId("terminal-search-empty")).toBeVisible({
     timeout: 5_000,
   });
 
-  // Click the input to ensure it has focus, then press Escape to close.
-  const searchInput2 = window.getByTestId("terminal-search-input");
-  await searchInput2.click();
-  await searchInput2.press("Escape");
+  // Esc closes the bar and returns focus to the xterm textarea.
+  await searchInput.press("Escape");
   await expect(window.getByTestId("terminal-search")).toHaveCount(0, {
     timeout: 5_000,
   });
-
-  // The xterm textarea should be focused now.
   const isFocused = await window.evaluate(() => {
     const el = document.activeElement;
     return el?.classList.contains("xterm-helper-textarea") ?? false;
   });
   expect(isFocused).toBe(true);
-});
-
-test("searching for non-existent text shows no-results indicator", async () => {
-  test.skip(process.platform !== "darwin", "Cmd+F is darwin-specific");
-
-  const panel = window.getByTestId("terminal-panel").first();
-  await panel.click();
-
-  await window.keyboard.press("Meta+f");
-  await expect(window.getByTestId("terminal-search")).toBeVisible({
-    timeout: 5_000,
-  });
-
-  const searchInput = window.getByTestId("terminal-search-input");
-  await searchInput.fill("zzz-absolutely-not-there-xyz");
-  await window.waitForTimeout(300);
-
-  // The "No results" indicator should appear.
-  const emptyIndicator = window.getByTestId("terminal-search-empty");
-  await expect(emptyIndicator).toBeVisible({ timeout: 5_000 });
-
-  // Close the search bar.
-  await window.keyboard.press("Escape");
 });

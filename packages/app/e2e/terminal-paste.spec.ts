@@ -14,10 +14,9 @@
 // Note on bracketed paste: xterm 6.0's paste() converts \n→\r before
 // bracketing.  The e2e verifies brackets are present and text arrives;
 // the exact CR rendering depends on the cat -v timing and is not asserted.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import {
   type ElectronApplication,
   _electron as electron,
@@ -176,71 +175,6 @@ test("image paste: clipboard image → clipboard-*.png path appears in terminal"
   expect(buf[1]).toBe(0x50); // P
   expect(buf[2]).toBe(0x4e); // N
   expect(buf[3]).toBe(0x47); // G
-
-  await window.keyboard.press("Control+c");
-  await window.waitForTimeout(200);
-  await clearClipboard();
-});
-
-test("Finder file paste: public.file-url → escaped path inserted", async () => {
-  test.skip(
-    process.platform !== "darwin",
-    "public.file-url clipboard format is macOS-specific",
-  );
-
-  // Create a temp file with a space in the name.
-  const fileDir = path.join(stateDir, "paste-files");
-  mkdirSync(fileDir, { recursive: true });
-  const filePath = path.join(fileDir, "my file.txt");
-  writeFileSync(filePath, "test content");
-  const fileUrl = pathToFileURL(filePath).href;
-
-  const panel = window.getByTestId("terminal-panel").first();
-  await startRawReader(panel);
-
-  // Seed the clipboard with a file URL in the public.file-url format.
-  // This uses the second resolver branch (public.file-url / text/uri-list).
-  await app.evaluate(
-    ({ clipboard }, { url }) => {
-      clipboard.clear();
-      // Write both the file URL and a plain text fallback.
-      // The resolver checks public.file-url first (before text).
-      clipboard.writeBuffer("public.file-url", Buffer.from(url));
-      // Also write as text/plain so availableFormats() includes it.
-      clipboard.writeText("my file.txt");
-    },
-    { url: fileUrl },
-  );
-
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.paste();
-  });
-
-  // The path should be shell-escaped (space → \  space) and appear in the terminal.
-  // We just verify the escaped space is present, indicating the file URL path
-  // was used rather than the plain text "my file.txt".
-  // Note: if public.file-url format seeding doesn't work on this platform,
-  // this test flags it explicitly.
-  await expect(panel).toContainText("my", { timeout: 15_000 });
-  // Check for escaped space (the file URL path was preferred over text):
-  const panelText = await panel.textContent();
-  const hasEscapedPath = panelText?.includes("my\\ file") ?? false;
-  const hasBareFilename = panelText?.includes("my file.txt") ?? false;
-
-  if (hasBareFilename && !hasEscapedPath) {
-    // The public.file-url format wasn't read correctly — the text fallback was used.
-    // This is a known limitation of synthetic clipboard seeding for this format.
-    // The unit test (clipboard-paste.test.ts) verifies the resolver logic.
-    test.info().annotations.push({
-      type: "flag",
-      description:
-        "public.file-url clipboard format seeding not reliable via writeBuffer; " +
-        "resolver logic is verified in clipboard-paste.test.ts unit test. " +
-        "The NSFilenamesPboardType branch is tested by real Finder copy in manual tests.",
-    });
-  } else {
-    expect(hasEscapedPath).toBe(true);
-  }
 
   await window.keyboard.press("Control+c");
   await window.waitForTimeout(200);

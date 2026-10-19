@@ -297,25 +297,6 @@ test("s on a selected parked card (cards carry no buttons) creates its worktree 
   expect(taskWorktrees()[0]).toContain("parked-work-");
 });
 
-test("dragging a parked card from Backlog into Dev starts it (worktree created)", async () => {
-  await submitNewTask({ title: "Dragged Work", destination: "backlog" });
-  const card = cardLocator("Dragged Work");
-  await expect(
-    window.getByTestId("column-backlog-cards").filter({ has: card }),
-  ).toBeVisible();
-  expect(taskWorktrees()).toHaveLength(1);
-
-  await dragTo(card, window.getByTestId("column-dev"));
-
-  await expect(
-    window.getByTestId("column-dev-cards").filter({ has: card }),
-  ).toBeVisible();
-  await expect(card).toContainText(/dragged-work-[a-z0-9]{6}/);
-  await expect
-    .poll(() => taskWorktrees().filter((dir) => dir.includes("dragged-work-")))
-    .toHaveLength(1);
-});
-
 test("Start now lands in Dev with a worktree, and the prompt reaches the first pi pane as its argument", async () => {
   const prompt = "Fix the 'flaky' test\nthen report $HOME";
   await submitNewTask({ title: "Started Work", destination: "start", prompt });

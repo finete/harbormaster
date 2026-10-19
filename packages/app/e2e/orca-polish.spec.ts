@@ -121,6 +121,11 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     await row.click({ button: "right" });
     const menu = window.getByTestId("sidebar-row-context-menu");
     await expect(menu).toBeVisible();
+    // Merged: while the menu is open, confirm scratch tasks have copy-branch disabled.
+    const copyBranch = menu.getByTestId(
+      "sidebar-row-context-menu-item-copy-branch",
+    );
+    await expect(copyBranch).toHaveAttribute("aria-disabled", "true");
     await menu.getByTestId("sidebar-row-context-menu-item-pin").click();
     await expect(menu).toHaveCount(0);
 
@@ -161,21 +166,6 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     await window.getByTestId("workspace-button").click();
   });
 
-  test("copy branch via the context menu writes to the clipboard (scratch task has no branch, so the item is absent)", async () => {
-    const row = rowLocator(window, "Orca Alpha");
-    await row.click({ button: "right" });
-    const menu = window.getByTestId("sidebar-row-context-menu");
-    await expect(menu).toBeVisible();
-    // A repository-less (scratch) task has no branch: the item is disabled,
-    // not hidden, so this also pins down that the menu renders it correctly.
-    const copyBranch = menu.getByTestId(
-      "sidebar-row-context-menu-item-copy-branch",
-    );
-    await expect(copyBranch).toHaveAttribute("aria-disabled", "true");
-    await window.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-  });
-
   test("the main process's app:cycle-task push (Cmd/Ctrl+Shift+Up/Down, intercepted via before-input-event exactly like the existing Cmd+W handler) cycles sidebar focus and opens the next task", async () => {
     // Electron's `before-input-event` requires real OS-level window focus to
     // route synthetic key events, which this sandboxed Playwright/CDP
@@ -210,54 +200,6 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
         `sidebar-task-row-${await rowTaskId(rowLocator(window, "Orca Alpha"))}`,
       );
     }).toPass({ timeout: 5_000 });
-  });
-
-  test("a task that finishes its turn while unfocused gets an unread dot, cleared on focus", async () => {
-    await createScratchTask(window, "Unread Target");
-    await createScratchTask(window, "Unread Looker");
-
-    const target = rowLocator(window, "Unread Target");
-    const looker = rowLocator(window, "Unread Looker");
-    await expect(target).toBeVisible();
-    await expect(looker).toBeVisible();
-    const targetId = await rowTaskId(target);
-
-    // Focus the *other* task so "Unread Target" is open but not focused.
-    await looker.click();
-    await expect(looker).toHaveAttribute("data-selected", "true");
-
-    const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
-    await presence.register({
-      taskId: targetId,
-      sessionPath: "/tmp/fake-session-unread.jsonl",
-      pid: process.pid,
-      mode: "interactive",
-      at: new Date().toISOString(),
-    });
-    await presence.setTurnActive(
-      targetId,
-      process.pid,
-      true,
-      new Date().toISOString(),
-    );
-    await expect(target.getByTestId("sidebar-row-spinner")).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // Turn ends while "Unread Looker" stays focused: dot + bolder title.
-    await presence.setTurnActive(
-      targetId,
-      process.pid,
-      false,
-      new Date().toISOString(),
-    );
-    await expect(target.getByTestId("sidebar-row-unread-dot")).toBeVisible({
-      timeout: 10_000,
-    });
-
-    // Focusing the target task clears its unread flag.
-    await target.click();
-    await expect(target.getByTestId("sidebar-row-unread-dot")).toHaveCount(0);
   });
 
   test("a finished-while-unfocused transition fires the renderer->main notify IPC", async () => {
@@ -320,8 +262,11 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
       ).toBe(true);
     }).toPass({ timeout: 10_000 });
 
-    // Restore window focus so later tests in this suite aren't affected.
+    // Restore window focus; then clicking the target task should clear the
+    // unread dot (merged from the separate "cleared on focus" test).
     await window.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await target.click();
+    await expect(target.getByTestId("sidebar-row-unread-dot")).toHaveCount(0);
   });
 });
 

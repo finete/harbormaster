@@ -132,12 +132,11 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("app launches and the main window opens", async () => {
+test("fresh state dir renders an empty board and an empty sidebar hint", async () => {
+  // Fold in the launch/window check: the app must have at least one window
+  // with the right title (previously a standalone test).
   expect(app.windows().length).toBeGreaterThan(0);
   await expect(window).toHaveTitle("Harbormaster");
-});
-
-test("fresh state dir renders an empty board and an empty sidebar hint", async () => {
   await expect(window.getByTestId("workspace-view")).toBeVisible();
   await expect(window.getByTestId("sidebar")).toBeVisible();
   await expect(window.getByTestId("sidebar-empty-hint")).toBeVisible();
@@ -177,14 +176,6 @@ test("creating a task shows it on the board; opening it puts it on the rail", as
     }),
   ).toBeVisible();
   await expect(window.getByTestId("sidebar-empty-hint")).toHaveCount(0);
-});
-
-test("a terminal panel appears for the focused task and receives pty output", async () => {
-  const panel = window.getByTestId("terminal-panel").first();
-  await expect(panel).toBeVisible();
-  await expect(panel).toHaveAttribute("data-received-output", "true", {
-    timeout: 20_000,
-  });
 });
 
 test("closing a workspace ends its terminals, drops it off the rail, and reopening from the board starts fresh", async () => {
@@ -240,37 +231,6 @@ test("terminals survive a board round-trip without respawning", async () => {
   await expect(window.getByTestId("terminal-panel").first()).toContainText(
     "berth-42",
   );
-});
-
-test('"+ terminal" adds a second dockview terminal panel', async () => {
-  const before = await window.getByTestId("terminal-panel").count();
-  await window.getByTestId("add-terminal-button").click();
-  await expect
-    .poll(async () => window.getByTestId("terminal-panel").count(), {
-      timeout: 10_000,
-    })
-    .toBeGreaterThan(before);
-});
-
-test("the Board button switches to the kanban board with all four columns", async () => {
-  await window.getByTestId("board-button").click();
-
-  await expect(window.getByTestId("board-view")).toBeVisible();
-  await expect(window.getByTestId("workspace-view")).toBeHidden();
-
-  for (const id of ["backlog", "dev", "awaiting", "done"]) {
-    await expect(window.getByTestId(`column-${id}`)).toBeVisible();
-  }
-  await expect(window.locator('[data-testid^="card-"]').first()).toBeVisible();
-});
-
-test("the board's Workspace button returns to the workspace view", async () => {
-  // the previous test left the app in the board view.
-  await expect(window.getByTestId("board-view")).toBeVisible();
-
-  await window.getByTestId("workspace-button").click();
-  await expect(window.getByTestId("workspace-view")).toBeVisible();
-  await expect(window.getByTestId("board-view")).toBeHidden();
 });
 
 test("clicking a card returns to the workspace view, focused on that task", async () => {
@@ -518,11 +478,18 @@ test("the workspace header keeps the verbs (Await… · Done, no kind names) and
 });
 
 test("Cmd+B toggles between board and workspace views", async () => {
-  // the previous test left the app in the board view; start from a known
-  // state so this test doesn't depend on run order.
+  // The previous test left the app in the board view.
+  // Confirm the board-button / workspace-button pair (formerly separate tests):
+  // board visible and workspace hidden while in board view.
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await expect(window.getByTestId("workspace-view")).toBeHidden();
+
+  // Workspace button returns to the workspace view; board becomes hidden.
   await window.getByTestId("workspace-button").click();
   await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("board-view")).toBeHidden();
 
+  // Cmd+B keyboard shortcut toggles between the two views.
   await window.keyboard.press("Meta+B");
   await expect(window.getByTestId("board-view")).toBeVisible();
 

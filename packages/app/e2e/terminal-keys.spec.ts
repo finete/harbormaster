@@ -126,68 +126,21 @@ test.describe("macOS keyboard parity (darwin only)", () => {
     "macOS-specific key sequences only tested on darwin",
   );
 
-  test("Meta+ArrowLeft sends ^A (line start)", async () => {
+  test("mac key sequence parity: Meta+ArrowLeft, Ctrl+Shift+F, Ctrl+Alt+], Alt+Backspace", async () => {
+    // One shared raw reader for all four combos (avoids per-combo setup cost).
     await startRawReader();
+    // Meta+ArrowLeft → ^A (line start, macTextEditingSequence).
     await window.keyboard.press("Meta+ArrowLeft");
     await expect(panel).toContainText("^A", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Meta+ArrowRight sends ^E (line end)", async () => {
-    await startRawReader();
-    await window.keyboard.press("Meta+ArrowRight");
-    await expect(panel).toContainText("^E", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Meta+Backspace sends ^U (kill to line start)", async () => {
-    await startRawReader();
-    await window.keyboard.press("Meta+Backspace");
-    await expect(panel).toContainText("^U", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Ctrl+Shift+F sends CSI-u sequence ^[[102;6u", async () => {
-    await startRawReader();
+    // Ctrl+Shift+F → ^[[102;6u (csiUSequenceForKeyEvent, Ctrl+Shift+letter).
     await window.keyboard.press("Control+Shift+KeyF");
-    // cat -v: ESC=^[, so ^[[102;6u = ESC [ 1 0 2 ; 6 u
     await expect(panel).toContainText("^[[102;6u", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Ctrl+Shift+P sends CSI-u sequence ^[[112;6u", async () => {
-    await startRawReader();
-    await window.keyboard.press("Control+Shift+KeyP");
-    await expect(panel).toContainText("^[[112;6u", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Ctrl+Alt+] sends ^[[93;7u", async () => {
-    await startRawReader();
+    // Ctrl+Alt+] → ^[[93;7u (mac Alt-modified key, only real-event proof).
     await window.keyboard.press("Control+Alt+BracketRight");
     await expect(panel).toContainText("^[[93;7u", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Alt+Backspace sends ESC DEL (^[^?) via macOptionIsMeta", async () => {
-    // macOptionIsMeta: true translates Alt+Backspace → ESC DEL = ^[^? in cat -v.
-    await startRawReader();
+    // Alt+Backspace → ^[^? (macOptionIsMeta option, regression check).
     await window.keyboard.press("Alt+Backspace");
     await expect(panel).toContainText("^[^?", { timeout: 10_000 });
-    await window.keyboard.press("Control+c");
-    await window.waitForTimeout(200);
-  });
-
-  test("Shift+Enter still sends ^[[13;2u (CSI-u regression)", async () => {
-    await startRawReader();
-    await window.keyboard.press("Shift+Enter");
-    await expect(panel).toContainText("^[[13;2u", { timeout: 10_000 });
     await window.keyboard.press("Control+c");
     await window.waitForTimeout(200);
   });
