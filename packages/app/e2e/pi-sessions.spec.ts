@@ -99,78 +99,6 @@ async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await expect(window.getByTestId("column-dev-cards")).toContainText(title);
 }
 
-test.describe("a bound task's primary pane launches HARBORMASTER_PI_COMMAND with the harness env", () => {
-  let app: ElectronApplication;
-  let window: Page;
-  let root: string;
-  let fakePiPath: string;
-  const mainProcessErrors: string[] = [];
-
-  test.beforeAll(async () => {
-    root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-pi-fake-"));
-    const stateDir = path.join(root, "state");
-    const codeRoot = path.join(root, "Code");
-    mkdirSync(stateDir, { recursive: true });
-    mkdirSync(codeRoot, { recursive: true });
-    seedFixtureRepo(codeRoot);
-    writeFileSync(
-      path.join(stateDir, "config.json"),
-      JSON.stringify({
-        automation: true,
-        codeRoot,
-        branchPrefix: "",
-      }),
-    );
-
-    // A fake `pi`: dumps just its HARBORMASTER_* env (the full host env is
-    // large enough that xterm's screen-reader text mirror can truncate it
-    // before these lines, so narrow the dump to what the test actually
-    // checks) and then idles instead of exiting, so the pty stays alive
-    // long enough for the terminal to render its output.
-    fakePiPath = path.join(root, "fake-pi");
-    writeFileSync(
-      fakePiPath,
-      "#!/bin/sh\nenv | grep ^HARBORMASTER\nwhile true; do sleep 3600; done\n",
-    );
-    chmodSync(fakePiPath, 0o755);
-
-    app = await electron.launch({
-      args: [mainEntry],
-      env: {
-        ...process.env,
-        HARBORMASTER_STATE_DIR: stateDir,
-        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
-        HARBORMASTER_WINDOW_OFFSCREEN: "1",
-        HARBORMASTER_PI_COMMAND: fakePiPath,
-      },
-    });
-    watchForMainProcessErrors(app, mainProcessErrors);
-    window = await app.firstWindow();
-    await window.waitForLoadState("domcontentloaded");
-  });
-
-  test.afterAll(async () => {
-    await app.close();
-    expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  test("the primary pane's terminal shows HARBORMASTER_TASK_ID from the fake pi's env dump", async () => {
-    await createTaskWithRepo(window, "Pi Pane Task");
-    const card = cardLocator(window, "Pi Pane Task");
-    await expect(card).toBeVisible();
-    await card.click();
-
-    const panel = window.getByTestId("terminal-panel").first();
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText("HARBORMASTER_TASK_ID", {
-      timeout: 20_000,
-    });
-    await expect(panel).toContainText("HARBORMASTER=1");
-    await expect(window.getByTestId("pi-fallback-warning")).toHaveCount(0);
-  });
-});
-
 test.describe("a missing pi binary falls back to a plain shell with a dismissible warning", () => {
   let app: ElectronApplication;
   let window: Page;
@@ -433,6 +361,10 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
     await expect(panel).toContainText("HARBORMASTER_TASK_ID", {
       timeout: 20_000,
     });
+    // Merged from the first describe: also confirm HARBORMASTER=1 is set and
+    // no pi-fallback-warning strip appears (the binary exists and launched).
+    await expect(panel).toContainText("HARBORMASTER=1");
+    await expect(window.getByTestId("pi-fallback-warning")).toHaveCount(0);
     await expect.poll(() => existsSync(pidFile)).toBe(true);
     const realPid = Number(readFileSync(pidFile, "utf8").trim());
     expect(Number.isInteger(realPid) && realPid > 0).toBe(true);

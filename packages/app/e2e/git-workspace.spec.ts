@@ -145,7 +145,7 @@ test("the fixture repo appears in the New Task dialog's repository picker", asyn
   await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
 });
 
-test("creating a task with the repo shows a derived branch subline on its card", async () => {
+test("derived branch subline and pty cwd inside the .harbormaster-worktrees checkout", async () => {
   await window.getByTestId("board-button").click();
   const card = cardLocator("Add git workspace");
   await expect(card).toBeVisible();
@@ -153,17 +153,12 @@ test("creating a task with the repo shows a derived branch subline on its card",
   // buttons) derives the branch + worktree.
   await dragTo(window, card, window.getByTestId("column-dev"));
 
-  // TaskCard renders "<branch> \u2192 <targetBranch>" in a font-mono subline
+  // TaskCard renders "<branch> → <targetBranch>" in a font-mono subline
   // once task.branch is set (see components/TaskCard.tsx).
   await expect(card).toContainText(/add-git-workspace-[a-z0-9]{6}/);
   await expect(card).toContainText("\u2192 main");
 
-  await window.getByTestId("workspace-button").click();
-});
-
-test("the task's terminal pty spawns inside its .harbormaster-worktrees checkout", async () => {
-  await window.getByTestId("board-button").click();
-  const card = cardLocator("Add git workspace");
+  // Open the workspace and confirm the pty cwd is inside the worktree (merged).
   await card.click();
   await window.getByTestId("workspace-view").waitFor();
 

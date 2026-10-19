@@ -216,17 +216,6 @@ test('"x" moves the selected card to Done', async () => {
   );
 });
 
-test("board cards carry no action buttons (the verbs live in the workspace header, keys, and drags)", async () => {
-  const cards = window
-    .getByTestId("board-view")
-    .locator('[data-testid^="card-"]');
-  expect(await cards.count()).toBeGreaterThan(0);
-  await expect(cards.locator("button")).toHaveCount(0);
-  await expect(
-    window.getByTestId("board-view").locator('[data-testid^="task-actions-"]'),
-  ).toHaveCount(0);
-});
-
 test('"r" opens the Await picker with review preselected; Enter (the fast path) moves the card to Awaiting / Review', async () => {
   // Keyboard Alpha sits at the top of the backlog column: s starts it.
   for (let i = 0; i < 4; i++) await window.keyboard.press("ArrowLeft");

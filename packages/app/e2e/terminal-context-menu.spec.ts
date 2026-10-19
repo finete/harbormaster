@@ -105,24 +105,6 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("right-click opens the context menu", async () => {
-  const panel = window.getByTestId("terminal-panel").first();
-  await panel.click();
-
-  // Right-click inside the terminal panel.
-  const box = await panel.boundingBox();
-  expect(box).not.toBeNull();
-  await window.mouse.click(
-    (box?.x ?? 0) + (box?.width ?? 0) / 2,
-    (box?.y ?? 0) + (box?.height ?? 0) / 2,
-    { button: "right" },
-  );
-
-  await expect(window.getByTestId("terminal-context-menu")).toBeVisible({
-    timeout: 5_000,
-  });
-});
-
 test("Clear menu item clears the terminal viewport", async () => {
   const panel = window.getByTestId("terminal-panel").first();
   await panel.click();
