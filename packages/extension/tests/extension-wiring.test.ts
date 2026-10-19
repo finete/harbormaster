@@ -269,7 +269,10 @@ describe("extension wiring", () => {
       resolveStatePaths(dir).presenceDir,
     );
     const record = await presence.read("task-1");
-    expect(record?.ended).toEqual({
+    // A reported outcome keeps the session live ("your move"): it is
+    // recorded as `outcome`, never as `ended` (process gone).
+    expect(record?.ended).toBeUndefined();
+    expect(record?.outcome).toEqual({
       status: "blocked",
       note: "needs a decision",
       at: expect.any(String),

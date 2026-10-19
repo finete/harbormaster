@@ -67,7 +67,12 @@ export interface ToDoneOptions {
    * `deleteUnmerged` removes the worktree and force-deletes (`-D`) a branch
    * whose PR never merged. Never overrides `protectedPaths`.
    */
-  force?: { removeDirty?: boolean; deleteUnmerged?: boolean };
+  force?: {
+    removeDirty?: boolean;
+    deleteUnmerged?: boolean;
+    /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+    leaveChildren?: boolean;
+  };
 }
 
 /**
@@ -77,8 +82,8 @@ export interface ToDoneOptions {
  * `unmerged`).
  */
 export interface ToDoneConfirmation {
-  requiresConfirmation: "dirty" | "unmerged";
-  /** Human-readable context for the question (task title, worktree path). */
+  requiresConfirmation: "dirty" | "unmerged" | "activeChildren";
+  /** Human-readable context for the question (task title, worktree path, or active-child titles/count). */
   detail: string;
 }
 
@@ -152,6 +157,44 @@ export interface DeleteTaskOptions {
   removeWorkspace?: boolean;
 }
 
+/**
+ * `CoreCommands.launchTask` input (see `ai/prds/task-launching.md`'s "one
+ * primitive"): creates a board task and queues it to start running
+ * immediately in the background. `relation` must be stated explicitly, no
+ * default.
+ */
+export interface LaunchTaskInput {
+  /**
+   * `child`: nests under `fromTaskId` (`parentTaskId`), pollable, and a Done
+   * parent with this still active asks for confirmation. One level only "-
+   * rejects when `fromTaskId`'s task itself has a `parentTaskId`.
+   * `standalone`: no lineage, only display-only provenance
+   * (`launchedFromTaskId`) when `fromTaskId` is given.
+   */
+  relation: "child" | "standalone";
+  /** Required for `relation: "child"`; optional provenance for `standalone` (a non-task Pi session has none). */
+  fromTaskId?: string;
+  title: string;
+  /** The user's objective; the kickoff contract (see `engines/launch-kickoff.ts`) is appended automatically. */
+  prompt: string;
+  /**
+   * A discovered repository id, a clone URL (cloned under `codeRoot`, reused
+   * when already present with the same remote), or `{ none: true }` for a
+   * repository-less scratch task.
+   */
+  repository: { repositoryId: string } | { cloneUrl: string } | { none: true };
+  /**
+   * `"parent"` (stacked work) is only valid for a `child` whose repository
+   * is the same as its parent's, and only once the parent has a branch;
+   * the worktree branches off the parent's branch instead of the
+   * repository's default branch. Never for `standalone`. Absent/`"default"`
+   * branches off the repository's default branch as usual.
+   */
+  baseBranch?: "default" | "parent";
+  /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default; passed to the harness only on the first launch. */
+  model?: string;
+}
+
 /** The typed command surface frontends call. No frontend touches state files. */
 export interface CoreCommands {
   listBoard(): Promise<BoardColumn[]>;
@@ -180,6 +223,40 @@ export interface CoreCommands {
    * worktree is left behind; the triggering error is rethrown as-is.
    */
   createTask(input: CreateTaskInput): Promise<Task>;
+  /**
+   * The one launch primitive (see `ai/prds/task-launching.md`): create a
+   * task and queue it to start running in the background. Lands in `dev`
+   * with `launch: { status: "queued" }`; `CoreCommands.claimPendingLaunches`
+   * is what actually starts it. Rejects an unknown `fromTaskId`, a `child`
+   * relation from a task that already has a `parentTaskId` (one level
+   * only), and an invalid `baseBranch: "parent"` (not a child, cross-
+   * repository, or a parent with no branch yet). A `{ cloneUrl }`
+   * repository is cloned under `GlobalConfig.codeRoot` (reused if already
+   * checked out with the same remote); `{ none: true }` creates a
+   * `temp_task` with a scratch-directory binding instead of a git worktree.
+   * Same rollback guarantees as `createTask`/`startTask` for the
+   * repository-backed path.
+   */
+  launchTask(input: LaunchTaskInput): Promise<Task>;
+  /**
+   * Flip up to `limit` queued launches to `started` (FIFO by
+   * `requestedAt`), for the app's background launcher to actually start a
+   * pty for. `limit <= 0` returns `[]`. Never returns a task not in `dev`.
+   */
+  claimPendingLaunches(limit: number): Promise<Task[]>;
+  /**
+   * Mark launched tasks' still-`started` sessions `interrupted` (app quit
+   * mid-turn); unknown ids and tasks not currently `started` are ignored.
+   * The marker clears on the task's next `claimSessionLaunch`.
+   */
+  markLaunchesInterrupted(taskIds: string[]): Promise<void>;
+  /** Every task with `parentTaskId === parentTaskId`, any state, oldest first. */
+  listChildren(parentTaskId: string): Promise<Task[]>;
+  /** Current effective launch settings (`GlobalConfig.launch`, defaulted), for a frontend to show/enforce the concurrency cap without touching config files. */
+  getLaunchSettings(): Promise<{
+    maxConcurrent: number;
+    defaultModel?: string;
+  }>;
   /**
    * Start a parked backlog task: for a repository-backed task without a
    * worktree binding, create its branch + worktree + binding now (same
@@ -269,7 +346,11 @@ export interface CoreCommands {
   ): Promise<Task>;
   /**
    * Move a task to `done`, cleaning up its workspace (pi-home's `complete`):
-   * remove the worktree and delete the branch. Destroying work needs the
+   * remove the worktree and delete the branch. A parent task
+   * (`listChildren` non-empty) with any non-done child asks first too
+   * (`requiresConfirmation: "activeChildren"`, checked before the dirty/
+   * unmerged questions below) unless `options.force.leaveChildren` is set;
+   * children are never touched either way. Destroying work needs the
    * user's confirmation first: a worktree with uncommitted changes, or a
    * branch whose PR never merged, returns a `ToDoneConfirmation` WITHOUT
    * moving the task (answer via `options.force` on the next call). A

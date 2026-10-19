@@ -132,6 +132,7 @@ function validBinding(value: unknown): value is WorkspaceBinding {
     isOptionalString(value.sessionId) &&
     isOptionalString(value.previousSessionPath) &&
     isOptionalString(value.forkFromSessionPath) &&
+    (value.scratch === undefined || typeof value.scratch === "boolean") &&
     typeof value.detached === "boolean" &&
     isString(value.createdAt) &&
     isString(value.updatedAt)

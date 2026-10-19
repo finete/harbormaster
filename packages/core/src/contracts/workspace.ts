@@ -78,6 +78,15 @@ export interface GitRepositoryAccess {
   ): Promise<RepositoryInfo[]>;
   /** Resolve the repository whose checkout contains `cwd`. */
   resolveRepository(cwd: string): Promise<RepositoryInfo>;
+  /**
+   * Clone `cloneUrl` into `<codeRoot>/<repo-name>` (the last path segment of
+   * the URL, `.git` stripped) for `launchTask`'s `{ cloneUrl }` repository
+   * variant, then resolve and return its {@link RepositoryInfo}. Reused
+   * when that directory already exists and is a git checkout whose `origin`
+   * remote normalizes to the same identity as `cloneUrl`; rejects if it
+   * exists with a different origin (or isn't a git checkout at all).
+   */
+  cloneRepository(codeRoot: string, cloneUrl: string): Promise<RepositoryInfo>;
 }
 
 /**

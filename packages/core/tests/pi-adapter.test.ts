@@ -80,6 +80,24 @@ describe("PiHarnessAdapter", () => {
         "--",
         "Do it",
       ]);
+      // A model override is mapped to `--model`, only on a brand-new session.
+      expect(
+        build(
+          {
+            mode: "new",
+            sessionId: "s-1",
+            model: "anthropic/claude-opus:thinking",
+          },
+          "Do it",
+        ),
+      ).toEqual([
+        "--session-id",
+        "s-1",
+        "--model",
+        "anthropic/claude-opus:thinking",
+        "--",
+        "Do it",
+      ]);
       expect(build({ mode: "resume", sessionId: "s-1" })).toEqual([
         "--session-id",
         "s-1",
@@ -271,9 +289,26 @@ describe("PiHarnessAdapter", () => {
         mode: "headless",
         at: new Date().toISOString(),
       });
+      await presence.end("task-1", 123, new Date().toISOString());
+
+      const adapter = new PiHarnessAdapter({ presence });
+      const status = await adapter.presence("task-1");
+      expect(status.live).toBe(false);
+      expect(status.record?.ended?.status).toBe("unreported");
+    });
+
+    it("a reported outcome stays live (`ended` keeps meaning the process is gone)", async () => {
+      const presence = new SessionPresenceAccess(join(dir, "presence"));
+      await presence.register({
+        taskId: "task-1",
+        sessionPath: "/sessions/task-1.jsonl",
+        pid: process.pid,
+        mode: "headless",
+        at: new Date().toISOString(),
+      });
       await presence.reportOutcome(
         "task-1",
-        123,
+        process.pid,
         "done",
         undefined,
         new Date().toISOString(),
@@ -281,8 +316,9 @@ describe("PiHarnessAdapter", () => {
 
       const adapter = new PiHarnessAdapter({ presence });
       const status = await adapter.presence("task-1");
-      expect(status.live).toBe(false);
-      expect(status.record?.ended?.status).toBe("done");
+      expect(status.live).toBe(true);
+      expect(status.record?.outcome?.status).toBe("done");
+      expect(status.record?.ended).toBeUndefined();
     });
   });
 

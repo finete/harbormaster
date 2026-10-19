@@ -210,4 +210,33 @@ describe("JsonConfigAccess", () => {
       "Invalid Harbormaster config",
     );
   });
+
+  it("round-trips a valid launch config and rejects an invalid one", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        launch: { maxConcurrent: 3, defaultModel: "openai/gpt" },
+      }),
+    );
+    const config = await new JsonConfigAccess(path).load();
+    expect(config.launch).toEqual({
+      maxConcurrent: 3,
+      defaultModel: "openai/gpt",
+    });
+
+    await writeFile(path, JSON.stringify({ launch: { maxConcurrent: 0 } }));
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "maxConcurrent",
+    );
+
+    await writeFile(path, JSON.stringify({ launch: { maxConcurrent: 1.5 } }));
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "maxConcurrent",
+    );
+
+    await writeFile(path, JSON.stringify({ launch: { defaultModel: "" } }));
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "defaultModel",
+    );
+  });
 });

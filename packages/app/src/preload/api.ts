@@ -58,6 +58,8 @@ export type {
 export interface ToDoneForce {
   removeDirty?: boolean;
   deleteUnmerged?: boolean;
+  /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+  leaveChildren?: boolean;
 }
 
 /**

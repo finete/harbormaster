@@ -37,6 +37,7 @@ import {
   JsonWorkspaceBindingAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
   resolveStatePaths,
 } from "../src/index.js";
@@ -175,6 +176,7 @@ async function fixture(): Promise<Fixture> {
     worktrees: new LocalGitWorktreeAccess(),
     bindings,
     sessions: new LocalSessionFileAccess(),
+    scratch: new LocalScratchWorkspaceAccess(join(stateDir, "scratch")),
     pullRequests: noGithub,
     versions: noGithub,
   });
@@ -500,3 +502,81 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     expect(result.task.initialPrompt).toBe("Again");
   });
 });
+
+describe.skipIf(!gitAvailable)(
+  "claimSessionLaunch: launched-task model + interrupted clearing",
+  () => {
+    it("passes the launch's model through on the first launch only", async () => {
+      const f = await fixture();
+      const task = await f.manager.launchTask({
+        relation: "standalone",
+        title: "Modeled",
+        prompt: "do it",
+        repository: { repositoryId: f.repositoryId },
+        model: "anthropic/claude-opus",
+      });
+
+      const first = await f.manager.claimSessionLaunch(task.id);
+      expect(first).toMatchObject({
+        mode: "new",
+        model: "anthropic/claude-opus",
+      });
+
+      // A later relaunch (resume) never carries the model again.
+      const second = await f.manager.claimSessionLaunch(task.id);
+      expect(second?.mode).toBe("resume");
+      expect(second).not.toHaveProperty("model");
+    });
+
+    it("falls back to the configured default model when the launch has none", async () => {
+      const f = await fixture();
+      await writeFile(
+        join(f.root, "state", "config.json"),
+        JSON.stringify({
+          automation: false,
+          movers: [],
+          codeRoot: join(f.root, "Code"),
+          branchPrefix: "",
+          launch: { defaultModel: "openai/gpt" },
+        }),
+      );
+      const task = await f.manager.launchTask({
+        relation: "standalone",
+        title: "Defaulted",
+        prompt: "do it",
+        repository: { repositoryId: f.repositoryId },
+      });
+      const first = await f.manager.claimSessionLaunch(task.id);
+      expect(first).toMatchObject({ mode: "new", model: "openai/gpt" });
+    });
+
+    it("never passes a model for a task not created by launchTask", async () => {
+      const f = await fixture();
+      const task = await startedTask(f);
+      const first = await f.manager.claimSessionLaunch(task.id);
+      expect(first?.mode).toBe("new");
+      expect(first).not.toHaveProperty("model");
+    });
+
+    it("clears an interrupted marker back to started on the next session launch", async () => {
+      const f = await fixture();
+      const task = await f.manager.launchTask({
+        relation: "standalone",
+        title: "Interrupted",
+        prompt: "do it",
+        repository: { repositoryId: f.repositoryId },
+      });
+      await f.manager.claimPendingLaunches(1);
+      await f.manager.markLaunchesInterrupted([task.id]);
+      expect((await f.manager.getTask(task.id))?.launch?.status).toBe(
+        "interrupted",
+      );
+
+      await f.manager.claimSessionLaunch(task.id);
+
+      const after = await f.manager.getTask(task.id);
+      expect(after?.launch?.status).toBe("started");
+      expect(after?.launch?.interruptedAt).toBeUndefined();
+    });
+  },
+);

@@ -145,6 +145,40 @@ export interface Task {
   completedAt?: string;
   archivedAt?: string;
   lastError?: string;
+  /**
+   * Set for a `child`-launched task (see `CoreCommands.launchTask`): the
+   * launching task's id. Nested under the parent on the board; the parent
+   * can poll it (`listChildren`) and a Done parent with active children
+   * asks for confirmation (`toDone`'s `activeChildren` case). One level
+   * only — a task with `parentTaskId` set can never itself become a parent
+   * (`launchTask` rejects a `child` relation from it).
+   */
+  parentTaskId?: string;
+  /**
+   * Display-only provenance for a `standalone`-launched task: the task (if
+   * any) whose session called `launchTask`. Unlike `parentTaskId` this
+   * creates no lineage — no nesting, no Done confirmation, no polling.
+   */
+  launchedFromTaskId?: string;
+  /** Present only for a task created by `launchTask`: its background-launch queue/run state. */
+  launch?: TaskLaunch;
+}
+
+/**
+ * A `launchTask`-created task's background-launch state (see
+ * `ai/prds/task-launching.md`): queued until the app's launcher claims it
+ * (`CoreCommands.claimPendingLaunches`), then started once its session pty
+ * is actually running. `interrupted` means the app quit mid-turn; it clears
+ * back to `started` on the task's next session launch
+ * (`CoreCommands.claimSessionLaunch`), never auto-resuming on its own.
+ */
+export interface TaskLaunch {
+  status: "queued" | "started" | "interrupted";
+  requestedAt: string;
+  startedAt?: string;
+  interruptedAt?: string;
+  /** Per-launch model override; falls back to `GlobalConfig.launch.defaultModel`, then the harness default. */
+  model?: string;
 }
 
 /**
@@ -203,6 +237,16 @@ export interface WorkspaceBinding {
    */
   forkFromSessionPath?: string;
   detached: boolean;
+  /**
+   * A non-git scratch workspace (a `launchTask` task with `repository: {
+   * none: true }`): `worktreePath` points at a plain directory under
+   * `<stateDir>/scratch/<taskId>`, never a git worktree. `toDone` and the
+   * done-cleanup retry sweep must never run worktree/branch git verbs
+   * against it — they park the binding (clear `worktreePath`) and leave the
+   * directory on disk, exactly like a git worktree binding minus the git
+   * removal.
+   */
+  scratch?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -235,6 +279,17 @@ export interface PresenceRecord {
   logPath?: string;
   /** Whether an agent turn is running right now. */
   runningTurn?: boolean;
+  /**
+   * Self-reported done/blocked verdict from `harbormaster_report_status`
+   * while the process is STILL LIVE (see `PresenceAccess.reportOutcome`):
+   * recorded without ending the attachment, so the task stays live ("your
+   * move" for a finished/blocked child) and the card can show the note as
+   * a secondary line. Cleared when the next turn starts (`setTurnActive`
+   * with `running: true`) — a stale verdict from before the user's reply
+   * must never linger. Unrelated to `ended`, which keeps its original
+   * meaning: the process is gone.
+   */
+  outcome?: { status: "done" | "blocked"; note?: string; at: string };
   /** Present once the attachment ended; absence + fresh heartbeat = live. */
   ended?: PresenceOutcome;
 }
@@ -257,7 +312,12 @@ export interface GlobalConfig {
   branchPrefix?: string;
   /** Per-repository settings (deployment pipelines today), keyed by normalized repository id. */
   repositories?: Record<string, RepositoryConfig>;
+  /** Background-task-launch settings (see `ai/prds/task-launching.md`). */
+  launch?: { maxConcurrent?: number; defaultModel?: string };
 }
+
+/** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */
+export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
 
 /** Written to a fresh config file: the built-in movers, spelled out so users see what they can reorder or drop. */
 export const defaultGlobalConfig = (): GlobalConfig => ({

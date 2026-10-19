@@ -32,6 +32,7 @@ import {
   JsonWorkspaceBindingAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
   resolveStatePaths,
 } from "../src/index.js";
@@ -331,6 +332,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
       worktrees: new LocalGitWorktreeAccess(),
       bindings,
       sessions: new LocalSessionFileAccess(),
+      scratch: new LocalScratchWorkspaceAccess(join(f.stateDir, "scratch")),
       pullRequests: noGithub,
       versions: noGithub,
     });

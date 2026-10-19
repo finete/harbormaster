@@ -35,6 +35,14 @@ export interface TaskStateAccess {
     patch: (current: Task) => Task | undefined,
   ): Promise<Task | undefined>;
   removeTask(id: string): Promise<void>;
+  /**
+   * Atomically flip up to `limit` queued launches (`task.launch.status ===
+   * "queued"`, `task.state === "dev"`) to `started` (`startedAt`), FIFO by
+   * `launch.requestedAt`, under the task-state lock "- so two concurrent
+   * callers never both claim the same launch. `limit <= 0` claims nothing.
+   * Returns the claimed tasks as persisted, in the order they were started.
+   */
+  claimQueuedLaunches(limit: number, startedAt: string): Promise<Task[]>;
 }
 
 /**
@@ -96,6 +104,17 @@ export interface PresenceAccess {
  */
 export interface SessionFileAccess {
   exists(sessionPath: string): Promise<boolean>;
+}
+
+/**
+ * Resource Access for a `launchTask` `{ none: true }` task's scratch
+ * workspace: a plain directory (never a git worktree) that stands in for a
+ * worktree so the app's existing "launch pi when a binding has
+ * `worktreePath`" path works unchanged.
+ */
+export interface ScratchWorkspaceAccess {
+  /** Create (idempotently) `<stateDir>/scratch/<taskId>` and return its absolute path. */
+  ensureScratchDirectory(taskId: string): Promise<string>;
 }
 
 /** Per-user global configuration storage. */

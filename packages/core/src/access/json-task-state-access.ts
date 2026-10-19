@@ -84,6 +84,41 @@ export class JsonTaskStateAccess implements TaskStateAccess {
     });
   }
 
+  async claimQueuedLaunches(limit: number, startedAt: string): Promise<Task[]> {
+    if (limit <= 0) return [];
+    return withFileLock(this.lockPath, async () => {
+      const state = await this.readValidated();
+      const queued = state.tasks
+        .filter(
+          (task) => task.state === "dev" && task.launch?.status === "queued",
+        )
+        .sort((a, b) =>
+          (a.launch?.requestedAt ?? "").localeCompare(
+            b.launch?.requestedAt ?? "",
+          ),
+        )
+        .slice(0, limit);
+      const claimed: Task[] = [];
+      for (const task of queued) {
+        const index = state.tasks.findIndex((item) => item.id === task.id);
+        if (index < 0 || !task.launch) continue;
+        const next: Task = {
+          ...task,
+          launch: { ...task.launch, status: "started", startedAt },
+          updatedAt: startedAt,
+        };
+        delete next.launch?.interruptedAt;
+        state.tasks[index] = next;
+        claimed.push(structuredClone(next));
+      }
+      if (claimed.length > 0) {
+        this.validate(state);
+        await writeJsonAtomic(this.statePath, state);
+      }
+      return claimed;
+    });
+  }
+
   private async mutate(change: (state: TaskStateFile) => void): Promise<void> {
     await withFileLock(this.lockPath, async () => {
       const state = await this.readValidated();
@@ -155,6 +190,20 @@ function isValidAwaiting(value: unknown): boolean {
   return false;
 }
 
+function isValidLaunch(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return (
+    (["queued", "started", "interrupted"] as const).includes(
+      value.status as never,
+    ) &&
+    isString(value.requestedAt) &&
+    isOptionalString(value.startedAt) &&
+    isOptionalString(value.interruptedAt) &&
+    isOptionalString(value.model)
+  );
+}
+
 function validTask(value: unknown): value is Task {
   if (!isRecord(value)) return false;
   return (
@@ -171,6 +220,9 @@ function validTask(value: unknown): value is Task {
     isOptionalString(value.pihomeIssueId) &&
     isValidPr(value.pr) &&
     isValidAwaiting(value.awaiting) &&
+    isOptionalString(value.parentTaskId) &&
+    isOptionalString(value.launchedFromTaskId) &&
+    isValidLaunch(value.launch) &&
     isString(value.createdAt) &&
     isString(value.updatedAt) &&
     isString(value.stateChangedAt) &&

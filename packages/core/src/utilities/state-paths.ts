@@ -14,6 +14,8 @@ export interface StatePaths {
   readonly workspaceBindingsLockFile: string;
   readonly configFile: string;
   readonly presenceDir: string;
+  /** Root for `launchTask` `{ none: true }` scratch directories: `<stateDir>/scratch/<taskId>`. */
+  readonly scratchDir: string;
 }
 
 export function resolveStatePaths(
@@ -27,5 +29,6 @@ export function resolveStatePaths(
     workspaceBindingsLockFile: join(stateDir, "workspace-bindings.lock"),
     configFile: join(stateDir, "config.json"),
     presenceDir: join(stateDir, "presence"),
+    scratchDir: join(stateDir, "scratch"),
   };
 }
