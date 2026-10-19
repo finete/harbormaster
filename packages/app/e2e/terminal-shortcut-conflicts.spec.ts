@@ -105,6 +105,8 @@ test.describe("Ctrl+W, Ctrl+B, Ctrl+Shift+Up reach the pty on darwin (not stolen
     // One shared raw reader for all three combos.
     await window.keyboard.type("stty -icanon -echo; cat -v");
     await window.keyboard.press("Enter");
+    // Intentional fixed wait: no deterministic ready signal from raw-mode pty
+    // reader; prevents first keypress from racing cat's exec and being dropped.
     await window.waitForTimeout(300);
 
     // Ctrl+W — regression: must send ^W to the pty, not close the task.

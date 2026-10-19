@@ -145,6 +145,8 @@ test("drag-drop file onto terminal pane → escaped path inserted", async () => 
   // Enter raw mode so we see exactly what's inserted.
   await window.keyboard.type("stty -icanon -echo; cat -v");
   await window.keyboard.press("Enter");
+  // Intentional fixed wait: no ready signal from raw-mode pty; prevents the
+  // following CDP drop event from racing cat's exec.
   await window.waitForTimeout(300);
 
   // Get the terminal panel's bounding box for the drop target.
@@ -193,6 +195,9 @@ test("drag-drop a file outside the terminal pane does NOT navigate the window", 
   await dispatchFileDrag(cdp, dropTarget.x, dropTarget.y, [dummyFile]);
   await cdp.detach();
 
+  // Intentional fixed wait: proving the window does NOT navigate within this
+  // window. There is no positive condition to observe; if navigation were going
+  // to happen it would complete within 500ms on any CI box.
   await window.waitForTimeout(500);
 
   // The URL should still be the same (no navigation to file://).

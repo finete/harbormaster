@@ -185,6 +185,8 @@ test.describe("the presence poll surfaces a running badge within one poll interv
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        // Fast presence poll so presence-driven assertions resolve in ms, not seconds.
+        HARBORMASTER_PRESENCE_POLL_MS: "250",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -318,6 +320,8 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_PI_COMMAND: fakePiPath,
+        // Fast presence poll so corroboration assertions resolve in ms, not seconds.
+        HARBORMASTER_PRESENCE_POLL_MS: "250",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -369,11 +373,34 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
     const realPid = Number(readFileSync(pidFile, "utf8").trim());
     expect(Number.isInteger(realPid) && realPid > 0).toBe(true);
 
-    // A presence record self-reporting a running turn, but under a pid that
-    // is definitely not this pane's real process (impersonation/staleness,
-    // not an off-by-one): the app must not trust its "working" claim just
-    // because a pane for this task happens to be open.
+    // Readiness probe: first write a *real* presence record (matching realPid)
+    // so the next poll tick shows badge-running. Then overwrite with the bogus
+    // record; the following poll must reject it via corroboration and the badge
+    // must disappear. This replaces a fixed 6s wait with two observable
+    // positive-condition transitions.
     const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
+    await presence.register({
+      taskId,
+      sessionPath: "/tmp/real-session-corroboration.jsonl",
+      pid: realPid,
+      mode: "interactive",
+      at: new Date().toISOString(),
+    });
+    await presence.setTurnActive(
+      taskId,
+      realPid,
+      true,
+      new Date().toISOString(),
+    );
+
+    await window.getByTestId("board-button").click();
+    const card = cardLocator(window, "Corroboration Task");
+    // Wait for badge-running to appear: confirms the poll processed the real record.
+    await expect(card.getByTestId("badge-running")).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // Now overwrite with the bogus-pid record.
     const bogusPid = 2_147_483_646; // outside any real pid range on this host
     await presence.register({
       taskId,
@@ -389,13 +416,11 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
       new Date().toISOString(),
     );
 
-    await window.getByTestId("board-button").click();
-    // Give the poll a few ticks to have definitely run at least once with
-    // the bogus record in place, then assert the spinner never appeared.
-    await window.waitForTimeout(6_000);
-    await expect(
-      cardLocator(window, "Corroboration Task").getByTestId("badge-running"),
-    ).toHaveCount(0);
+    // Wait for badge-running to disappear: confirms corroboration rejected the
+    // bogus pid — a deterministic observable transition instead of a fixed wait.
+    await expect(card.getByTestId("badge-running")).toHaveCount(0, {
+      timeout: 5_000,
+    });
 
     // Kill the pane's real process out from under the app (a crash, an OOM
     // kill, `kill -9` from outside, ...) "- physical process truth, not

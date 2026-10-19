@@ -116,10 +116,8 @@ test("Shift+Enter sends a CSI-u sequence to the pty; plain Enter still behaves n
   await window.keyboard.type("stty -icanon -echo; cat -v");
   await window.keyboard.press("Enter");
 
-  // Give the reader a beat to actually be the foreground reader before
-  // sending the combo (no deterministic "ready" signal from a shell-less
-  // raw-mode reader; a short settle avoids a flaky race against `cat`'s
-  // exec).
+  // Intentional fixed wait: no deterministic "ready" signal from a shell-less
+  // raw-mode reader; a short settle avoids a flaky race against `cat`'s exec.
   await window.waitForTimeout(300);
 
   await window.keyboard.press("Shift+Enter");

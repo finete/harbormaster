@@ -126,11 +126,10 @@ test("terminal search: open, find text, no-results indicator, Esc restores focus
   await searchInput.fill("needle-9");
   await expect(searchBar).toBeVisible();
   await expect(window.getByTestId("terminal-search-empty")).toHaveCount(0);
-  await window.waitForTimeout(300);
 
   // Switch to a term that does NOT exist — empty indicator appears.
   await searchInput.fill("zzz-absolutely-not-there-xyz");
-  await window.waitForTimeout(300);
+  // No fixed sleep: toBeVisible polls internally.
   await expect(window.getByTestId("terminal-search-empty")).toBeVisible({
     timeout: 5_000,
   });

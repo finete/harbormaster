@@ -249,6 +249,9 @@ test("closing a workspace, then relaunching, does not restore it", async () => {
   await expect(window.getByTestId(`task-workspace-${taskId}`)).toHaveCount(0);
   await expect(window.getByTestId("workspace-empty-hint")).toBeVisible();
   // No new pi launch: the closed task's pane never respawned.
+  // Intentional fixed wait: proving no new pi launch was spawned within this
+  // window. There is no positive observable condition; if a pane were going to
+  // respawn it would appear within 500ms.
   await window.waitForTimeout(500);
   expect(launches().length).toBe(launchesBeforeRelaunch);
 });
