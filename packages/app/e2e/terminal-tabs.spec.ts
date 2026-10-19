@@ -262,6 +262,9 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
 
     // --- clicking an existing tab must NOT add a new panel ---
     await tabs.first().click();
+    // Intentional fixed wait: proving a click on an existing tab does NOT
+    // spawn a new panel. No positive condition to observe; if a panel were
+    // going to appear it would do so within 300ms.
     await window.waitForTimeout(300);
     await expect(tabs).toHaveCount(2);
     await expect(panels).toHaveCount(1);

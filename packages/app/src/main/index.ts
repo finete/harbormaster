@@ -352,11 +352,21 @@ async function pollPresenceOnce(): Promise<void> {
   }
 }
 
+/**
+ * Presence poll interval in milliseconds. Configurable via
+ * `HARBORMASTER_PRESENCE_POLL_MS` so e2e tests can use a short interval
+ * (e.g. 250ms) without changing production behaviour (default: 5000ms).
+ */
+const PRESENCE_POLL_MS = Math.max(
+  100,
+  Number(process.env.HARBORMASTER_PRESENCE_POLL_MS ?? 5_000),
+);
+
 function startPresencePolling(): void {
   if (presencePollTimer) return;
   presencePollTimer = setInterval(() => {
     void pollPresenceOnce();
-  }, 5_000);
+  }, PRESENCE_POLL_MS);
   void pollPresenceOnce();
 }
 

@@ -99,6 +99,8 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        // Fast presence poll so presence-driven assertions resolve in ms, not seconds.
+        HARBORMASTER_PRESENCE_POLL_MS: "250",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -320,6 +322,7 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        HARBORMASTER_PRESENCE_POLL_MS: "250",
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);

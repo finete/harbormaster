@@ -451,15 +451,15 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
       window.getByTestId("add-terminal-button"),
     ];
 
-    const idle = await measurePhase(app, window, hoverTargets);
-    console.log(`[perf] idle ${JSON.stringify(idle)}`);
-
     writeFileSync(trigger, "go");
     // Let the flood reach steady state before sampling.
     await expect(window.getByTestId("terminal-tab").first()).toContainText(
       "working",
       { timeout: 20_000 },
     );
+    // Intentional fixed wait: the tab title confirms the flood started, but the
+    // IPC batcher needs ~1s to fill its first 64K window to steady-state
+    // throughput. There is no observable signal for "batcher at peak rate".
     await window.waitForTimeout(1_500);
 
     const flood = await measurePhase(app, window, hoverTargets);

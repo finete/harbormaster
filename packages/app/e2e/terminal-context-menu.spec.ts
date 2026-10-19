@@ -129,9 +129,8 @@ test("Clear menu item clears the terminal viewport", async () => {
 
   // Click "Clear".
   await window.getByTestId("terminal-context-menu-item-clear").click();
-  await window.waitForTimeout(300);
 
-  // The marker should be gone from the viewport.
+  // The marker should be gone from the viewport (toContainText polls internally).
   await expect(panel).not.toContainText("before-clear-6");
 });
 

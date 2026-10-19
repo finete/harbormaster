@@ -117,6 +117,9 @@ async function startRawReader(): Promise<void> {
   await panel.click();
   await window.keyboard.type("stty -icanon -echo; cat -v");
   await window.keyboard.press("Enter");
+  // Intentional fixed wait: no deterministic "cat -v ready" signal from a
+  // raw-mode pty reader; this settle prevents the first keypress from racing
+  // cat's exec and being dropped.
   await window.waitForTimeout(300);
 }
 
@@ -142,6 +145,8 @@ test.describe("macOS keyboard parity (darwin only)", () => {
     await window.keyboard.press("Alt+Backspace");
     await expect(panel).toContainText("^[^?", { timeout: 10_000 });
     await window.keyboard.press("Control+c");
+    // Intentional fixed wait: let the shell return to canonical mode before the
+    // next test opens a new raw reader (no ready signal after Ctrl+C settles).
     await window.waitForTimeout(200);
   });
 
@@ -154,6 +159,9 @@ test.describe("macOS keyboard parity (darwin only)", () => {
 
     // Cmd+K should clear the viewport.
     await window.keyboard.press("Meta+k");
+    // Intentional fixed wait: xterm's clear is synchronous in the renderer but
+    // the viewport DOM update may be one frame behind; the following
+    // not.toContainText assertion has no built-in retry timeout.
     await window.waitForTimeout(300);
 
     await window.keyboard.type("echo after-$((1+1))");
