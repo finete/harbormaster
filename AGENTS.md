@@ -61,3 +61,26 @@ as collaborators.
 review ceremony. Subagents/implementers work on short-lived local branches or
 worktrees purely as transport; the supervisor reviews, merges to `main`, and
 pushes. Keep `main` green (typecheck + tests pass at every commit).
+
+## Testing workflow
+
+The e2e suite is slow (full run ~2.5 min); spend it deliberately.
+
+- **Iterate on targeted tests.** While working, run only the specs and unit
+  files you touch: `npx playwright test e2e/<spec>.spec.ts` (after
+  `npx electron-vite build` if main/preload/renderer changed) and
+  `npx vitest run <file>`. Never run the full e2e suite to check one change.
+- **Full suite once, at the end.** The complete gate (biome → lint →
+  typecheck → `npm test` → `npm test -w @harbormaster/app`, zero
+  `uncaughtException` lines) runs once when the work is done. Rerun it only
+  after a fix to something it caught.
+- **Prove new tests can fail, cheaply.** Each new e2e must be shown to fail
+  with its feature reverted — run *only that spec* for the reverted check,
+  then restore. A test that passes with the feature broken is worse than none.
+- **Keep the suite lean.** No e2e whose protection a unit test or broader e2e
+  already provides; one e2e per integration seam; pure logic goes in unit
+  tests; merge small same-fixture tests rather than adding launches. Use
+  condition waits, not fixed sleeps (a sleep only where "nothing happens"
+  is the behavior, with a comment).
+- **Leave no app instances behind.** Close every Electron app a test or
+  scratch script launches; leaked instances slow every later run.
