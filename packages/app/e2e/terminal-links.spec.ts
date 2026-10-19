@@ -125,6 +125,100 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
+test("plain URL Cmd-clicked → written to link sink; plain click does NOT write", async () => {
+  test.skip(
+    process.platform !== "darwin",
+    "Meta (Cmd) modifier is macOS-specific",
+  );
+
+  const panel = window.getByTestId("terminal-panel").first();
+  await panel.click();
+
+  const testUrl = "https://harbormaster.test/link-e2e-click";
+  await window.keyboard.type(`echo ${testUrl}`);
+  await window.keyboard.press("Enter");
+  await expect(panel).toContainText(testUrl, { timeout: 10_000 });
+
+  // Allow WebLinksAddon to register the URL (it scans on hover, but the
+  // link provider is also invoked when the renderer finishes the line).
+  await window.waitForTimeout(800);
+
+  // --- Compute the URL's pixel position from xterm's real cell geometry ---
+  //
+  // With screenReaderMode:true, xterm maintains .xterm-accessibility-tree:
+  // one <div role="listitem"> per visible terminal row.  Each row element has:
+  //   - height = cell height in CSS px  (set inline via style.height)
+  //   - width  = lastColumn * cellWidth (set via scaleX CSS transform, where
+  //              lastColumn = trimmed text length for ASCII rows)
+  //
+  // Therefore for a row with trimmed text `t` (ASCII):
+  //   cellWidth  = rowBox.width / t.length    (boundingBox().width post-scaleX)
+  //   x_centre   = rowBox.x + (urlIdx + url.length/2) * cellWidth
+  //
+  // Playwright's locator.boundingBox() uses the same viewport coordinate space
+  // as mouse.click(x,y), so no translation is needed.
+  // The test MUST fail if the click misses — there is NO conditional skip.
+
+  // Find the URL row via Playwright locator (same coordinate space as mouse).
+  // .last() selects the echo-output row (URL at column 0) over the command row.
+  const urlRowLocator = panel
+    .locator(".xterm-accessibility-tree > div")
+    .filter({ hasText: testUrl })
+    .last();
+
+  await expect(urlRowLocator).toBeVisible({ timeout: 5_000 });
+  const rowBox = await urlRowLocator.boundingBox();
+  const rowText = await urlRowLocator.textContent();
+
+  expect(
+    rowBox,
+    "URL row not found in xterm-accessibility-tree (screenReaderMode must be true)",
+  ).not.toBeNull();
+  if (!rowBox || !rowText) return;
+
+  // cellWidth: scaleX aligns trimmed text to lastColumn * cellWidth pixels.
+  // For ASCII, lastColumn = textLength, so cellWidth = rowBox.width / textLength.
+  const cellWidth = rowBox.width / rowText.length;
+  const urlIdx = rowText.indexOf(testUrl);
+  const urlCenterCol = urlIdx + testUrl.length / 2;
+  const coords = {
+    x: rowBox.x + urlCenterCol * cellWidth,
+    y: rowBox.y + rowBox.height / 2,
+  };
+
+  // Hover so WebLinksAddon fires hover detection (provideLinks is synchronous
+  // in WebLinkProvider, but the linkifier fires on mousemove), then Cmd-click.
+  // NOTE: mouse.click({modifiers:["Meta"]}) does NOT set event.metaKey in
+  // Electron offscreen mode.  keyboard.down("Meta") + click does.
+  await window.mouse.move(coords.x, coords.y);
+  await window.waitForTimeout(400);
+  await window.keyboard.down("Meta");
+  await window.mouse.click(coords.x, coords.y);
+  await window.keyboard.up("Meta");
+  await window.waitForTimeout(600);
+
+  // Positive assertion: sink must contain the URL.
+  // If the click missed the link (bad coordinates), this assertion FAILS.
+  const sinkAfterCmd = readSink();
+  expect(sinkAfterCmd).toContain(testUrl);
+
+  // Clear sink for the negative control.
+  writeFileSync(linkSinkPath, "");
+
+  // Negative control: plain click on the same coordinates without Meta
+  // must NOT fire the link handler.
+  await window.mouse.move(coords.x, coords.y);
+  await window.waitForTimeout(300);
+  await window.mouse.click(coords.x, coords.y); // no modifiers
+  await window.waitForTimeout(600);
+
+  const sinkAfterPlain = readSink();
+  expect(
+    sinkAfterPlain,
+    "plain click (no Meta) must not write to the link sink",
+  ).toBe("");
+});
+
 test("OSC 8 hyperlink Cmd-clicked → URI delivered to the link sink", async () => {
   test.skip(
     process.platform !== "darwin",
