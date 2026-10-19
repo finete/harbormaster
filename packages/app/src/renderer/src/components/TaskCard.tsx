@@ -1,7 +1,11 @@
 import { useDraggable } from "@dnd-kit/core";
 import { Loader2 } from "lucide-react";
 import type { HTMLAttributes, JSX } from "react";
-import type { Task } from "../../../preload/api";
+import type { PresenceBadge, Task } from "../../../preload/api";
+import {
+  deriveLaunchMarker,
+  deriveOutcomeLine,
+} from "../lib/task-status-lines";
 import {
   lastInteractionTimestamp,
   relativeTime,
@@ -13,9 +17,7 @@ import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 
-type TaskCardPresence =
-  | { live: boolean; runningTurn: boolean; heartbeatAt?: string }
-  | undefined;
+type TaskCardPresence = PresenceBadge | undefined;
 
 /**
  * One board card: title, branch, PR/presence/unread chrome only, plus a
@@ -56,6 +58,12 @@ interface TaskCardProps {
   selected?: boolean;
   /** "Finished while you weren't looking" (Orca polish item 7, see core-client.ts's useUnreadTaskIds); a subtle card badge, cleared once the task gains focus. */
   unread?: boolean | undefined;
+  /** Rendered indented/attached under its parent's card (see lib/task-lineage.ts); purely visual. */
+  nested?: boolean;
+  /** A child elsewhere (different column/group) whose parent still exists: the "\u21b3 parent title" lineage line (lib/task-lineage.ts). */
+  parentTitle?: string;
+  /** A standalone launch's display-only provenance line (lib/task-status-lines.ts). */
+  provenanceTitle?: string;
 }
 
 function DraggableTaskCard(props: TaskCardProps): JSX.Element {
@@ -80,6 +88,9 @@ function TaskCardFace({
   onSelect,
   selected,
   unread,
+  nested,
+  parentTitle,
+  provenanceTitle,
   variant,
   cardRef,
   dragProps,
@@ -91,6 +102,8 @@ function TaskCardFace({
   const running = !!presence?.runningTurn;
   // Live but idle = pi-home's ● "your move": the agent is waiting on you.
   const attention = !!presence?.live && !running;
+  const outcome = deriveOutcomeLine(presence);
+  const launchMarker = deriveLaunchMarker(task);
 
   // Same 30s tick the sidebar rail uses (lib/use-now.ts), so the card's
   // relative time and waiting-duration stay fresh without a prop from Board.
@@ -122,6 +135,9 @@ function TaskCardFace({
         !isOverlay &&
           selected &&
           "ring-2 ring-primary ring-offset-1 ring-offset-background",
+        // Attached under its parent's card (see lib/task-lineage.ts): a
+        // visible left rail + indent, pi-home-style tree attachment.
+        nested && "ml-4 border-l-2 border-l-primary/30",
       )}
       {...dragProps}
     >
@@ -168,7 +184,41 @@ function TaskCardFace({
           )}
         </p>
       )}
-      {(running || attention || task.pr) && (
+      {parentTitle && (
+        <p
+          className="truncate text-xs text-muted-foreground"
+          data-slot="lineage"
+          data-testid="card-lineage-line"
+          title={`Child of "${parentTitle}"`}
+        >
+          ↳ {parentTitle}
+        </p>
+      )}
+      {provenanceTitle && (
+        <p
+          className="truncate text-xs text-muted-foreground"
+          data-slot="provenance"
+          data-testid="card-provenance-line"
+        >
+          {provenanceTitle}
+        </p>
+      )}
+      {outcome && (
+        <p
+          className={cn(
+            "truncate text-xs",
+            outcome.status === "blocked"
+              ? "text-amber-300"
+              : "text-muted-foreground",
+          )}
+          data-slot="outcome"
+          data-testid="card-outcome-line"
+          title={outcome.note}
+        >
+          {outcome.note}
+        </p>
+      )}
+      {(running || attention || launchMarker || task.pr) && (
         <div
           className="flex flex-wrap items-center gap-1.5 pt-1"
           data-slot="badges"
@@ -194,6 +244,24 @@ function TaskCardFace({
                 aria-hidden
               />
               your move
+            </Badge>
+          )}
+          {launchMarker === "queued" && (
+            <Badge
+              variant="secondary"
+              className="shrink-0"
+              data-testid="badge-launch-queued"
+            >
+              queued
+            </Badge>
+          )}
+          {launchMarker === "interrupted" && (
+            <Badge
+              variant="outline"
+              className="shrink-0 gap-1 border-amber-400/60 text-amber-300"
+              data-testid="badge-launch-interrupted"
+            >
+              interrupted
             </Badge>
           )}
           {task.pr && (

@@ -115,6 +115,43 @@ describe("buildSelectionGrid", () => {
       { state: "done", taskIds: ["d2"] },
     ]);
   });
+
+  it("excludes a lineage-collapsed task's nested children (never selectable while hidden)", () => {
+    const columns: BoardColumn[] = [
+      {
+        state: "backlog",
+        title: "Backlog",
+        groups: [
+          {
+            id: "scratch",
+            tasks: [
+              task({ id: "parent", state: "backlog" }),
+              task({ id: "child", parentTaskId: "parent", state: "backlog" }),
+            ],
+          },
+        ],
+      },
+    ];
+    const collapsed = buildSelectionGrid(
+      columns,
+      false,
+      undefined,
+      undefined,
+      new Set(["parent"]),
+    );
+    expect(collapsed).toEqual([{ state: "backlog", taskIds: ["parent"] }]);
+
+    const expanded = buildSelectionGrid(
+      columns,
+      false,
+      undefined,
+      undefined,
+      new Set(),
+    );
+    expect(expanded).toEqual([
+      { state: "backlog", taskIds: ["parent", "child"] },
+    ]);
+  });
 });
 
 describe("firstSelectableTaskId / resolveSelection", () => {

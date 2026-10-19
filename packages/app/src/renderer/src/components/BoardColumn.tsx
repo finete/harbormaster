@@ -6,7 +6,7 @@ import {
   ChevronsRight,
 } from "lucide-react";
 import type { JSX } from "react";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import type {
   BoardColumn as BoardColumnData,
   PresenceChangedPayload,
@@ -18,6 +18,9 @@ import {
   visibleGroupsForColumn,
 } from "../lib/board-selection";
 import { repoColorClass } from "../lib/repo-color";
+import type { LineageIndex } from "../lib/task-lineage";
+import { layoutLineageRows } from "../lib/task-lineage";
+import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { cn } from "../lib/utils";
 import { TaskCard } from "./TaskCard";
 import { Button } from "./ui/button";
@@ -61,6 +64,9 @@ export function BoardColumn({
   collapsed = false,
   onToggleCollapse,
   onAutoExpandPeek,
+  lineageIndex,
+  collapsedLineageParents,
+  onToggleLineageChildren,
 }: {
   column: BoardColumnData;
   presence: PresenceChangedPayload;
@@ -82,6 +88,11 @@ export function BoardColumn({
   onToggleCollapse?: () => void;
   /** Fired after ~500ms of a drag hovering this column while it's collapsed (Azure DevOps-style auto-expand peek); Board.tsx re-collapses it on drag end/cancel. */
   onAutoExpandPeek?: () => void;
+  /** Full-board parent/child + provenance index (see lib/task-lineage.ts), built once per render in Board.tsx. */
+  lineageIndex: LineageIndex;
+  /** Saved "N children" chip collapse state (lib/sidebar-persistence.ts's `LINEAGE_COLLAPSED_PARENTS_KEY`), shared with the sidebar. */
+  collapsedLineageParents: ReadonlySet<string>;
+  onToggleLineageChildren: (parentTaskId: string) => void;
 }): JSX.Element {
   // The droppable's *node* is the content wrapper inside the cards scroller
   // (so dnd-kit's auto-scroller, which walks the hovered droppable's
@@ -287,16 +298,65 @@ export function BoardColumn({
                 </button>
                 {!groupCollapsed && (
                   <div className="flex flex-col gap-2">
-                    {group.tasks.map((task) => (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        presence={presence[task.id]}
-                        onSelect={onSelectTask}
-                        selected={selectedTaskId === task.id}
-                        unread={unreadTaskIds?.has(task.id)}
-                      />
-                    ))}
+                    {layoutLineageRows(
+                      group.tasks.map((task) => ({ task })),
+                      lineageIndex,
+                      collapsedLineageParents,
+                    ).map(({ item, nested, children, parentTitle }) => {
+                      const task = item.task;
+                      const provenanceTitle = deriveProvenanceLabel(
+                        task,
+                        (id) => lineageIndex.taskById.get(id)?.title,
+                      );
+                      return (
+                        <Fragment key={task.id}>
+                          <TaskCard
+                            task={task}
+                            presence={presence[task.id]}
+                            onSelect={onSelectTask}
+                            selected={selectedTaskId === task.id}
+                            unread={unreadTaskIds?.has(task.id)}
+                            nested={nested}
+                            {...(parentTitle ? { parentTitle } : {})}
+                            {...(provenanceTitle ? { provenanceTitle } : {})}
+                          />
+                          {children && (
+                            <button
+                              type="button"
+                              data-testid={`lineage-children-toggle-${task.id}`}
+                              disabled={!children.nestedHere}
+                              aria-expanded={
+                                children.nestedHere
+                                  ? !children.collapsed
+                                  : undefined
+                              }
+                              onClick={() => onToggleLineageChildren(task.id)}
+                              className={cn(
+                                "-mt-1 flex items-center gap-1 self-start pl-1 text-[11px] text-muted-foreground",
+                                children.nestedHere
+                                  ? "hover:text-foreground"
+                                  : "cursor-default opacity-70",
+                              )}
+                            >
+                              {children.nestedHere &&
+                                (children.collapsed ? (
+                                  <ChevronRight
+                                    className="h-3 w-3 shrink-0"
+                                    aria-hidden
+                                  />
+                                ) : (
+                                  <ChevronDown
+                                    className="h-3 w-3 shrink-0"
+                                    aria-hidden
+                                  />
+                                ))}
+                              {children.count}{" "}
+                              {children.count === 1 ? "child" : "children"}
+                            </button>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     {previewInGroup && group.id === landingGroupId && (
                       <DropPreview state={column.state} />
                     )}

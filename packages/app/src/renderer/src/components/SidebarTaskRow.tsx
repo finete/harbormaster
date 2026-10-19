@@ -1,7 +1,11 @@
-import { Pin, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Pin, X } from "lucide-react";
 import type { JSX, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
+import {
+  deriveLaunchMarker,
+  deriveOutcomeLine,
+} from "../lib/task-status-lines";
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
@@ -155,6 +159,11 @@ export function SidebarTaskRow({
   onRenameRequest,
   onContextMenu,
   rowRef,
+  nested = false,
+  parentTitle,
+  provenanceTitle,
+  childrenInfo,
+  onToggleChildren,
 }: {
   row: SidebarRow;
   selected: boolean;
@@ -176,6 +185,15 @@ export function SidebarTaskRow({
   /** Lets the owning Sidebar track this row's DOM node for scroll-into-view/reveal (item 1). */
   rowRef?: (taskId: string, node: HTMLDivElement | null) => void;
   /** Brief highlight after a reveal/scroll-to-current (item 1); self-clears in the parent. */
+  /** Rendered indented under its parent's row (see lib/task-lineage.ts); purely visual. */
+  nested?: boolean;
+  /** A child elsewhere whose parent still exists: the "\u21b3 parent title" lineage line. */
+  parentTitle?: string;
+  /** A standalone launch's display-only provenance line (lib/task-status-lines.ts). */
+  provenanceTitle?: string;
+  /** Set only on a row that has at least one child (lib/task-lineage.ts); the "N children" chip. */
+  childrenInfo?: { count: number; collapsed: boolean; nestedHere: boolean };
+  onToggleChildren?: () => void;
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
@@ -185,6 +203,8 @@ export function SidebarTaskRow({
       ? "your move"
       : undefined;
   const attention = !presence?.runningTurn && !!presence?.live;
+  const outcome = deriveOutcomeLine(presence);
+  const launchMarker = deriveLaunchMarker(task);
   const [draftTitle, setDraftTitle] = useState(task.title);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -253,7 +273,13 @@ export function SidebarTaskRow({
   };
 
   return (
-    <div className="border-b border-border/40 px-1.5 py-1 last:border-b-0">
+    <div
+      className={cn(
+        "border-b border-border/40 px-1.5 py-1 last:border-b-0",
+        // Attached under its parent's row (see lib/task-lineage.ts).
+        nested && "ml-3 border-l-2 border-l-primary/30 pl-1",
+      )}
+    >
       {/* biome-ignore lint/a11y/useSemanticElements: nested interactive PR chip rules out a native <button> row */}
       <div
         ref={(node) => rowRef?.(task.id, node)}
@@ -355,6 +381,28 @@ export function SidebarTaskRow({
             {stateChipLabel(task, state)}
           </span>
           <PrChip task={task} />
+          {launchMarker === "queued" && (
+            <span
+              data-testid="sidebar-row-launch-queued"
+              className={cn(
+                CHIP_BASE,
+                "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
+              )}
+            >
+              queued
+            </span>
+          )}
+          {launchMarker === "interrupted" && (
+            <span
+              data-testid="sidebar-row-launch-interrupted"
+              className={cn(
+                CHIP_BASE,
+                "border-amber-500/40 bg-amber-500/10 text-amber-300",
+              )}
+            >
+              interrupted
+            </span>
+          )}
         </div>
         {activity && (
           <div
@@ -372,6 +420,67 @@ export function SidebarTaskRow({
               {activity}
             </span>
           </div>
+        )}
+        {parentTitle && (
+          <p
+            className="truncate pl-5 text-[11px] text-muted-foreground"
+            data-testid="sidebar-row-lineage-line"
+            title={`Child of "${parentTitle}"`}
+          >
+            ↳ {parentTitle}
+          </p>
+        )}
+        {provenanceTitle && (
+          <p
+            className="truncate pl-5 text-[11px] text-muted-foreground"
+            data-testid="sidebar-row-provenance-line"
+          >
+            {provenanceTitle}
+          </p>
+        )}
+        {outcome && (
+          <p
+            className={cn(
+              "truncate pl-5 text-[11px]",
+              outcome.status === "blocked"
+                ? "text-amber-300"
+                : "text-muted-foreground",
+            )}
+            data-testid="sidebar-row-outcome-line"
+            title={outcome.note}
+          >
+            {outcome.note}
+          </p>
+        )}
+        {childrenInfo && (
+          <button
+            type="button"
+            data-testid={`sidebar-row-lineage-toggle-${task.id}`}
+            disabled={!childrenInfo.nestedHere}
+            aria-expanded={
+              childrenInfo.nestedHere ? !childrenInfo.collapsed : undefined
+            }
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleChildren?.();
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            className={cn(
+              "ml-5 flex items-center gap-1 self-start text-[11px] text-muted-foreground",
+              childrenInfo.nestedHere
+                ? "hover:text-foreground"
+                : "cursor-default opacity-70",
+            )}
+          >
+            {childrenInfo.nestedHere &&
+              (childrenInfo.collapsed ? (
+                <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+              ) : (
+                <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+              ))}
+            {childrenInfo.count}{" "}
+            {childrenInfo.count === 1 ? "child" : "children"}
+          </button>
         )}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { Loader2, Play, RotateCcw } from "lucide-react";
+import { Loader2, Play, Rocket, RotateCcw } from "lucide-react";
 import type { JSX, MouseEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
@@ -12,6 +12,7 @@ import {
   toDoneMutation,
 } from "../lib/task-mutations";
 import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
+import { type LaunchRelation, LaunchTaskDialog } from "./LaunchTaskDialog";
 import { ReopenTaskDialog } from "./ReopenTaskDialog";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
@@ -33,9 +34,63 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
   >(null);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [awaitOpen, setAwaitOpen] = useState(false);
+  // Launch dialog (see LaunchTaskDialog.tsx): one dialog instance, relation
+  // preselected by which button opened it but switchable inside.
+  const [launchRelation, setLaunchRelation] = useState<LaunchRelation | null>(
+    null,
+  );
 
   const awaitAllowed = canAwait(task);
   const doneAllowed = canDone(task);
+  // One level only (see ai/prds/task-launching.md): a task that is itself a
+  // child can never launch further children, only standalone tasks.
+  const canLaunchSubtask = !task.parentTaskId;
+
+  function launchButtons(): JSX.Element {
+    return (
+      <>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canLaunchSubtask}
+          onClick={(event) => {
+            stopClick(event);
+            setLaunchRelation("child");
+          }}
+          data-testid={`launch-subtask-button-${task.id}`}
+          title={
+            canLaunchSubtask
+              ? "Launch a child task: nested under this one, pollable"
+              : "A child task cannot launch further children (one level only)"
+          }
+        >
+          <Rocket className="h-3 w-3" />
+          Launch subtask…
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={(event) => {
+            stopClick(event);
+            setLaunchRelation("standalone");
+          }}
+          data-testid={`launch-task-button-${task.id}`}
+          title="Launch a standalone task: no lineage, no polling"
+        >
+          <Rocket className="h-3 w-3" />
+          Launch task…
+        </Button>
+        <LaunchTaskDialog
+          open={launchRelation !== null}
+          onOpenChange={(open) => {
+            if (!open) setLaunchRelation(null);
+          }}
+          fromTask={task}
+          defaultRelation={launchRelation ?? "standalone"}
+        />
+      </>
+    );
+  }
 
   function stopClick(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();
@@ -122,6 +177,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           )}
           Reopen
         </Button>
+        {launchButtons()}
         {/* Clicks inside the dialog must not bubble to the header's hosts. */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: event-propagation boundary only, not an interactive element. */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: same — keyboard events are handled by the dialog itself. */}
@@ -183,6 +239,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
         Done
         <Kbd>x</Kbd>
       </Button>
+      {launchButtons()}
       <AwaitDialog
         taskId={awaitOpen ? task.id : null}
         onCancel={() => setAwaitOpen(false)}

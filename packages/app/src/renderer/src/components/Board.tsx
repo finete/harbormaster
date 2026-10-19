@@ -15,7 +15,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { JSX } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TaskState } from "../../../preload/api";
 import { isConfirmOpen } from "../confirm";
@@ -37,9 +37,12 @@ import { modKeyLabel } from "../lib/platform";
 import {
   readBoardCollapsedColumns,
   readBoardCollapsedGroups,
+  readCollapsedLineageParents,
   storeBoardCollapsedColumns,
   storeBoardCollapsedGroups,
+  storeCollapsedLineageParents,
 } from "../lib/sidebar-persistence";
+import { buildLineageIndex } from "../lib/task-lineage";
 import {
   canAwait,
   canStart,
@@ -158,6 +161,25 @@ export function Board({
   const [peekedColumns, setPeekedColumns] = useState<Set<TaskState>>(new Set());
   // The card being dragged, rendered as the portaled DragOverlay preview.
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  // Lineage "N children" chip collapse state (see lib/task-lineage.ts),
+  // shared with the sidebar via the same localStorage key.
+  const [collapsedLineageParents, setCollapsedLineageParents] = useState<
+    Set<string>
+  >(() => readCollapsedLineageParents(window.localStorage));
+  const lineageIndex = useMemo(
+    () => buildLineageIndex(flattenBoard(columns).map((row) => row.task)),
+    [columns],
+  );
+
+  function toggleLineageChildren(parentTaskId: string): void {
+    setCollapsedLineageParents((current) => {
+      const next = new Set(current);
+      if (next.has(parentTaskId)) next.delete(parentTaskId);
+      else next.add(parentTaskId);
+      storeCollapsedLineageParents(window.localStorage, next);
+      return next;
+    });
+  }
 
   function toggleGroup(state: TaskState, groupId: string): void {
     setCollapsedGroups((current) => {
@@ -309,9 +331,17 @@ export function Board({
       showArchived,
       collapsedGroups,
       effectiveCollapsedColumns,
+      collapsedLineageParents,
     );
     setSelectedTaskId((previous) => resolveSelection(grid, previous));
-  }, [columns, showArchived, collapsedGroups, collapsedColumns, peekedColumns]);
+  }, [
+    columns,
+    showArchived,
+    collapsedGroups,
+    collapsedColumns,
+    peekedColumns,
+    collapsedLineageParents,
+  ]);
 
   // Board-axis scrolling (item 12): trackpads and horizontal wheels scroll
   // the column row natively; Shift+wheel is only converted to horizontal
@@ -392,6 +422,7 @@ export function Board({
         showArchived,
         collapsedGroups,
         effectiveCollapsedColumns,
+        collapsedLineageParents,
       );
       switch (event.key) {
         case "ArrowLeft":
@@ -469,6 +500,7 @@ export function Board({
     collapsedGroups,
     collapsedColumns,
     peekedColumns,
+    collapsedLineageParents,
     selectedTaskId,
     selectedTask,
     onSelectTask,
@@ -525,6 +557,9 @@ export function Board({
               collapsed={effectiveCollapsedColumns.has(column.state)}
               onToggleCollapse={() => toggleColumn(column.state)}
               onAutoExpandPeek={() => autoExpandPeek(column.state)}
+              lineageIndex={lineageIndex}
+              collapsedLineageParents={collapsedLineageParents}
+              onToggleLineageChildren={toggleLineageChildren}
             />
           ))}
         </div>

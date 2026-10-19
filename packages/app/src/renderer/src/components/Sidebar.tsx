@@ -16,17 +16,26 @@ import type {
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
-import { useBoard, usePresenceMap, useUnreadTaskIds } from "../core-client";
+import {
+  flattenBoard,
+  useBoard,
+  usePresenceMap,
+  useUnreadTaskIds,
+} from "../core-client";
 import { modKeyLabel } from "../lib/platform";
 import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
 import {
   readCollapsedGroups,
+  readCollapsedLineageParents,
   readPinnedTaskIds,
   storeCollapsedGroups,
+  storeCollapsedLineageParents,
   storePinnedTaskIds,
   togglePinned,
 } from "../lib/sidebar-persistence";
+import { buildLineageIndex, layoutLineageRows } from "../lib/task-lineage";
+import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
@@ -133,6 +142,24 @@ export function Sidebar({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readCollapsedGroups(window.localStorage),
   );
+  // Lineage "N children" chip collapse state (see lib/task-lineage.ts),
+  // shared with the board via the same localStorage key.
+  const [collapsedLineageParents, setCollapsedLineageParents] = useState<
+    Set<string>
+  >(() => readCollapsedLineageParents(window.localStorage));
+  const lineageIndex = useMemo(
+    () => buildLineageIndex(flattenBoard(columns).map((row) => row.task)),
+    [columns],
+  );
+  const toggleLineageChildren = useCallback((parentTaskId: string): void => {
+    setCollapsedLineageParents((current) => {
+      const next = new Set(current);
+      if (next.has(parentTaskId)) next.delete(parentTaskId);
+      else next.add(parentTaskId);
+      storeCollapsedLineageParents(window.localStorage, next);
+      return next;
+    });
+  }, []);
   const [collapsed, setCollapsed] = useState(readStoredCollapsed);
   const [width, setWidth] = useState(readStoredWidth);
   const [resizing, setResizing] = useState(false);
@@ -339,7 +366,18 @@ export function Sidebar({
   function renderRow(
     row: ReturnType<typeof sidebarRows>[number],
     isPinned: boolean,
+    lineage?: {
+      nested: boolean;
+      parentTitle?: string | undefined;
+      children?:
+        | { count: number; collapsed: boolean; nestedHere: boolean }
+        | undefined;
+    },
   ) {
+    const provenanceTitle = deriveProvenanceLabel(
+      row.task,
+      (id) => lineageIndex.taskById.get(id)?.title,
+    );
     return (
       <SidebarTaskRow
         key={row.task.id}
@@ -356,6 +394,15 @@ export function Sidebar({
         onRenameRequest={setRenamingTaskId}
         onContextMenu={openContextMenu}
         rowRef={setRowRef}
+        nested={lineage?.nested ?? false}
+        {...(lineage?.parentTitle ? { parentTitle: lineage.parentTitle } : {})}
+        {...(provenanceTitle ? { provenanceTitle } : {})}
+        {...(lineage?.children
+          ? {
+              childrenInfo: lineage.children,
+              onToggleChildren: () => toggleLineageChildren(row.task.id),
+            }
+          : {})}
       />
     );
   }
@@ -578,7 +625,13 @@ export function Sidebar({
               </span>
             </div>
             <div className="border-y border-border/40">
-              {visiblePinned.map((row) => renderRow(row, true))}
+              {layoutLineageRows(
+                visiblePinned,
+                lineageIndex,
+                collapsedLineageParents,
+              ).map(({ item, nested, children, parentTitle }) =>
+                renderRow(item, true, { nested, parentTitle, children }),
+              )}
             </div>
           </section>
         )}
@@ -623,7 +676,13 @@ export function Sidebar({
               </button>
               {open && (
                 <div className="border-y border-border/40">
-                  {group.rows.map((row) => renderRow(row, false))}
+                  {layoutLineageRows(
+                    group.rows,
+                    lineageIndex,
+                    collapsedLineageParents,
+                  ).map(({ item, nested, children, parentTitle }) =>
+                    renderRow(item, false, { nested, parentTitle, children }),
+                  )}
                 </div>
               )}
             </section>

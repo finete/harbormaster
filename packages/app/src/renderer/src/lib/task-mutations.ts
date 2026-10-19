@@ -98,8 +98,7 @@ const DONE_MESSAGES: Record<
   dirty: "The worktree has uncommitted changes — remove it anyway?",
   unmerged:
     "The branch isn't merged — delete the worktree and local branch anyway?",
-  activeChildren:
-    "This task has active child tasks — complete it anyway? They keep running, nested under it.",
+  activeChildren: "They keep running and stay nested under it once it's Done.",
 };
 
 /**
