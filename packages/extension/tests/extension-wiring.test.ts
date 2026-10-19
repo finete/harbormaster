@@ -3,7 +3,7 @@
 // per-turn), and the session is named after its task (pi-home's
 // setSessionName). Real presence/task files in a temp state dir.
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -95,7 +95,18 @@ describe("extension wiring", () => {
     dir = await mkdtemp(join(tmpdir(), "harbormaster-ext-wiring-"));
     process.env.HARBORMASTER_TASK_ID = "task-1";
     process.env.HARBORMASTER_STATE_DIR = dir;
+    delete process.env.HARBORMASTER_SESSION_ID;
     const paths = resolveStatePaths(dir);
+    // Deterministic, empty codeRoot: listRepositories() must never scan the
+    // real $HOME/Code checked out on the machine running these tests.
+    await writeFile(
+      paths.configFile,
+      JSON.stringify({
+        automation: true,
+        codeRoot: join(dir, "code"),
+        branchPrefix: "",
+      }),
+    );
     await new JsonTaskStateAccess(
       paths.tasksFile,
       paths.tasksLockFile,
@@ -157,7 +168,11 @@ describe("extension wiring", () => {
       "todev",
       "todone",
     ]);
-    expect([...pi.tools.keys()]).toEqual(["harbormaster_report_status"]);
+    expect([...pi.tools.keys()].sort()).toEqual([
+      "harbormaster_launch_task",
+      "harbormaster_report_status",
+      "harbormaster_subtask_status",
+    ]);
   });
 
   it("/todev moves the task to Dev and refreshes the widget", async () => {
@@ -279,5 +294,350 @@ describe("extension wiring", () => {
     });
 
     await pi.handlers.get("session_shutdown")?.({}, ctx);
+  });
+
+  describe("harbormaster_launch_task", () => {
+    it("registers even outside any Harbormaster-hosted session", () => {
+      delete process.env.HARBORMASTER_TASK_ID;
+      delete process.env.HARBORMASTER_STATE_DIR;
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      expect(pi.tools.has("harbormaster_launch_task")).toBe(true);
+      // harbormaster_subtask_status also registers everywhere (it errors at
+      // execution time outside a task session instead of being absent).
+      expect(pi.tools.has("harbormaster_subtask_status")).toBe(true);
+      // Task-session-only machinery (presence/widget/commands/report_status)
+      // never registers without a task id.
+      expect(pi.handlers.has("session_start")).toBe(false);
+      expect(pi.tools.has("harbormaster_report_status")).toBe(false);
+    });
+
+    it("relation child rejects outside a task session (no HARBORMASTER_TASK_ID at all)", async () => {
+      delete process.env.HARBORMASTER_TASK_ID;
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const tool = pi.tools.get("harbormaster_launch_task");
+      await expect(
+        tool?.execute("call-1", {
+          relation: "child",
+          title: "Fix something",
+          prompt: "Do the thing",
+          repository: "none",
+        }),
+      ).rejects.toThrow(
+        "child requires launching from a Harbormaster task session",
+      );
+    });
+
+    it("relation child rejects when the nested-session guard treats this process as not the task", async () => {
+      process.env.HARBORMASTER_SESSION_ID = "pane-session";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      // A nested pi process (subagent) inherits the env but opens its own
+      // session id, so the session_start guard stands down.
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_launch_task");
+      await expect(
+        tool?.execute("call-1", {
+          relation: "child",
+          title: "Fix something",
+          prompt: "Do the thing",
+          repository: "none",
+        }),
+      ).rejects.toThrow(
+        "child requires launching from a Harbormaster task session",
+      );
+
+      const subtaskTool = pi.tools.get("harbormaster_subtask_status");
+      await expect(subtaskTool?.execute("call-2", {})).rejects.toThrow(
+        /only available inside a Harbormaster task session/,
+      );
+    });
+
+    it("a child launch passes through to launchTask with fromTaskId set to this task", async () => {
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_launch_task");
+      const result = (await tool?.execute("call-1", {
+        relation: "child",
+        title: "Fix the flaky test",
+        prompt: "Make the test deterministic",
+        repository: "none",
+      })) as {
+        content: Array<{ type: string; text: string }>;
+        details: { task: { id: string } };
+      };
+
+      expect(result.content[0]?.text).toContain('"Fix the flaky test"');
+      expect(result.content[0]?.text).toContain("QUEUED");
+      expect(result.content[0]?.text).toContain("harbormaster_subtask_status");
+
+      const paths = resolveStatePaths(dir);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      const child = await taskState.getTask(result.details.task.id);
+      expect(child?.parentTaskId).toBe("task-1");
+      expect(child?.launchedFromTaskId).toBeUndefined();
+      expect(child?.launch?.status).toBe("queued");
+    });
+
+    it("a standalone launch records launchedFromTaskId (provenance only, no lineage) when launched from a task session", async () => {
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_launch_task");
+      const result = (await tool?.execute("call-1", {
+        relation: "standalone",
+        title: "Unrelated fix",
+        prompt: "Do an unrelated thing",
+        repository: "none",
+      })) as { details: { task: { id: string } } };
+
+      const paths = resolveStatePaths(dir);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      const task = await taskState.getTask(result.details.task.id);
+      expect(task?.parentTaskId).toBeUndefined();
+      expect(task?.launchedFromTaskId).toBe("task-1");
+    });
+
+    it("a standalone launch from a non-task session has no provenance at all", async () => {
+      delete process.env.HARBORMASTER_TASK_ID;
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const tool = pi.tools.get("harbormaster_launch_task");
+      const result = (await tool?.execute("call-1", {
+        relation: "standalone",
+        title: "Unrelated fix",
+        prompt: "Do an unrelated thing",
+        repository: "none",
+      })) as { details: { task: { id: string } } };
+
+      const paths = resolveStatePaths(dir);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      const task = await taskState.getTask(result.details.task.id);
+      expect(task?.parentTaskId).toBeUndefined();
+      expect(task?.launchedFromTaskId).toBeUndefined();
+    });
+  });
+
+  describe("harbormaster_subtask_status", () => {
+    async function seedChild(
+      dirPath: string,
+      overrides: Partial<Parameters<JsonTaskStateAccess["createTask"]>[0]>,
+    ) {
+      const paths = resolveStatePaths(dirPath);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      await taskState.createTask({
+        id: "child-1",
+        kind: "task",
+        state: "dev",
+        title: "Fix the flaky test",
+        initialPrompt: "",
+        parentTaskId: "task-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        stateChangedAt: "2026-01-01T00:00:00.000Z",
+        ...overrides,
+      });
+    }
+
+    it("reports 'No child tasks.' when there are none", async () => {
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_subtask_status");
+      const result = (await tool?.execute("call-1", {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+      expect(result.content[0]?.text).toBe("No child tasks.");
+    });
+
+    it("formats a queued child and a done child with a reported outcome", async () => {
+      await seedChild(dir, {
+        id: "child-1",
+        launch: { status: "queued", requestedAt: "2026-01-01T00:00:00.000Z" },
+      });
+      const paths = resolveStatePaths(dir);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      await taskState.createTask({
+        id: "child-2",
+        kind: "task",
+        state: "done",
+        title: "Already shipped",
+        initialPrompt: "",
+        parentTaskId: "task-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        stateChangedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_subtask_status");
+      const result = (await tool?.execute("call-1", {})) as {
+        content: Array<{ type: string; text: string }>;
+        details: { children: unknown[] };
+      };
+      expect(result.content[0]?.text).toContain(
+        '"Fix the flaky test" (child-1)',
+      );
+      expect(result.content[0]?.text).toContain("queued");
+      expect(result.content[0]?.text).toContain('"Already shipped" (child-2)');
+      expect(result.details.children).toHaveLength(2);
+    });
+
+    it("shows working/your move run state from live presence", async () => {
+      await seedChild(dir, {
+        id: "child-1",
+        launch: { status: "started", requestedAt: "2026-01-01T00:00:00.000Z" },
+      });
+      const presence = new SessionPresenceAccess(
+        resolveStatePaths(dir).presenceDir,
+      );
+      await presence.register({
+        taskId: "child-1",
+        sessionPath: join(dir, "child-session.jsonl"),
+        pid: process.pid,
+        mode: "interactive",
+        at: new Date().toISOString(),
+      });
+      await presence.setTurnActive(
+        "child-1",
+        process.pid,
+        true,
+        new Date().toISOString(),
+      );
+
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      const tool = pi.tools.get("harbormaster_subtask_status");
+      const result = (await tool?.execute("call-1", {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+      expect(result.content[0]?.text).toContain("working");
+    });
+
+    it("rejects outside a task session", async () => {
+      delete process.env.HARBORMASTER_TASK_ID;
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      const tool = pi.tools.get("harbormaster_subtask_status");
+      await expect(tool?.execute("call-1", {})).rejects.toThrow(
+        /only available inside a Harbormaster task session/,
+      );
+    });
+  });
+
+  describe("task widget children summary line", () => {
+    it("shows a compact children run-state line when the task has children", async () => {
+      const paths = resolveStatePaths(dir);
+      const taskState = new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      );
+      await taskState.createTask({
+        id: "child-1",
+        kind: "task",
+        state: "dev",
+        title: "Child A",
+        initialPrompt: "",
+        parentTaskId: "task-1",
+        launch: { status: "queued", requestedAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        stateChangedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await taskState.createTask({
+        id: "child-2",
+        kind: "task",
+        state: "done",
+        title: "Child B",
+        initialPrompt: "",
+        parentTaskId: "task-1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        stateChangedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      let widgetLines: string[] | undefined;
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      (
+        ctx.ui as {
+          setWidget: (key: string, lines: string[] | undefined) => void;
+        }
+      ).setWidget = (_key, lines) => {
+        widgetLines = lines;
+      };
+
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      expect(widgetLines?.some((line) => line.includes("children:"))).toBe(
+        true,
+      );
+      expect(
+        widgetLines?.some(
+          (line) => line.includes("1 queued") && line.includes("1 done"),
+        ),
+      ).toBe(true);
+    });
+
+    it("omits the children line entirely for a childless task", async () => {
+      process.env.HARBORMASTER_SESSION_ID = "session-1";
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      let widgetLines: string[] | undefined;
+      const ctx = fakeCtx(join(dir, "session.jsonl"));
+      (
+        ctx.ui as {
+          setWidget: (key: string, lines: string[] | undefined) => void;
+        }
+      ).setWidget = (_key, lines) => {
+        widgetLines = lines;
+      };
+
+      await pi.handlers.get("session_start")?.({}, ctx);
+
+      expect(widgetLines?.some((line) => line.includes("children:"))).toBe(
+        false,
+      );
+    });
   });
 });

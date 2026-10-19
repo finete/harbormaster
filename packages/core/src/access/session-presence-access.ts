@@ -115,6 +115,18 @@ export class SessionPresenceAccess implements PresenceAccess {
     const record = await this.read(taskId);
     if (!record || record.pid !== pid) return; // a newer attachment took over
     if (record.mode === "interactive") {
+      // A reported outcome (e.g. a launched child that called
+      // harbormaster_report_status) outlives the process: it becomes the
+      // ended marker so the parent's subtask status and the card still show
+      // the verdict after the pty is gone (app quit, pane closed).
+      if (record.outcome) {
+        const { outcome, ...rest } = record;
+        await writeJsonAtomic(this.pathFor(taskId), {
+          ...rest,
+          ended: outcome,
+        } satisfies PresenceRecord);
+        return;
+      }
       // The user was present; an ended interactive attachment leaves no marker.
       await rm(this.pathFor(taskId), { force: true });
       return;
