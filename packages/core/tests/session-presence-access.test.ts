@@ -61,6 +61,26 @@ describe("SessionPresenceAccess", () => {
     expect(await access.read("task-1")).toBeUndefined();
   });
 
+  it("end on an interactive session keeps a reported outcome as the ended marker", async () => {
+    await access.register({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      pid: 1,
+      mode: "interactive",
+      at: "t0",
+    });
+    await access.reportOutcome("task-1", 1, "blocked", "needs creds", "t1");
+    await access.end("task-1", 1, "t2");
+
+    const record = await access.read("task-1");
+    expect(record?.outcome).toBeUndefined();
+    expect(record?.ended).toEqual({
+      status: "blocked",
+      note: "needs creds",
+      at: "t1",
+    });
+  });
+
   it("end on a headless session leaves an unreported marker", async () => {
     await access.register({
       taskId: "task-1",

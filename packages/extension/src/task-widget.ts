@@ -152,14 +152,17 @@ export function taskSummaryLine(task: Task, theme: TaskWidgetTheme): string {
 
 /**
  * Full widget content for `ctx.ui.setWidget()`: the awaiting source (when
- * awaiting), the PR line (when there is a PR), then the summary — or
- * `undefined` when there is no task to show (the task vanished from state,
- * or the extension is not Harbormaster-hosted) — passing `undefined`
- * clears a previously set widget.
+ * awaiting), the PR line (when there is a PR), the summary, then — when the
+ * task has children — a compact children-run-state line (pi-home parity,
+ * see `child-status.ts`'s `formatChildrenSummaryLine`) — or `undefined`
+ * when there is no task to show (the task vanished from state, or the
+ * extension is not Harbormaster-hosted) — passing `undefined` clears a
+ * previously set widget.
  */
 export function buildTaskWidgetLines(
   task: Task | undefined,
   theme: TaskWidgetTheme,
+  childrenSummaryLine?: string,
 ): string[] | undefined {
   if (!task) return undefined;
   const lines: string[] = [];
@@ -168,5 +171,6 @@ export function buildTaskWidgetLines(
   const prLine = pullRequestLine(task, theme);
   if (prLine) lines.push(prLine);
   lines.push(taskSummaryLine(task, theme));
+  if (childrenSummaryLine) lines.push(theme.fg("accent", childrenSummaryLine));
   return lines;
 }
