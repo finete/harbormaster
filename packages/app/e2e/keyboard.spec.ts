@@ -54,11 +54,14 @@ function cardLocator(title: string): Locator {
 
 async function createBacklogTask(title: string): Promise<void> {
   await window.getByTestId("board-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-  await window.getByTestId("new-task-destination-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  // Creating leaves the board for the workspace view (one create path);
+  // come back so the next card / the tests find the board on screen.
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 }
 
 async function selectedCard(): Promise<Locator> {
@@ -172,9 +175,12 @@ test("Enter opens the selected task's workspace", async () => {
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test('"n" opens the New Task dialog, and typing inside it does not also trigger single-key shortcuts', async () => {
+test('"n" opens the new-task draft composer, and typing inside it does not also trigger single-key shortcuts', async () => {
   await window.keyboard.press("n");
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  // Leaves the board for the workspace view, with the draft row + composer.
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("sidebar-draft-row")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
 
   // Typing a title full of shortcut letters (n/x/r/s/g/a) must only land in
   // the input — none of them should move selection, toggle archived, etc.
@@ -190,8 +196,14 @@ test('"n" opens the New Task dialog, and typing inside it does not also trigger 
   );
   expect(afterSelected).toBe(beforeSelected);
 
-  await window.keyboard.press("Escape");
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  // Discard the (non-empty) draft: closing asks for confirmation.
+  await window.getByTestId("sidebar-draft-close").click();
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  await expect(window.getByTestId("sidebar-draft-row")).toHaveCount(0);
+
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
 test('"x" moves the selected card to Done', async () => {
@@ -322,15 +334,15 @@ test("shortcuts are suppressed while the terminal is focused: the board's single
   // active view); the terminal must still receive it verbatim — it must
   // not, for instance, pop a dialog that'd steal focus from the pty.
   await window.keyboard.type("n");
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
   // The global Cmd/Ctrl+N shortcut is the meaningful guard here: focus is
   // inside `.xterm`, so lib/keyboard-guard.ts's isTypingTarget() must block
   // it even though a modifier key is held.
   await window.keyboard.press("Meta+N");
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.keyboard.press("Control+N");
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();

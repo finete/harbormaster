@@ -116,27 +116,33 @@ async function dragTo(card: Locator, target: Locator): Promise<void> {
   await window.waitForTimeout(250);
 }
 
-async function openNewTaskDialog(): Promise<void> {
+async function openNewTaskComposer(): Promise<void> {
   await window.getByTestId("board-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
 }
 
+/** Creates through the composer, then returns to the board (creating lands in the workspace view). */
 async function submitNewTask(options: {
   title: string;
   destination: "start" | "backlog";
   prompt?: string;
 }): Promise<void> {
-  await openNewTaskDialog();
-  await window
-    .getByTestId(`new-task-destination-${options.destination}`)
-    .click();
+  await openNewTaskComposer();
   await window.getByTestId("new-task-title-input").fill(options.title);
   await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
   if (options.prompt !== undefined) {
     await window.getByTestId("new-task-prompt-input").fill(options.prompt);
   }
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window
+    .getByTestId(
+      options.destination === "start"
+        ? "new-task-submit"
+        : "new-task-submit-backlog",
+    )
+    .click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 }
 
 test.beforeAll(async () => {
@@ -238,27 +244,30 @@ test.afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("the New Task dialog offers Start now (default) vs Park in Backlog, plus an initial prompt", async () => {
-  await openNewTaskDialog();
-  const start = window.getByTestId("new-task-destination-start");
-  const backlog = window.getByTestId("new-task-destination-backlog");
-  await expect(start).toBeVisible();
+test("the draft composer offers Start (primary) vs Park in backlog, plus a prompt; closing a non-empty draft asks to discard", async () => {
+  await openNewTaskComposer();
+  const start = window.getByTestId("new-task-submit");
+  const backlog = window.getByTestId("new-task-submit-backlog");
+  await expect(start).toContainText("Start");
   await expect(backlog).toBeVisible();
-  await expect(start.locator("input")).toBeChecked();
-  await expect(window.getByTestId("new-task-submit")).toHaveText(/Start task/);
+  // Nothing typed yet: neither can submit (title is optional, but one of
+  // title/prompt must exist).
+  await expect(start).toBeDisabled();
+  await expect(backlog).toBeDisabled();
 
   const prompt = window.getByTestId("new-task-prompt-input");
-  await expect(prompt).toBeVisible();
-  await expect(prompt).toHaveAttribute("placeholder", /first message/);
+  await expect(prompt).toBeFocused();
+  await expect(prompt).toHaveAttribute("placeholder", "What should pi do?");
+  await prompt.fill("Throwaway");
+  await expect(start).toBeEnabled();
+  await expect(backlog).toBeEnabled();
 
-  await backlog.click();
-  await expect(backlog.locator("input")).toBeChecked();
-  await expect(window.getByTestId("new-task-submit")).toHaveText(
-    /Add to Backlog/,
-  );
-
-  await window.keyboard.press("Escape");
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("sidebar-draft-close").click();
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  await expect(window.getByTestId("sidebar-draft-row")).toHaveCount(0);
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
 test("parking a repo task lands in Backlog and creates no branch or worktree", async () => {
@@ -357,4 +366,41 @@ test("the board header's Refresh button shows a busy state and triggers a board 
     timeout: 10_000,
   });
   await expect(button).toHaveAttribute("aria-busy", "false");
+});
+
+test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a prompt-only Start turns it into the focused task with a derived title", async () => {
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await window.keyboard.press("ControlOrMeta+N");
+
+  // Leaves the board for the workspace view: draft row pinned first + composer.
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await expect(window.getByTestId("board-view")).toBeHidden();
+  const draftRow = window.getByTestId("sidebar-draft-row");
+  await expect(draftRow).toBeVisible();
+  await expect(
+    window.getByTestId("sidebar-list").locator("> :first-child"),
+  ).toHaveAttribute("data-testid", "sidebar-draft-row");
+  await expect(draftRow).toContainText("New task");
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
+
+  // Prompt only, no title: the derived title labels the draft live.
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("Derive my title from this line\nand ignore the rest");
+  await expect(draftRow).toContainText("Derive my title from this line");
+  await window.getByTestId("new-task-submit").click();
+
+  // The draft row became the real task, focused, in the workspace.
+  await expect(draftRow).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  const row = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Derive my title from this line" });
+  await expect(row).toHaveAttribute("data-selected", "true");
+  // Top of its group (where the draft row was).
+  expect(await row.evaluate((el) => el.previousElementSibling === null)).toBe(
+    true,
+  );
+  const taskId = (await row.getAttribute("data-task-id")) ?? "";
+  await expect(window.getByTestId(`task-workspace-${taskId}`)).toBeVisible();
 });

@@ -190,12 +190,11 @@ async function createRepoTask(
   repositoryId: string,
 ): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-  await window.getByTestId("new-task-destination-start").click();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
   await window.getByTestId("new-task-repo-select").selectOption(repositoryId);
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(row(window, title)).toBeVisible();
 }
 
@@ -245,11 +244,13 @@ test.beforeAll(async () => {
 
   const alphaId = `github.com/test/${ALPHA}`;
   const betaId = `github.com/test/${BETA}`;
-  await createRepoTask(window, "Alpha One", alphaId);
-  await createRepoTask(window, "Alpha Two", alphaId);
+  // A started draft lands at the TOP of the rail (where its draft row was),
+  // so create bottom-first to get the intended top-to-bottom initial order.
   await createRepoTask(window, "Alpha Three", alphaId);
-  await createRepoTask(window, "Beta One", betaId);
+  await createRepoTask(window, "Alpha Two", alphaId);
+  await createRepoTask(window, "Alpha One", alphaId);
   await createRepoTask(window, "Beta Two", betaId);
+  await createRepoTask(window, "Beta One", betaId);
 
   // Two children of Alpha One, launched through the real launch primitive,
   // then opened from their board cards so they get rail rows.
@@ -463,8 +464,17 @@ test("a nested child dragged out of its parent's block detaches; dragged back it
   await expect.poll(() => storageList(window, DETACHED_KEY)).toContain(redId);
 
   // Collapse the parent's children, then drag Kid Red back into its block.
-  await window.getByTestId(`sidebar-row-lineage-toggle-${parentId}`).click();
-  await expect(row(window, "Kid Blue")).toHaveCount(0);
+  // A click fired right after a dnd-kit drop can be swallowed (drop timing),
+  // so retry idempotently: click only while still expanded, until collapsed.
+  const lineageToggle = window.getByTestId(
+    `sidebar-row-lineage-toggle-${parentId}`,
+  );
+  await expect(async () => {
+    if ((await lineageToggle.getAttribute("aria-expanded")) === "true") {
+      await lineageToggle.click();
+    }
+    await expect(row(window, "Kid Blue")).toHaveCount(0, { timeout: 1000 });
+  }).toPass();
   const collapsedBefore = await storageValue(window, COLLAPSED_PARENTS_KEY);
 
   drag = await beginDrag(window, row(window, "Kid Red"));

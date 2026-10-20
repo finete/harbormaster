@@ -419,9 +419,8 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
     await window
       .getByTestId("new-task-repo-select")
       .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, title);
     const cardTestId = await card.getAttribute("data-testid");

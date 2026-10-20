@@ -126,11 +126,10 @@ test("drag-drop file onto terminal pane → escaped path inserted", async () => 
 
   // Open a task and workspace.
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill("Drop Test Task");
-  await window.getByTestId("new-task-destination-backlog").click();
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
   await window.getByTestId("board-button").click();
   await cardLocator("Drop Test Task").click();

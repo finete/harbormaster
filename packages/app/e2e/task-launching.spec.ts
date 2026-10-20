@@ -89,18 +89,16 @@ function invocationsFor(needle: string): string[] {
     .filter((line) => line.trim().length > 0 && line.includes(needle));
 }
 
-async function openLaunchDialog(relation: "subtask" | "task"): Promise<void> {
-  // Launching lives inside the sidebar's New task dialog (one entry point):
-  // the parent is the focused task; the Link control picks the relation.
+async function openLaunchComposer(relation: "subtask" | "task"): Promise<void> {
+  // Launching lives inside the new-task draft composer (one entry point):
+  // the draft captures the focused task as its origin; the link chip adds
+  // the link (default relation: standalone) and picks the relation.
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-  await window
-    .getByTestId(
-      relation === "subtask"
-        ? "new-task-link-child"
-        : "new-task-link-standalone",
-    )
-    .click();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
+  await window.getByTestId("new-task-link-add").click();
+  if (relation === "subtask") {
+    await window.getByTestId("new-task-link-child").click();
+  }
 }
 
 test.beforeAll(async () => {
@@ -213,14 +211,17 @@ test.afterAll(async () => {
 test("launching a subtask nests it under its parent, queued, starting in the background with no pane and no view switch; opening it attaches with exactly one pi process", async () => {
   // --- Seed: a repo-backed parent task, started now (Dev + its own pi pane). ---
   await window.getByTestId("board-new-task-button").click();
-  await window.getByTestId("new-task-destination-start").click();
   await window.getByTestId("new-task-title-input").fill("Parent Task");
   await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
   await window
     .getByTestId("new-task-prompt-input")
     .fill("Coordinate the subtasks");
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  // Creating lands in the workspace view (the new task focused); the card
+  // lookups below are on the board.
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 
   const parentCard = cardLocator("Parent Task");
   await expect(
@@ -234,7 +235,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
 
   // --- Consume the one concurrency slot with a standalone "Blocker" launch, ---
   // --- so the real task-under-test's launch stays queued, not racy.       ---
-  await openLaunchDialog("task");
+  await openLaunchComposer("task");
   await expect(window.getByTestId("new-task-link-standalone")).toHaveAttribute(
     "data-selected",
     "true",
@@ -243,10 +244,10 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   await window
     .getByTestId("new-task-prompt-input")
     .fill("Occupy the only concurrency slot");
-  // Repository: "None (general)" (default) — a scratch task is enough to
+  // Repository: "None / scratch" (default) — a scratch task is enough to
   // occupy a launch slot and never touches the fixture repo's worktrees.
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(
     window.getByTestId("toast-success").filter({ hasText: "Blocker" }),
   ).toBeVisible();
@@ -255,7 +256,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   await window.waitForTimeout(500);
 
   // --- The actual task-under-test: a child, same repo as its parent. ---
-  await openLaunchDialog("subtask");
+  await openLaunchComposer("subtask");
   await expect(window.getByTestId("new-task-link-child")).toHaveAttribute(
     "data-selected",
     "true",
@@ -269,7 +270,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   // appears (wave-3 task brief item 5).
   await expect(window.getByTestId("new-task-base-branch")).toBeVisible();
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(
     window.getByTestId("toast-success").filter({ hasText: "Child Under Test" }),
   ).toBeVisible();

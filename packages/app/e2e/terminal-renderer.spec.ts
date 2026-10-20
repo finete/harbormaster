@@ -99,8 +99,7 @@ test.describe("terminal renderer lifecycle (P0-3)", () => {
       await window
         .getByTestId("new-task-repo-select")
         .selectOption("github.com/test/fixture");
-      await window.getByTestId("new-task-destination-backlog").click();
-      await window.getByTestId("new-task-submit").click();
+      await window.getByTestId("new-task-submit-backlog").click();
 
       await window.getByTestId("board-button").click();
       const card = window

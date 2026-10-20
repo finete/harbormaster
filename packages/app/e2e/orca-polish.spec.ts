@@ -67,11 +67,10 @@ function cardLocator(window: Page, title: string): Locator {
 
 async function createScratchTask(window: Page, title: string): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-  await window.getByTestId("new-task-destination-start").click();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 }
 
 async function rowTaskId(row: Locator): Promise<string> {
@@ -331,14 +330,13 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
 
     // Start now + repo selected: branch + worktree are created immediately.
     await window.getByTestId("sidebar-new-task-button").click();
-    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-    await window.getByTestId("new-task-destination-start").click();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Orca Repo Task");
     await window
       .getByTestId("new-task-repo-select")
       .selectOption("github.com/test/orca-fixture");
     await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   });
 
   test.afterAll(async () => {

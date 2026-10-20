@@ -105,8 +105,7 @@ test("hiding a workspace produces zero SIGWINCH events (P0-2)", async () => {
     await window
       .getByTestId("new-task-repo-select")
       .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
+    await window.getByTestId("new-task-submit-backlog").click();
 
     // Navigate to board and drag card to dev column.
     await window.getByTestId("board-button").click();
