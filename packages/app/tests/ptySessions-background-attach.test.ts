@@ -12,6 +12,8 @@ import {
   activeSessionPids,
   attachPrimarySession,
   createBackgroundPrimarySession,
+  createSession,
+  detachPrimarySession,
   disposeSession,
   lookupPanePid,
   writeToSession,
@@ -159,5 +161,51 @@ describe("attachPrimarySession", () => {
     // session stays alive/attachable-once semantics hold (covered above).
     // A resize ioctl failure would throw synchronously inside
     // attachPrimarySession and fail this test via an uncaught exception.
+  });
+});
+
+describe("detachPrimarySession (renderer reload / crash)", () => {
+  it("hands an attached primary back to the background so the reloaded pane re-attaches to the SAME process", async () => {
+    const taskId = `task-${randomUUID()}`;
+    const { id, pid } = createBackgroundPrimarySession(
+      taskId,
+      shellSpec(),
+      () => {},
+    );
+    track(id);
+    const first = attachPrimarySession(taskId, 80, 24, {
+      onData: () => {},
+      onExit: () => {},
+    });
+    expect(first?.id).toBe(id);
+    // While attached, a second attach must miss (that is what used to make
+    // a reloaded pane spawn a duplicate pi).
+    expect(
+      attachPrimarySession(taskId, 80, 24, {
+        onData: () => {},
+        onExit: () => {},
+      }),
+    ).toBeUndefined();
+
+    expect(detachPrimarySession(id)).toBe(true);
+    writeToSession(id, "echo detached-marker\r");
+    await sleep(300);
+
+    const again = attachPrimarySession(taskId, 80, 24, {
+      onData: () => {},
+      onExit: () => {},
+    });
+    expect(again?.id).toBe(id);
+    expect(again?.pid).toBe(pid);
+    expect(again?.snapshot).toContain("detached-marker");
+  });
+
+  it("refuses non-primary sessions (the caller disposes those)", () => {
+    const { id } = createSession(80, 24, {
+      onData: () => {},
+      onExit: () => {},
+    });
+    track(id);
+    expect(detachPrimarySession(id)).toBe(false);
   });
 });

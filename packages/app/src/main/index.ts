@@ -55,6 +55,7 @@ import {
   attachPrimarySession,
   createBackgroundPrimarySession,
   createSession,
+  detachPrimarySession,
   disposeAllSessions,
   disposeSession,
   getSession,
@@ -99,6 +100,22 @@ function trackSession(webContentsId: number, sessionId: string): void {
 
 function untrackSession(webContentsId: number, sessionId: string): void {
   sessionsByWebContentsId.get(webContentsId)?.delete(sessionId);
+}
+
+/**
+ * The renderer behind `webContentsId` started over without its panes
+ * running their cleanup (window reload, renderer crash: the webContents
+ * survives, so no 'destroyed' fires). Task primaries go back to the
+ * background so the reloaded panes re-attach to the same pi; every other
+ * pty ("+ terminal" shells) is disposed as the old pane is gone.
+ */
+function releaseSessionsFor(webContentsId: number): void {
+  const ids = sessionsByWebContentsId.get(webContentsId);
+  if (!ids) return;
+  for (const id of [...ids]) {
+    if (!detachPrimarySession(id)) disposeSession(id);
+  }
+  sessionsByWebContentsId.delete(webContentsId);
 }
 
 function disposeSessionsFor(webContentsId: number): void {
@@ -824,6 +841,20 @@ function createWindow(): void {
   // listener — so pty processes never outlive the window whose panels
   // owned them.
   win.on("closed", () => disposeSessionsFor(webContentsId));
+
+  // A reload (dev full reload, Cmd+R) or a crashed renderer keeps this
+  // webContents alive, so the per-session 'destroyed' cleanup never runs and
+  // the panes' own unmount cleanup never ran either. Without this, every
+  // reload spawned a second pi per task on the same session file while the
+  // old one kept running invisibly.
+  win.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      releaseSessionsFor(webContentsId);
+    }
+  });
+  win.webContents.on("render-process-gone", () =>
+    releaseSessionsFor(webContentsId),
+  );
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
