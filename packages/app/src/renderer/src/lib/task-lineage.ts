@@ -66,6 +66,14 @@ export interface LineageRow<T extends LineageItem> {
   parentTitle?: string;
 }
 
+/** Opt-in extras for callers that own their own order (the sidebar); the board passes none. */
+export interface LayoutLineageOptions {
+  /** Children rendered top-level (with the "↳ parent" line) even though their parent is in the same group. */
+  detachedIds?: ReadonlySet<string>;
+  /** Sibling order for nested children: ids by position; unknown ids sort after, oldest first. Default: `createdAt`. */
+  siblingOrder?: readonly string[];
+}
+
 /**
  * Orders one rendering group's items so each child directly follows its
  * parent when both are present in `items` (see module doc); a parent whose
@@ -77,12 +85,18 @@ export function layoutLineageRows<T extends LineageItem>(
   items: readonly T[],
   index: LineageIndex,
   collapsedParents: ReadonlySet<string>,
+  options: LayoutLineageOptions = {},
 ): LineageRow<T>[] {
   const itemById = new Map(items.map((item) => [item.task.id, item] as const));
+  const detached = options.detachedIds;
+  const isNestedHere = (task: Task): boolean =>
+    !!task.parentTaskId &&
+    itemById.has(task.parentTaskId) &&
+    !detached?.has(task.id);
   const rows: LineageRow<T>[] = [];
   for (const item of items) {
     const { task } = item;
-    if (task.parentTaskId && itemById.has(task.parentTaskId)) {
+    if (isNestedHere(task)) {
       continue; // rendered nested under its parent's row below, not here
     }
     const row: LineageRow<T> = { item, nested: false };
@@ -92,8 +106,11 @@ export function layoutLineageRows<T extends LineageItem>(
     }
     const allChildren = index.childrenByParent.get(task.id) ?? [];
     if (allChildren.length > 0) {
-      const nestedChildren = allChildren.filter((child) =>
-        itemById.has(child.id),
+      const nestedChildren = sortSiblings(
+        allChildren.filter(
+          (child) => itemById.has(child.id) && isNestedHere(child),
+        ),
+        options.siblingOrder,
       );
       row.children = {
         count: allChildren.length,
@@ -112,6 +129,25 @@ export function layoutLineageRows<T extends LineageItem>(
     }
   }
   return rows;
+}
+
+function sortSiblings(
+  children: Task[],
+  siblingOrder: readonly string[] | undefined,
+): Task[] {
+  if (!siblingOrder) return children;
+  const index = new Map(siblingOrder.map((id, i) => [id, i] as const));
+  return children
+    .map((child, position) => ({ child, position }))
+    .sort((a, b) => {
+      const ai = index.get(a.child.id);
+      const bi = index.get(b.child.id);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a.position - b.position;
+    })
+    .map(({ child }) => child);
 }
 
 /**

@@ -1,5 +1,12 @@
 import { ChevronDown, ChevronRight, Pin, X } from "lucide-react";
-import type { JSX, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import type {
+  CSSProperties,
+  HTMLAttributes,
+  JSX,
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+} from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import {
@@ -118,6 +125,7 @@ function PrChip({ task }: { task: Task }): JSX.Element | null {
       data-testid="pr-chip"
       data-pr-url={url ?? ""}
       onClick={open}
+      onPointerDown={stopPointerDown}
       onKeyDown={(event) => event.stopPropagation()}
       disabled={!url}
       title={`${prBadgeLabel(pr)}${url ? " — open on GitHub" : ""}`}
@@ -130,6 +138,23 @@ function PrChip({ task }: { task: Task }): JSX.Element | null {
       #{pr.number}
     </button>
   );
+}
+
+/** Pointer-down on an inner control must not start a row drag (R20): the control's own click keeps working. */
+const stopPointerDown = (event: PointerEvent<HTMLElement>): void =>
+  event.stopPropagation();
+
+/** dnd-kit wiring handed down by Sidebar's `SortableTaskRow` (R7/R20/R22). */
+export interface RowDragProps {
+  /** Ref for the row's outer wrapper (the sortable node). */
+  setNodeRef: (node: HTMLElement | null) => void;
+  style: CSSProperties;
+  /** dnd-kit aria attributes (spread before the row's own, so `aria-pressed` still wins). */
+  attributes: HTMLAttributes<HTMLElement>;
+  /** Pointer listeners; undefined while dragging is disabled (search, rename). */
+  listeners: Record<string, unknown> | undefined;
+  /** This row is the in-flow placeholder of the active drag: dimmed. */
+  isDragging: boolean;
 }
 
 /**
@@ -164,6 +189,8 @@ export function SidebarTaskRow({
   provenanceTitle,
   childrenInfo,
   onToggleChildren,
+  drag,
+  overlay = false,
 }: {
   row: SidebarRow;
   selected: boolean;
@@ -194,6 +221,10 @@ export function SidebarTaskRow({
   /** Set only on a row that has at least one child (lib/task-lineage.ts); the "N children" chip. */
   childrenInfo?: { count: number; collapsed: boolean; nestedHere: boolean };
   onToggleChildren?: () => void;
+  /** Sortable wiring (Sidebar's `SortableTaskRow`); absent for plain/overlay rows. */
+  drag?: RowDragProps;
+  /** Rendered inside the portaled DragOverlay: no testid collision with the in-flow row, no ref. */
+  overlay?: boolean;
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
@@ -270,22 +301,39 @@ export function SidebarTaskRow({
   // above isn't fighting a scroll gesture.
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     if (event.button === 1) event.preventDefault();
+    // dnd-kit's PointerSensor activator ignores non-primary buttons, so a
+    // right-click (context menu) or middle-click never starts a drag.
+    const start = drag?.listeners?.onPointerDown;
+    if (typeof start === "function") start(event);
   };
+  const { onPointerDown: _ownPointerDown, ...otherListeners } =
+    drag?.listeners ?? {};
 
   return (
     <div
+      ref={drag?.setNodeRef}
+      style={drag?.style}
       className={cn(
         "border-b border-border/40 px-1.5 py-1 last:border-b-0",
         // Attached under its parent's row (see lib/task-lineage.ts).
         nested && "ml-3 border-l-2 border-l-primary/30 pl-1",
+        overlay && "rounded-md border bg-background shadow-lg",
+        drag?.isDragging && "opacity-40",
       )}
     >
       {/* biome-ignore lint/a11y/useSemanticElements: nested interactive PR chip rules out a native <button> row */}
       <div
-        ref={(node) => rowRef?.(task.id, node)}
+        {...drag?.attributes}
+        {...otherListeners}
+        ref={(node) => {
+          if (!overlay) rowRef?.(task.id, node);
+        }}
         role="button"
         tabIndex={0}
-        data-testid={`sidebar-task-row-${task.id}`}
+        data-testid={
+          overlay ? "sidebar-drag-overlay-row" : `sidebar-task-row-${task.id}`
+        }
+        data-task-id={task.id}
         data-selected={selected || undefined}
         data-pinned={pinned || undefined}
         data-unread={unread || undefined}
@@ -359,6 +407,7 @@ export function SidebarTaskRow({
             aria-label={`Close ${task.title}`}
             title="Close workspace"
             onClick={onCloseClick}
+            onPointerDown={stopPointerDown}
             onKeyDown={(event) => event.stopPropagation()}
             className="hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground group-hover:flex"
           >
@@ -460,6 +509,7 @@ export function SidebarTaskRow({
             aria-expanded={
               childrenInfo.nestedHere ? !childrenInfo.collapsed : undefined
             }
+            onPointerDown={stopPointerDown}
             onClick={(event) => {
               event.stopPropagation();
               onToggleChildren?.();

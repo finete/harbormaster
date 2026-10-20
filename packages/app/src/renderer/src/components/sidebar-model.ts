@@ -1,14 +1,21 @@
 // Pure view-model logic for the workspace sidebar (Sidebar.tsx): repository
-// grouping, running-first ordering, search filtering, board-position chip
-// labels, PR links, and compact relative times. Kept free of React and of
-// `window` so it is unit-testable under plain vitest (see
-// packages/app/tests/sidebar-model.test.ts).
+// grouping, search filtering, board-position chip labels, PR links, and
+// compact relative times. Kept free of React and of `window` so it is
+// unit-testable under plain vitest (see packages/app/tests/sidebar-model.test.ts).
+//
+// Rail order is FIXED and USER-OWNED (ai/prds/sidebar-ordering.md, R1): rows
+// sort by their index in the persisted global task order and groups by the
+// persisted group order (lib/sidebar-order.ts). Nothing here ever reorders
+// by activity (running/live), board column, or core push; ids/labels the
+// stored order doesn't know yet sort after the known ones (new ones land at
+// the bottom). Only an explicit drag rewrites the stored order.
 import type {
   BoardColumn,
   PresenceBadge,
   Task,
   TaskState,
 } from "../../../preload/api";
+import { sortByOrder } from "../lib/sidebar-order";
 import { lastInteractionTimestamp, relativeTime } from "../lib/time-format";
 
 export { relativeTime };
@@ -39,30 +46,35 @@ export function repoLabel(task: Pick<Task, "repositoryId">): string {
 }
 
 /**
- * Every non-archived, *opened* task on the board, in board (column, then
- * group) order. The rail lists open task workspaces, cmux-style, not the
- * full board inventory (`openedTaskIds` is App's `openedTaskIds` state) —
- * the Board stays the full inventory, see App.tsx / docs/design-decisions.md.
+ * Every *opened* task on the board, in `openedTaskIds` insertion order — NOT
+ * board order, so a column move or any core push can never reshuffle the rail
+ * (R1/R3); the stored task order is applied afterwards by `groupRows`. The
+ * rail lists open task workspaces, cmux-style, not the full board inventory
+ * (`openedTaskIds` is App's `openedTaskIds` state) — the Board stays the
+ * full inventory, see App.tsx / docs/design-decisions.md.
  */
 export function sidebarRows(
   columns: BoardColumn[],
   presence: Record<string, PresenceBadge | undefined>,
   openedTaskIds: ReadonlySet<string>,
 ): SidebarRow[] {
-  return columns.flatMap((column) =>
-    column.groups.flatMap((group) =>
-      group.tasks
-        // An open workspace always gets a row (cmux rule: every open window
-        // is listed), even an archived task, or it becomes an orphan pane
-        // with no way to see or close it from the rail.
-        .filter((task) => openedTaskIds.has(task.id))
-        .map((task) => ({
-          task,
-          state: column.state,
-          presence: presence[task.id],
-        })),
-    ),
-  );
+  const byId = new Map<string, { task: Task; state: TaskState }>();
+  for (const column of columns) {
+    for (const group of column.groups) {
+      for (const task of group.tasks) {
+        byId.set(task.id, { task, state: column.state });
+      }
+    }
+  }
+  const rows: SidebarRow[] = [];
+  // An open workspace always gets a row (cmux rule: every open window is
+  // listed), even an archived task, or it becomes an orphan pane with no way
+  // to see or close it from the rail.
+  for (const id of openedTaskIds) {
+    const hit = byId.get(id);
+    if (hit) rows.push({ ...hit, presence: presence[id] });
+  }
+  return rows;
 }
 
 /** Case-insensitive substring match over title, branch, and repository. */
@@ -80,18 +92,17 @@ export function matchesQuery(row: SidebarRow, query: string): boolean {
   return haystack.includes(needle);
 }
 
-function activityRank(row: SidebarRow): number {
-  if (row.presence?.runningTurn) return 0;
-  if (row.presence?.live) return 1;
-  return 2;
-}
-
 /**
- * Groups rows by short repository name (alphabetical, "scratch" last). Within
- * a group, running tasks come first, then live-but-idle, then everything
- * else — each tier keeping its original (board) order.
+ * Groups rows by short repository name. Groups sort by their index in
+ * `groupOrder` (R5); labels it doesn't list come after, in the default order
+ * (alphabetical, "scratch" last). Within a group rows sort by their index in
+ * `taskOrder` (R2); unknown ids come after, in input order. No activity sort.
  */
-export function groupRows(rows: SidebarRow[]): SidebarGroup[] {
+export function groupRows(
+  rows: SidebarRow[],
+  taskOrder: readonly string[] = [],
+  groupOrder: readonly string[] = [],
+): SidebarGroup[] {
   const byLabel = new Map<string, SidebarRow[]>();
   for (const row of rows) {
     const label = repoLabel(row.task);
@@ -99,22 +110,20 @@ export function groupRows(rows: SidebarRow[]): SidebarGroup[] {
     if (bucket) bucket.push(row);
     else byLabel.set(label, [row]);
   }
-  const labels = [...byLabel.keys()].sort((a, b) => {
+  const defaultLabels = [...byLabel.keys()].sort((a, b) => {
     if (a === SCRATCH_GROUP) return b === SCRATCH_GROUP ? 0 : 1;
     if (b === SCRATCH_GROUP) return -1;
     return a.localeCompare(b);
   });
-  return labels.map((label) => {
-    const bucket = byLabel.get(label) ?? [];
-    const ordered = bucket
-      .map((row, index) => ({ row, index }))
-      .sort(
-        (a, b) =>
-          activityRank(a.row) - activityRank(b.row) || a.index - b.index,
-      )
-      .map(({ row }) => row);
-    return { label, rows: ordered };
-  });
+  const labels = sortByOrder(defaultLabels, groupOrder, (label) => label);
+  return labels.map((label) => ({
+    label,
+    rows: sortByOrder(
+      byLabel.get(label) ?? [],
+      taskOrder,
+      (row) => row.task.id,
+    ),
+  }));
 }
 
 /** Visual tone of a state chip; mirrors the board's per-column colors. */
@@ -179,13 +188,14 @@ export function clampSidebarWidth(width: number): number {
 /**
  * Splits `groups` into a "Pinned" section (Orca polish item 3) and the
  * remaining repo groups with pinned rows removed, so a pinned task never
- * renders twice. Pinned rows keep their relative (board) order, not
- * insertion-into-`pinnedIds` order, so re-pinning doesn't reshuffle the
- * section.
+ * renders twice. Pinned rows follow the global `taskOrder` (R28), not
+ * board order or insertion-into-`pinnedIds` order, so re-pinning doesn't
+ * reshuffle the section.
  */
 export function partitionPinned(
   groups: SidebarGroup[],
   pinnedIds: ReadonlySet<string>,
+  taskOrder: readonly string[] = [],
 ): { pinned: SidebarRow[]; rest: SidebarGroup[] } {
   if (pinnedIds.size === 0) return { pinned: [], rest: groups };
   const pinned: SidebarRow[] = [];
@@ -199,7 +209,10 @@ export function partitionPinned(
       return { ...group, rows: keep };
     })
     .filter((group) => group.rows.length > 0);
-  return { pinned, rest };
+  return {
+    pinned: sortByOrder(pinned, taskOrder, (row) => row.task.id),
+    rest,
+  };
 }
 
 /**

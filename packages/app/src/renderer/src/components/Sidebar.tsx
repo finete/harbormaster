@@ -1,4 +1,25 @@
 import {
+  type Announcements,
+  type CollisionDetection,
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  type DragMoveEvent,
+  DragOverlay,
+  type DragStartEvent,
+  MeasuringStrategy,
+  type Modifier,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -12,9 +33,11 @@ import {
 import type {
   JSX,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Task } from "../../../preload/api";
 import {
   flattenBoard,
@@ -26,16 +49,34 @@ import { modKeyLabel } from "../lib/platform";
 import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
 import {
+  dragVisibleRows,
+  groupSortableId,
+  mergeSectionOrder,
+  parseSortableId,
+  projectGroupDrop,
+  projectTaskDrop,
+  type SectionRow,
+  sameSequence,
+  taskSortableId,
+} from "../lib/sidebar-order";
+import {
   readCollapsedGroups,
   readCollapsedLineageParents,
+  readGroupOrder,
   readPinnedTaskIds,
   storeCollapsedGroups,
   storeCollapsedLineageParents,
+  storeGroupOrder,
   storePinnedTaskIds,
   togglePinned,
 } from "../lib/sidebar-persistence";
-import { buildLineageIndex, layoutLineageRows } from "../lib/task-lineage";
+import {
+  buildLineageIndex,
+  type LineageRow,
+  layoutLineageRows,
+} from "../lib/task-lineage";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
+import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
@@ -43,16 +84,18 @@ import {
   type ContextMenuItem,
   SidebarRowContextMenu,
 } from "./SidebarRowContextMenu";
-import { SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
+import { type RowDragProps, SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
 import {
   clampSidebarWidth,
   groupRows,
   matchesQuery,
   partitionPinned,
   pullRequestUrl,
+  repoLabel,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  type SidebarRow,
   sidebarRows,
   visibleTaskOrder,
 } from "./sidebar-model";
@@ -89,11 +132,185 @@ function store(key: string, value: string): void {
   }
 }
 
+const PINNED_SECTION = "pinned";
+const noop = (): void => {};
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
+function groupSection(label: string): string {
+  return `group:${label}`;
+}
+
+/**
+ * Collision for the sidebar's two sortable kinds (R8/R17): only droppables of
+ * the dragged item's own kind — and, for tasks, its own section — are
+ * candidates, and a pointer outside the union of those candidates (another
+ * group, a header, outside the sidebar) yields no collision, i.e. a cancel.
+ */
+const sidebarCollision: CollisionDetection = (args) => {
+  const activeData = args.active.data.current as
+    | { kind?: string; section?: string }
+    | undefined;
+  if (!activeData?.kind) return [];
+  const candidates = args.droppableContainers.filter((container) => {
+    const data = container.data.current as
+      | { kind?: string; section?: string }
+      | undefined;
+    return (
+      data?.kind === activeData.kind &&
+      (activeData.kind !== "task" || data?.section === activeData.section)
+    );
+  });
+  if (candidates.length === 0) return [];
+  const pointer = args.pointerCoordinates;
+  if (pointer) {
+    let top = Number.POSITIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+    let left = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    for (const container of candidates) {
+      const rect = args.droppableRects.get(container.id);
+      if (!rect) continue;
+      top = Math.min(top, rect.top);
+      bottom = Math.max(bottom, rect.bottom);
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+    }
+    if (
+      pointer.y < top ||
+      pointer.y > bottom ||
+      pointer.x < left ||
+      pointer.x > right
+    ) {
+      return [];
+    }
+  }
+  // Nearest candidate to the *pointer* (not the dragged rect): the rows hide
+  // at drag start, so the dragged node's rect is not a reliable proxy for
+  // where the user is pointing, while pointer coordinates always are.
+  if (!pointer) {
+    return closestCenter({ ...args, droppableContainers: candidates });
+  }
+  let best: (typeof candidates)[number] | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const container of candidates) {
+    const rect = args.droppableRects.get(container.id);
+    if (!rect) continue;
+    const centerY = rect.top + rect.height / 2;
+    const distance =
+      pointer.y >= rect.top && pointer.y <= rect.bottom
+        ? Math.abs(pointer.y - centerY) / 1000
+        : Math.min(
+            Math.abs(pointer.y - rect.top),
+            Math.abs(pointer.y - rect.bottom),
+          );
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = container;
+    }
+  }
+  return best ? [{ id: best.id }] : [];
+};
+
+/** One draggable task row (R7): sortable id `task:<id>`, tagged with its section for collision filtering. */
+function SortableTaskRow({
+  section,
+  disabled,
+  rowProps,
+}: {
+  section: string;
+  disabled: boolean;
+  rowProps: Parameters<typeof SidebarTaskRow>[0];
+}): JSX.Element {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: taskSortableId(rowProps.row.task.id),
+    data: { kind: "task", section },
+    disabled,
+    animateLayoutChanges: () => false,
+  });
+  // dnd-kit's `aria-disabled` would mark every control inside the row (the
+  // rename input, buttons) disabled for assistive tech while dragging is
+  // merely off (search/rename); drop it so disabled rows behave as today.
+  const { "aria-disabled": _ariaDisabled, ...rowAttributes } = attributes;
+  const drag: RowDragProps = {
+    setNodeRef,
+    // Translate, never Transform: Transform scales variable-height rows (R22).
+    style: { transform: CSS.Translate.toString(transform), transition },
+    attributes: rowAttributes,
+    listeners,
+    isDragging,
+  };
+  return <SidebarTaskRow {...rowProps} drag={drag} />;
+}
+
+/** One draggable repo group (R17): the whole section moves, the header is the drag handle. */
+function SortableGroupSection({
+  label,
+  disabled,
+  header,
+  children,
+}: {
+  label: string;
+  disabled: boolean;
+  header: (drag: {
+    attributes: Omit<
+      ReturnType<typeof useSortable>["attributes"],
+      "aria-disabled"
+    >;
+    listeners: ReturnType<typeof useSortable>["listeners"];
+    setActivatorNodeRef: (node: HTMLElement | null) => void;
+  }) => ReactNode;
+  children: ReactNode;
+}): JSX.Element {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: groupSortableId(label),
+    data: { kind: "group" },
+    disabled,
+    animateLayoutChanges: () => false,
+  });
+  const { "aria-disabled": _ariaDisabled, ...headerAttributes } = attributes;
+  return (
+    <section
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      data-testid={`sidebar-group-${label}`}
+      className={cn("pt-1", isDragging && "opacity-40")}
+    >
+      {header({
+        attributes: headerAttributes,
+        listeners,
+        setActivatorNodeRef,
+      })}
+      {children}
+    </section>
+  );
+}
+
 /**
  * Workspace-view task rail, modeled on cmux's sidebar: the rail lists only
  * *open* task workspaces (`openedTaskIds`, owned by App.tsx), not the full
  * board inventory -- the Board stays the full inventory. Rows are grouped
- * by repository (collapsible, "scratch" last, running tasks first), a
+ * by repository (collapsible, "scratch" last by default), kept in a FIXED,
+ * user-owned order that only a drag rewrites (see sidebar-model.ts and
+ * ai/prds/sidebar-ordering.md): rows reorder within their section, nested
+ * children can detach/re-attach, and repo groups reorder by their header.
+ * Keyboard sorting is deliberately out of scope: dnd-kit's KeyboardSensor
+ * activates on Enter/Space, which would steal row activation (no
+ * KeyboardSensor is registered; announcements below serve pointer drags). A
  * type-to-filter search box, drag-to-resize right edge (persisted), and a
  * collapse toggle down to a thin strip of status dots. Clicking a row
  * focuses that task through App's takeover-guarded `selectTask`; each row's
@@ -106,6 +323,10 @@ function store(key: string, value: string): void {
 export function Sidebar({
   focusedTaskId,
   openedTaskIds,
+  taskOrder,
+  onTaskOrderChange,
+  detachedIds,
+  onDetachedChange,
   onSelectTask,
   onCloseTask,
   onShowBoard,
@@ -114,6 +335,12 @@ export function Sidebar({
 }: {
   focusedTaskId: string | null;
   openedTaskIds: ReadonlySet<string>;
+  /** Global user-owned task order (App's `useSidebarOrder`). */
+  taskOrder: readonly string[];
+  onTaskOrderChange: (order: readonly string[]) => void;
+  /** Children dragged out of their parent's block (rendered top-level). */
+  detachedIds: ReadonlySet<string>;
+  onDetachedChange: (ids: ReadonlySet<string>) => void;
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
@@ -160,6 +387,48 @@ export function Sidebar({
       return next;
     });
   }, []);
+  const [groupOrder, setGroupOrder] = useState<readonly string[]>(() =>
+    readGroupOrder(window.localStorage),
+  );
+  // What is being dragged right now (null = nothing). `projectedAttached`
+  // is the live attach/detach projection for the dragged child's in-flow
+  // placeholder (R14); it is view state only — nothing is committed until drop.
+  const [drag, setDrag] = useState<
+    | { kind: "task"; taskId: string; section: string }
+    | { kind: "group"; label: string }
+    | null
+  >(null);
+  const [projectedAttached, setProjectedAttached] = useState<boolean | null>(
+    null,
+  );
+  // Where the dragged node sat when the drag began (before any row hid).
+  // dnd-kit measures the active node only after the layout override has
+  // applied, so it reports the *moved* rect; the modifier below re-anchors
+  // overlay to the pointer using this origin (collision uses the pointer itself).
+  const dragOriginRef = useRef<{ left: number; top: number } | null>(null);
+  const alignToDragOrigin: Modifier = useCallback(
+    ({ transform, activeNodeRect }) => {
+      const origin = dragOriginRef.current;
+      if (!origin || !activeNodeRect) return transform;
+      return {
+        ...transform,
+        x: transform.x + origin.left - activeNodeRect.left,
+        y: transform.y + origin.top - activeNodeRect.top,
+      };
+    },
+    [],
+  );
+  const dragGuards = useDragGuards();
+  // Drag-only layout overrides (hidden nested blocks, collapsed group bodies)
+  // apply from the first render of a drag, so dnd-kit measures the dragged
+  // node, the overlay and every droppable against one consistent layout.
+  const layoutHidden = drag !== null;
+  const sensors = useSensors(
+    // Board parity: 4px before a drag starts, so a plain click still
+    // selects the row; dnd-kit's activator ignores non-primary buttons, so
+    // right-click (context menu) never starts one.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
   const [collapsed, setCollapsed] = useState(readStoredCollapsed);
   const [width, setWidth] = useState(readStoredWidth);
   const [resizing, setResizing] = useState(false);
@@ -193,10 +462,28 @@ export function Sidebar({
     () => sidebarRows(columns, presence, openedTaskIds),
     [columns, presence, openedTaskIds],
   );
-  const groups = useMemo(() => groupRows(rows), [rows]);
+  const groups = useMemo(
+    () => groupRows(rows, taskOrder, groupOrder),
+    [rows, taskOrder, groupOrder],
+  );
   const { pinned, rest: restGroups } = useMemo(
-    () => partitionPinned(groups, pinnedIds),
-    [groups, pinnedIds],
+    () => partitionPinned(groups, pinnedIds, taskOrder),
+    [groups, pinnedIds, taskOrder],
+  );
+  const layoutOptions = useMemo(
+    () => ({ detachedIds, siblingOrder: taskOrder }),
+    [detachedIds, taskOrder],
+  );
+  /** A section's rows in rendered order (children under parents, sibling order from the task order). */
+  const layoutSection = useCallback(
+    (sectionRows: SidebarRow[], collapsedParents: ReadonlySet<string>) =>
+      layoutLineageRows(
+        sectionRows,
+        lineageIndex,
+        collapsedParents,
+        layoutOptions,
+      ),
+    [lineageIndex, layoutOptions],
   );
   const searching = query.trim().length > 0;
   const visiblePinned = useMemo(
@@ -215,10 +502,25 @@ export function Sidebar({
   );
   // The rail's full top-to-bottom task order as currently rendered; drives
   // both keyboard cycling (item 5) and the reveal-filter-clear check (item 1).
-  const visibleOrder = useMemo(
-    () => visibleTaskOrder(visiblePinned, visibleGroups),
-    [visiblePinned, visibleGroups],
-  );
+  // Rows are laid out with nothing collapsed so cycling/scroll order matches
+  // the rail's rendered order (children directly under their parent).
+  const visibleOrder = useMemo(() => {
+    const laidOut = (sectionRows: SidebarRow[]): SidebarRow[] =>
+      layoutSection(sectionRows, EMPTY_SET).map((entry) => entry.item);
+    return visibleTaskOrder(
+      laidOut(visiblePinned),
+      visibleGroups.map((group) => ({ ...group, rows: laidOut(group.rows) })),
+    );
+  }, [visiblePinned, visibleGroups, layoutSection]);
+  // The collapsed icon rail walks the same order: pinned first, then groups.
+  const railRows = useMemo(() => {
+    const laidOut = (sectionRows: SidebarRow[]): SidebarRow[] =>
+      layoutSection(sectionRows, EMPTY_SET).map((entry) => entry.item);
+    return [
+      ...laidOut(pinned),
+      ...restGroups.flatMap((group) => laidOut(group.rows)),
+    ];
+  }, [pinned, restGroups, layoutSection]);
 
   const toggleCollapsed = (): void => {
     setCollapsed((current) => {
@@ -363,10 +665,233 @@ export function Sidebar({
     ? rows.find((row) => row.task.id === contextMenu.taskId)
     : undefined;
 
+  // --- Drag and drop (ai/prds/sidebar-ordering.md) --------------------------
+  // No dragging while filtering (a reordered filtered list is ambiguous) or
+  // renaming; the collapsed icon rail renders no sortables at all.
+  const dragDisabled = searching || renamingTaskId !== null;
+
+  /** The rows of `section` (pinned, or `group:<label>`), unfiltered because dragging is off while searching. */
+  const sectionRowsOf = (section: string): SidebarRow[] =>
+    section === PINNED_SECTION
+      ? visiblePinned
+      : (visibleGroups.find((group) => groupSection(group.label) === section)
+          ?.rows ?? []);
+
+  /** A section's fully expanded layout as pure drag rows (collapse ignored). */
+  const toSectionRows = (laid: LineageRow<SidebarRow>[]): SectionRow[] => {
+    const ids = new Set(laid.map((entry) => entry.item.task.id));
+    return laid.map((entry) => {
+      const parentId = entry.item.task.parentTaskId;
+      return {
+        id: entry.item.task.id,
+        nested: entry.nested,
+        parentId: parentId && ids.has(parentId) ? parentId : undefined,
+      };
+    });
+  };
+  const expandedSectionRows = (section: string): SectionRow[] =>
+    toSectionRows(layoutSection(sectionRowsOf(section), EMPTY_SET));
+
+  const titleOf = (taskId: string): string =>
+    rows.find((row) => row.task.id === taskId)?.task.title ?? "task";
+  const sectionName = (section: string | undefined): string =>
+    !section || section === PINNED_SECTION
+      ? "Pinned"
+      : section.slice("group:".length);
+  const describeSortable = (id: string | number): string => {
+    const parsed = parseSortableId(id);
+    if (!parsed) return "an item";
+    return parsed.kind === "task"
+      ? titleOf(parsed.value)
+      : `${parsed.value} group`;
+  };
+  const sectionOfTask = (taskId: string): string => {
+    const row = rows.find((entry) => entry.task.id === taskId);
+    if (!row) return PINNED_SECTION;
+    return pinnedIds.has(taskId)
+      ? PINNED_SECTION
+      : groupSection(repoLabel(row.task));
+  };
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${describeSortable(active.id)}.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${describeSortable(active.id)} is over ${describeSortable(over.id)}.`
+        : `${describeSortable(active.id)} is no longer over a valid position.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `${describeSortable(active.id)} dropped ${
+            parseSortableId(active.id)?.kind === "task"
+              ? `in ${sectionName(sectionOfTask(parseSortableId(active.id)?.value ?? ""))}`
+              : "among the groups"
+          }.`
+        : `${describeSortable(active.id)} dropped outside its list; nothing moved.`,
+    onDragCancel: ({ active }) =>
+      `Moving ${describeSortable(active.id)} was cancelled; nothing moved.`,
+  };
+
+  const resetDrag = (): void => {
+    dragOriginRef.current = null;
+    setDrag(null);
+    setProjectedAttached(null);
+  };
+
+  const handleDragStart = (event: DragStartEvent): void => {
+    dragGuards.beginDrag();
+    const parsed = parseSortableId(event.active.id);
+    if (!parsed) return;
+    setProjectedAttached(null);
+    // dnd-kit measures the active node late (after the override below), so
+    // read where it sits right now straight from the DOM: the sortable node
+    // is the row's outer wrapper / the group <section>.
+    const originNode =
+      parsed.kind === "group"
+        ? document.querySelector(
+            `[data-testid="sidebar-group-${parsed.value}"]`,
+          )
+        : rowNodes.current.get(parsed.value)?.parentElement;
+    const originRect = originNode?.getBoundingClientRect();
+    dragOriginRef.current = originRect
+      ? { left: originRect.left, top: originRect.top }
+      : null;
+    if (parsed.kind === "group") {
+      setDrag({ kind: "group", label: parsed.value });
+    } else {
+      const section = (
+        event.active.data.current as { section?: string } | undefined
+      )?.section;
+      setDrag({
+        kind: "task",
+        taskId: parsed.value,
+        section: section ?? sectionOfTask(parsed.value),
+      });
+    }
+  };
+
+  // Live attach/detach preview for the placeholder's indentation (R14).
+  // Only view state: the order itself is committed once, in onDragEnd (R9).
+  const handleDragMove = (event: DragMoveEvent): void => {
+    if (drag?.kind !== "task" || !event.over) return;
+    const over = parseSortableId(event.over.id);
+    if (over?.kind !== "task") return;
+    const projection = projectTaskDrop(
+      expandedSectionRows(drag.section),
+      drag.taskId,
+      over.value,
+      event.delta.x,
+    );
+    setProjectedAttached(projection?.attached ?? null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent): void => {
+    dragGuards.endDrag();
+    const current = drag;
+    resetDrag();
+    // R24: nothing to commit when the dragged item vanished mid-drag, and
+    // R8: a drop outside the section's candidates has no `over` (a cancel).
+    if (!current || !event.over) return;
+    const over = parseSortableId(event.over.id);
+    if (!over) return;
+
+    if (current.kind === "group") {
+      if (over.kind !== "group") return;
+      const labels = visibleGroups.map((group) => group.label);
+      if (!labels.includes(current.label)) return;
+      const next = projectGroupDrop(labels, current.label, over.value);
+      if (!next) return; // R19: dropped where it started
+      const merged = mergeSectionOrder(
+        groupOrder,
+        groups.map((group) => group.label),
+        next,
+      );
+      if (sameSequence(merged, groupOrder)) return;
+      setGroupOrder(merged);
+      storeGroupOrder(window.localStorage, merged);
+      return;
+    }
+
+    if (over.kind !== "task") return;
+    if (!rows.some((row) => row.task.id === current.taskId)) return;
+    const full = expandedSectionRows(current.section);
+    const projection = projectTaskDrop(
+      full,
+      current.taskId,
+      over.value,
+      event.delta.x,
+    );
+    if (!projection?.changed) return; // R19: no-op, write nothing
+    const merged = mergeSectionOrder(
+      taskOrder,
+      rows.map((row) => row.task.id),
+      projection.sequence,
+    );
+    if (!sameSequence(merged, taskOrder)) onTaskOrderChange(merged);
+
+    const parentId = full.find((row) => row.id === current.taskId)?.parentId;
+    if (projection.attached !== null && parentId !== undefined) {
+      const wasDetached = detachedIds.has(current.taskId);
+      if (projection.attached && wasDetached) {
+        const next = new Set(detachedIds);
+        next.delete(current.taskId);
+        onDetachedChange(next);
+        // Re-attaching under a collapsed parent expands it so the row
+        // doesn't vanish (R13).
+        if (collapsedLineageParents.has(parentId)) {
+          setCollapsedLineageParents((collapsedNow) => {
+            const expanded = new Set(collapsedNow);
+            expanded.delete(parentId);
+            storeCollapsedLineageParents(window.localStorage, expanded);
+            return expanded;
+          });
+        }
+      } else if (!projection.attached && !wasDetached) {
+        onDetachedChange(new Set(detachedIds).add(current.taskId));
+      }
+    }
+  };
+
+  const handleDragCancel = (): void => {
+    dragGuards.endDrag();
+    resetDrag();
+  };
+
+  // R24: the dragged item disappeared (closed elsewhere, archived): drop the
+  // drag-only render overrides; the eventual drop finds no drag and writes nothing.
+  const dragTargetGone =
+    drag?.kind === "task"
+      ? !rows.some((row) => row.task.id === drag.taskId)
+      : drag?.kind === "group"
+        ? !visibleGroups.some((group) => group.label === drag.label)
+        : false;
+  useEffect(() => {
+    if (dragTargetGone) {
+      setDrag(null);
+      setProjectedAttached(null);
+    }
+  }, [dragTargetGone]);
+
+  const overlayRow =
+    drag?.kind === "task"
+      ? rows.find((row) => row.task.id === drag.taskId)
+      : undefined;
+  const overlayGroup =
+    drag?.kind === "group"
+      ? visibleGroups.find((group) => group.label === drag.label)
+      : undefined;
+
+  const handleSelect = useCallback(
+    (taskId: string): void => {
+      if (dragGuards.consumeDragClick()) return;
+      onSelectTask(taskId);
+    },
+    [dragGuards, onSelectTask],
+  );
+
   function renderRow(
-    row: ReturnType<typeof sidebarRows>[number],
+    row: SidebarRow,
     isPinned: boolean,
-    lineage?: {
+    section: string,
+    lineage: {
       nested: boolean;
       parentTitle?: string | undefined;
       children?:
@@ -378,32 +903,78 @@ export function Sidebar({
       row.task,
       (id) => lineageIndex.taskById.get(id)?.title,
     );
+    // The in-flow placeholder shows the *projected* indentation (R14).
+    const isActive = drag?.kind === "task" && drag.taskId === row.task.id;
+    const nested =
+      isActive && projectedAttached !== null
+        ? projectedAttached
+        : lineage.nested;
     return (
-      <SidebarTaskRow
+      <SortableTaskRow
         key={row.task.id}
-        row={row}
-        selected={focusedTaskId === row.task.id}
-        now={now}
-        onSelect={onSelectTask}
-        onClose={onCloseTask}
-        pinned={isPinned}
-        unread={unreadTaskIds.has(row.task.id)}
-        isRenaming={renamingTaskId === row.task.id}
-        onRenameCommit={commitRename}
-        onRenameCancel={() => setRenamingTaskId(null)}
-        onRenameRequest={setRenamingTaskId}
-        onContextMenu={openContextMenu}
-        rowRef={setRowRef}
-        nested={lineage?.nested ?? false}
-        {...(lineage?.parentTitle ? { parentTitle: lineage.parentTitle } : {})}
-        {...(provenanceTitle ? { provenanceTitle } : {})}
-        {...(lineage?.children
-          ? {
-              childrenInfo: lineage.children,
-              onToggleChildren: () => toggleLineageChildren(row.task.id),
-            }
-          : {})}
+        section={section}
+        disabled={dragDisabled}
+        rowProps={{
+          row,
+          selected: focusedTaskId === row.task.id,
+          now,
+          onSelect: handleSelect,
+          onClose: onCloseTask,
+          pinned: isPinned,
+          unread: unreadTaskIds.has(row.task.id),
+          isRenaming: renamingTaskId === row.task.id,
+          onRenameCommit: commitRename,
+          onRenameCancel: () => setRenamingTaskId(null),
+          onRenameRequest: setRenamingTaskId,
+          onContextMenu: openContextMenu,
+          rowRef: setRowRef,
+          nested,
+          ...(lineage.parentTitle ? { parentTitle: lineage.parentTitle } : {}),
+          ...(provenanceTitle ? { provenanceTitle } : {}),
+          ...(lineage.children
+            ? {
+                childrenInfo: lineage.children,
+                onToggleChildren: () => toggleLineageChildren(row.task.id),
+              }
+            : {}),
+        }}
       />
+    );
+  }
+
+  /**
+   * One section's rows inside its own SortableContext (R7). While a task drag
+   * is active in this section, every nested block is hidden except the dragged
+   * child's own parent's block, and the dragged row's own children are hidden
+   * (R10/R15) — a drag-only render override; saved collapse state is untouched.
+   */
+  function renderSectionRows(
+    section: string,
+    sectionRows: SidebarRow[],
+    isPinned: boolean,
+  ) {
+    const draggingHere =
+      layoutHidden && drag?.kind === "task" && drag.section === section;
+    const laid = layoutSection(
+      sectionRows,
+      draggingHere ? EMPTY_SET : collapsedLineageParents,
+    );
+    let shown = laid;
+    if (draggingHere && drag?.kind === "task") {
+      const visible = new Set(
+        dragVisibleRows(toSectionRows(laid), drag.taskId).map((r) => r.id),
+      );
+      shown = laid.filter((entry) => visible.has(entry.item.task.id));
+    }
+    return (
+      <SortableContext
+        items={shown.map((entry) => taskSortableId(entry.item.task.id))}
+        strategy={verticalListSortingStrategy}
+      >
+        {shown.map(({ item, nested, children, parentTitle }) =>
+          renderRow(item, isPinned, section, { nested, parentTitle, children }),
+        )}
+      </SortableContext>
     );
   }
 
@@ -447,6 +1018,8 @@ export function Sidebar({
     event: ReactKeyboardEvent<HTMLInputElement>,
   ): void => {
     if (event.key !== "Escape") return;
+    // The Escape that just cancelled a drag must not also clear the filter.
+    if (dragGuards.dragKeyGuardRef.current) return;
     event.preventDefault();
     if (query) setQuery("");
     else searchRef.current?.blur();
@@ -479,25 +1052,23 @@ export function Sidebar({
           <ChevronsRight className="h-4 w-4" aria-hidden />
         </button>
         <div className="mt-2 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
-          {groups.flatMap((group) =>
-            group.rows.map((row) => (
-              <button
-                key={row.task.id}
-                type="button"
-                data-testid={`sidebar-collapsed-row-${row.task.id}`}
-                aria-pressed={focusedTaskId === row.task.id}
-                aria-label={row.task.title}
-                title={`${row.task.title} · ${group.label}`}
-                onClick={() => onSelectTask(row.task.id)}
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent/50",
-                  focusedTaskId === row.task.id && "bg-accent/70",
-                )}
-              >
-                <StatusDot presence={row.presence} />
-              </button>
-            )),
-          )}
+          {railRows.map((row) => (
+            <button
+              key={row.task.id}
+              type="button"
+              data-testid={`sidebar-collapsed-row-${row.task.id}`}
+              aria-pressed={focusedTaskId === row.task.id}
+              aria-label={row.task.title}
+              title={`${row.task.title} · ${repoLabel(row.task)}`}
+              onClick={() => onSelectTask(row.task.id)}
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent/50",
+                focusedTaskId === row.task.id && "bg-accent/70",
+              )}
+            >
+              <StatusDot presence={row.presence} />
+            </button>
+          ))}
         </div>
         <div className="flex flex-col items-center gap-1 border-t border-border py-2">
           <button
@@ -593,102 +1164,168 @@ export function Sidebar({
           )}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        {rows.length === 0 && (
-          <p
-            data-testid="sidebar-empty-hint"
-            className="px-4 py-4 text-xs text-muted-foreground"
-          >
-            No open tasks — pick one from the Board.
-          </p>
-        )}
-        {rows.length > 0 &&
-          visiblePinned.length === 0 &&
-          visibleGroups.length === 0 && (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={sidebarCollision}
+        // Rows hide/show at drag start (R10/R15/R18): stale rects would
+        // mis-target drops, so droppables are re-measured continuously.
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+        accessibility={{
+          announcements,
+          screenReaderInstructions: {
+            draggable:
+              "Drag with a pointer to reorder this item within its list; Escape cancels. Keyboard reordering is not supported.",
+          },
+        }}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div
+          data-testid="sidebar-list"
+          data-drag-layout={layoutHidden ? drag?.kind : undefined}
+          className="min-h-0 flex-1 overflow-y-auto pb-2"
+        >
+          {rows.length === 0 && (
             <p
-              data-testid="sidebar-search-empty"
+              data-testid="sidebar-empty-hint"
               className="px-4 py-4 text-xs text-muted-foreground"
             >
-              No tasks match "{query.trim()}".
+              No open tasks — pick one from the Board.
             </p>
           )}
-        {visiblePinned.length > 0 && (
-          <section data-testid="sidebar-pinned-section" className="pt-1">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <Pin className="h-3 w-3 shrink-0 rotate-45" aria-hidden />
-              <span>Pinned</span>
-              <span
-                className="ml-auto font-normal tabular-nums text-muted-foreground/70"
-                data-testid="sidebar-pinned-count"
+          {rows.length > 0 &&
+            visiblePinned.length === 0 &&
+            visibleGroups.length === 0 && (
+              <p
+                data-testid="sidebar-search-empty"
+                className="px-4 py-4 text-xs text-muted-foreground"
               >
-                {visiblePinned.length}
-              </span>
-            </div>
-            <div className="border-y border-border/40">
-              {layoutLineageRows(
-                visiblePinned,
-                lineageIndex,
-                collapsedLineageParents,
-              ).map(({ item, nested, children, parentTitle }) =>
-                renderRow(item, true, { nested, parentTitle, children }),
-              )}
-            </div>
-          </section>
-        )}
-        {visibleGroups.map((group) => {
-          // A live filter always shows its matches, even inside a group
-          // the user collapsed.
-          const open = searching || !collapsedGroups.has(group.label);
-          return (
-            <section
-              key={group.label}
-              data-testid={`sidebar-group-${group.label}`}
-              className="pt-1"
-            >
-              <button
-                type="button"
-                data-testid={`sidebar-group-toggle-${group.label}`}
-                aria-expanded={open}
-                onClick={() => toggleGroup(group.label)}
-                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {open ? (
-                  <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
-                ) : (
-                  <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
-                )}
-                <span
-                  className={cn(
-                    "truncate normal-case",
-                    group.label !== "Pinned" &&
-                      group.label !== "scratch" &&
-                      repoColorClass(group.label),
-                  )}
-                >
-                  {group.label}
-                </span>
+                No tasks match "{query.trim()}".
+              </p>
+            )}
+          {visiblePinned.length > 0 && (
+            <section data-testid="sidebar-pinned-section" className="pt-1">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <Pin className="h-3 w-3 shrink-0 rotate-45" aria-hidden />
+                <span>Pinned</span>
                 <span
                   className="ml-auto font-normal tabular-nums text-muted-foreground/70"
-                  data-testid="sidebar-group-count"
+                  data-testid="sidebar-pinned-count"
                 >
-                  {group.rows.length}
+                  {visiblePinned.length}
                 </span>
-              </button>
-              {open && (
-                <div className="border-y border-border/40">
-                  {layoutLineageRows(
-                    group.rows,
-                    lineageIndex,
-                    collapsedLineageParents,
-                  ).map(({ item, nested, children, parentTitle }) =>
-                    renderRow(item, false, { nested, parentTitle, children }),
-                  )}
-                </div>
-              )}
+              </div>
+              <div className="border-y border-border/40">
+                {renderSectionRows(PINNED_SECTION, visiblePinned, true)}
+              </div>
             </section>
-          );
-        })}
-      </div>
+          )}
+          <SortableContext
+            items={visibleGroups.map((group) => groupSortableId(group.label))}
+            strategy={verticalListSortingStrategy}
+          >
+            {visibleGroups.map((group) => {
+              // A live filter always shows its matches, even inside a group
+              // the user collapsed; while a group is dragged every body
+              // renders collapsed (R18) without touching the saved state.
+              const open =
+                !(layoutHidden && drag?.kind === "group") &&
+                (searching || !collapsedGroups.has(group.label));
+              return (
+                <SortableGroupSection
+                  key={group.label}
+                  label={group.label}
+                  disabled={dragDisabled}
+                  header={({ attributes, listeners, setActivatorNodeRef }) => (
+                    <button
+                      type="button"
+                      {...attributes}
+                      {...listeners}
+                      ref={setActivatorNodeRef}
+                      data-testid={`sidebar-group-toggle-${group.label}`}
+                      aria-expanded={open}
+                      aria-roledescription="sortable group"
+                      onClick={() => {
+                        if (dragGuards.consumeDragClick()) return;
+                        toggleGroup(group.label);
+                      }}
+                      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {open ? (
+                        <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+                      ) : (
+                        <ChevronRight
+                          className="h-3 w-3 shrink-0"
+                          aria-hidden
+                        />
+                      )}
+                      <span
+                        className={cn(
+                          "truncate normal-case",
+                          group.label !== "Pinned" &&
+                            group.label !== "scratch" &&
+                            repoColorClass(group.label),
+                        )}
+                      >
+                        {group.label}
+                      </span>
+                      <span
+                        className="ml-auto font-normal tabular-nums text-muted-foreground/70"
+                        data-testid="sidebar-group-count"
+                      >
+                        {group.rows.length}
+                      </span>
+                    </button>
+                  )}
+                >
+                  {open && (
+                    <div className="border-y border-border/40">
+                      {renderSectionRows(
+                        groupSection(group.label),
+                        group.rows,
+                        false,
+                      )}
+                    </div>
+                  )}
+                </SortableGroupSection>
+              );
+            })}
+          </SortableContext>
+        </div>
+        {/* Portaled out of the overflow-y-auto scroller (R22): never clipped,
+          never stretches the list; the in-flow source row just dims. */}
+        {createPortal(
+          <DragOverlay dropAnimation={null} modifiers={[alignToDragOrigin]}>
+            {overlayRow ? (
+              <SidebarTaskRow
+                overlay
+                row={overlayRow}
+                selected={focusedTaskId === overlayRow.task.id}
+                now={now}
+                onSelect={noop}
+                onClose={noop}
+                pinned={pinnedIds.has(overlayRow.task.id)}
+              />
+            ) : overlayGroup ? (
+              <div
+                data-testid="sidebar-drag-overlay-group"
+                className="flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground shadow-lg"
+              >
+                <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="truncate normal-case">
+                  {overlayGroup.label}
+                </span>
+                <span className="ml-auto font-normal tabular-nums">
+                  {overlayGroup.rows.length}
+                </span>
+              </div>
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
+      </DndContext>
       <div className="flex items-center gap-1.5 border-t border-border px-3 py-2">
         <Button
           size="sm"
