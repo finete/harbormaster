@@ -20,6 +20,10 @@ import {
   type PtyFlowControl,
 } from "./pty-data-batcher";
 import { buildPtyEnv } from "./pty-env";
+import {
+  createTerminalModeTracker,
+  type TerminalModeTracker,
+} from "./terminal-mode-tracker";
 
 export interface PtySessionCallbacks {
   onData: (data: string) => void;
@@ -70,6 +74,8 @@ interface PtySessionRecord {
   attached: boolean;
   /** Present only while `attached` is `false` for a background-launched primary (see `HeadlessHost`). Explicitly `undefined` once `attachPrimarySession` disposes it. */
   headless?: HeadlessHost | undefined;
+  /** DEC private modes the program has set, tracked from spawn for the session's whole life (attached or not) — see `terminal-mode-tracker.ts`. Only present for a task primary. */
+  modes?: TerminalModeTracker;
 }
 
 const sessions = new Map<string, PtySessionRecord>();
@@ -222,7 +228,19 @@ export function createSession(
     flow,
     batcher,
   };
-  const dataDisposable = ptyProcess.onData((data) => io.sink(data));
+  // Only register a session that actually ran the harness spec (a real `pi`
+  // launch, not a plain `$SHELL`) as the task's pane - a shell fallback
+  // (missing `pi` binary) or a scratch task's bare terminal never gets a
+  // presence record to corroborate against, and must never be mistaken for
+  // one (a false "attached" badge on a task with no agent at all).
+  const registerAsPane = useSpec && options?.primary && !!options?.taskId;
+  // Only task primaries can later be detached/re-attached, so only they need
+  // their modes tracked; plain shells skip the scan entirely.
+  const modes = registerAsPane ? createTerminalModeTracker() : undefined;
+  const dataDisposable = ptyProcess.onData((data) => {
+    modes?.feed(data);
+    io.sink(data);
+  });
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
     // Deliver every byte the process wrote before announcing its exit, so
     // the pane never prints "[process exited]" ahead of its last output.
@@ -240,12 +258,6 @@ export function createSession(
     io.exitSink(exitCode);
   });
 
-  // Only register a session that actually ran the harness spec (a real `pi`
-  // launch, not a plain `$SHELL`) as the task's pane - a shell fallback
-  // (missing `pi` binary) or a scratch task's bare terminal never gets a
-  // presence record to corroborate against, and must never be mistaken for
-  // one (a false "attached" badge on a task with no agent at all).
-  const registerAsPane = useSpec && options?.primary && !!options?.taskId;
   sessions.set(id, {
     id,
     process: ptyProcess,
@@ -254,7 +266,7 @@ export function createSession(
     exitDisposable,
     io,
     attached: true,
-    ...(registerAsPane ? { taskId: options.taskId } : {}),
+    ...(registerAsPane && modes ? { taskId: options.taskId, modes } : {}),
   });
   if (registerAsPane && options?.taskId) {
     primaryTaskSessions.set(options.taskId, id);
@@ -334,7 +346,11 @@ export function createBackgroundPrimarySession(
       // below (which fires regardless of attach state).
     },
   };
-  const dataDisposable = ptyProcess.onData((data) => io.sink(data));
+  const modes = createTerminalModeTracker();
+  const dataDisposable = ptyProcess.onData((data) => {
+    modes.feed(data);
+    io.sink(data);
+  });
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
     if (primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
@@ -353,6 +369,7 @@ export function createBackgroundPrimarySession(
     io,
     attached: false,
     taskId,
+    modes,
     headless: { terminal: headlessTerminal, serialize },
   });
   primaryTaskSessions.set(taskId, id);
@@ -389,7 +406,15 @@ export function attachPrimarySession(
   const session = sessions.get(sessionId);
   if (!session || session.attached) return undefined;
 
-  const snapshot = session.headless?.serialize.serialize() ?? "";
+  // addon-serialize restores alt screen, bracketed paste, focus reporting and
+  // the mouse TRACKING mode, but omits mouse ENCODING (1005/1006/1015/1016)
+  // and cursor visibility (?25). Without them the renderer's xterm would send
+  // X10 mouse reports fullscreen pi can't parse (no wheel/selection) and show
+  // a stray cursor. Append the tracked modes AFTER the serialized screen: the
+  // serializer emits ?1049h plus the alt-buffer content, and a repeated
+  // ?1049h on an already-alternate buffer leaves content and cursor intact.
+  const serialized = session.headless?.serialize.serialize() ?? "";
+  const snapshot = serialized + (session.modes?.replaySequence() ?? "");
   session.headless?.terminal.dispose();
   session.headless = undefined;
 
@@ -467,6 +492,10 @@ export function detachPrimarySession(id: string): boolean {
   });
   const serialize = new SerializeAddon();
   headlessTerminal.loadAddon(serialize);
+  // This mirror starts mid-stream: it never saw pi's startup sequences, so
+  // without this a later snapshot would lack alt screen and mouse modes.
+  const replay = session.modes?.replaySequence();
+  if (replay) headlessTerminal.write(replay);
   const taskId = session.taskId;
   session.io.sink = (data) => {
     try {
