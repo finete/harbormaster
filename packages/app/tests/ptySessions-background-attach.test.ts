@@ -209,3 +209,64 @@ describe("detachPrimarySession (renderer reload / crash)", () => {
     expect(detachPrimarySession(id)).toBe(false);
   });
 });
+
+/** A process that, like fullscreen pi, enters the alt screen, enables mouse tracking + SGR encoding, bracketed paste and hides the cursor, then idles echoing. */
+function piLikeSpec(): ReturnType<typeof shellSpec> {
+  return {
+    command: "/bin/sh",
+    args: [
+      "-c",
+      "printf '\\033[?1049h\\033[?1000h\\033[?1002h\\033[?1004h\\033[?1006h\\033[?2004h\\033[?25lpi-ready'; exec cat",
+    ],
+    cwd: process.cwd(),
+    env: {},
+  };
+}
+
+const noopCallbacks = { onData: () => {}, onExit: () => {} };
+
+describe("terminal modes survive attach / detach", () => {
+  it("attach snapshot restores mouse encoding and cursor visibility that addon-serialize omits", async () => {
+    const taskId = `task-${randomUUID()}`;
+    const { id } = createBackgroundPrimarySession(
+      taskId,
+      piLikeSpec(),
+      () => {},
+    );
+    track(id);
+    await sleep(400);
+    const attached = attachPrimarySession(taskId, 80, 24, noopCallbacks);
+    const snapshot = attached?.snapshot ?? "";
+    expect(snapshot).toContain("pi-ready");
+    expect(snapshot).toContain("\x1b[?1049h");
+    expect(snapshot).toContain("\x1b[?1002h");
+    expect(snapshot).toContain("\x1b[?1006h");
+    expect(snapshot).toContain("\x1b[?25l");
+    // Replay comes after the serialized screen.
+    expect(snapshot.lastIndexOf("\x1b[?1006h")).toBeGreaterThan(
+      snapshot.indexOf("pi-ready"),
+    );
+  });
+
+  it("detach -> reattach keeps alt screen and mouse modes even though the new mirror starts mid-stream", async () => {
+    const taskId = `task-${randomUUID()}`;
+    const { id } = createBackgroundPrimarySession(
+      taskId,
+      piLikeSpec(),
+      () => {},
+    );
+    track(id);
+    await sleep(400);
+    expect(attachPrimarySession(taskId, 80, 24, noopCallbacks)?.id).toBe(id);
+    expect(detachPrimarySession(id)).toBe(true);
+    writeToSession(id, "after-detach\r");
+    await sleep(300);
+    const again = attachPrimarySession(taskId, 80, 24, noopCallbacks);
+    const snapshot = again?.snapshot ?? "";
+    expect(snapshot).toContain("after-detach");
+    expect(snapshot).toContain("\x1b[?1049h");
+    expect(snapshot).toContain("\x1b[?1002h");
+    expect(snapshot).toContain("\x1b[?1006h");
+    expect(snapshot).toContain("\x1b[?25l");
+  });
+});

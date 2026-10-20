@@ -45,6 +45,7 @@ let root: string;
 let repoCheckout: string;
 let configPath: string;
 let invokeLogPath: string;
+let mouseLogPath: string;
 const mainProcessErrors: string[] = [];
 
 function watchForMainProcessErrors(electronApp: ElectronApplication): void {
@@ -144,6 +145,7 @@ test.beforeAll(async () => {
   );
 
   invokeLogPath = path.join(root, "pi-invocations.log");
+  mouseLogPath = path.join(root, "pi-mouse.log");
 
   // Fake pi: records its own invocation (cwd + pid) to a shared log file —
   // proof of exactly how many times pi actually started for a given
@@ -157,6 +159,14 @@ test.beforeAll(async () => {
     [
       "#!/bin/sh",
       'printf "cwd:%s pid:%s\\n" "$PWD" "$$" >> "$PI_INVOKE_LOG"',
+      // The child-under-test behaves like fullscreen pi: alt screen + mouse
+      // tracking (?1002h) + SGR encoding (?1006h), logging every byte the
+      // pane sends back so the test can inspect the mouse reports.
+      'case "$PWD" in *child-under-test*)',
+      "  stty raw -echo",
+      "  printf '\\033[?1049h\\033[?1000h\\033[?1002h\\033[?1004h\\033[?1006h\\033[?25lchild-ready'",
+      '  exec cat >> "$PI_MOUSE_LOG" ;;',
+      "esac",
       "while true; do sleep 3600; done",
       "",
     ].join("\n"),
@@ -178,6 +188,7 @@ test.beforeAll(async () => {
       HARBORMASTER_GH_COMMAND: fakeGh,
       HARBORMASTER_PRESENCE_POLL_MS: "250",
       PI_INVOKE_LOG: invokeLogPath,
+      PI_MOUSE_LOG: mouseLogPath,
     },
   });
   watchForMainProcessErrors(app);
@@ -309,6 +320,49 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   // asserting the count stays at exactly one.
   await window.waitForTimeout(500);
   expect(invocationsFor("child-under-test")).toHaveLength(1);
+
+  // --- The attached background primary must send SGR (1006) mouse reports: ---
+  // --- addon-serialize drops the mouse encoding, so without the replayed  ---
+  // --- modes xterm falls back to X10 and fullscreen pi sees no wheel/drag. ---
+  const childPanel = window
+    .getByTestId(`task-workspace-${childId}`)
+    .getByTestId("terminal-panel");
+  await expect(childPanel)
+    .toContainText("child-ready", { timeout: 10_000 })
+    .catch(() => {
+      // Without the a11y mirror the text isn't in the DOM; the mouse log
+      // below is the real assertion.
+    });
+  const readMouseLog = (): string => {
+    try {
+      return readFileSync(mouseLogPath, "binary");
+    } catch {
+      return "";
+    }
+  };
+  const box = await childPanel.boundingBox();
+  if (!box) throw new Error("child terminal panel has no bounding box");
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await window.mouse.move(cx, cy);
+  await expect
+    .poll(
+      async () => {
+        await window.mouse.wheel(0, -100);
+        return readMouseLog();
+      },
+      { timeout: 15_000, intervals: [200] },
+    )
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC is required for SGR mouse
+    .toMatch(/\x1b\[<6[45];\d+;\d+M/);
+  await window.mouse.move(cx - 40, cy);
+  await window.mouse.down();
+  await window.mouse.move(cx + 40, cy, { steps: 5 });
+  await window.mouse.up();
+  await expect
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC is required for SGR mouse
+    .poll(() => /\x1b\[<0;\d+;\d+M/.test(readMouseLog()), { timeout: 5_000 })
+    .toBe(true);
 
   // --- A window reload (dev full reload, Cmd+R) keeps the webContents, ---
   // --- so pane cleanup never runs: the reloaded panes must re-attach to  ---
