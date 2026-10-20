@@ -100,7 +100,7 @@ test.afterEach(() => {
   assertNoMainProcessErrors();
 });
 
-test("the key legend renders at the top of the board view", async () => {
+test("the key legend renders as a floating card on the board view", async () => {
   const legend = window.getByTestId("board-key-legend");
   await expect(legend).toBeVisible();
   await expect(legend).toContainText("Open");

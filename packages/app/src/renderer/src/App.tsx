@@ -21,6 +21,7 @@ import {
   useUnreadTaskIds,
 } from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
+import { modKeyLabel } from "./lib/platform";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
 import {
@@ -378,39 +379,48 @@ export function App(): JSX.Element {
               view === "board" ? "flex h-full w-full flex-col" : "hidden"
             }
           >
-            <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <header className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2"
                 data-testid="workspace-button"
                 onClick={() => setView("workspace")}
-                title="Back to workspace"
+                title={`Back to workspace (${modKeyLabel()}B)`}
               >
-                <PanelLeft className="mr-1.5 h-4 w-4" />
+                <PanelLeft className="mr-1.5 h-3.5 w-3.5" />
                 Workspace
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-7 px-2"
                 data-testid="board-refresh-button"
                 aria-busy={manualRefresh.busy}
                 disabled={manualRefresh.busy}
                 onClick={manualRefresh.refresh}
-                title="Refresh PR status and run movers now"
+                title="Refresh PR status and run movers now (g)"
               >
                 <RefreshCw
                   className={cn(
-                    "mr-1.5 h-4 w-4",
+                    "mr-1.5 h-3.5 w-3.5",
                     manualRefresh.busy && "animate-spin",
                   )}
                 />
                 Refresh
-                <Kbd>g</Kbd>
               </Button>
-              <span className="text-sm font-medium text-muted-foreground">
+              <span className="px-1 text-sm font-medium text-muted-foreground">
                 Board
               </span>
-              <span className="ml-auto text-xs text-muted-foreground">⌘B</span>
+              <Button
+                size="sm"
+                className="ml-auto h-7 px-2"
+                data-testid="board-new-task-button"
+                onClick={() => setBoardNewTaskSignal((n) => n + 1)}
+              >
+                + New task
+                <Kbd>{`${modKeyLabel()}N`}</Kbd>
+              </Button>
             </header>
             <div className="min-h-0 flex-1">
               <Board

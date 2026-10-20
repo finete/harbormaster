@@ -127,7 +127,9 @@ async function releaseOutsideColumns(from: {
   await expect(window.getByTestId("drag-overlay-card")).toHaveCount(0);
 }
 
-const FILLER_COUNT = 12;
+// Enough cards that the backlog column still overflows vertically now that
+// the board chrome is a single compact header row (more column height).
+const FILLER_COUNT = 16;
 
 test.beforeAll(async () => {
   stateDir = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-board-drag-"));
