@@ -85,6 +85,39 @@ describe("sidebarRows", () => {
     expect(rows[1]?.presence).toBeUndefined();
   });
 
+  it("emits rows in openedTaskIds insertion order, never board order", () => {
+    const columns: BoardColumn[] = [
+      {
+        state: "dev",
+        title: "Dev",
+        groups: [
+          {
+            id: "g",
+            tasks: [task({ id: "a" }), task({ id: "b" }), task({ id: "c" })],
+          },
+        ],
+      },
+    ];
+    const rows = sidebarRows(columns, {}, new Set(["c", "a", "b"]));
+    expect(rows.map((r) => r.task.id)).toEqual(["c", "a", "b"]);
+    // A column move (a -> done, listed after dev) must not move the row.
+    const moved: BoardColumn[] = [
+      {
+        state: "dev",
+        title: "Dev",
+        groups: [{ id: "g", tasks: [task({ id: "b" }), task({ id: "c" })] }],
+      },
+      {
+        state: "done",
+        title: "Done",
+        groups: [{ id: "g2", tasks: [task({ id: "a", state: "done" })] }],
+      },
+    ];
+    expect(
+      sidebarRows(moved, {}, new Set(["c", "a", "b"])).map((r) => r.task.id),
+    ).toEqual(["c", "a", "b"]);
+  });
+
   it("excludes tasks that are not in the opened set, even if unarchived", () => {
     const columns: BoardColumn[] = [
       {
@@ -107,28 +140,62 @@ describe("sidebarRows", () => {
 });
 
 describe("groupRows", () => {
-  it("groups by repo alphabetically with scratch last, running first then live", () => {
-    const rows = [
-      row(task({ id: "s1" })),
-      row(task({ id: "z1", repositoryId: "github.com/o/zeta" })),
-      row(task({ id: "a1", repositoryId: "github.com/o/alpha" })),
-      row(task({ id: "a2", repositoryId: "github.com/o/alpha" }), {
-        live: true,
-        runningTurn: false,
-      }),
-      row(task({ id: "a3", repositoryId: "github.com/o/alpha" }), {
-        live: true,
-        runningTurn: true,
-      }),
-      row(task({ id: "a4", repositoryId: "github.com/o/alpha" })),
-    ];
+  const rows = [
+    row(task({ id: "s1" })),
+    row(task({ id: "z1", repositoryId: "github.com/o/zeta" })),
+    row(task({ id: "a1", repositoryId: "github.com/o/alpha" })),
+    row(task({ id: "a2", repositoryId: "github.com/o/alpha" }), {
+      live: true,
+      runningTurn: false,
+    }),
+    row(task({ id: "a3", repositoryId: "github.com/o/alpha" }), {
+      live: true,
+      runningTurn: true,
+    }),
+    row(task({ id: "a4", repositoryId: "github.com/o/alpha" })),
+  ];
+
+  it("defaults to alphabetical groups, scratch last, input order within a group (no activity sort)", () => {
     const groups = groupRows(rows);
     expect(groups.map((g) => g.label)).toEqual(["alpha", "zeta", "scratch"]);
     expect(groups[0]?.rows.map((r) => r.task.id)).toEqual([
-      "a3",
-      "a2",
       "a1",
+      "a2",
+      "a3",
       "a4",
+    ]);
+  });
+
+  it("orders rows by the stored task order; unknown ids come after in input order", () => {
+    const groups = groupRows(rows, ["a4", "a1"]);
+    expect(groups[0]?.rows.map((r) => r.task.id)).toEqual([
+      "a4",
+      "a1",
+      "a2",
+      "a3",
+    ]);
+  });
+
+  it("is unaffected by a presence change (running turn starting/stopping)", () => {
+    const before = groupRows(rows, ["a1", "a2", "a3", "a4"]);
+    const flipped = rows.map((r) =>
+      r.task.id === "a4"
+        ? { ...r, presence: { live: true, runningTurn: true } }
+        : r,
+    );
+    const after = groupRows(flipped, ["a1", "a2", "a3", "a4"]);
+    expect(after[0]?.rows.map((r) => r.task.id)).toEqual(
+      before[0]?.rows.map((r) => r.task.id),
+    );
+  });
+
+  it("orders groups by the stored group order; unknown labels follow in default order", () => {
+    const groups = groupRows(rows, [], ["zeta", "scratch"]);
+    expect(groups.map((g) => g.label)).toEqual(["zeta", "scratch", "alpha"]);
+    expect(groupRows(rows, [], ["scratch"]).map((g) => g.label)).toEqual([
+      "scratch",
+      "alpha",
+      "zeta",
     ]);
   });
 });
@@ -282,6 +349,11 @@ describe("partitionPinned", () => {
       group.rows.map((r) => r.task.id),
     );
     expect(remainingIds).toEqual(["a", "c"]);
+  });
+
+  it("orders pinned rows by the global task order, not group/board order", () => {
+    const { pinned } = partitionPinned(groups, new Set(["a", "c"]), ["c", "a"]);
+    expect(pinned.map((r) => r.task.id)).toEqual(["c", "a"]);
   });
 
   it("drops a group entirely once every one of its rows is pinned", () => {

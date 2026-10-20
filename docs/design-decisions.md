@@ -146,3 +146,14 @@ difference not listed here is a bug.
   ordinary interactive Pi sessions in app-owned ptys with no pane until
   opened (attach, never takeover); quitting the app stops them, no detached
   processes. See `ai/prds/task-launching.md`.
+- **The sidebar rail order is fixed and user-owned.** Nothing reorders rows
+  except an explicit drag: no activity sort, no board-column order, no
+  reaction to presence or core pushes. Rows keep one persisted global task
+  order (`harbormaster.sidebar.taskOrder`); a newly opened task lands at the
+  bottom of its section and closing forgets the position. Rows are sortable
+  (`@dnd-kit/sortable`) within their own section only (a repo group or
+  Pinned; never across), repo groups reorder by their header
+  (`harbormaster.sidebar.groupOrder`), and a nested child dragged out of its
+  parent's block detaches into a top-level row with the "↳ parent" line
+  (`harbormaster.sidebar.detachedChildIds`) until it is dragged back. The
+  order is committed once, on drop. See `ai/prds/sidebar-ordering.md`.

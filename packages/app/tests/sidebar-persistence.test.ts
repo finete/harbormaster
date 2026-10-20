@@ -6,14 +6,23 @@ import {
   readBoardCollapsedGroups,
   readCollapsedGroups,
   readCollapsedLineageParents,
+  readDetachedChildIds,
+  readGroupOrder,
   readPinnedTaskIds,
+  readTaskOrder,
   SIDEBAR_COLLAPSED_GROUPS_KEY,
+  SIDEBAR_DETACHED_CHILDREN_KEY,
+  SIDEBAR_GROUP_ORDER_KEY,
+  SIDEBAR_TASK_ORDER_KEY,
   type StorageLike,
   storeBoardCollapsedColumns,
   storeBoardCollapsedGroups,
   storeCollapsedGroups,
   storeCollapsedLineageParents,
+  storeDetachedChildIds,
+  storeGroupOrder,
   storePinnedTaskIds,
+  storeTaskOrder,
   togglePinned,
 } from "../src/renderer/src/lib/sidebar-persistence";
 
@@ -137,5 +146,34 @@ describe("lineage collapsed-parents persistence", () => {
     expect(readCollapsedLineageParents(storage)).toEqual(new Set());
     storage.setItem("harbormaster.lineage.collapsedParents", "{nope");
     expect(readCollapsedLineageParents(storage)).toEqual(new Set());
+  });
+});
+
+describe("sidebar order persistence", () => {
+  it("uses the documented keys", () => {
+    expect(SIDEBAR_TASK_ORDER_KEY).toBe("harbormaster.sidebar.taskOrder");
+    expect(SIDEBAR_GROUP_ORDER_KEY).toBe("harbormaster.sidebar.groupOrder");
+    expect(SIDEBAR_DETACHED_CHILDREN_KEY).toBe(
+      "harbormaster.sidebar.detachedChildIds",
+    );
+  });
+
+  it("round-trips task order, preserving order and dropping duplicates", () => {
+    const storage = fakeStorage();
+    expect(readTaskOrder(storage)).toEqual([]);
+    storeTaskOrder(storage, ["c", "a", "b"]);
+    expect(readTaskOrder(storage)).toEqual(["c", "a", "b"]);
+    storage.setItem(SIDEBAR_TASK_ORDER_KEY, '["a","b","a",3]');
+    expect(readTaskOrder(storage)).toEqual(["a", "b"]);
+  });
+
+  it("round-trips group order and detached ids; garbage reads as empty", () => {
+    const storage = fakeStorage();
+    storeGroupOrder(storage, ["zeta", "alpha"]);
+    expect(readGroupOrder(storage)).toEqual(["zeta", "alpha"]);
+    storeDetachedChildIds(storage, new Set(["x", "y"]));
+    expect(readDetachedChildIds(storage)).toEqual(new Set(["x", "y"]));
+    storage.setItem(SIDEBAR_GROUP_ORDER_KEY, "not json");
+    expect(readGroupOrder(storage)).toEqual([]);
   });
 });

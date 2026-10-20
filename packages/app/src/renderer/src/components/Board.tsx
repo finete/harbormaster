@@ -51,6 +51,7 @@ import {
   toAwaitMutation,
   toDoneMutation,
 } from "../lib/task-mutations";
+import { useDragGuards } from "../lib/use-drag-guards";
 import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
@@ -222,62 +223,32 @@ export function Board({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
-  // dnd-kit doesn't suppress the native `click` event the browser still
-  // fires on pointerup after a completed drag (it only cancels at the
-  // activation-constraint level, not the DOM click). Track whether this
-  // gesture actually crossed the activation distance so a real drag
-  // doesn't also trigger TaskCard's onClick "select" handler; a plain
-  // click (never reaching onDragStart) still selects normally.
-  const draggedRef = useRef(false);
-  // True for the whole pointer drag *and* the rest of the event dispatch
-  // that ended it: dnd-kit's PointerSensor cancels on an Escape keydown at
-  // the document, synchronously, before this board's window-level keymap
-  // sees the same event — which must not then also run Escape's "back to
-  // workspace" (or arrow-key selection moves mid-drag).
-  const dragKeyGuardRef = useRef(false);
+  // Click-after-drag suppression + Escape key guard (shared with the
+  // sidebar, see lib/use-drag-guards.ts). A plain click (never reaching
+  // onDragStart) still selects normally.
+  const { dragKeyGuardRef, beginDrag, endDrag, consumeDragClick } =
+    useDragGuards();
 
   function handleDragStart(event: DragStartEvent): void {
-    draggedRef.current = true;
-    dragKeyGuardRef.current = true;
+    beginDrag();
     setActiveTaskId(String(event.active.id));
-  }
-
-  function releaseDragKeyGuardSoon(): void {
-    setTimeout(() => {
-      dragKeyGuardRef.current = false;
-    }, 0);
   }
 
   function handleDragCancel(): void {
     setActiveTaskId(null);
     setPeekedColumns(new Set());
-    clearDraggedSoon();
-    releaseDragKeyGuardSoon();
+    endDrag();
   }
 
   function handleSelectTask(taskId: string): void {
-    if (draggedRef.current) {
-      draggedRef.current = false;
-      return;
-    }
+    if (consumeDragClick()) return;
     onSelectTask(taskId);
-  }
-
-  // The suppressed click (if any) is dispatched right after pointerup, i.e.
-  // before a 0ms timer fires; clear the flag then, so a drop that produced
-  // no click (pointer released over another element) can't swallow the
-  // next genuine card click.
-  function clearDraggedSoon(): void {
-    setTimeout(() => {
-      draggedRef.current = false;
-    }, 0);
   }
 
   function handleDragEnd(event: DragEndEvent): void {
     setActiveTaskId(null);
     setPeekedColumns(new Set());
-    clearDraggedSoon();
-    releaseDragKeyGuardSoon();
+    endDrag();
     const { active, over } = event;
     if (!over) return;
 

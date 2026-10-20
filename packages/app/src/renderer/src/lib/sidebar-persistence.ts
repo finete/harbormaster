@@ -14,6 +14,13 @@ export interface StorageLike {
 export const SIDEBAR_COLLAPSED_GROUPS_KEY =
   "harbormaster.sidebar.collapsedGroups";
 export const SIDEBAR_PINNED_TASKS_KEY = "harbormaster.sidebar.pinnedTaskIds";
+/** Global user-owned task order: task ids, top to bottom (ai/prds/sidebar-ordering.md R2). */
+export const SIDEBAR_TASK_ORDER_KEY = "harbormaster.sidebar.taskOrder";
+/** User-owned repo-group order: `repoLabel` strings (R5). */
+export const SIDEBAR_GROUP_ORDER_KEY = "harbormaster.sidebar.groupOrder";
+/** Children dragged out of their parent's block, rendered top-level (R12). */
+export const SIDEBAR_DETACHED_CHILDREN_KEY =
+  "harbormaster.sidebar.detachedChildIds";
 /** Board group-collapse state: `boardGroupKey(column, group)` entries (see board-selection.ts). */
 export const BOARD_COLLAPSED_GROUPS_KEY = "harbormaster.board.collapsedGroups";
 /** Board column-collapse (slim rail) state: raw `TaskState` entries, independent of group collapse. */
@@ -126,4 +133,47 @@ export function storeCollapsedLineageParents(
   collapsed: ReadonlySet<string>,
 ): void {
   writeStringArray(storage, LINEAGE_COLLAPSED_PARENTS_KEY, collapsed);
+}
+
+function dedupe(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+/** Restores the global task order persisted by `storeTaskOrder`. */
+export function readTaskOrder(storage: StorageLike): string[] {
+  return dedupe(readStringArray(storage, SIDEBAR_TASK_ORDER_KEY));
+}
+
+/** Persists the global task order. */
+export function storeTaskOrder(
+  storage: StorageLike,
+  order: readonly string[],
+): void {
+  writeStringArray(storage, SIDEBAR_TASK_ORDER_KEY, order);
+}
+
+/** Restores the repo-group label order persisted by `storeGroupOrder`. */
+export function readGroupOrder(storage: StorageLike): string[] {
+  return dedupe(readStringArray(storage, SIDEBAR_GROUP_ORDER_KEY));
+}
+
+/** Persists the repo-group label order. */
+export function storeGroupOrder(
+  storage: StorageLike,
+  order: readonly string[],
+): void {
+  writeStringArray(storage, SIDEBAR_GROUP_ORDER_KEY, order);
+}
+
+/** Restores the detached-child id set persisted by `storeDetachedChildIds`. */
+export function readDetachedChildIds(storage: StorageLike): Set<string> {
+  return new Set(readStringArray(storage, SIDEBAR_DETACHED_CHILDREN_KEY));
+}
+
+/** Persists the detached-child id set. */
+export function storeDetachedChildIds(
+  storage: StorageLike,
+  detached: ReadonlySet<string>,
+): void {
+  writeStringArray(storage, SIDEBAR_DETACHED_CHILDREN_KEY, detached);
 }

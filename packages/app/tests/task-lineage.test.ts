@@ -137,3 +137,70 @@ describe("hiddenNestedChildIds", () => {
     ).toEqual(new Set());
   });
 });
+
+describe("layoutLineageRows opt-in options (sidebar)", () => {
+  const parent = task({ id: "parent" });
+  const early = task({
+    id: "early",
+    parentTaskId: "parent",
+    createdAt: "2025-01-01T01:00:00.000Z",
+  });
+  const late = task({
+    id: "late",
+    parentTaskId: "parent",
+    createdAt: "2025-01-01T02:00:00.000Z",
+  });
+  const index = buildLineageIndex([parent, early, late]);
+  const items = [{ task: parent }, { task: early }, { task: late }];
+
+  it("sorts nested siblings by createdAt when no options are supplied (board behaviour)", () => {
+    const rows = layoutLineageRows(items, index, new Set());
+    expect(rows.map((r) => r.item.task.id)).toEqual([
+      "parent",
+      "early",
+      "late",
+    ]);
+  });
+
+  it("sorts nested siblings by the supplied order, unknown ids last", () => {
+    const rows = layoutLineageRows(items, index, new Set(), {
+      siblingOrder: ["late"],
+    });
+    expect(rows.map((r) => r.item.task.id)).toEqual([
+      "parent",
+      "late",
+      "early",
+    ]);
+  });
+
+  it("renders a detached child top-level with its parent line, at its own position", () => {
+    const rows = layoutLineageRows(
+      [{ task: early }, { task: parent }, { task: late }],
+      index,
+      new Set(),
+      { detachedIds: new Set(["early"]) },
+    );
+    expect(rows.map((r) => [r.item.task.id, r.nested])).toEqual([
+      ["early", false],
+      ["parent", false],
+      ["late", true],
+    ]);
+    expect(rows[0]?.parentTitle).toBe("parent");
+    expect(rows[1]?.children).toEqual({
+      count: 2,
+      collapsed: false,
+      nestedHere: true,
+    });
+  });
+
+  it("a parent whose every child is detached has nothing nested here", () => {
+    const rows = layoutLineageRows(items, index, new Set(), {
+      detachedIds: new Set(["early", "late"]),
+    });
+    expect(rows.find((r) => r.item.task.id === "parent")?.children).toEqual({
+      count: 2,
+      collapsed: false,
+      nestedHere: false,
+    });
+  });
+});

@@ -21,6 +21,7 @@ import {
   useUnreadTaskIds,
 } from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
+import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
 import {
   readFocusedTaskId,
@@ -46,6 +47,8 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
   const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
+  const sidebarOrder = useSidebarOrder();
+  const { appendOpened, removeClosed } = sidebarOrder;
   const columns = useBoard();
   const manualRefresh = useManualRefresh();
   const flatRows = useMemo(() => flattenBoard(columns), [columns]);
@@ -93,18 +96,25 @@ export function App(): JSX.Element {
   // drops the task's persisted dockview layout (lib/workspace-persistence)
   // so a later reopen never resurrects a stale one — relaunching after a
   // close must not restore it (restore only replays what was open at exit).
-  const closeTask = useCallback((taskId: string) => {
-    setOpenedTaskIds((prev) => {
-      if (!prev.has(taskId)) return prev;
-      const next = new Set(prev);
-      next.delete(taskId);
-      setFocusedTaskId((current) =>
-        current === taskId ? (next.values().next().value ?? "") : current,
-      );
-      return next;
-    });
-    removeWorkspaceLayout(window.localStorage, taskId);
-  }, []);
+  const closeTask = useCallback(
+    (taskId: string) => {
+      setOpenedTaskIds((prev) => {
+        if (!prev.has(taskId)) return prev;
+        const next = new Set(prev);
+        next.delete(taskId);
+        setFocusedTaskId((current) =>
+          current === taskId ? (next.values().next().value ?? "") : current,
+        );
+        return next;
+      });
+      removeWorkspaceLayout(window.localStorage, taskId);
+      // The single close path: forget the task's rail position (and detached
+      // flag) so a reopen lands at the bottom. Never runs during startup
+      // restore, which only ever *adds* to openedTaskIds.
+      removeClosed(taskId);
+    },
+    [removeClosed],
+  );
 
   const requestCloseTask = useCallback(
     (taskId: string) => {
@@ -220,13 +230,18 @@ export function App(): JSX.Element {
     storeFocusedTaskId(window.localStorage, focusedTaskId);
   }, [restoreComplete, focusedTaskId]);
 
-  const openTask = useCallback((taskId: string) => {
-    setFocusedTaskId(taskId);
-    setOpenedTaskIds((prev) =>
-      prev.has(taskId) ? prev : new Set(prev).add(taskId),
-    );
-    setView("workspace");
-  }, []);
+  const openTask = useCallback(
+    (taskId: string) => {
+      setFocusedTaskId(taskId);
+      setOpenedTaskIds((prev) =>
+        prev.has(taskId) ? prev : new Set(prev).add(taskId),
+      );
+      // A task not yet in the stored rail order appends at the bottom.
+      appendOpened(taskId);
+      setView("workspace");
+    },
+    [appendOpened],
+  );
 
   // Entry point for every "open/focus this task" action (sidebar row, board
   // card). Own-pane-live tasks (already in `openedTaskIds`) just focus, no
@@ -257,25 +272,29 @@ export function App(): JSX.Element {
   // (a board card click or a sidebar row, once one exists). This never
   // focuses or switches view \u2014 only `selectTask`/`openTask` do that \u2014
   // so creating a task from the board keeps the board on screen.
-  const createTask = useCallback((input: NewTaskDialogResult) => {
-    void window.harbormaster.core
-      .createTask({
-        title: input.title,
-        initialPrompt: input.initialPrompt ?? "",
-        ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
-        ...(input.start ? { start: true } : {}),
-      })
-      .then((task) => {
-        if (!input.start) return;
-        setOpenedTaskIds((prev) =>
-          prev.has(task.id) ? prev : new Set(prev).add(task.id),
-        );
-      })
-      .catch((error: unknown) => {
-        console.error("createTask failed:", error);
-        pushToast(describeThrown(error), "error");
-      });
-  }, []);
+  const createTask = useCallback(
+    (input: NewTaskDialogResult) => {
+      void window.harbormaster.core
+        .createTask({
+          title: input.title,
+          initialPrompt: input.initialPrompt ?? "",
+          ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+          ...(input.start ? { start: true } : {}),
+        })
+        .then((task) => {
+          if (!input.start) return;
+          setOpenedTaskIds((prev) =>
+            prev.has(task.id) ? prev : new Set(prev).add(task.id),
+          );
+          appendOpened(task.id);
+        })
+        .catch((error: unknown) => {
+          console.error("createTask failed:", error);
+          pushToast(describeThrown(error), "error");
+        });
+    },
+    [appendOpened],
+  );
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -413,6 +432,10 @@ export function App(): JSX.Element {
             <Sidebar
               focusedTaskId={focusedTaskId}
               openedTaskIds={openedTaskIds}
+              taskOrder={sidebarOrder.taskOrder}
+              onTaskOrderChange={sidebarOrder.setTaskOrder}
+              detachedIds={sidebarOrder.detachedIds}
+              onDetachedChange={sidebarOrder.setDetachedIds}
               onSelectTask={selectTask}
               onCloseTask={requestCloseTask}
               onShowBoard={() => setView("board")}
