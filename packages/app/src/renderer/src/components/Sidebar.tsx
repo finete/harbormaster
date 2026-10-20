@@ -1030,6 +1030,12 @@ export function Sidebar({
       open={newTaskOpen}
       onOpenChange={setNewTaskOpen}
       onCreate={onCreateTask}
+      fromTask={
+        focusedTaskId
+          ? (flattenBoard(columns).find((row) => row.task.id === focusedTaskId)
+              ?.task ?? null)
+          : null
+      }
     />
   );
 

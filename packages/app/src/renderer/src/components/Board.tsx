@@ -33,7 +33,6 @@ import {
   resolveSelection,
 } from "../lib/board-selection";
 import { isTypingTarget } from "../lib/keyboard-guard";
-import { modKeyLabel } from "../lib/platform";
 import {
   readBoardCollapsedColumns,
   readBoardCollapsedGroups,
@@ -57,8 +56,6 @@ import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
 import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { TaskCard } from "./TaskCard";
-import { Button } from "./ui/button";
-import { Kbd } from "./ui/kbd";
 
 /**
  * Column-level drops (every droppable is a whole column): the pointer's
@@ -480,18 +477,8 @@ export function Board({
   ]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <BoardKeyLegend />
-      <div className="flex items-center justify-end border-b border-border px-3 py-2">
-        <Button
-          size="sm"
-          data-testid="board-new-task-button"
-          onClick={() => setNewTaskOpen(true)}
-        >
-          + New task
-          <Kbd>{`${modKeyLabel()}N`}</Kbd>
-        </Button>
-      </div>
       <DndContext
         sensors={sensors}
         collisionDetection={columnCollisionDetection}

@@ -89,16 +89,18 @@ function invocationsFor(needle: string): string[] {
     .filter((line) => line.trim().length > 0 && line.includes(needle));
 }
 
-async function openLaunchDialog(
-  parentTaskId: string,
-  relation: "subtask" | "task",
-): Promise<void> {
-  const button =
-    relation === "subtask"
-      ? window.getByTestId(`launch-subtask-button-${parentTaskId}`)
-      : window.getByTestId(`launch-task-button-${parentTaskId}`);
-  await button.click();
-  await expect(window.getByTestId("launch-task-dialog")).toBeVisible();
+async function openLaunchDialog(relation: "subtask" | "task"): Promise<void> {
+  // Launching lives inside the sidebar's New task dialog (one entry point):
+  // the parent is the focused task; the Link control picks the relation.
+  await window.getByTestId("sidebar-new-task-button").click();
+  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await window
+    .getByTestId(
+      relation === "subtask"
+        ? "new-task-link-child"
+        : "new-task-link-standalone",
+    )
+    .click();
 }
 
 test.beforeAll(async () => {
@@ -232,18 +234,19 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
 
   // --- Consume the one concurrency slot with a standalone "Blocker" launch, ---
   // --- so the real task-under-test's launch stays queued, not racy.       ---
-  await openLaunchDialog(parentId, "task");
-  await expect(
-    window.getByTestId("launch-task-relation-standalone"),
-  ).toHaveAttribute("data-selected", "true");
-  await window.getByTestId("launch-task-title-input").fill("Blocker");
+  await openLaunchDialog("task");
+  await expect(window.getByTestId("new-task-link-standalone")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await window.getByTestId("new-task-title-input").fill("Blocker");
   await window
-    .getByTestId("launch-task-prompt-input")
+    .getByTestId("new-task-prompt-input")
     .fill("Occupy the only concurrency slot");
   // Repository: "None (general)" (default) — a scratch task is enough to
   // occupy a launch slot and never touches the fixture repo's worktrees.
-  await window.getByTestId("launch-task-submit").click();
-  await expect(window.getByTestId("launch-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
   await expect(
     window.getByTestId("toast-success").filter({ hasText: "Blocker" }),
   ).toBeVisible();
@@ -252,20 +255,21 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   await window.waitForTimeout(500);
 
   // --- The actual task-under-test: a child, same repo as its parent. ---
-  await openLaunchDialog(parentId, "subtask");
-  await expect(
-    window.getByTestId("launch-task-relation-child"),
-  ).toHaveAttribute("data-selected", "true");
-  await window.getByTestId("launch-task-title-input").fill("Child Under Test");
+  await openLaunchDialog("subtask");
+  await expect(window.getByTestId("new-task-link-child")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await window.getByTestId("new-task-title-input").fill("Child Under Test");
   await window
-    .getByTestId("launch-task-prompt-input")
+    .getByTestId("new-task-prompt-input")
     .fill("Fix the specific bug");
-  await window.getByTestId("launch-task-repo-select").selectOption(REPO_ID);
+  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
   // Same repo as the parent + parent has a branch: the base-branch picker
   // appears (wave-3 task brief item 5).
-  await expect(window.getByTestId("launch-task-base-branch")).toBeVisible();
-  await window.getByTestId("launch-task-submit").click();
-  await expect(window.getByTestId("launch-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-base-branch")).toBeVisible();
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
   await expect(
     window.getByTestId("toast-success").filter({ hasText: "Child Under Test" }),
   ).toBeVisible();
