@@ -431,6 +431,61 @@ export function attachPrimarySession(
   return { id: session.id, pid: session.process.pid, snapshot };
 }
 
+/**
+ * The inverse of `attachPrimarySession`: hands a task's attached primary pty
+ * back to the background (paneless, headless screen mirror, no flow
+ * control) instead of killing it. Used when the renderer that owned it goes
+ * away without disposing it — a window reload (dev full reload, Cmd+R) or a
+ * renderer crash keeps the same webContents, so its panes never ran their
+ * cleanup — so the reloaded pane's `attachPrimary` reconnects to the SAME
+ * pi process instead of spawning a second one on the same session file.
+ * Returns `false` for anything that is not a task's registered primary (a
+ * "+ terminal" shell, a shell fallback): the caller disposes those.
+ */
+export function detachPrimarySession(id: string): boolean {
+  const session = sessions.get(id);
+  if (!session?.taskId || primaryTaskSessions.get(session.taskId) !== id) {
+    return false;
+  }
+  if (!session.attached) return true;
+
+  session.io.batcher?.dispose();
+  delete session.io.batcher;
+  delete session.io.flow;
+  // Flow control may have paused the pty waiting on acks that will never
+  // come from the departed renderer; a background session is never paused.
+  try {
+    session.process.resume();
+  } catch {
+    // Already gone; its exit disposable reports that separately.
+  }
+
+  const headlessTerminal = new HeadlessTerminal({
+    cols: session.process.cols || BACKGROUND_SESSION_COLS,
+    rows: session.process.rows || BACKGROUND_SESSION_ROWS,
+    allowProposedApi: true,
+  });
+  const serialize = new SerializeAddon();
+  headlessTerminal.loadAddon(serialize);
+  const taskId = session.taskId;
+  session.io.sink = (data) => {
+    try {
+      headlessTerminal.write(data);
+    } catch (error) {
+      console.error(
+        `[ptySessions] detached headless write failed for ${taskId}:`,
+        error,
+      );
+    }
+  };
+  session.io.exitSink = () => {
+    session.headless?.terminal.dispose();
+  };
+  session.headless = { terminal: headlessTerminal, serialize };
+  session.attached = false;
+  return true;
+}
+
 export function getSession(id: string): PtySessionRecord | undefined {
   return sessions.get(id);
 }

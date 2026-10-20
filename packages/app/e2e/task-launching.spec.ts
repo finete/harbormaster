@@ -310,6 +310,32 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   await window.waitForTimeout(500);
   expect(invocationsFor("child-under-test")).toHaveLength(1);
 
+  // --- A window reload (dev full reload, Cmd+R) keeps the webContents, ---
+  // --- so pane cleanup never runs: the reloaded panes must re-attach to  ---
+  // --- the SAME pi instead of spawning a second one per task.           ---
+  const parentInvocations = invocationsFor("parent-task").length;
+  expect(parentInvocations).toBe(1);
+  await window.reload();
+  await window.waitForLoadState("domcontentloaded");
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await window.getByTestId(`card-${childId}`).click();
+  await expect(
+    window
+      .getByTestId(`task-workspace-${childId}`)
+      .getByTestId("terminal-panel"),
+  ).toBeVisible();
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${parentId}`).click();
+  await expect(
+    window
+      .getByTestId(`task-workspace-${parentId}`)
+      .getByTestId("terminal-panel"),
+  ).toBeVisible();
+  await window.waitForTimeout(500);
+  expect(invocationsFor("child-under-test")).toHaveLength(1);
+  expect(invocationsFor("parent-task")).toHaveLength(1);
+
   // Outcome note: the fake pi never calls `harbormaster_report_status` (no
   // extension/MCP wiring in this fixture), so there is nothing to assert
   // here — the derivation itself is covered by
