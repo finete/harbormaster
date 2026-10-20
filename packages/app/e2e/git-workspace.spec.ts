@@ -125,7 +125,7 @@ test.afterAll(async () => {
 
 test("the fixture repo appears in the New Task dialog's repository picker", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
 
   await expect(
     window
@@ -140,9 +140,8 @@ test("the fixture repo appears in the New Task dialog's repository picker", asyn
 
   await expect(window.getByTestId("new-task-branch-preview")).toBeVisible();
 
-  await window.getByTestId("new-task-destination-backlog").click();
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 });
 
 test("derived branch subline and pty cwd inside the .harbormaster-worktrees checkout", async () => {

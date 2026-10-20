@@ -7,7 +7,11 @@
 // nothing here prunes the order against `openedTaskIds`, so the async
 // workspace restore can never wipe a stored order.
 import { useCallback, useEffect, useState } from "react";
-import { appendToOrder, removeFromOrder } from "./sidebar-order";
+import {
+  appendToOrder,
+  prependToOrder,
+  removeFromOrder,
+} from "./sidebar-order";
 import {
   readDetachedChildIds,
   readTaskOrder,
@@ -22,6 +26,8 @@ export interface SidebarOrderState {
   setDetachedIds: (ids: ReadonlySet<string>) => void;
   /** Open path: a task not yet in the order lands at the bottom. */
   appendOpened: (taskId: string) => void;
+  /** A draft that became a task: lands at the top (where the draft row was). */
+  prependOpened: (taskId: string) => void;
   /** Close path: forget the task's position and detached flag, so a reopen lands at the bottom. */
   removeClosed: (taskId: string) => void;
 }
@@ -43,6 +49,9 @@ export function useSidebarOrder(): SidebarOrderState {
   const appendOpened = useCallback((taskId: string): void => {
     setTaskOrder((prev) => appendToOrder(prev, taskId));
   }, []);
+  const prependOpened = useCallback((taskId: string): void => {
+    setTaskOrder((prev) => prependToOrder(prev, taskId));
+  }, []);
   const removeClosed = useCallback((taskId: string): void => {
     setTaskOrder((prev) => removeFromOrder(prev, taskId));
     setDetachedIds((prev) => {
@@ -58,6 +67,7 @@ export function useSidebarOrder(): SidebarOrderState {
     setTaskOrder,
     setDetachedIds,
     appendOpened,
+    prependOpened,
     removeClosed,
   };
 }

@@ -243,12 +243,11 @@ test.describe("toAwait and toDone drive the board through the real core command 
 
   test("creating a repo task, then r on the board + Enter (the Await picker's review fast path) pushes the branch, opens a PR, and moves the card into Awaiting / Review", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
-    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Ship Feature");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Ship Feature");
@@ -362,7 +361,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Quick Scratch Fix");
     await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Quick Scratch Fix");
@@ -397,9 +396,8 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Review");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Drag Review");
@@ -443,9 +441,8 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Done");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Drag Done");
@@ -578,9 +575,8 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Dirty Done");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Dirty Done");
@@ -694,9 +690,8 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Flaky Gh Task");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Flaky Gh Task");

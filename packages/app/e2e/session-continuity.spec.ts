@@ -182,12 +182,11 @@ let sessionFile = "";
 
 test("the first pane pre-assigns a session id; reopening the task resumes that same session", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
-  await window.getByTestId("new-task-destination-start").click();
   await window.getByTestId("new-task-title-input").fill("Continuity");
   await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
   await window.getByTestId("new-task-prompt-input").fill("Kick it off");
   await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
   await openTask("Continuity");
   taskId = await cardTaskId(cardLocator("Continuity"));

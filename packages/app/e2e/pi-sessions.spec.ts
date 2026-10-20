@@ -80,14 +80,13 @@ function seedFixtureRepo(codeRoot: string): string {
 
 async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
   await window
     .getByTestId("new-task-repo-select")
     .selectOption("github.com/test/fixture");
-  await window.getByTestId("new-task-destination-backlog").click();
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   // Parked in Backlog: Start creates the worktree the pi pane runs in.
   // (a drop on Dev — cards carry no buttons).
@@ -202,10 +201,10 @@ test.describe("the presence poll surfaces a running badge within one poll interv
 
   test("a presence record written straight through SessionPresenceAccess shows a spinner on the sidebar row within ~5s", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
-    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Presence Task");
     await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     const row = window
       .locator('[data-testid^="sidebar-task-row-"]')
@@ -341,13 +340,13 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
     // detour needed (the sidebar's "Tasks" list only surfaces started
     // tasks, same as `pollPresenceOnce`'s own non-done filter).
     await window.getByTestId("sidebar-new-task-button").click();
-    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Corroboration Task");
     await window
       .getByTestId("new-task-repo-select")
       .selectOption("github.com/test/fixture");
     await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     const row = window
       .locator('[data-testid^="sidebar-task-row-"]')

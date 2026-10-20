@@ -140,7 +140,7 @@ test.afterAll(async () => {
 
 test("two checkouts of the same remote collapse into one New Task repository option, labeled with its checkout count", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
 
   const options = window
     .getByTestId("new-task-repo-select")
@@ -148,9 +148,8 @@ test("two checkouts of the same remote collapse into one New Task repository opt
   await expect(options).toHaveCount(1);
   await expect(options).toHaveText(`${REPO_ID} — 2 checkouts`);
 
-  await window.getByTestId("new-task-destination-backlog").click();
   await window.getByTestId("new-task-title-input").fill("Multi-checkout task");
   await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 });

@@ -125,8 +125,7 @@ test.describe("terminal wheel translation (P0-1)", () => {
       await window
         .getByTestId("new-task-repo-select")
         .selectOption("github.com/test/fixture");
-      await window.getByTestId("new-task-destination-backlog").click();
-      await window.getByTestId("new-task-submit").click();
+      await window.getByTestId("new-task-submit-backlog").click();
 
       await window.getByTestId("board-button").click();
       const card = window

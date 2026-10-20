@@ -5,7 +5,10 @@ import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
-import type { NewTaskDialogResult } from "./components/NewTaskDialog";
+import {
+  NewTaskComposer,
+  type NewTaskOutcome,
+} from "./components/NewTaskComposer";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
@@ -13,6 +16,7 @@ import { Button } from "./components/ui/button";
 import { Dialog, DialogFooter } from "./components/ui/dialog";
 import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
+import { requestConfirm } from "./confirm";
 import {
   flattenBoard,
   useBoard,
@@ -21,6 +25,14 @@ import {
   useUnreadTaskIds,
 } from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
+import {
+  draftLabel,
+  emptyDraft,
+  isDraftEmpty,
+  type NewTaskDraft,
+  readDraft,
+  storeDraft,
+} from "./lib/new-task-draft";
 import { modKeyLabel } from "./lib/platform";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
@@ -31,7 +43,7 @@ import {
   storeFocusedTaskId,
   storeOpenedTaskIds,
 } from "./lib/workspace-persistence";
-import { describeThrown, pushToast } from "./toast";
+import { pushToast } from "./toast";
 
 type View = "board" | "workspace";
 
@@ -49,7 +61,7 @@ export function App(): JSX.Element {
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
   const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
   const sidebarOrder = useSidebarOrder();
-  const { appendOpened, removeClosed } = sidebarOrder;
+  const { appendOpened, prependOpened, removeClosed } = sidebarOrder;
   const columns = useBoard();
   const manualRefresh = useManualRefresh();
   const flatRows = useMemo(() => flattenBoard(columns), [columns]);
@@ -61,16 +73,32 @@ export function App(): JSX.Element {
     [],
   );
 
+  // The new-task DRAFT (renderer-only, persisted; lib/new-task-draft.ts):
+  // at most one. While `draftFocused` the main pane shows the composer and no
+  // task is "visible" (`focusedTaskId` is kept as the task to fall back to).
+  const [draft, setDraft] = useState<NewTaskDraft | null>(() =>
+    readDraft(window.localStorage),
+  );
+  const [draftFocused, setDraftFocused] = useState(false);
+  const [draftFocusSignal, setDraftFocusSignal] = useState(0);
+  useEffect(() => {
+    storeDraft(window.localStorage, draft);
+  }, [draft]);
+  const visibleTaskId = draftFocused ? "" : focusedTaskId;
+  const draftOrigin = draft?.originTaskId
+    ? (flatRows.find((row) => row.task.id === draft.originTaskId)?.task ?? null)
+    : null;
+
   // OS notifications + dock badge (daily-driver switch, task B). Unread
   // state is still fully owned here through the same hook Sidebar/Board use
   // (see lib/unread.ts); this instance only ever feeds the dock badge count
   // and the `useTaskNotifications` subscription below "- it never renders
   // anything itself.
-  const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
+  const unreadTaskIds = useUnreadTaskIds(visibleTaskId);
   useEffect(() => {
     void window.harbormaster.app.setBadgeCount(unreadTaskIds.size);
   }, [unreadTaskIds]);
-  useTaskNotifications(focusedTaskId, getTaskTitle);
+  useTaskNotifications(visibleTaskId, getTaskTitle);
 
   // Takeover-offer guard state (see /AGENTS.md "Attachment safety",
   // /docs/design-decisions.md #8, components/TakeoverDialog.tsx): set only
@@ -83,13 +111,6 @@ export function App(): JSX.Element {
   // Close-workspace confirm: set only while the focused task's agent is
   // mid-turn and the user asked to close its workspace anyway.
   const [pendingClose, setPendingClose] = useState<string | null>(null);
-
-  // Cmd/Ctrl+N "open New Task dialog from either view" (board or workspace):
-  // each view owns its own New Task dialog instance (Board.tsx / Sidebar.tsx),
-  // so this just bumps whichever one is currently visible's open-signal —
-  // never both, so only one `new-task-dialog` ever mounts at a time.
-  const [boardNewTaskSignal, setBoardNewTaskSignal] = useState(0);
-  const [sidebarNewTaskSignal, setSidebarNewTaskSignal] = useState(0);
 
   // Closing unmounts the TaskWorkspace, which disposes every pane's pty
   // (TerminalPane unmount cleanup); the pi session ends, cmux-style. The
@@ -239,6 +260,7 @@ export function App(): JSX.Element {
       );
       // A task not yet in the stored rail order appends at the bottom.
       appendOpened(taskId);
+      setDraftFocused(false);
       setView("workspace");
     },
     [appendOpened],
@@ -266,35 +288,63 @@ export function App(): JSX.Element {
     [openedTaskIds, openTask],
   );
 
-  // Shared "+ New task" handler for both entry points (Sidebar's footer
-  // button, Board's header button): "Start now" auto-opens the new task's
-  // workspace so it appears in the rail immediately, cmux-style; parked
-  // backlog tasks stay off the rail until the user opens them explicitly
-  // (a board card click or a sidebar row, once one exists). This never
-  // focuses or switches view \u2014 only `selectTask`/`openTask` do that \u2014
-  // so creating a task from the board keeps the board on screen.
-  const createTask = useCallback(
-    (input: NewTaskDialogResult) => {
-      void window.harbormaster.core
-        .createTask({
-          title: input.title,
-          initialPrompt: input.initialPrompt ?? "",
-          ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
-          ...(input.start ? { start: true } : {}),
-        })
-        .then((task) => {
-          if (!input.start) return;
-          setOpenedTaskIds((prev) =>
-            prev.has(task.id) ? prev : new Set(prev).add(task.id),
-          );
-          appendOpened(task.id);
-        })
-        .catch((error: unknown) => {
-          console.error("createTask failed:", error);
-          pushToast(describeThrown(error), "error");
-        });
+  // The ONE way to create a task (Cmd/Ctrl+N, the sidebar button, the board
+  // header button): leave the board, then open/focus THE draft. An existing
+  // draft is only focused; a fresh one captures the focused task as its
+  // origin (the task a launch would come from).
+  const openDraft = useCallback(() => {
+    setDraft((prev) => prev ?? emptyDraft(focusedTaskId || null));
+    setDraftFocused(true);
+    setDraftFocusSignal((count) => count + 1);
+    setView("workspace");
+  }, [focusedTaskId]);
+
+  const discardDraft = useCallback(() => {
+    setDraft(null);
+    setDraftFocused(false);
+  }, []);
+
+  const closeDraft = useCallback(() => {
+    if (!draft || isDraftEmpty(draft)) {
+      discardDraft();
+      return;
+    }
+    void requestConfirm({
+      title: "Discard draft?",
+      message: "This new task draft has content that will be lost.",
+      confirmLabel: "Discard",
+    }).then((confirmed) => {
+      if (confirmed) discardDraft();
+    });
+  }, [draft, discardDraft]);
+
+  // A submitted draft. "Start" turns the draft row into the real task in the
+  // same place (top of the rail) and focuses it - it is our own fresh task, so
+  // no takeover check. Park/launch return focus to the origin task: launching
+  // never steals focus (ai/prds/task-launching.md).
+  const onDraftSubmitted = useCallback(
+    (outcome: NewTaskOutcome) => {
+      const originId = draft?.originTaskId ?? null;
+      setDraft(null);
+      setDraftFocused(false);
+      if (outcome.kind === "start") {
+        const id = outcome.task.id;
+        setOpenedTaskIds((prev) =>
+          prev.has(id) ? prev : new Set(prev).add(id),
+        );
+        prependOpened(id);
+        setFocusedTaskId(id);
+        return;
+      }
+      if (originId && openedTaskIds.has(originId)) setFocusedTaskId(originId);
+      pushToast(
+        outcome.kind === "launch"
+          ? `Launched ${outcome.task.title} \u2014 queued`
+          : `Parked ${outcome.task.title} in Backlog`,
+        "success",
+      );
     },
-    [appendOpened],
+    [draft, openedTaskIds, prependOpened],
   );
 
   useEffect(() => {
@@ -319,24 +369,23 @@ export function App(): JSX.Element {
         if (takeover || pendingClose) return;
         if (isTypingTarget(event.target)) return;
         event.preventDefault();
-        if (view === "board") setBoardNewTaskSignal((count) => count + 1);
-        else setSidebarNewTaskSignal((count) => count + 1);
+        openDraft();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [view, takeover, pendingClose]);
+  }, [takeover, pendingClose, openDraft]);
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
   useEffect(
     () =>
       window.harbormaster.core.onCloseTabShortcut(() => {
-        if (view === "workspace" && focusedTaskId) {
-          requestCloseTask(focusedTaskId);
-        }
+        if (view !== "workspace") return;
+        if (draftFocused) closeDraft();
+        else if (focusedTaskId) requestCloseTask(focusedTaskId);
       }),
-    [view, focusedTaskId, requestCloseTask],
+    [view, draftFocused, focusedTaskId, requestCloseTask, closeDraft],
   );
 
   // Clicking an OS notification: main pushes the clicked task's id (see
@@ -416,7 +465,7 @@ export function App(): JSX.Element {
                 size="sm"
                 className="ml-auto h-7 px-2"
                 data-testid="board-new-task-button"
-                onClick={() => setBoardNewTaskSignal((n) => n + 1)}
+                onClick={openDraft}
               >
                 + New task
                 <Kbd>{`${modKeyLabel()}N`}</Kbd>
@@ -425,11 +474,10 @@ export function App(): JSX.Element {
             <div className="min-h-0 flex-1">
               <Board
                 onSelectTask={selectTask}
-                onCreateTask={createTask}
+                onNewTask={openDraft}
                 active={view === "board"}
-                openNewTaskSignal={boardNewTaskSignal}
                 onBackToWorkspace={() => setView("workspace")}
-                focusedTaskId={focusedTaskId || null}
+                focusedTaskId={visibleTaskId || null}
               />
             </div>
           </div>
@@ -440,7 +488,7 @@ export function App(): JSX.Element {
             className={view === "workspace" ? "flex h-full w-full" : "hidden"}
           >
             <Sidebar
-              focusedTaskId={focusedTaskId}
+              focusedTaskId={visibleTaskId}
               openedTaskIds={openedTaskIds}
               taskOrder={sidebarOrder.taskOrder}
               onTaskOrderChange={sidebarOrder.setTaskOrder}
@@ -449,13 +497,32 @@ export function App(): JSX.Element {
               onSelectTask={selectTask}
               onCloseTask={requestCloseTask}
               onShowBoard={() => setView("board")}
-              onCreateTask={createTask}
-              openNewTaskSignal={sidebarNewTaskSignal}
+              onNewTask={openDraft}
+              draftLabel={draft ? draftLabel(draft) : null}
+              draftFocused={draftFocused}
+              onSelectDraft={() => {
+                setDraftFocused(true);
+                setDraftFocusSignal((count) => count + 1);
+              }}
+              onCloseDraft={closeDraft}
             />
             <WorkspaceView
-              focusedTaskId={focusedTaskId}
+              focusedTaskId={visibleTaskId}
               openedTaskIds={openedTaskIds}
               onCloseTask={requestCloseTask}
+              composer={
+                draft && draftFocused ? (
+                  <NewTaskComposer
+                    draft={draft}
+                    onChange={(patch) =>
+                      setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
+                    }
+                    origin={draftOrigin}
+                    focusSignal={draftFocusSignal}
+                    onSubmitted={onDraftSubmitted}
+                  />
+                ) : null
+              }
             />
           </div>
         }

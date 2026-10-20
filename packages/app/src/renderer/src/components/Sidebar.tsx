@@ -25,6 +25,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   LayoutGrid,
+  Pencil,
   Pin,
   Plus,
   Search,
@@ -79,7 +80,6 @@ import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
-import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import {
   type ContextMenuItem,
   SidebarRowContextMenu,
@@ -330,8 +330,11 @@ export function Sidebar({
   onSelectTask,
   onCloseTask,
   onShowBoard,
-  onCreateTask,
-  openNewTaskSignal,
+  onNewTask,
+  draftLabel,
+  draftFocused,
+  onSelectDraft,
+  onCloseDraft,
 }: {
   focusedTaskId: string | null;
   openedTaskIds: ReadonlySet<string>;
@@ -344,25 +347,18 @@ export function Sidebar({
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
-  onCreateTask: (input: NewTaskDialogResult) => void;
-  /** Bumped by App.tsx's Cmd/Ctrl+N handler while the workspace view is active; opens this sidebar's New Task dialog. */
-  openNewTaskSignal?: number;
+  /** Open/focus THE new-task draft (same path as Cmd/Ctrl+N). */
+  onNewTask: () => void;
+  /** Live label of the new-task draft row; `null` = no draft exists. */
+  draftLabel: string | null;
+  draftFocused: boolean;
+  onSelectDraft: () => void;
+  onCloseDraft: () => void;
 }): JSX.Element {
   const columns = useBoard();
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const openNewTaskSignalRef = useRef(openNewTaskSignal);
-  useEffect(() => {
-    if (
-      openNewTaskSignal !== undefined &&
-      openNewTaskSignal !== openNewTaskSignalRef.current
-    ) {
-      openNewTaskSignalRef.current = openNewTaskSignal;
-      setNewTaskOpen(true);
-    }
-  }, [openNewTaskSignal]);
   const [query, setQuery] = useState("");
   // Saved group-collapse state (Orca polish item 2): same localStorage
   // pattern as rail width/collapse below, restored on launch.
@@ -1025,20 +1021,6 @@ export function Sidebar({
     else searchRef.current?.blur();
   };
 
-  const newTaskDialog = (
-    <NewTaskDialog
-      open={newTaskOpen}
-      onOpenChange={setNewTaskOpen}
-      onCreate={onCreateTask}
-      fromTask={
-        focusedTaskId
-          ? (flattenBoard(columns).find((row) => row.task.id === focusedTaskId)
-              ?.task ?? null)
-          : null
-      }
-    />
-  );
-
   if (collapsed) {
     return (
       <div
@@ -1058,6 +1040,22 @@ export function Sidebar({
           <ChevronsRight className="h-4 w-4" aria-hidden />
         </button>
         <div className="mt-2 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
+          {draftLabel !== null && (
+            <button
+              type="button"
+              data-testid="sidebar-collapsed-draft"
+              aria-pressed={draftFocused}
+              aria-label={draftLabel}
+              title={draftLabel}
+              onClick={onSelectDraft}
+              className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50",
+                draftFocused && "bg-accent/70 text-foreground",
+              )}
+            >
+              <Pencil className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
           {railRows.map((row) => (
             <button
               key={row.task.id}
@@ -1082,7 +1080,7 @@ export function Sidebar({
             data-testid="sidebar-new-task-button"
             aria-label="New task"
             title="New task"
-            onClick={() => setNewTaskOpen(true)}
+            onClick={onNewTask}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
           >
             <Plus className="h-4 w-4" aria-hidden />
@@ -1098,7 +1096,6 @@ export function Sidebar({
             <LayoutGrid className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        {newTaskDialog}
       </div>
     );
   }
@@ -1193,7 +1190,37 @@ export function Sidebar({
           data-drag-layout={layoutHidden ? drag?.kind : undefined}
           className="min-h-0 flex-1 overflow-y-auto pb-2"
         >
-          {rows.length === 0 && (
+          {draftLabel !== null && (
+            <div
+              data-testid="sidebar-draft-row"
+              data-focused={draftFocused}
+              className={cn(
+                "group flex items-center gap-2 border-l-2 border-dashed border-primary/50 px-3 py-1.5 text-sm italic text-muted-foreground transition-colors hover:bg-accent/40",
+                draftFocused && "bg-accent/70 text-foreground",
+              )}
+            >
+              <button
+                type="button"
+                data-testid="sidebar-draft-select"
+                onClick={onSelectDraft}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{draftLabel}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="sidebar-draft-close"
+                aria-label="Discard draft"
+                title="Close draft"
+                onClick={onCloseDraft}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-60 hover:bg-accent hover:opacity-100"
+              >
+                <X className="h-3 w-3" aria-hidden />
+              </button>
+            </div>
+          )}
+          {rows.length === 0 && draftLabel === null && (
             <p
               data-testid="sidebar-empty-hint"
               className="px-4 py-4 text-xs text-muted-foreground"
@@ -1337,7 +1364,7 @@ export function Sidebar({
           size="sm"
           variant="outline"
           className="flex-1"
-          onClick={() => setNewTaskOpen(true)}
+          onClick={onNewTask}
           data-testid="sidebar-new-task-button"
         >
           <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -1383,7 +1410,6 @@ export function Sidebar({
           )}
         />
       </div>
-      {newTaskDialog}
       {contextMenu && contextMenuRow && (
         <SidebarRowContextMenu
           x={contextMenu.x}

@@ -54,7 +54,6 @@ import { useDragGuards } from "../lib/use-drag-guards";
 import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { BoardColumn } from "./BoardColumn";
 import { BoardKeyLegend } from "./BoardKeyLegend";
-import { NewTaskDialog, type NewTaskDialogResult } from "./NewTaskDialog";
 import { TaskCard } from "./TaskCard";
 
 /**
@@ -113,18 +112,16 @@ const boardMeasuring: MeasuringConfiguration = {
  */
 export function Board({
   onSelectTask,
-  onCreateTask,
+  onNewTask,
   active = true,
-  openNewTaskSignal,
   onBackToWorkspace,
   focusedTaskId = null,
 }: {
   onSelectTask: (taskId: string) => void;
-  onCreateTask: (input: NewTaskDialogResult) => void;
+  /** `n`: open/focus the new-task draft (App.tsx leaves the board for the workspace view). */
+  onNewTask: () => void;
   /** Whether the board is the currently-visible view; gates the single-key TUI shortcuts. */
   active?: boolean;
-  /** Bumped by App.tsx's Cmd/Ctrl+N handler while the board is the active view; opens this board's New Task dialog. */
-  openNewTaskSignal?: number;
   /** Escape: back to the workspace view (App.tsx owns the view switch). */
   onBackToWorkspace?: () => void;
   /** App's currently-focused task (see core-client.ts's useUnreadTaskIds); absent outside the workspace view's own tracking. */
@@ -136,7 +133,6 @@ export function Board({
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   // The task the Await… picker is open for (a drop on Awaiting, or `r`).
   const [awaitTaskId, setAwaitTaskId] = useState<string | null>(null);
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Done-column-only toggle (see BoardColumn.tsx); archived tasks are hidden
   // by default, sidebar excludes them always regardless of this.
@@ -331,18 +327,6 @@ export function Board({
     return () => row.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Cmd/Ctrl+N from App.tsx while this board is the active view.
-  const openNewTaskSignalRef = useRef(openNewTaskSignal);
-  useEffect(() => {
-    if (
-      openNewTaskSignal !== undefined &&
-      openNewTaskSignal !== openNewTaskSignalRef.current
-    ) {
-      openNewTaskSignalRef.current = openNewTaskSignal;
-      setNewTaskOpen(true);
-    }
-  }, [openNewTaskSignal]);
-
   const selectedTask = flattenBoard(columns).find(
     (row) => row.task.id === selectedTaskId,
   )?.task;
@@ -380,7 +364,7 @@ export function Board({
   useEffect(() => {
     if (!active) return;
     function onKeyDown(event: KeyboardEvent): void {
-      if (newTaskOpen || awaitTaskId || isConfirmOpen()) return;
+      if (awaitTaskId || isConfirmOpen()) return;
       if (dragKeyGuardRef.current) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
@@ -417,7 +401,7 @@ export function Board({
           return;
         case "n":
           event.preventDefault();
-          setNewTaskOpen(true);
+          onNewTask();
           return;
         case "g":
           event.preventDefault();
@@ -461,7 +445,7 @@ export function Board({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     active,
-    newTaskOpen,
+    onNewTask,
     awaitTaskId,
     columns,
     showArchived,
@@ -542,11 +526,6 @@ export function Board({
         taskId={awaitTaskId}
         onCancel={() => setAwaitTaskId(null)}
         onConfirm={confirmAwait}
-      />
-      <NewTaskDialog
-        open={newTaskOpen}
-        onOpenChange={setNewTaskOpen}
-        onCreate={onCreateTask}
       />
     </div>
   );

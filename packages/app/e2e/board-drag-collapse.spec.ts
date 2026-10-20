@@ -77,11 +77,13 @@ function cardLocator(title: string): Locator {
 
 async function createBacklogTask(title: string): Promise<void> {
   await window.getByTestId("board-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
-  await window.getByTestId("new-task-destination-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  // Creating leaves the board for the workspace view; return to it.
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 }
 
 /** Presses the pointer on `card`'s title strip and moves past the 4px activation distance. */

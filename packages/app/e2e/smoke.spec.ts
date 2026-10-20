@@ -87,13 +87,18 @@ async function createTask(
   title: string,
 ): Promise<void> {
   await window.getByTestId(newTaskButtonTestId).click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   // These smoke tasks have no repository, so parking vs starting only decides
   // the landing column; the suite's assertions expect Backlog.
-  await window.getByTestId("new-task-destination-backlog").click();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  // Every create path (board header included) lands in the workspace view
+  // now; callers expect the view they started from.
+  if (newTaskButtonTestId === "board-new-task-button") {
+    await window.getByTestId("board-button").click();
+    await expect(window.getByTestId("board-view")).toBeVisible();
+  }
 }
 
 function cardLocator(title: string): Locator {

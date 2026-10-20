@@ -56,6 +56,14 @@ export function appendToOrder(
   return order.includes(id) ? order : [...order, id];
 }
 
+/** `order` with `id` moved/inserted at the front (a draft turning into its task keeps its top slot). */
+export function prependToOrder(
+  order: readonly string[],
+  id: string,
+): readonly string[] {
+  return order[0] === id ? order : [id, ...order.filter((x) => x !== id)];
+}
+
 /** `order` without `id` (close-a-task path, R4). Returns the same array when unchanged. */
 export function removeFromOrder(
   order: readonly string[],

@@ -166,9 +166,8 @@ test.describe("the connectivity banner replaces per-task warning toasts while gh
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Offline Task");
     await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, "Offline Task");

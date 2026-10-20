@@ -78,14 +78,13 @@ async function createTaskWithRepo(
   title: string,
 ): Promise<string> {
   await window.getByTestId("sidebar-new-task-button").click();
-  await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
   await window
     .getByTestId("new-task-repo-select")
     .selectOption("github.com/test/fixture");
-  await window.getByTestId("new-task-destination-backlog").click();
-  await window.getByTestId("new-task-submit").click();
-  await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+  await window.getByTestId("new-task-submit-backlog").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   const card = cardLocator(window, title);
   const cardTestId = await card.getAttribute("data-testid");
@@ -198,11 +197,10 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
     // gets the one, real primary pane this suite's single-tab assumptions
     // need.
     await window.getByTestId("sidebar-new-task-button").click();
-    await expect(window.getByTestId("new-task-dialog")).toBeVisible();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Auto-focus Decoy");
-    await window.getByTestId("new-task-destination-backlog").click();
-    await window.getByTestId("new-task-submit").click();
-    await expect(window.getByTestId("new-task-dialog")).toHaveCount(0);
+    await window.getByTestId("new-task-submit-backlog").click();
+    await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     const taskId = await createTaskWithRepo(window, "Tab Parity Task");
     const card = cardLocator(window, "Tab Parity Task");
