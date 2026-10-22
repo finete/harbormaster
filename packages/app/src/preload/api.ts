@@ -211,8 +211,20 @@ export interface HarbormasterApi {
      */
     ack(id: string, chars: number): void;
     dispose(id: string): Promise<void>;
-    onData(listener: (event: TerminalDataEvent) => void): () => void;
-    onExit(listener: (event: TerminalExitEvent) => void): () => void;
+    /**
+     * Subscribe to pty output. Pass `id` to receive only that session's
+     * chunks (routed centrally in the preload: one IPC listener total, not
+     * one per pane); omit it to receive every session's.
+     */
+    onData(
+      listener: (event: TerminalDataEvent) => void,
+      id?: string,
+    ): () => void;
+    /** Subscribe to pty exits; `id` filters to one session like `onData`. */
+    onExit(
+      listener: (event: TerminalExitEvent) => void,
+      id?: string,
+    ): () => void;
     /**
      * P1-1: Query whether screenReaderMode should be enabled for terminal
      * panes. Returns true when the OS reports an AT or the e2e env var

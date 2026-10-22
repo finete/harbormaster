@@ -7,9 +7,12 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import {
+  captureWebglContext,
   createTerminalOptions,
+  createWebglParker,
   type HostContext,
   installHostIntegrations,
+  isContainerVisible,
   type SearchHandle,
 } from "../lib/terminal-host";
 import {
@@ -55,10 +58,20 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const mountEl = containerRef.current;
+    if (!mountEl) return;
+    // Non-null alias so hoisted helper functions below keep the narrowing.
+    const container: HTMLDivElement = mountEl;
 
-    const terminal = new Terminal(createTerminalOptions());
+    const params = props.params as
+      | { cwd?: string; taskId?: string; primary?: boolean }
+      | undefined;
+    const cwd = params?.cwd;
+    const isPrimary = !!params?.primary;
+
+    const terminal = new Terminal(
+      createTerminalOptions({ primary: isPrimary }),
+    );
 
     // Unicode 11 width tables — must be loaded before open() so the first
     // render uses the correct glyph widths.
@@ -85,8 +98,14 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     // 3. Re-acquire WebGL lazily when visible again (ResizeObserver fires with
     //    non-zero rect after being hidden), provided < 3 losses in 5 minutes.
     // After 3 losses in 5 min we stay on DOM (likely a sick GPU — VS Code's
-    // _suggestedRendererType='dom' idea). We do NOT dispose on every hide
-    // (that leaks contexts per xterm #6068 and rebuilds the atlas).
+    // _suggestedRendererType='dom' idea).
+    // 4. Park: a pane hidden for longer than WEBGL_PARK_DELAY_MS (10 s) drops
+    //    its WebGL addon AND explicitly frees the context (loseContext after
+    //    dispose — a disposed context otherwise lingers until GC, which is
+    //    what xterm #6068 is about), data-renderer="parked". Showing it again
+    //    re-loads WebGL. A quick hide/show (tab flick) never touches the GPU,
+    //    so the atlas rebuild cost is only paid after a real absence. Parking
+    //    is not a loss and does not count toward the 3-loss cap.
 
     let disposed = false;
     let sessionId: string | undefined;
@@ -95,56 +114,103 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       "[data-testid='terminal-panel']",
     ) as HTMLElement | null;
 
+    // Context-loss timestamps, oldest first; trimmed in place to the 5-min
+    // window so it never grows with uptime.
     const losses: number[] = [];
     let webglLost = false;
 
-    function setRenderer(r: "webgl" | "dom"): void {
+    function recentLossCount(): number {
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      let stale = 0;
+      while (stale < losses.length && (losses[stale] ?? 0) < cutoff) stale++;
+      if (stale > 0) losses.splice(0, stale);
+      return losses.length;
+    }
+
+    function setRenderer(r: "webgl" | "dom" | "parked"): void {
       terminalPanel?.setAttribute("data-renderer", r);
     }
 
     let webgl: WebglAddon | undefined;
 
     function disposeWebgl(): void {
-      if (!webgl) return;
+      const addon = webgl;
+      if (!addon) return;
+      // Cleared first: the onContextLoss handler ignores any addon that is no
+      // longer the current one, so our own loseContext() below (or a late
+      // event from this addon) is never mistaken for a real GPU loss.
+      webgl = undefined;
       // Tabby cursor-blink-manager workaround (addon-webgl ≤0.19).
       try {
         // biome-ignore lint/suspicious/noExplicitAny: internal workaround
-        (webgl as any)._renderer?._cursorBlinkStateManager?.dispose();
+        (addon as any)._renderer?._cursorBlinkStateManager?.dispose();
       } catch {}
+      // Grab the GL context before dispose() drops the renderer; lose it
+      // after, once the addon's webglcontextlost listener is gone.
+      const context = captureWebglContext(addon);
       try {
-        webgl.dispose();
+        addon.dispose();
       } catch {}
-      webgl = undefined;
+      context?.loseContext();
     }
 
     function loadWebgl(): void {
       if (disposed) return;
       try {
         disposeWebgl();
-        webgl = new WebglAddon();
-        webgl.onContextLoss(() => {
-          if (disposed) return;
+        const addon = new WebglAddon();
+        webgl = addon;
+        addon.onContextLoss(() => {
+          if (disposed || webgl !== addon) return;
           webglLost = true;
           losses.push(Date.now());
           disposeWebgl();
           setRenderer("dom");
-          fitAddon.fit(); // DOM cell metrics differ from WebGL
-          const recentLosses = losses.filter(
-            (t) => Date.now() - t < 5 * 60 * 1000,
-          );
-          if (recentLosses.length >= 3) {
+          // DOM cell metrics differ from WebGL, so refit — but only when laid
+          // out. Chromium usually evicts a HIDDEN pane's context, and fitting
+          // a display:none pane proposes 11x6 (reflowing scrollback and
+          // SIGWINCHing pi); the ResizeObserver refits on show instead.
+          if (isContainerVisible(container)) fitAddon.fit();
+          if (recentLossCount() >= 3) {
             console.warn(
               "[terminal] WebGL context lost 3+ times in 5 min; staying on DOM renderer",
             );
           }
         });
-        terminal.loadAddon(webgl);
+        terminal.loadAddon(addon);
         webglLost = false;
         setRenderer("webgl");
       } catch {
+        webgl = undefined;
         setRenderer("dom");
       }
     }
+
+    const parker = createWebglParker({
+      park: () => {
+        if (disposed || !webgl) return;
+        disposeWebgl();
+        setRenderer("parked");
+      },
+      unpark: () => {
+        if (disposed || webgl || recentLossCount() >= 3) return;
+        loadWebgl();
+        if (isContainerVisible(container)) fitAddon.fit();
+      },
+    });
+    // Visible = intersecting the viewport (IntersectionObserver) AND laid out
+    // with a real size (ResizeObserver below). Covers both display:none task
+    // workspaces and dockview tabs detached from the document.
+    let intersecting = true;
+    function updateVisibility(): void {
+      parker.setVisible(intersecting && isContainerVisible(container));
+    }
+    const intersectionObserver = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry) intersecting = entry.isIntersecting;
+      updateVisibility();
+    });
+    intersectionObserver.observe(container);
 
     // P1-1: Enable screenReaderMode when OS reports AT or e2e env knob is set.
     // xterm supports runtime toggling; the mirror back-fills current rows when
@@ -161,11 +227,6 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
     fitAddon.fit();
 
-    const params = props.params as
-      | { cwd?: string; taskId?: string; primary?: boolean }
-      | undefined;
-    const cwd = params?.cwd;
-    const isPrimary = !!params?.primary;
     const isMac = /mac/i.test(navigator.platform);
 
     // HostContext ties together all feature installers.
@@ -210,8 +271,9 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     function wireSession(id: string): void {
       sessionId = id;
       let receivedOutput = false;
+      // Subscribed by id: the preload routes each chunk to this session's
+      // listeners only (one IPC listener total, not one per pane).
       unsubscribeData = window.harbormaster.terminal.onData((event) => {
-        if (event.id !== id) return;
         const chars = event.data.length;
         terminal.write(event.data, () => {
           if (!disposed) window.harbormaster.terminal.ack(id, chars);
@@ -220,12 +282,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           receivedOutput = true;
           setHasReceivedOutput(true);
         }
-      });
+      }, id);
       unsubscribeExit = window.harbormaster.terminal.onExit((event) => {
-        if (event.id === id) {
-          terminal.writeln(`\r\n[process exited with code ${event.exitCode}]`);
-        }
-      });
+        terminal.writeln(`\r\n[process exited with code ${event.exitCode}]`);
+      }, id);
 
       terminal.onData((data) => {
         window.harbormaster.terminal.write(id, data);
@@ -298,6 +358,9 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       // means display:none or no layout; fitting would propose a garbage 11x6
       // size (verified SIGWINCH in real app).
       const r = entries[entries.length - 1]?.contentRect;
+      // Before fitting: on show this unparks (reloads WebGL) first, so the
+      // single fit below measures with the final renderer's cell metrics.
+      updateVisibility();
       if (!container.isConnected || !r || r.width === 0 || r.height === 0) {
         return;
       }
@@ -306,13 +369,8 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
       // P0-3: re-acquire WebGL when this pane becomes visible after a
       // context loss, if we haven't hit the 3-loss-in-5-min threshold.
-      if (webglLost && !disposed) {
-        const recentLosses = losses.filter(
-          (t) => Date.now() - t < 5 * 60 * 1000,
-        );
-        if (recentLosses.length < 3) {
-          loadWebgl();
-        }
+      if (webglLost && !webgl && !disposed && recentLossCount() < 3) {
+        loadWebgl();
       }
     });
     resizeObserver.observe(container);
@@ -324,6 +382,8 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       titleThrottle.dispose();
       resizeDisposable.dispose();
       resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      parker.dispose();
       integrations.dispose();
       unsubscribeData?.();
       unsubscribeExit?.();
@@ -331,7 +391,9 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       if (sessionId) void window.harbormaster.terminal.dispose(sessionId);
 
       // P0-3: disposeWebgl() handles the Tabby cursor-blink-manager workaround
-      // (addon-webgl ≤0.19) and is a no-op when webgl is null.
+      // (addon-webgl ≤0.19), frees the GL context right away (StrictMode's
+      // throwaway mount no longer holds one until GC), and is a no-op when
+      // webgl is undefined.
       disposeWebgl();
 
       try {

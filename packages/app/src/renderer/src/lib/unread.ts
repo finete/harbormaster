@@ -68,9 +68,11 @@ export function unreadTransitions(input: UnreadTransitionInput): string[] {
 export function applyUnreadTransition(
   current: ReadonlySet<string>,
   input: UnreadTransitionInput,
-): Set<string> {
-  const marked = unreadTransitions(input);
-  if (marked.length === 0) return new Set(current);
+): ReadonlySet<string> {
+  const marked = unreadTransitions(input).filter((id) => !current.has(id));
+  // Same reference on a no-op so React's setState bails out: the ~5s
+  // presence push must not re-render every consumer when nothing changed.
+  if (marked.length === 0) return current;
   const next = new Set(current);
   for (const taskId of marked) next.add(taskId);
   return next;
@@ -80,8 +82,8 @@ export function applyUnreadTransition(
 export function clearUnread(
   current: ReadonlySet<string>,
   taskId: string,
-): Set<string> {
-  if (!current.has(taskId)) return new Set(current);
+): ReadonlySet<string> {
+  if (!current.has(taskId)) return current;
   const next = new Set(current);
   next.delete(taskId);
   return next;

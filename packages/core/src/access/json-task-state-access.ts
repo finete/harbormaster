@@ -8,8 +8,9 @@
 import { dirname } from "node:path";
 import type { Task } from "../contracts/model.js";
 import type { TaskStateAccess } from "../contracts/services.js";
-import { readJson, writeJsonAtomic } from "../utilities/atomic-json.js";
+import { writeJsonAtomic } from "../utilities/atomic-json.js";
 import { withFileLock } from "../utilities/file-lock.js";
+import { JsonFileCache } from "../utilities/json-file-cache.js";
 
 interface TaskStateFile {
   version: 1;
@@ -21,6 +22,8 @@ const emptyState = (): TaskStateFile => ({ version: 1, tasks: [] });
 export class JsonTaskStateAccess implements TaskStateAccess {
   readonly statePath: string;
   readonly lockPath: string;
+  /** Parse cache: unchanged files skip read+parse+validate (see utilities/json-file-cache.ts). */
+  private readonly cache: JsonFileCache<TaskStateFile>;
 
   constructor(
     statePath: string,
@@ -28,15 +31,20 @@ export class JsonTaskStateAccess implements TaskStateAccess {
   ) {
     this.statePath = statePath;
     this.lockPath = lockPath;
+    this.cache = new JsonFileCache<TaskStateFile>(
+      statePath,
+      emptyState,
+      (value) => this.validate(value),
+    );
   }
 
   async listTasks(): Promise<Task[]> {
-    return structuredClone((await this.readValidated()).tasks);
+    return structuredClone((await this.readShared()).tasks);
   }
 
   async getTask(id: string): Promise<Task | undefined> {
     return structuredClone(
-      (await this.readValidated()).tasks.find((task) => task.id === id),
+      (await this.readShared()).tasks.find((task) => task.id === id),
     );
   }
 
@@ -61,19 +69,22 @@ export class JsonTaskStateAccess implements TaskStateAccess {
     patch: (current: Task) => Task | undefined,
   ): Promise<Task | undefined> {
     return withFileLock(this.lockPath, async () => {
-      const state = await this.readValidated();
-      const index = state.tasks.findIndex((item) => item.id === id);
-      const current = state.tasks[index];
+      // Read the shared parse and clone only the one task: most patches
+      // (refresh's per-task observations) change nothing and never write.
+      const shared = await this.readShared();
+      const index = shared.tasks.findIndex((item) => item.id === id);
+      const current = shared.tasks[index];
       if (index < 0 || !current) return undefined;
       const next = patch(structuredClone(current));
       // Nothing changed: leave the file unwritten.
-      if (!next) return current;
+      if (!next) return structuredClone(current);
       if (next.id !== id) {
         throw new Error(`patchTask cannot change a task id: ${id}`);
       }
+      const state: TaskStateFile = { ...shared, tasks: [...shared.tasks] };
       state.tasks[index] = next;
       this.validate(state);
-      await writeJsonAtomic(this.statePath, state);
+      await this.write(state);
       return structuredClone(next);
     });
   }
@@ -113,7 +124,7 @@ export class JsonTaskStateAccess implements TaskStateAccess {
       }
       if (claimed.length > 0) {
         this.validate(state);
-        await writeJsonAtomic(this.statePath, state);
+        await this.write(state);
       }
       return claimed;
     });
@@ -124,14 +135,27 @@ export class JsonTaskStateAccess implements TaskStateAccess {
       const state = await this.readValidated();
       change(state);
       this.validate(state);
-      await writeJsonAtomic(this.statePath, state);
+      await this.write(state);
     });
   }
 
+  /** The cached parse, shared: read-only. Clone anything handed out. */
+  private readShared(): Promise<TaskStateFile> {
+    return this.cache.read();
+  }
+
+  /** A private, mutable copy of the current state (for mutations). */
   private async readValidated(): Promise<TaskStateFile> {
-    const state = await readJson<unknown>(this.statePath, emptyState);
-    this.validate(state);
-    return state as TaskStateFile;
+    return structuredClone(await this.readShared());
+  }
+
+  private async write(state: TaskStateFile): Promise<void> {
+    this.cache.invalidate();
+    try {
+      await writeJsonAtomic(this.statePath, state);
+    } finally {
+      this.cache.invalidate();
+    }
   }
 
   private validate(value: unknown): asserts value is TaskStateFile {

@@ -7,8 +7,9 @@ import type {
   MouseEvent,
   PointerEvent,
 } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Task } from "../../../preload/api";
+import { createSharedStore } from "../lib/shared-store";
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
@@ -43,10 +44,56 @@ const PR_CHIP_CLASS: Record<ReturnType<typeof prBadgeVariant>, string> = {
 const CHIP_BASE =
   "inline-flex h-[18px] shrink-0 items-center rounded border px-1.5 text-[10px] font-medium leading-none";
 
+/** Half-period of the running dot's halo blink. */
+const RUNNING_BLINK_MS = 1_000;
+
+/**
+ * One shared, low-frequency blink for every running-turn dot. Deliberately
+ * not a CSS `animate-ping`/`animate-pulse`: an infinite CSS animation makes
+ * Chromium produce a frame every vsync (recompositing every WebGL terminal
+ * layer) for as long as any agent runs. A 1s toggle costs one tiny repaint
+ * per second instead, and the timer only runs while a running dot is
+ * mounted (ref-counted, see lib/shared-store.ts).
+ */
+const runningBlink = createSharedStore<boolean>(false, (set) => {
+  let on = false;
+  set(on);
+  const timer = setInterval(() => {
+    on = !on;
+    set(on);
+  }, RUNNING_BLINK_MS);
+  return () => clearInterval(timer);
+});
+
+function RunningDot(): JSX.Element {
+  const haloOn = useSyncExternalStore(
+    runningBlink.subscribe,
+    runningBlink.getSnapshot,
+  );
+  return (
+    <span
+      className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+      data-testid="sidebar-row-spinner"
+      data-status="running"
+      role="img"
+      aria-label="Agent working"
+    >
+      {/* Halo blinks (no transition); reduced-motion users get it steady. */}
+      <span
+        className={cn(
+          "absolute inline-flex h-full w-full rounded-full ring-2 ring-sky-400/50 motion-reduce:opacity-100",
+          haloOn ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-400" />
+    </span>
+  );
+}
+
 /**
  * Live-presence indicator. Keeps the pre-redesign test ids so e2e coverage
  * carries over: `sidebar-row-spinner` while an agent turn runs (pulsing
- * halo — the "moving symbol while it works"), `sidebar-row-attention-dot`
+ * halo — the "moving symbol while it works", a cheap 1s blink), `sidebar-row-attention-dot`
  * for live-but-idle — pi-home's ● "your move": the agent finished its loop
  * and waits on you, so it is styled as attention (amber), not as a calm
  * "all good" — and `sidebar-row-status-dot` otherwise (muted gray).
@@ -57,18 +104,7 @@ export function StatusDot({
   presence: SidebarRow["presence"];
 }): JSX.Element {
   if (presence?.runningTurn) {
-    return (
-      <span
-        className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center"
-        data-testid="sidebar-row-spinner"
-        data-status="running"
-        role="img"
-        aria-label="Agent working"
-      >
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400/60" />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-400" />
-      </span>
-    );
+    return <RunningDot />;
   }
   if (presence?.live) {
     return (

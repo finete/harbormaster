@@ -20,6 +20,7 @@ import {
   type PtyFlowControl,
 } from "./pty-data-batcher";
 import { buildPtyEnv } from "./pty-env";
+import { releasePty, spawnWithFdHygiene } from "./pty-fd-hygiene";
 import {
   createTerminalModeTracker,
   type TerminalModeTracker,
@@ -173,21 +174,23 @@ export function createSession(
     appVersion,
     hyperlinks: true,
   });
-  const ptyProcess = useSpec
-    ? pty.spawn(spec.command, spec.args, {
-        name: "xterm-256color",
-        cols,
-        rows,
-        cwd: spawnCwd,
-        env: baseEnv,
-      })
-    : pty.spawn(defaultShell(), [], {
-        name: "xterm-256color",
-        cols,
-        rows,
-        cwd,
-        env: baseEnv,
-      });
+  const ptyProcess = spawnWithFdHygiene(() =>
+    useSpec
+      ? pty.spawn(spec.command, spec.args, {
+          name: "xterm-256color",
+          cols,
+          rows,
+          cwd: spawnCwd,
+          env: baseEnv,
+        })
+      : pty.spawn(defaultShell(), [], {
+          name: "xterm-256color",
+          cols,
+          rows,
+          cwd,
+          env: baseEnv,
+        }),
+  );
 
   // Subscriptions are owned by the session record so `disposeSession` can
   // unsubscribe them explicitly — killing the process alone doesn't
@@ -255,7 +258,13 @@ export function createSession(
     if (taskId && primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
     }
-    io.exitSink(exitCode);
+    try {
+      io.exitSink(exitCode);
+    } finally {
+      // A dead session is retired right here, not left for a dispose that
+      // may never come (see `retireSession`).
+      retireSession(id);
+    }
   });
 
   sessions.set(id, {
@@ -312,13 +321,15 @@ export function createBackgroundPrimarySession(
     appVersion: safeAppVersion(),
     hyperlinks: true,
   });
-  const ptyProcess = pty.spawn(spec.command, spec.args, {
-    name: "xterm-256color",
-    cols,
-    rows,
-    cwd: spec.cwd,
-    env,
-  });
+  const ptyProcess = spawnWithFdHygiene(() =>
+    pty.spawn(spec.command, spec.args, {
+      name: "xterm-256color",
+      cols,
+      rows,
+      cwd: spec.cwd,
+      env,
+    }),
+  );
 
   const headlessTerminal = new HeadlessTerminal({
     cols,
@@ -352,12 +363,20 @@ export function createBackgroundPrimarySession(
     io.sink(data);
   });
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+    // Attached by now (`attachPrimarySession`)? Deliver its last output
+    // ahead of the exit, exactly like a renderer-created session.
+    io.batcher?.flush();
     if (primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
     }
-    sessions.get(id)?.headless?.terminal.dispose();
-    onExit(exitCode);
-    io.exitSink(exitCode);
+    try {
+      onExit(exitCode);
+      io.exitSink(exitCode);
+    } finally {
+      // Retiring disposes the headless mirror (if still unattached), the
+      // batcher (if attached) and the pty itself (see `retireSession`).
+      retireSession(id);
+    }
   });
 
   sessions.set(id, {
@@ -508,7 +527,8 @@ export function detachPrimarySession(id: string): boolean {
     }
   };
   session.io.exitSink = () => {
-    session.headless?.terminal.dispose();
+    // Nothing to notify: the exit handler retires the session (disposing
+    // this headless mirror) right after.
   };
   session.headless = { terminal: headlessTerminal, serialize };
   session.attached = false;
@@ -547,6 +567,21 @@ export function resizeSession(id: string, cols: number, rows: number): void {
 }
 
 export function disposeSession(id: string): void {
+  retireSession(id);
+}
+
+/**
+ * Drops a session record and releases everything it holds: subscriptions,
+ * batcher timer, headless mirror, and the pty itself (master fd closed via
+ * node-pty's `destroy()`, see `releasePty`). Runs from `disposeSession` and
+ * from the process's own exit — a background pi nobody ever opened, or a
+ * pane whose process exited before a reload, never gets a dispose call, and
+ * a dead record left behind would keep its cwd in `activeSessionCwds()`
+ * (blocking that worktree's cleanup until restart) and its pid in
+ * `activeSessionPids()`. Idempotent: a second call (or a later
+ * write/resize/dispose on the id) finds nothing and is a no-op.
+ */
+function retireSession(id: string): void {
   const session = sessions.get(id);
   if (!session) return;
   // Remove from the map first: disposing/killing can synchronously trigger
@@ -562,11 +597,8 @@ export function disposeSession(id: string): void {
   // nowhere to go, and a late timer flush must not outlive the session.
   session.io.batcher?.dispose();
   session.headless?.terminal.dispose();
-  try {
-    session.process.kill();
-  } catch {
-    // Already exited/killed — nothing left to clean up.
-  }
+  session.headless = undefined;
+  releasePty(session.process);
 }
 
 export function disposeAllSessions(): void {

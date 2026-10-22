@@ -19,6 +19,11 @@ export { dropInsertText } from "./drop";
 export { createTerminalOptions } from "./options";
 export { pasteFromClipboard } from "./paste";
 export type { SearchHandle } from "./search";
+export {
+  captureWebglContext,
+  createWebglParker,
+  isContainerVisible,
+} from "./webgl-park";
 export type { HostContext, IDisposable };
 export { combineDisposables };
 

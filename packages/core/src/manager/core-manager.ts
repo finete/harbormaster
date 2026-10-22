@@ -1416,6 +1416,9 @@ export class CoreManager implements CoreCommands {
     warnings: string[],
     connectivity: { failedChecks: number },
   ): Promise<boolean> {
+    // One bindings read per pass, not one per done task: the done list only
+    // grows, and each per-task lookup used to re-read the whole file.
+    let bindingsByTask: Map<string, WorkspaceBinding> | undefined;
     for (const task of tasks) {
       if (
         task.state !== "done" ||
@@ -1427,11 +1430,30 @@ export class CoreManager implements CoreCommands {
       }
       const repo = repositories?.get(task.repositoryId);
       if (!repo) continue;
-      let binding: WorkspaceBinding | undefined;
-      try {
-        binding = await this.deps.bindings.getBindingForTask(task.id);
-      } catch {
-        continue;
+      if (!bindingsByTask) {
+        try {
+          bindingsByTask = new Map(
+            (await this.deps.bindings.listBindings()).map((binding) => [
+              binding.taskId,
+              binding,
+            ]),
+          );
+        } catch {
+          // Unreadable bindings: nothing to retry this pass (as before,
+          // when every per-task lookup failed the same way).
+          return false;
+        }
+      }
+      let binding = bindingsByTask.get(task.id);
+      if (binding?.worktreePath) {
+        // Rare path (a worktree is actually still on disk): re-read this one
+        // binding so the cleanup below acts on, and parks, current data
+        // rather than the pass-start snapshot.
+        try {
+          binding = await this.deps.bindings.getBindingForTask(task.id);
+        } catch {
+          continue;
+        }
       }
       if (!binding?.worktreePath) {
         this.cleanupWarnings.delete(task.id);

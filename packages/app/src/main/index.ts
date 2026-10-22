@@ -47,6 +47,7 @@ import {
 } from "./external-url";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
+import { createPushDedupe, createSingleFlight } from "./presence-push";
 import { resolvePrimaryLaunch } from "./primary-launch";
 import {
   acknowledgeSessionData,
@@ -427,12 +428,36 @@ function watchStateFiles(): void {
 let presencePollTimer: ReturnType<typeof setInterval> | undefined;
 
 /**
+ * Presence pushes skip a window whose last push was identical (most ticks:
+ * heartbeats are ~60s apart), sparing three renderer subscribers a
+ * wholesale state replace + re-render every 5s. The renderer has no initial
+ * presence fetch, so the dedupe is per window, reset when it (re)loads, and
+ * an identical payload is still re-sent after 30s (see `createPushDedupe`).
+ */
+const presencePushDedupe = createPushDedupe({ maxSuppressMs: 30_000 });
+
+let presencePoll: (() => Promise<void>) | undefined;
+
+/**
+ * Runs (or joins) a presence poll tick (`pollPresenceTick`), single-flighted:
+ * the interval and pty-exit triggers never run it concurrently — a trigger
+ * mid-tick schedules one trailing tick instead — and a failed tick is
+ * logged, never an unhandled rejection.
+ */
+function pollPresenceOnce(): Promise<void> {
+  presencePoll ??= createSingleFlight(pollPresenceTick, (error) => {
+    console.error("[presence] poll failed:", error);
+  });
+  return presencePoll();
+}
+
+/**
  * One poll tick: presence for every non-done task, pushed as a single
  * taskId -> {live, runningTurn} map to every open window. Stops itself (and
  * is restarted by `startPresencePolling`) once no window is left open, so
  * exactly one timer ever runs regardless of window count.
  */
-async function pollPresenceOnce(): Promise<void> {
+async function pollPresenceTick(): Promise<void> {
   const windows = BrowserWindow.getAllWindows();
   if (windows.length === 0) {
     stopPresencePolling();
@@ -479,7 +504,10 @@ async function pollPresenceOnce(): Promise<void> {
     }),
   );
   const payload: PresenceChangedPayload = Object.fromEntries(entries);
+  const json = JSON.stringify(payload);
   for (const win of windows) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue;
+    if (!presencePushDedupe.shouldSend(win.webContents.id, json)) continue;
     safeSend(win.webContents, "core:presence-changed", payload);
   }
   // Launched tasks' working-ness can only change here between other
@@ -688,16 +716,12 @@ function registerPtyIpc(): void {
           ...(options.primary ? { primary: options.primary } : {}),
         },
       );
+      // Tracked per webContents: if it is torn down before the renderer
+      // calls `terminal.dispose()` (window force-closed, crashed, or the app
+      // quits mid-session), `createWindow`'s single per-window 'destroyed'
+      // listener disposes every pty it owns - no per-session listener (one
+      // per spawn/attach piled up past MaxListeners across reloads).
       trackSession(sender.id, id);
-
-      // Belt-and-suspenders: if this webContents is torn down before the
-      // renderer calls `terminal.dispose()` (window force-closed, crashed,
-      // or the app quits mid-session), kill the pty here instead of leaving
-      // an orphan process or a listener racing a destroyed send target.
-      sender.once("destroyed", () => {
-        untrackSession(sender.id, id);
-        disposeSession(id);
-      });
 
       return { id, fellBackToShell };
     },
@@ -742,11 +766,8 @@ function registerPtyIpc(): void {
       });
       if (!attached) return undefined;
       ref.id = attached.id;
+      // Same per-window 'destroyed' cleanup as `pty:create` (see there).
       trackSession(sender.id, attached.id);
-      sender.once("destroyed", () => {
-        untrackSession(sender.id, attached.id);
-        disposeSession(attached.id);
-      });
       return { id: attached.id, snapshot: attached.snapshot };
     },
   );
@@ -836,14 +857,26 @@ function createWindow(): void {
     navEvent.preventDefault();
   });
 
-  // Dispose this window's ptys as soon as it closes — ahead of (and
-  // redundant with, deliberately) the per-session webContents 'destroyed'
-  // listener — so pty processes never outlive the window whose panels
-  // owned them.
-  win.on("closed", () => disposeSessionsFor(webContentsId));
+  // Dispose this window's ptys as soon as it closes, and (belt-and-
+  // suspenders, deliberately redundant) when its webContents is destroyed
+  // by any other route — so pty processes never outlive the window whose
+  // panels owned them. Exactly one listener of each per window, however
+  // many ptys it spawns or attaches (`disposeSessionsFor` is idempotent).
+  win.on("closed", () => {
+    disposeSessionsFor(webContentsId);
+    presencePushDedupe.reset(webContentsId);
+  });
+  win.webContents.once("destroyed", () => disposeSessionsFor(webContentsId));
+
+  // Every (re)load starts a renderer with empty presence state and no fetch
+  // of its own: forget what this window was last sent and push right away.
+  win.webContents.on("did-finish-load", () => {
+    presencePushDedupe.reset(webContentsId);
+    void pollPresenceOnce();
+  });
 
   // A reload (dev full reload, Cmd+R) or a crashed renderer keeps this
-  // webContents alive, so the per-session 'destroyed' cleanup never runs and
+  // webContents alive, so the per-window 'destroyed' cleanup never runs and
   // the panes' own unmount cleanup never ran either. Without this, every
   // reload spawned a second pi per task on the same session file while the
   // old one kept running invisibly.

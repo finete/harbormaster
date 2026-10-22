@@ -4,7 +4,13 @@
 // kept live via the "board-changed" push channel — no frontend reads or
 // writes state files directly (see /docs/design-decisions.md "Core is
 // headless").
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type {
   BoardColumn,
   PresenceChangedPayload,
@@ -15,6 +21,7 @@ import {
   notificationsDisabled,
   notifyTransitionEvents,
 } from "./lib/notifications";
+import { createSharedStore } from "./lib/shared-store";
 import { applyUnreadTransition, clearUnread } from "./lib/unread";
 
 export type {
@@ -41,47 +48,44 @@ export function flattenBoard(columns: BoardColumn[]): FlatTaskRow[] {
 }
 
 /**
- * Subscribes to the live board: fetches once on mount, then replaces state
- * wholesale on every "board-changed" push (the core always sends the full
- * column list, so there is nothing to merge).
+ * The one shared board subscription (see lib/shared-store.ts): fetched once
+ * when the first `useBoard` caller mounts, then replaced wholesale on every
+ * "board-changed" push (the core always sends the full column list, so there
+ * is nothing to merge). Released when the last caller unmounts.
  */
-export function useBoard(): BoardColumn[] {
-  const [columns, setColumns] = useState<BoardColumn[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.harbormaster.core.listBoard().then((cols) => {
-      if (!cancelled) setColumns(cols);
-    });
-    const unsubscribe = window.harbormaster.core.onBoardChanged((payload) => {
-      if (!cancelled) setColumns(payload.columns);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
-
-  return columns;
-}
+const boardStore = createSharedStore<BoardColumn[]>([], (set) => {
+  let pushed = false;
+  void window.harbormaster.core.listBoard().then((cols) => {
+    // A push that already landed is at least as fresh as this fetch.
+    if (!pushed) set(cols);
+  });
+  return window.harbormaster.core.onBoardChanged((payload) => {
+    pushed = true;
+    set(payload.columns);
+  });
+});
 
 /**
- * Subscribes to the ~5s main-process presence poll (see
- * /src/main/index.ts's `pollPresenceOnce`). Replaces state wholesale on
- * every push "-" the main process always sends the full non-done-task map,
- * so (like `useBoard`) there is nothing to merge.
+ * The one shared presence subscription to the ~5s main-process presence
+ * poll (see /src/main/index.ts's `pollPresenceOnce`). Replaced wholesale on
+ * every push (the main process always sends the full non-done-task map);
+ * an unchanged push doesn't notify anyone.
  */
+const presenceStore = createSharedStore<PresenceChangedPayload>({}, (set) =>
+  window.harbormaster.core.onPresenceChanged((payload) => set(payload)),
+);
+
+/** Subscribes to the live board (shared across every caller). */
+export function useBoard(): BoardColumn[] {
+  return useSyncExternalStore(boardStore.subscribe, boardStore.getSnapshot);
+}
+
+/** Subscribes to the live presence map (shared across every caller). */
 export function usePresenceMap(): PresenceChangedPayload {
-  const [presence, setPresence] = useState<PresenceChangedPayload>({});
-
-  useEffect(() => {
-    const unsubscribe = window.harbormaster.core.onPresenceChanged((payload) =>
-      setPresence(payload),
-    );
-    return unsubscribe;
-  }, []);
-
-  return presence;
+  return useSyncExternalStore(
+    presenceStore.subscribe,
+    presenceStore.getSnapshot,
+  );
 }
 
 /**
@@ -94,14 +98,14 @@ export function usePresenceMap(): PresenceChangedPayload {
  * Session-local "finished while you weren't looking" tracking (Orca polish
  * item 7): subscribes to the same ~5s presence push `usePresenceMap` does,
  * folding each push through the pure transition rule in `lib/unread.ts`.
- * Self-contained (its own presence subscription) so both the sidebar rows
- * and the board cards can call it without fighting over one shared
- * subscription's state. Never persisted "-" a fresh launch starts clean.
+ * Each caller keeps its own unread Set (sidebar rows and board cards don't
+ * fight over one state), but all ride the single shared presence store.
+ * Never persisted "-" a fresh launch starts clean.
  */
 export function useUnreadTaskIds(
   focusedTaskId: string | null,
 ): ReadonlySet<string> {
-  const [unread, setUnread] = useState<Set<string>>(() => new Set());
+  const [unread, setUnread] = useState<ReadonlySet<string>>(() => new Set());
   const previousRef = useRef<PresenceChangedPayload>({});
   const focusedTaskIdRef = useRef(focusedTaskId);
   focusedTaskIdRef.current = focusedTaskId;
@@ -127,28 +131,33 @@ export function useUnreadTaskIds(
   }, []);
 
   useEffect(() => {
-    const unsubscribe = window.harbormaster.core.onPresenceChanged(
-      (payload) => {
-        // Capture the pre-push snapshot *before* touching the ref: React's
-        // `setUnread` updater below can run after this callback returns
-        // (it isn't a React-originated event, so updates aren't
-        // synchronously flushed), and by then `previousRef.current =
-        // payload` would already have overwritten it "-" comparing the new
-        // push against itself and never seeing a transition.
-        const previous = previousRef.current;
-        previousRef.current = payload;
-        setUnread((current) =>
-          applyUnreadTransition(current, {
-            previous,
-            next: payload,
-            focusedTaskId,
-            windowFocused: windowFocusedRef.current,
-          }),
-        );
-      },
-    );
+    // Rides the shared presence store (one IPC subscription app-wide); it
+    // only notifies on a *changed* push, so an idle 5s poll costs nothing.
+    // Baseline = whatever the shared store already holds, so a late mount
+    // doesn't treat already-blocked tasks as fresh transitions.
+    previousRef.current = presenceStore.getSnapshot();
+    const unsubscribe = presenceStore.subscribe(() => {
+      const payload = presenceStore.getSnapshot();
+      // Capture the pre-push snapshot *before* touching the ref: React's
+      // `setUnread` updater below can run after this callback returns
+      // (it isn't a React-originated event, so updates aren't
+      // synchronously flushed), and by then `previousRef.current =
+      // payload` would already have overwritten it "-" comparing the new
+      // push against itself and never seeing a transition.
+      const previous = previousRef.current;
+      previousRef.current = payload;
+      const focused = focusedTaskIdRef.current;
+      setUnread((current) =>
+        applyUnreadTransition(current, {
+          previous,
+          next: payload,
+          focusedTaskId: focused,
+          windowFocused: windowFocusedRef.current,
+        }),
+      );
+    });
     return unsubscribe;
-  }, [focusedTaskId]);
+  }, []);
 
   // The task that just gained focus is, by definition, being looked at now.
   useEffect(() => {
@@ -161,11 +170,11 @@ export function useUnreadTaskIds(
 
 /**
  * OS-notification half of the "finished while you weren't looking" feature
- * (daily-driver switch, task B): a second, self-contained subscription to
- * the same ~5s presence push `useUnreadTaskIds` watches, folding each push
+ * (daily-driver switch, task B): a separate listener on the same shared
+ * ~5s presence store `useUnreadTaskIds` watches, folding each push
  * through `notifyTransitionEvents` (lib/notifications.ts "- the exact same
  * transition edges the unread dot lights up on) and calling `app.notify`
- * for each. Deliberately a separate subscription rather than a callback
+ * for each. Deliberately a separate listener rather than a callback
  * threaded through `useUnreadTaskIds`, matching that hook's own
  * self-contained pattern "- callers never fight over shared subscription
  * state. Call once (e.g. from App.tsx), not per sidebar row/board card.
@@ -199,26 +208,26 @@ export function useTaskNotifications(
   }, []);
 
   useEffect(() => {
-    const unsubscribe = window.harbormaster.core.onPresenceChanged(
-      (payload) => {
-        const previous = previousRef.current;
-        previousRef.current = payload;
-        if (notificationsDisabled(window.localStorage)) return;
-        const events = notifyTransitionEvents({
-          previous,
-          next: payload,
-          focusedTaskId: focusedTaskIdRef.current,
-          windowFocused: windowFocusedRef.current,
+    previousRef.current = presenceStore.getSnapshot();
+    const unsubscribe = presenceStore.subscribe(() => {
+      const payload = presenceStore.getSnapshot();
+      const previous = previousRef.current;
+      previousRef.current = payload;
+      if (notificationsDisabled(window.localStorage)) return;
+      const events = notifyTransitionEvents({
+        previous,
+        next: payload,
+        focusedTaskId: focusedTaskIdRef.current,
+        windowFocused: windowFocusedRef.current,
+      });
+      for (const event of events) {
+        void window.harbormaster.app.notify({
+          taskId: event.taskId,
+          title: getTaskTitleRef.current(event.taskId),
+          body: event.body,
         });
-        for (const event of events) {
-          void window.harbormaster.app.notify({
-            taskId: event.taskId,
-            title: getTaskTitleRef.current(event.taskId),
-            body: event.body,
-          });
-        }
-      },
-    );
+      }
+    });
     return unsubscribe;
   }, []);
 }
