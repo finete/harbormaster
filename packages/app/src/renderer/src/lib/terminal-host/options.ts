@@ -6,7 +6,18 @@
 
 import type { ITerminalOptions } from "@xterm/xterm";
 
-export function createTerminalOptions(): ITerminalOptions {
+/** Scrollback for the primary (pi) pane: the agent transcript lives here. */
+export const PRIMARY_SCROLLBACK = 10_000;
+/**
+ * Scrollback for secondary "+ terminal" shells. Each buffer line costs
+ * roughly cols × 12 bytes and panes never shrink it, so halve the cap for
+ * panes whose history matters less.
+ */
+export const SHELL_SCROLLBACK = 5_000;
+
+export function createTerminalOptions(
+  opts: { primary?: boolean } = {},
+): ITerminalOptions {
   return {
     // Note: convertEol is intentionally NOT set (item #25).
     // With convertEol:true, every bare LF from curses apps (vim, htop, etc.)
@@ -16,7 +27,7 @@ export function createTerminalOptions(): ITerminalOptions {
       '"Hack Nerd Font Mono", "HackNerdFontMono", "MesloLGS NF", Menlo, monospace',
     fontSize: 13,
     lineHeight: 1,
-    scrollback: 10_000,
+    scrollback: opts.primary ? PRIMARY_SCROLLBACK : SHELL_SCROLLBACK,
     macOptionIsMeta: true,
     // Allow text selection to override mouse-reporting mode (item #21):
     // Option-click forces a selection even when the pty has enabled

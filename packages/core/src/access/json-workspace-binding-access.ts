@@ -5,8 +5,9 @@
 import { dirname } from "node:path";
 import type { WorkspaceBinding } from "../contracts/model.js";
 import type { WorkspaceBindingAccess } from "../contracts/services.js";
-import { readJson, writeJsonAtomic } from "../utilities/atomic-json.js";
+import { writeJsonAtomic } from "../utilities/atomic-json.js";
 import { withFileLock } from "../utilities/file-lock.js";
+import { JsonFileCache } from "../utilities/json-file-cache.js";
 
 interface BindingStateFile {
   version: 1;
@@ -18,6 +19,8 @@ const emptyState = (): BindingStateFile => ({ version: 1, bindings: [] });
 export class JsonWorkspaceBindingAccess implements WorkspaceBindingAccess {
   readonly statePath: string;
   readonly lockPath: string;
+  /** Parse cache: unchanged files skip read+parse+validate (see utilities/json-file-cache.ts). */
+  private readonly cache: JsonFileCache<BindingStateFile>;
 
   constructor(
     statePath: string,
@@ -25,19 +28,22 @@ export class JsonWorkspaceBindingAccess implements WorkspaceBindingAccess {
   ) {
     this.statePath = statePath;
     this.lockPath = lockPath;
+    this.cache = new JsonFileCache<BindingStateFile>(
+      statePath,
+      emptyState,
+      (value) => this.validate(value),
+    );
   }
 
   async listBindings(): Promise<WorkspaceBinding[]> {
-    return structuredClone((await this.readValidated()).bindings);
+    return structuredClone((await this.readShared()).bindings);
   }
 
   async getBindingForTask(
     taskId: string,
   ): Promise<WorkspaceBinding | undefined> {
     return structuredClone(
-      (await this.readValidated()).bindings.find(
-        (item) => item.taskId === taskId,
-      ),
+      (await this.readShared()).bindings.find((item) => item.taskId === taskId),
     );
   }
 
@@ -78,14 +84,27 @@ export class JsonWorkspaceBindingAccess implements WorkspaceBindingAccess {
       const state = await this.readValidated();
       change(state);
       this.validate(state);
-      await writeJsonAtomic(this.statePath, state);
+      await this.write(state);
     });
   }
 
+  /** The cached parse, shared: read-only. Clone anything handed out. */
+  private readShared(): Promise<BindingStateFile> {
+    return this.cache.read();
+  }
+
+  /** A private, mutable copy of the current state (for mutations). */
   private async readValidated(): Promise<BindingStateFile> {
-    const state = await readJson<unknown>(this.statePath, emptyState);
-    this.validate(state);
-    return state as BindingStateFile;
+    return structuredClone(await this.readShared());
+  }
+
+  private async write(state: BindingStateFile): Promise<void> {
+    this.cache.invalidate();
+    try {
+      await writeJsonAtomic(this.statePath, state);
+    } finally {
+      this.cache.invalidate();
+    }
   }
 
   private validate(value: unknown): asserts value is BindingStateFile {

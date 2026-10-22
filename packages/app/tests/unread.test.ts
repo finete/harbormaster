@@ -116,7 +116,7 @@ describe("applyUnreadTransition", () => {
     expect(next).toEqual(new Set(["x", "a"]));
   });
 
-  it("returns an equivalent set (not the same reference) when nothing changes", () => {
+  it("returns the same reference when nothing changes (so React bails out)", () => {
     const current = new Set(["x"]);
     const next = applyUnreadTransition(current, {
       previous: {},
@@ -124,8 +124,18 @@ describe("applyUnreadTransition", () => {
       focusedTaskId: null,
       windowFocused: true,
     });
-    expect(next).not.toBe(current);
-    expect(next).toEqual(current);
+    expect(next).toBe(current);
+  });
+
+  it("returns the same reference when every transition is already unread", () => {
+    const current = new Set(["a"]);
+    const next = applyUnreadTransition(current, {
+      previous: { a: { runningTurn: true } },
+      next: { a: { runningTurn: false } },
+      focusedTaskId: null,
+      windowFocused: true,
+    });
+    expect(next).toBe(current);
   });
 });
 
@@ -138,6 +148,6 @@ describe("clearUnread", () => {
   it("is a no-op for a task id that isn't marked", () => {
     const current = new Set(["b"]);
     const next = clearUnread(current, "a");
-    expect(next).toEqual(current);
+    expect(next).toBe(current);
   });
 });

@@ -15,14 +15,20 @@
 // which happens to prefer the "plain" `arnac` over `arnac2`/`arnac3`).
 
 import type { Dirent } from "node:fs";
-import { access as fsAccess, mkdir, readdir, realpath } from "node:fs/promises";
+import {
+  access as fsAccess,
+  mkdir,
+  readdir,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type {
   GitRepositoryAccess,
   RepositoryCheckout,
   RepositoryInfo,
 } from "../contracts/workspace.js";
-import { run, tryRun } from "../utilities/run.js";
+import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
 
 /** One directory entry under a code root, described well enough to group by identity. */
 interface CheckoutDescriptor {
@@ -40,8 +46,46 @@ interface RepositoryGroup {
   checkouts: CheckoutDescriptor[];
 }
 
-/** `git`-shelling-out implementation of {@link GitRepositoryAccess}. */
+/** Default lifetime of a cached discovery result (see {@link LocalGitRepositoryAccess}). */
+export const DISCOVERY_CACHE_TTL_MS = 5 * 60_000;
+
+export interface LocalGitRepositoryAccessOptions {
+  /** Max age of a cached `discoverRepositories` result; 0 disables the cache. */
+  discoveryTtlMs?: number;
+  /** Clock for the TTL (tests). */
+  now?: () => number;
+}
+
+interface DiscoveryCacheEntry {
+  key: string;
+  expiresAt: number;
+  repos: RepositoryInfo[];
+}
+
+/**
+ * `git`-shelling-out implementation of {@link GitRepositoryAccess}.
+ *
+ * `discoverRepositories` is called on every refresh tick (and by several UI
+ * verbs) and costs ~5 git spawns per checkout. Its result is cached, keyed
+ * on a cheap filesystem fingerprint: the code root, the preferred-checkout
+ * config, the root's directory listing, and a stat (mtime/ctime/inode) of
+ * each entry's `.git`. Adding/removing/renaming a checkout, `git init`, or a
+ * `.git/config` rewrite (remote change: git writes it via rename, bumping
+ * the `.git` directory's mtime) changes the fingerprint and forces a fresh
+ * discovery. What the fingerprint cannot see (e.g. `origin/HEAD` moving
+ * under `.git/refs/`, which only changes the default branch) is bounded by
+ * a TTL. `cloneRepository` drops the cache outright.
+ */
 export class LocalGitRepositoryAccess implements GitRepositoryAccess {
+  private discoveryCache: DiscoveryCacheEntry | undefined;
+  private readonly discoveryTtlMs: number;
+  private readonly now: () => number;
+
+  constructor(options: LocalGitRepositoryAccessOptions = {}) {
+    this.discoveryTtlMs = options.discoveryTtlMs ?? DISCOVERY_CACHE_TTL_MS;
+    this.now = options.now ?? Date.now;
+  }
+
   async discoverRepositories(
     codeRoot: string,
     preferredCheckouts?: Record<string, string>,
@@ -54,7 +98,37 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
     }
+    const key = await discoveryFingerprint(root, entries, preferredCheckouts);
+    const cached = this.discoveryCache;
+    if (cached && cached.key === key && cached.expiresAt > this.now()) {
+      // Fresh copy: callers must never be able to mutate the cache.
+      return structuredClone(cached.repos);
+    }
+    const repos = await this.discoverUncached(
+      root,
+      entries,
+      preferredCheckouts,
+    );
+    if (this.discoveryTtlMs > 0) {
+      this.discoveryCache = {
+        key,
+        expiresAt: this.now() + this.discoveryTtlMs,
+        repos: structuredClone(repos),
+      };
+    }
+    return repos;
+  }
 
+  /** Drop the cached discovery result; the next call re-runs git. */
+  invalidateDiscoveryCache(): void {
+    this.discoveryCache = undefined;
+  }
+
+  private async discoverUncached(
+    root: string,
+    entries: Dirent[],
+    preferredCheckouts: Record<string, string> | undefined,
+  ): Promise<RepositoryInfo[]> {
     const groups = new Map<string, RepositoryGroup>();
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
@@ -124,6 +198,21 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
     codeRoot: string,
     cloneUrl: string,
   ): Promise<RepositoryInfo> {
+    // A clone (or a failed half-clone) changes what discovery would find;
+    // the fingerprint would usually notice, but never serve a stale list
+    // right after an explicit clone.
+    this.invalidateDiscoveryCache();
+    try {
+      return await this.cloneRepositoryUncached(codeRoot, cloneUrl);
+    } finally {
+      this.invalidateDiscoveryCache();
+    }
+  }
+
+  private async cloneRepositoryUncached(
+    codeRoot: string,
+    cloneUrl: string,
+  ): Promise<RepositoryInfo> {
     const root = resolve(codeRoot);
     const target = join(root, repoNameFromUrl(cloneUrl));
     const wantedId = normalizeRemoteIdentity(cloneUrl);
@@ -156,7 +245,9 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
       return this.resolveRepository(target);
     }
     await mkdir(root, { recursive: true });
-    await run("git", ["clone", cloneUrl, target]);
+    await run("git", ["clone", cloneUrl, target], undefined, {
+      timeoutMs: LONG_RUN_TIMEOUT_MS,
+    });
     return this.resolveRepository(target);
   }
 
@@ -226,6 +317,39 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
     }
     return (await tryRun("git", ["branch", "--show-current"], cwd)) || "main";
   }
+}
+
+/**
+ * Cheap fingerprint of everything under `root` that discovery's result
+ * depends on and that a stat can see: one readdir (already done by the
+ * caller) plus one `stat` per directory entry, versus ~5 git spawns each.
+ */
+async function discoveryFingerprint(
+  root: string,
+  entries: Dirent[],
+  preferredCheckouts: Record<string, string> | undefined,
+): Promise<string> {
+  const names = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => entry.name)
+    .sort();
+  const parts = await Promise.all(
+    names.map(async (name) => {
+      try {
+        const info = await stat(join(root, name, ".git"), { bigint: true });
+        return `${name}:${info.ino}:${info.mtimeNs}:${info.ctimeNs}`;
+      } catch {
+        return `${name}:-`;
+      }
+    }),
+  );
+  return JSON.stringify([
+    root,
+    Object.entries(preferredCheckouts ?? {}).sort(([a], [b]) =>
+      a.localeCompare(b),
+    ),
+    parts,
+  ]);
 }
 
 /**

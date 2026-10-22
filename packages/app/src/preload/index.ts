@@ -29,6 +29,30 @@ import type {
   UpdateTaskInput,
   WorkspaceBinding,
 } from "./api";
+import { createIdRouter } from "./pty-bus";
+
+/**
+ * One `ipcRenderer` listener per pty channel, fanned out by session id
+ * (see pty-bus.ts): a chunk crosses the context bridge only to the pane(s)
+ * subscribed to its session instead of once per open pane.
+ */
+function ipcChannelSubscriber<E>(
+  channel: string,
+): (dispatch: (event: E) => void) => () => void {
+  return (dispatch) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: E): void =>
+      dispatch(payload);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  };
+}
+
+const ptyData = createIdRouter<TerminalDataEvent>(
+  ipcChannelSubscriber<TerminalDataEvent>("pty:data"),
+);
+const ptyExit = createIdRouter<TerminalExitEvent>(
+  ipcChannelSubscriber<TerminalExitEvent>("pty:exit"),
+);
 
 const api: HarbormasterApi = {
   shell: {
@@ -51,22 +75,14 @@ const api: HarbormasterApi = {
     },
     dispose: (id: string): Promise<void> =>
       ipcRenderer.invoke("pty:dispose", id),
-    onData: (listener: (event: TerminalDataEvent) => void): (() => void) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        payload: TerminalDataEvent,
-      ): void => listener(payload);
-      ipcRenderer.on("pty:data", handler);
-      return () => ipcRenderer.removeListener("pty:data", handler);
-    },
-    onExit: (listener: (event: TerminalExitEvent) => void): (() => void) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        payload: TerminalExitEvent,
-      ): void => listener(payload);
-      ipcRenderer.on("pty:exit", handler);
-      return () => ipcRenderer.removeListener("pty:exit", handler);
-    },
+    onData: (
+      listener: (event: TerminalDataEvent) => void,
+      id?: string,
+    ): (() => void) => ptyData.on(listener, id),
+    onExit: (
+      listener: (event: TerminalExitEvent) => void,
+      id?: string,
+    ): (() => void) => ptyExit.on(listener, id),
     // P1-1: screen-reader mode (off by default; on when OS AT detected or e2e env set).
     getScreenReaderMode: (): Promise<boolean> =>
       ipcRenderer.invoke("terminal:screen-reader-mode"),

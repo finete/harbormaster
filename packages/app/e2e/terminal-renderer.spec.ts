@@ -10,7 +10,8 @@
  *   be tested without WebGL.
  *
  * - If data-renderer="webgl", we run the full lifecycle:
- *   1. Starts WebGL.
+ *   1. Starts WebGL; hidden past the (test-shortened) park delay it
+ *      parks (data-renderer="parked", WebGL canvas gone), shown it is WebGL.
  *   2. Force context loss → DOM, text still readable.
  *   3. Hide → show → WebGL re-acquired.
  *   4. 3 losses in 5 min → stays DOM.
@@ -153,6 +154,46 @@ test.describe("terminal renderer lifecycle (P0-3)", () => {
         await expect(panel).toContainText("renderer-test-ready");
         return; // Skip WebGL lifecycle assertions.
       }
+
+      // ── Step 1b: hidden past the park delay → parked; shown → WebGL ─────
+      // A hidden pane must not hold a WebGL context (GPU memory + Chromium's
+      // active-context cap). Shorten the 10 s park delay via the renderer's
+      // test knob, read when the hide starts.
+      // Canvas count, not getContext(): probing would create a context. The
+      // DOM renderer draws with divs, so zero canvases = no WebGL renderer.
+      async function webglCanvasCount(): Promise<number> {
+        return window.evaluate(
+          () =>
+            document.querySelectorAll("[data-testid='terminal-panel'] canvas")
+              .length,
+        );
+      }
+      expect(await webglCanvasCount()).toBeGreaterThan(0);
+      await window.evaluate(() => {
+        (
+          window as { __harbormasterWebglParkDelayMs?: number }
+        ).__harbormasterWebglParkDelayMs = 300;
+      });
+      await window.getByTestId("board-button").click();
+      await expect(panel).toHaveAttribute("data-renderer", "parked", {
+        timeout: 10_000,
+      });
+      // The WebGL canvas is gone, not just hidden (context released).
+      expect(await webglCanvasCount()).toBe(0);
+      await window
+        .locator('[data-testid^="card-"]')
+        .filter({ hasText: "Renderer Test" })
+        .click();
+      await expect(panel).toHaveAttribute("data-renderer", "webgl", {
+        timeout: 10_000,
+      });
+      await expect(panel).toContainText("renderer-test-ready");
+      // Restore the default delay so the loss/recovery steps below exercise
+      // the context-loss re-acquire path, not unparking.
+      await window.evaluate(() => {
+        delete (window as { __harbormasterWebglParkDelayMs?: number })
+          .__harbormasterWebglParkDelayMs;
+      });
 
       /** Force a WebGL context loss by finding the WebGL canvas. */
       async function forceContextLoss(): Promise<void> {

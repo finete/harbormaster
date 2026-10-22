@@ -5,7 +5,7 @@ import {
   type DockviewReadyEvent,
 } from "dockview-react";
 import type { JSX } from "react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
@@ -47,13 +47,17 @@ const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
  * task (lazily, on first focus) and keeps it alive — hidden, not unmounted —
  * so ptys and dockview layout survive switching between tasks/views.
  */
-export function TaskWorkspace({
+export const TaskWorkspace = memo(function TaskWorkspace({
   taskId,
-  onClose,
+  onCloseTask,
 }: {
   taskId: string;
-  /** Close this task's workspace (cmux-style): unmounts every pane, ending their ptys. */
-  onClose?: () => void;
+  /**
+   * Close a task's workspace (cmux-style): unmounts every pane, ending their
+   * ptys. Takes the task id (not a pre-bound closure) so callers can pass one
+   * stable callback and `memo` keeps hidden workspaces from re-rendering.
+   */
+  onCloseTask?: (taskId: string) => void;
 }): JSX.Element {
   // Dockview's own api is state (not a ref): the initial-panel effect below
   // needs to re-run once it becomes available, same as it re-runs once the
@@ -82,9 +86,12 @@ export function TaskWorkspace({
   // enabled state always reflects the latest state/branch/repositoryId.
   const columns = useBoard();
   const manualRefresh = useManualRefresh();
-  const task = flattenBoard(columns).find(
-    (row) => row.task.id === taskId,
-  )?.task;
+  // Memoized on the board snapshot: the shared board store keeps the same
+  // `columns` reference until the board actually changes.
+  const task = useMemo(
+    () => flattenBoard(columns).find((row) => row.task.id === taskId)?.task,
+    [columns, taskId],
+  );
 
   // Re-resolved whenever the task changes column: a parked backlog task
   // has no binding yet, and `startTask` creates one as it moves to Dev.
@@ -323,11 +330,11 @@ export function TaskWorkspace({
             <Plus className="h-3.5 w-3.5" />
             terminal
           </Button>
-          {onClose && (
+          {onCloseTask && (
             <Button
               size="sm"
               variant="ghost"
-              onClick={onClose}
+              onClick={() => onCloseTask(taskId)}
               data-testid="close-workspace-button"
               aria-label="Close workspace"
               title="Close this task's workspace and end its terminals (⌘W)"
@@ -349,4 +356,4 @@ export function TaskWorkspace({
       </div>
     </div>
   );
-}
+});

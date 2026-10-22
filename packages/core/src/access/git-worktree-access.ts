@@ -12,7 +12,7 @@ import type {
   RepositoryInfo,
   WorktreeInfo,
 } from "../contracts/workspace.js";
-import { run, tryRun } from "../utilities/run.js";
+import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
 
 /** Directory (sibling of every repository checkout) that holds task worktrees. */
 export const TASK_WORKTREES_DIRNAME = ".harbormaster-worktrees";
@@ -44,6 +44,8 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
         "git",
         ["worktree", "add", "-b", branch, path, baseRef],
         repo.root,
+        // Checkout of a large tree plus post-checkout hooks can be slow.
+        { timeoutMs: LONG_RUN_TIMEOUT_MS },
       );
     } catch (error) {
       // Leave no orphan from *this* failed attempt (branch collision, dirty
@@ -83,6 +85,9 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
         "git",
         ["worktree", "remove", ...(force ? ["--force"] : []), path],
         ownerRoot,
+        // Deleting a worktree with big build/dependency dirs can be slow, and
+        // killing it midway would leave a half-removed tree.
+        { timeoutMs: LONG_RUN_TIMEOUT_MS },
       );
     } catch (error) {
       const stillExists = await fsAccess(path).then(
@@ -127,7 +132,9 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
   }
 
   async pushBranch(path: string, branch: string): Promise<void> {
-    await run("git", ["push", "--set-upstream", "origin", branch], path);
+    await run("git", ["push", "--set-upstream", "origin", branch], path, {
+      timeoutMs: LONG_RUN_TIMEOUT_MS,
+    });
   }
 
   private async inspect(path: string): Promise<WorktreeInfo> {

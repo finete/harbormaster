@@ -15,6 +15,7 @@ import {
   createSession,
   detachPrimarySession,
   disposeSession,
+  getSession,
   lookupPanePid,
   writeToSession,
 } from "../src/main/ptySessions";
@@ -31,6 +32,21 @@ function shellSpec(): {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Condition wait instead of a fixed sleep: resolves once the session's
+ * headless mirror has parsed `marker` (output arrives asynchronously and can
+ * lag well past a few hundred ms when the suite runs under parallel load).
+ */
+async function waitForMirror(id: string, marker: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const serialized = getSession(id)?.headless?.serialize.serialize() ?? "";
+    if (serialized.includes(marker)) return;
+    await sleep(20);
+  }
+  throw new Error(`mirror never showed ${JSON.stringify(marker)}`);
 }
 
 const openSessionIds: string[] = [];
@@ -234,7 +250,7 @@ describe("terminal modes survive attach / detach", () => {
       () => {},
     );
     track(id);
-    await sleep(400);
+    await waitForMirror(id, "pi-ready");
     const attached = attachPrimarySession(taskId, 80, 24, noopCallbacks);
     const snapshot = attached?.snapshot ?? "";
     expect(snapshot).toContain("pi-ready");
@@ -256,11 +272,11 @@ describe("terminal modes survive attach / detach", () => {
       () => {},
     );
     track(id);
-    await sleep(400);
+    await waitForMirror(id, "pi-ready");
     expect(attachPrimarySession(taskId, 80, 24, noopCallbacks)?.id).toBe(id);
     expect(detachPrimarySession(id)).toBe(true);
     writeToSession(id, "after-detach\r");
-    await sleep(300);
+    await waitForMirror(id, "after-detach");
     const again = attachPrimarySession(taskId, 80, 24, noopCallbacks);
     const snapshot = again?.snapshot ?? "";
     expect(snapshot).toContain("after-detach");

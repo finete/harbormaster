@@ -11,7 +11,8 @@ import type {
   PullRequestAccess,
   PullRequestStatus,
 } from "../contracts/github.js";
-import { run } from "../utilities/run.js";
+import { LruMap } from "../utilities/lru-map.js";
+import { LONG_RUN_TIMEOUT_MS, run } from "../utilities/run.js";
 
 interface GhReview {
   state?: string;
@@ -42,12 +43,17 @@ export type Execute = (
 /** Overrides the `gh` binary (and only `gh`) for e2e: a tiny fake CLI stands in for a real GitHub login. Mirrors `HARBORMASTER_PI_COMMAND` (see `harness/pi-adapter.ts`). */
 const GH_COMMAND_ENV = "HARBORMASTER_GH_COMMAND";
 
+/** Entries kept per memo cache: far above one refresh's working set (one per deploy-stage SHA pair). */
+const MEMO_CAPACITY = 200;
+
 /** `gh`-CLI-shelling-out implementation of {@link PullRequestAccess}. */
 export class GithubPrAccess implements PullRequestAccess {
-  /** Ancestry between two fixed commits never changes, so results memoize forever. */
-  private readonly ancestry = new Map<string, boolean>();
-  /** History reachable from a fixed commit is immutable; memoized forever too. */
-  private readonly commitLogs = new Map<string, CommitLogEntry[]>();
+  /** Ancestry between two fixed commits never changes, so results never go stale (LRU-capped only to bound memory). */
+  private readonly ancestry = new LruMap<string, boolean>(MEMO_CAPACITY);
+  /** History reachable from a fixed commit is immutable; LRU-capped too. */
+  private readonly commitLogs = new LruMap<string, CommitLogEntry[]>(
+    MEMO_CAPACITY,
+  );
 
   constructor(
     private readonly execute: Execute = (command, args, cwd) =>
@@ -55,6 +61,10 @@ export class GithubPrAccess implements PullRequestAccess {
         command === "gh" ? process.env[GH_COMMAND_ENV] || "gh" : command,
         args,
         cwd,
+        // A push runs the user's pre-push hooks: allow it the long limit.
+        command === "git" && args[0] === "push"
+          ? { timeoutMs: LONG_RUN_TIMEOUT_MS }
+          : undefined,
       ),
   ) {}
 

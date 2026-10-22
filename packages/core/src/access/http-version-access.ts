@@ -5,12 +5,14 @@
 // next refresh retries.
 
 import type { VersionAccess } from "../contracts/github.js";
+import { LruMap } from "../utilities/lru-map.js";
 
 export class HttpVersionAccess implements VersionAccess {
-  private readonly cache = new Map<
+  /** LRU-capped: keyed by URL, so bounded in practice, but never unbounded. */
+  private readonly cache = new LruMap<
     string,
     { value: string; expiresAt: number }
-  >();
+  >(200);
 
   constructor(
     private readonly ttlMs = 5 * 60_000,
