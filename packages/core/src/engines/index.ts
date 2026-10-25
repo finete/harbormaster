@@ -1,5 +1,6 @@
 export * from "./awaiting-kinds.js";
 export * from "./board-grouping.js";
+export * from "./branch-adoption.js";
 export * from "./cleanup.js";
 export * from "./connectivity.js";
 export * from "./deployment.js";
