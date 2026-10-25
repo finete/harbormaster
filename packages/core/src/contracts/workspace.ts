@@ -119,6 +119,11 @@ export interface GitWorktreeAccess {
   isWorktreeDirty(path: string): Promise<boolean>;
   branchExists(repo: RepositoryInfo, branch: string): Promise<boolean>;
   /**
+   * Branch currently checked out in the worktree at `path`; `undefined` when
+   * detached, the path is missing, or it is not a git directory. Never throws.
+   */
+  currentBranch(path: string): Promise<string | undefined>;
+  /**
    * Delete a branch. Uses a safe, non-force delete (refusing branches not
    * merged into HEAD) unless `force` is true. No-op if the branch is already
    * gone.

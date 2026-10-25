@@ -68,6 +68,7 @@ import {
   normalizeAwaitingInputs,
 } from "../engines/awaiting-kinds.js";
 import { groupColumnTasks } from "../engines/board-grouping.js";
+import { branchToAdopt } from "../engines/branch-adoption.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
 import { isConnectivityError } from "../engines/connectivity.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
@@ -958,17 +959,38 @@ export class CoreManager implements CoreCommands {
     // Each observation is dominated by gh latency and independent of the
     // others; writes are lock-serialized field patches, so a few run at
     // once (pi-home's reconcile uses the same 4-worker pool).
-    await forEachConcurrently(candidates, REFRESH_CONCURRENCY, async (task) => {
-      const moved = await this.refreshTask(
-        task,
-        config,
-        repositories,
-        protectedPaths,
-        warnings,
-        connectivity,
-      );
-      if (moved) changed = true;
-    });
+    // One bindings read per pass (lazy, shared by all candidates) feeds the
+    // branch-follow step below; no per-task binding lookups.
+    let bindingsByTask: Promise<Map<string, WorkspaceBinding>> | undefined;
+    const bindingFor = (taskId: string) => {
+      bindingsByTask ??= this.deps.bindings
+        .listBindings()
+        .then((all) => new Map(all.map((b) => [b.taskId, b])))
+        .catch(() => new Map<string, WorkspaceBinding>());
+      return bindingsByTask.then((byTask) => byTask.get(taskId));
+    };
+    await forEachConcurrently(
+      candidates,
+      REFRESH_CONCURRENCY,
+      async (listed) => {
+        const adopted = await this.followWorktreeBranch(
+          listed,
+          repositories,
+          await bindingFor(listed.id),
+        );
+        const task = adopted ?? listed;
+        if (adopted) changed = true;
+        const moved = await this.refreshTask(
+          task,
+          config,
+          repositories,
+          protectedPaths,
+          warnings,
+          connectivity,
+        );
+        if (moved) changed = true;
+      },
+    );
 
     if (
       await this.retryDoneCleanups(
@@ -994,6 +1016,63 @@ export class CoreManager implements CoreCommands {
           }
         : {}),
     };
+  }
+
+  /**
+   * A task follows its worktree's current branch: an agent may `git checkout
+   * -b other` inside the worktree and open its PR from there, so the PR lookup
+   * by the original branch would never find it. Adopts the checked-out branch
+   * onto the task and its binding (so PR lookup, PR create and Done cleanup
+   * all act on it) and returns the patched task; `undefined` when nothing
+   * changed. The original local branch is deliberately left alone (it is
+   * never deleted here). One `git branch --show-current` per live bound task.
+   */
+  private async followWorktreeBranch(
+    task: Task,
+    repositories: Map<string, RepositoryInfo> | undefined,
+    binding: WorkspaceBinding | undefined,
+  ): Promise<Task | undefined> {
+    if (!binding?.worktreePath) return undefined;
+    try {
+      const adopt = branchToAdopt({
+        taskBranch: task.branch,
+        currentBranch: await this.deps.worktrees.currentBranch(
+          binding.worktreePath,
+        ),
+        targetBranch: task.targetBranch,
+        defaultBranch: task.repositoryId
+          ? repositories?.get(task.repositoryId)?.defaultBranch
+          : undefined,
+      });
+      if (!adopt) return undefined;
+      let applied = false;
+      const patched = await this.deps.tasks.patchTask(task.id, (fresh) => {
+        if (
+          fresh.state === "done" ||
+          fresh.state === "backlog" ||
+          fresh.branch !== task.branch
+        ) {
+          return undefined;
+        }
+        applied = true;
+        return {
+          ...fresh,
+          branch: adopt,
+          updatedAt: this.deps.clock.now().toISOString(),
+        };
+      });
+      if (!applied || !patched) return undefined;
+      const freshBinding = await this.deps.bindings.getBindingForTask(task.id);
+      if (freshBinding) {
+        await this.deps.bindings.replaceBinding({
+          ...freshBinding,
+          branch: adopt,
+        });
+      }
+      return patched;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

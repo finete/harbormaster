@@ -122,6 +122,11 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     return ref !== undefined;
   }
 
+  async currentBranch(path: string): Promise<string | undefined> {
+    const branch = await tryRun("git", ["branch", "--show-current"], path);
+    return branch?.trim() || undefined;
+  }
+
   async deleteBranch(
     repo: RepositoryInfo,
     branch: string,
