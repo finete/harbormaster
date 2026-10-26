@@ -18,6 +18,7 @@ import { installWheel } from "./wheel";
 export { dropInsertText } from "./drop";
 export { createTerminalOptions } from "./options";
 export { pasteFromClipboard } from "./paste";
+export { registerResettablePane } from "./renderer-reset-host";
 export type { SearchHandle } from "./search";
 export {
   captureWebglContext,

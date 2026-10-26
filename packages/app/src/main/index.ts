@@ -656,6 +656,30 @@ function wireSleepWakeGating(): void {
   });
 }
 
+// Terminal WebGL recovery on wake: macOS sleep / screen lock can discard a
+// WebGL canvas's backing store without any `webglcontextlost` event, leaving
+// terminal panes blank (see renderer-reset.ts). A lock fires neither
+// `visibilitychange` nor `focus` in the renderer, so main tells every window
+// to rebuild its terminal renderers. Resume is sent twice: right away, and
+// once more after the GPU process has had a beat to settle (the renderer
+// coalesces a reset already in flight; a second one is cheap).
+const RENDERER_RESET_CHANNEL = "terminal:renderer-reset";
+const RENDERER_RESET_SETTLE_MS = 1_500;
+
+function broadcastRendererReset(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, RENDERER_RESET_CHANNEL, null);
+  }
+}
+
+function wireRendererResetOnWake(): void {
+  powerMonitor.on("unlock-screen", broadcastRendererReset);
+  powerMonitor.on("resume", () => {
+    broadcastRendererReset();
+    setTimeout(broadcastRendererReset, RENDERER_RESET_SETTLE_MS);
+  });
+}
+
 function registerPtyIpc(): void {
   ipcMain.handle(
     "pty:create",
@@ -1033,6 +1057,7 @@ app.whenReady().then(() => {
   startPresencePolling();
   startRefreshLoop();
   wireSleepWakeGating();
+  wireRendererResetOnWake();
   // Queued launches (from a previous run, or an extension launchTask call
   // that landed before this app ever started) start right away "-" see
   // background-launcher.ts's "on app ready" trigger.

@@ -13,6 +13,7 @@ import {
   type HostContext,
   installHostIntegrations,
   isContainerVisible,
+  registerResettablePane,
   type SearchHandle,
 } from "../lib/terminal-host";
 import {
@@ -198,6 +199,31 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         if (isContainerVisible(container)) fitAddon.fit();
       },
     });
+    // 5. Coordinated reset (renderer-reset.ts): on system resume / screen
+    //    unlock (or focus after a long absence) EVERY pane drops WebGL in
+    //    the same tick, so the shared glyph atlas loses its last owner and
+    //    is discarded, then each restores on the next frame with a fresh
+    //    context + atlas. Fixes panes left blank by a backing store the GPU
+    //    discarded without a context-loss event.
+    let droppedForReset = false;
+    const unregisterReset = registerResettablePane({
+      drop: () => {
+        droppedForReset = webgl !== undefined;
+        if (droppedForReset) disposeWebgl();
+      },
+      restore: () => {
+        if (disposed) return;
+        const reload = droppedForReset;
+        droppedForReset = false;
+        // A pane parked in between stays parked; unpark re-loads on show.
+        if (reload && !webgl && !parker.isParked() && recentLossCount() < 3) {
+          loadWebgl();
+        }
+        if (isContainerVisible(container)) fitAddon.fit();
+        terminal.refresh(0, terminal.rows - 1);
+      },
+    });
+
     // Visible = intersecting the viewport (IntersectionObserver) AND laid out
     // with a real size (ResizeObserver below). Covers both display:none task
     // workspaces and dockview tabs detached from the document.
@@ -384,6 +410,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
       parker.dispose();
+      unregisterReset();
       integrations.dispose();
       unsubscribeData?.();
       unsubscribeExit?.();
