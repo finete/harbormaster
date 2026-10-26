@@ -16,11 +16,17 @@ export interface PresenceChangedPayload {
   record: PresenceRecord | undefined;
 }
 
+export interface MessagesChangedPayload {
+  /** Tasks whose messaging state may have changed (targets and task senders). */
+  taskIds: string[];
+}
+
 /** Every event name the core emits, mapped to its payload shape. */
 export interface CoreEventMap {
   "board-changed": BoardChangedPayload;
   "task-changed": TaskChangedPayload;
   "presence-changed": PresenceChangedPayload;
+  "messages-changed": MessagesChangedPayload;
 }
 
 export type CoreEventName = keyof CoreEventMap;

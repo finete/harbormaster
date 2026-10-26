@@ -12,6 +12,7 @@ import type {
   PresenceStatus,
   SessionLaunch,
 } from "../contracts/harness.js";
+import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
 import { SystemClock } from "../utilities/defaults.js";
 import { resolveStatePaths } from "../utilities/state-paths.js";
@@ -111,7 +112,18 @@ export function piSessionArgs(session: SessionLaunch | undefined): string[] {
   }
 }
 
+/** Pi's in-session extension can receive, steer, follow up, and inline images. */
+export const PI_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
+  receive: true,
+  steer: true,
+  followUp: true,
+  images: true,
+};
+
 export class PiHarnessAdapter implements HarnessAdapter {
+  readonly messaging: HarnessMessagingCapabilities = {
+    ...PI_MESSAGING_CAPABILITIES,
+  };
   private readonly presenceAccess: PresenceAccess;
   private readonly clock: Clock;
   private readonly livenessOptions: PresenceLivenessOptions;

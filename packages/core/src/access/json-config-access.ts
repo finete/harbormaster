@@ -56,6 +56,7 @@ export class JsonConfigAccess implements ConfigAccess {
       const repositories = normalizeRepositories(raw.repositories);
       const movers = normalizeMovers("movers", raw.movers);
       const launch = normalizeLaunch(raw.launch);
+      const messaging = normalizeMessaging(raw.messaging);
       return {
         automation: normalizeAutomation(raw.automation),
         ...(movers ? { movers } : {}),
@@ -63,6 +64,7 @@ export class JsonConfigAccess implements ConfigAccess {
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
         ...(repositories ? { repositories } : {}),
         ...(launch ? { launch } : {}),
+        ...(messaging ? { messaging } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
@@ -241,6 +243,42 @@ function normalizeLaunch(value: unknown): GlobalConfig["launch"] | undefined {
     launch.defaultModel = value.defaultModel.trim();
   }
   return launch;
+}
+
+/**
+ * Validated leniently like `launch`: both fields optional; defaults
+ * (`DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES` / `DEFAULT_MESSAGE_LOOP_CAP`)
+ * apply at read time.
+ */
+function normalizeMessaging(
+  value: unknown,
+): GlobalConfig["messaging"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("messaging must be an object");
+  const messaging: NonNullable<GlobalConfig["messaging"]> = {};
+  if (value.parentReplyTimeoutMinutes !== undefined) {
+    if (
+      typeof value.parentReplyTimeoutMinutes !== "number" ||
+      !Number.isFinite(value.parentReplyTimeoutMinutes) ||
+      value.parentReplyTimeoutMinutes <= 0
+    ) {
+      throw new Error(
+        "messaging.parentReplyTimeoutMinutes must be a positive number",
+      );
+    }
+    messaging.parentReplyTimeoutMinutes = value.parentReplyTimeoutMinutes;
+  }
+  if (value.loopCap !== undefined) {
+    if (
+      typeof value.loopCap !== "number" ||
+      !Number.isInteger(value.loopCap) ||
+      value.loopCap <= 0
+    ) {
+      throw new Error("messaging.loopCap must be a positive integer");
+    }
+    messaging.loopCap = value.loopCap;
+  }
+  return messaging;
 }
 
 function normalizeAutomation(value: unknown): boolean {
