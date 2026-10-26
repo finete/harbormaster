@@ -43,6 +43,7 @@ import type { Task } from "../../../preload/api";
 import {
   flattenBoard,
   useBoard,
+  useMessagingStates,
   usePresenceMap,
   useUnreadTaskIds,
 } from "../core-client";
@@ -76,10 +77,12 @@ import {
   type LineageRow,
   layoutLineageRows,
 } from "../lib/task-lineage";
+import { deriveMessagingChips } from "../lib/task-messaging-chips";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
+import { ApprovalInboxButton } from "./ApprovalInbox";
 import {
   type ContextMenuItem,
   SidebarRowContextMenu,
@@ -330,6 +333,7 @@ export function Sidebar({
   onSelectTask,
   onCloseTask,
   onShowBoard,
+  onOpenApprovals,
   onNewTask,
   draftLabel,
   draftFocused,
@@ -347,6 +351,8 @@ export function Sidebar({
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
+  /** Open the approval inbox sheet (App owns it); the footer button only shows while messages await approval. */
+  onOpenApprovals: () => void;
   /** Open/focus THE new-task draft (same path as Cmd/Ctrl+N). */
   onNewTask: () => void;
   /** Live label of the new-task draft row; `null` = no draft exists. */
@@ -358,6 +364,7 @@ export function Sidebar({
   const columns = useBoard();
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
+  const messagingStates = useMessagingStates();
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   const [query, setQuery] = useState("");
   // Saved group-collapse state (Orca polish item 2): same localStorage
@@ -1070,7 +1077,13 @@ export function Sidebar({
                 focusedTaskId === row.task.id && "bg-accent/70",
               )}
             >
-              <StatusDot presence={row.presence} />
+              <StatusDot
+                presence={row.presence}
+                waitingOnParent={
+                  deriveMessagingChips(messagingStates.get(row.task.id), now)
+                    .suppressAttention
+                }
+              />
             </button>
           ))}
         </div>
@@ -1095,6 +1108,11 @@ export function Sidebar({
           >
             <LayoutGrid className="h-4 w-4" aria-hidden />
           </button>
+          <ApprovalInboxButton
+            compact
+            testId="sidebar-approval-inbox-button"
+            onClick={onOpenApprovals}
+          />
         </div>
       </div>
     );
@@ -1382,6 +1400,11 @@ export function Sidebar({
           Board
           <Kbd>{`${modKeyLabel()}B`}</Kbd>
         </Button>
+        <ApprovalInboxButton
+          compact
+          testId="workspace-approval-inbox-button"
+          onClick={onOpenApprovals}
+        />
       </div>
       {/* Straddles the right border so the grab target sits on the seam. */}
       {/* biome-ignore lint/a11y/useSemanticElements: an <hr> cannot host pointer/keyboard resize handlers */}

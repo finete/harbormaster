@@ -10,6 +10,8 @@ import {
   isWorking,
   type LaunchedTaskStatus,
   type LaunchQueueTask,
+  selectWakeTargets,
+  type WakeCandidate,
 } from "../src/main/background-launcher";
 
 const NOW = Date.parse("2024-06-01T00:00:00.000Z");
@@ -246,5 +248,286 @@ describe("createBackgroundLauncher", () => {
 
     await launcher.runPass();
     expect(seenTaskIds).toEqual(["t1"]);
+  });
+});
+
+function wakeCandidate(
+  taskId: string,
+  overrides: Partial<WakeCandidate> = {},
+): WakeCandidate {
+  return { taskId, hasLivePane: false, presenceLive: false, ...overrides };
+}
+
+describe("selectWakeTargets", () => {
+  const none = new Set<string>();
+  const never = new Map<string, number>();
+
+  it("wakes tasks with no live session, in order, up to capacity", () => {
+    expect(
+      selectWakeTargets({
+        candidates: [
+          wakeCandidate("a"),
+          wakeCandidate("b"),
+          wakeCandidate("c"),
+        ],
+        capacity: 2,
+        inFlight: none,
+        lastWakeAt: never,
+        nowMs: NOW,
+      }),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("skips a live app pane, live harness presence and a queued launch", () => {
+    expect(
+      selectWakeTargets({
+        candidates: [
+          wakeCandidate("pane", { hasLivePane: true }),
+          wakeCandidate("presence", { presenceLive: true }),
+          wakeCandidate("queued", { launchStatus: "queued" }),
+          wakeCandidate("interrupted", { launchStatus: "interrupted" }),
+          wakeCandidate("started-dead", { launchStatus: "started" }),
+        ],
+        capacity: 10,
+        inFlight: none,
+        lastWakeAt: never,
+        nowMs: NOW,
+      }),
+    ).toEqual(["interrupted", "started-dead"]);
+  });
+
+  it("never picks a task whose wake is in flight, or woke within the cooldown", () => {
+    const lastWakeAt = new Map([
+      ["recent", NOW - 10_000],
+      ["old", NOW - 61_000],
+    ]);
+    expect(
+      selectWakeTargets({
+        candidates: [
+          wakeCandidate("busy"),
+          wakeCandidate("recent"),
+          wakeCandidate("old"),
+        ],
+        capacity: 10,
+        inFlight: new Set(["busy"]),
+        lastWakeAt,
+        nowMs: NOW,
+      }),
+    ).toEqual(["old"]);
+  });
+
+  it("honors a custom cooldown, dedupes ids, and returns nothing at zero capacity", () => {
+    const candidates = [wakeCandidate("a"), wakeCandidate("a")];
+    expect(
+      selectWakeTargets({
+        candidates,
+        capacity: 5,
+        inFlight: none,
+        lastWakeAt: new Map([["a", NOW - 5_000]]),
+        nowMs: NOW,
+        cooldownMs: 1_000,
+      }),
+    ).toEqual(["a"]);
+    expect(
+      selectWakeTargets({
+        candidates,
+        capacity: 0,
+        inFlight: none,
+        lastWakeAt: never,
+        nowMs: NOW,
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("createBackgroundLauncher: waking message targets", () => {
+  /** A launcher over mutable fakes; `panes` is the app's live-pane set. */
+  function harness(
+    options: {
+      maxConcurrent?: number;
+      pending?: LaunchQueueTask[];
+      started?: LaunchQueueTask[];
+      queue?: LaunchQueueTask[];
+    } = {},
+  ) {
+    const state = {
+      now: NOW,
+      pending: options.pending ?? [],
+      panes: new Set<string>(),
+      livePresence: new Set<string>(),
+      woken: [] as string[],
+      startedNow: [] as string[],
+      wakeGate: undefined as Promise<void> | undefined,
+    };
+    const queue = [...(options.queue ?? [])];
+    const launcher = createBackgroundLauncher({
+      listStartedLaunches: async () => options.started ?? [],
+      getLaunchSettings: async () => ({
+        maxConcurrent: options.maxConcurrent ?? 4,
+      }),
+      hasLivePane: (taskId) => state.panes.has(taskId),
+      getPresence: async (taskId) => ({
+        runningTurn: false,
+        hasPresenceRecord: true, // a stale record from the previous run
+        live: state.livePresence.has(taskId),
+      }),
+      claimPendingLaunches: async (limit) => queue.splice(0, limit),
+      startSession: async (task) => {
+        state.startedNow.push(task.id);
+        state.panes.add(task.id);
+      },
+      listPendingMessageTargets: async () => state.pending,
+      wakeSession: async (taskId) => {
+        state.woken.push(taskId);
+        await state.wakeGate;
+        state.panes.add(taskId);
+      },
+      now: () => state.now,
+    });
+    return { state, launcher };
+  }
+
+  it("wakes a pending target with no live session, and skips live/queued ones", async () => {
+    const { state, launcher } = harness({
+      pending: [
+        makeTask("dead"),
+        makeTask("pane"),
+        makeTask("live"),
+        { id: "queued", launch: { status: "queued" } },
+      ],
+    });
+    state.panes.add("pane");
+    state.livePresence.add("live");
+    await launcher.runPass();
+    expect(state.woken).toEqual(["dead"]);
+  });
+
+  it("does nothing when wake deps are not provided (launch-only use)", async () => {
+    const launcher = createBackgroundLauncher({
+      listStartedLaunches: async () => [],
+      getLaunchSettings: async () => ({ maxConcurrent: 2 }),
+      hasLivePane: () => false,
+      getPresence: async () => ({
+        runningTurn: false,
+        hasPresenceRecord: false,
+      }),
+      claimPendingLaunches: async () => [],
+      startSession: async () => {},
+      now: () => NOW,
+    });
+    await expect(launcher.runPass()).resolves.toBeUndefined();
+  });
+
+  it("counts woken sessions toward maxConcurrent like started launches (grace, then idle frees the slot)", async () => {
+    const { state, launcher } = harness({
+      maxConcurrent: 1,
+      pending: [makeTask("a"), makeTask("b")],
+    });
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a"]); // capacity 1: only one wake
+
+    // Still inside the grace window, the new session not reported yet (its
+    // old presence record is stale): "a" still holds the only slot.
+    state.now = NOW + 10_000;
+    state.pending = [makeTask("b")];
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a"]);
+
+    // "a" reports in live and idle: the slot frees and "b" is woken.
+    state.livePresence.add("a");
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a", "b"]);
+  });
+
+  it("a woken task past its grace window without reporting in stops counting", async () => {
+    const { state, launcher } = harness({
+      maxConcurrent: 1,
+      pending: [makeTask("a")],
+    });
+    await launcher.runPass();
+    state.now = NOW + DEFAULT_STARTUP_GRACE_MS + 1;
+    state.pending = [makeTask("b")];
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a", "b"]);
+  });
+
+  it("queued launches claim capacity first; wakes only get what is left", async () => {
+    const { state, launcher } = harness({
+      maxConcurrent: 2,
+      queue: [makeTask("q1")],
+      pending: [makeTask("w1"), makeTask("w2")],
+    });
+    await launcher.runPass();
+    expect(state.startedNow).toEqual(["q1"]);
+    expect(state.woken).toEqual(["w1"]);
+  });
+
+  it("a woken task also holding a launch record counts once, from the wake time", async () => {
+    const { state, launcher } = harness({
+      maxConcurrent: 1,
+      started: [makeTask("a", new Date(NOW - 3_600_000).toISOString())],
+      pending: [],
+    });
+    state.pending = [{ id: "a", launch: { status: "interrupted" } }];
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a"]);
+    state.pending = [makeTask("b")];
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a"]);
+  });
+
+  it("does not re-wake a task whose session died within the cooldown, but does after it", async () => {
+    const { state, launcher } = harness({ pending: [makeTask("a")] });
+    await launcher.runPass();
+    state.panes.delete("a"); // the session died without claiming its message
+    state.now = NOW + 5_000;
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a"]);
+    state.now = NOW + 61_000;
+    await launcher.runPass();
+    expect(state.woken).toEqual(["a", "a"]);
+  });
+
+  it("never attempts a wake twice concurrently for one task", async () => {
+    const { state, launcher } = harness({ pending: [makeTask("a")] });
+    let release: (() => void) | undefined;
+    state.wakeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = launcher.runPass();
+    const second = launcher.runPass(); // coalesced rerun while the wake is pending
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.woken).toEqual(["a"]);
+    release?.();
+    await Promise.all([first, second]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.woken).toEqual(["a"]);
+  });
+
+  it("a failed wake is reported via onStartError and does not block the rest", async () => {
+    const errors: string[] = [];
+    const woken: string[] = [];
+    const launcher = createBackgroundLauncher({
+      listStartedLaunches: async () => [],
+      getLaunchSettings: async () => ({ maxConcurrent: 3 }),
+      hasLivePane: () => false,
+      getPresence: async () => ({
+        runningTurn: false,
+        hasPresenceRecord: false,
+        live: false,
+      }),
+      claimPendingLaunches: async () => [],
+      startSession: async () => {},
+      listPendingMessageTargets: async () => [makeTask("bad"), makeTask("ok")],
+      wakeSession: async (taskId) => {
+        if (taskId === "bad") throw new Error("boom");
+        woken.push(taskId);
+      },
+      onStartError: (task) => errors.push(task.id),
+      now: () => NOW,
+    });
+    await launcher.runPass();
+    expect(errors).toEqual(["bad"]);
+    expect(woken).toEqual(["ok"]);
   });
 });

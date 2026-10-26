@@ -12,12 +12,16 @@ import type {
   CreateTaskInput,
   HarbormasterApi,
   LaunchTaskInput,
+  MessageMode,
+  MessagingChangedPayload,
   MoveTaskOptions,
   PresenceChangedPayload,
   PresenceSnapshot,
   ReopenTaskInput,
   RepositoryInfo,
   Task,
+  TaskMessage,
+  TaskMessagingState,
   TaskState,
   TerminalCreateOptions,
   TerminalCreateResult,
@@ -206,6 +210,35 @@ const api: HarbormasterApi = {
     },
     updateTaskState: (id: string, patch: UpdateTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:updateTaskState", id, patch),
+    listPendingApprovals: (): Promise<TaskMessage[]> =>
+      ipcRenderer.invoke("core:listPendingApprovals"),
+    approveMessage: (
+      messageId: string,
+      edits?: { text?: string; mode?: MessageMode },
+    ): Promise<TaskMessage> =>
+      ipcRenderer.invoke("core:approveMessage", messageId, edits),
+    rejectMessage: (messageId: string): Promise<TaskMessage> =>
+      ipcRenderer.invoke("core:rejectMessage", messageId),
+    getMessagingStates: (): Promise<TaskMessagingState[]> =>
+      ipcRenderer.invoke("core:getMessagingStates"),
+    readMessageAttachment: (
+      messageId: string,
+      index: number,
+    ): Promise<{ mimeType?: string; base64: string }> =>
+      ipcRenderer.invoke("core:readMessageAttachment", messageId, index),
+    listMessages: (filter?: { taskId?: string }): Promise<TaskMessage[]> =>
+      ipcRenderer.invoke("core:listMessages", filter),
+    onMessagingChanged: (
+      listener: (payload: MessagingChangedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: MessagingChangedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:messaging-changed", handler);
+      return () =>
+        ipcRenderer.removeListener("core:messaging-changed", handler);
+    },
     onCycleTask: (
       listener: (direction: "up" | "down") => void,
     ): (() => void) => {

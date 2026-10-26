@@ -2,6 +2,11 @@ import { useDraggable } from "@dnd-kit/core";
 import { Loader2 } from "lucide-react";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
+import { useMessagingStates } from "../core-client";
+import {
+  deriveMessagingChips,
+  loopCapLabel,
+} from "../lib/task-messaging-chips";
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
@@ -100,14 +105,23 @@ function TaskCardFace({
   dragProps?: HTMLAttributes<HTMLDivElement>;
 }): JSX.Element {
   const running = !!presence?.runningTurn;
-  // Live but idle = pi-home's ● "your move": the agent is waiting on you.
-  const attention = !!presence?.live && !running;
-  const outcome = deriveOutcomeLine(presence);
-  const launchMarker = deriveLaunchMarker(task);
-
   // Same 30s tick the sidebar rail uses (lib/use-now.ts), so the card's
   // relative time and waiting-duration stay fresh without a prop from Board.
   const now = useNow();
+  // Task messaging chips (lib/task-messaging-chips.ts), evaluated against
+  // the same clock so a "waiting on parent" expiry flips back to amber by
+  // itself.
+  const messaging = deriveMessagingChips(
+    useMessagingStates().get(task.id),
+    now,
+  );
+  // Live but idle = pi-home's ● "your move": the agent is waiting on you,
+  // unless it is waiting on its parent instead (neutral, not amber).
+  const attention =
+    !!presence?.live && !running && !messaging.suppressAttention;
+  const outcome = deriveOutcomeLine(presence);
+  const launchMarker = deriveLaunchMarker(task);
+
   const isAwaiting = task.state === "awaiting" && !!task.awaiting;
   const isOverlay = variant === "overlay";
 
@@ -218,7 +232,24 @@ function TaskCardFace({
           {outcome.note}
         </p>
       )}
-      {(running || attention || launchMarker || task.pr) && (
+      {messaging.waitingOnParent && (
+        <p
+          className="truncate text-xs text-muted-foreground"
+          data-slot="waiting-question"
+          data-testid="card-waiting-question"
+          title={messaging.waitingOnParent.question}
+        >
+          {messaging.waitingOnParent.question}
+        </p>
+      )}
+      {(running ||
+        attention ||
+        launchMarker ||
+        task.pr ||
+        messaging.waitingOnParent ||
+        messaging.approvalsWaiting > 0 ||
+        messaging.childQuestionsWaiting > 0 ||
+        messaging.loopCapReached) && (
         <div
           className="flex flex-wrap items-center gap-1.5 pt-1"
           data-slot="badges"
@@ -244,6 +275,46 @@ function TaskCardFace({
                 aria-hidden
               />
               your move
+            </Badge>
+          )}
+          {messaging.waitingOnParent && (
+            <Badge
+              variant="secondary"
+              className="shrink-0"
+              data-testid="badge-waiting-on-parent"
+              title="Asked its parent a question; waiting for the answer"
+            >
+              waiting on parent
+            </Badge>
+          )}
+          {messaging.approvalsWaiting > 0 && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-primary/60 text-primary"
+              data-testid="badge-approval-waiting"
+              title="A message to this task is waiting for your approval"
+            >
+              message awaiting approval
+            </Badge>
+          )}
+          {messaging.childQuestionsWaiting > 0 && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-primary/60 text-primary"
+              data-testid="badge-child-question"
+              title="A child task asked this task a question"
+            >
+              child asked a question
+            </Badge>
+          )}
+          {messaging.loopCapReached && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-amber-400/60 text-amber-300"
+              data-testid="badge-loop-cap"
+              title={loopCapLabel(messaging.loopCapReached)}
+            >
+              message cap reached
             </Badge>
           )}
           {launchMarker === "queued" && (

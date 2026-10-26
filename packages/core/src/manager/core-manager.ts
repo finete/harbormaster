@@ -1690,7 +1690,8 @@ export class CoreManager implements CoreCommands {
     // 2. The target exists and is not Done/Backlog.
     const target = await this.deps.tasks.getTask(input.targetTaskId);
     if (!target) throw new Error(`Task not found: ${input.targetTaskId}`);
-    const unavailable = undeliverableReason(target);
+    const unavailable =
+      undeliverableReason(target) ?? (await this.noSessionReason(target));
     if (unavailable) throw new Error(unavailable);
 
     // 3. Route from lineage (non-task senders always need approval).
@@ -1834,6 +1835,19 @@ export class CoreManager implements CoreCommands {
     return claimed;
   }
 
+  /**
+   * A target with no workspace binding (no worktree or scratch directory)
+   * can never host a Harbormaster-launched session, so it could never
+   * claim its inbox: reject up front instead of leaving the app to retry
+   * waking it forever.
+   */
+  private async noSessionReason(task: Task): Promise<string | undefined> {
+    const binding = await this.deps.bindings.getBindingForTask(task.id);
+    return binding?.worktreePath
+      ? undefined
+      : `Task ${task.id} has no workspace, so it has no session to receive messages; tell the user instead.`;
+  }
+
   subscribeInbox(taskId: string, listener: () => void): () => void {
     return this.requireMessaging().messages.watchDoorbell(taskId, listener);
   }
@@ -1871,7 +1885,7 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const target = await this.deps.tasks.getTask(message.targetTaskId);
     const reason = target
-      ? undeliverableReason(target)
+      ? (undeliverableReason(target) ?? (await this.noSessionReason(target)))
       : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
     let result: TaskMessage;
     if (reason) {

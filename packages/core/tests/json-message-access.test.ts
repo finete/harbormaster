@@ -47,7 +47,15 @@ const claimInput = (idle: boolean) => ({
   resolveMode: (mode: "steer" | "followUp") => mode,
 });
 
-async function waitFor(check: () => boolean, ms = 3000): Promise<void> {
+/**
+ * macOS `fs.watch` (FSEvents) can drop events written in the first moments
+ * after a watcher starts, more so under full-suite load. Production does not
+ * depend on that window (the extension claims on subscribe and the heartbeat
+ * backstops a missed ring); tests let the watcher arm before writing.
+ */
+const armWatchers = () => new Promise((resolve) => setTimeout(resolve, 150));
+
+async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!check()) {
     if (Date.now() > deadline) throw new Error("timed out waiting");
@@ -263,6 +271,7 @@ describe("doorbell", () => {
     const offB = access.watchDoorbell("task-b", () => {
       rungB += 1;
     });
+    await armWatchers();
     try {
       await access.recordMessage(msg("task-a"));
       await waitFor(() => rungA > 0);
@@ -287,6 +296,7 @@ describe("doorbell", () => {
     const off = access.watchDoorbell("../weird id", () => {
       rung += 1;
     });
+    await armWatchers();
     await access.recordMessage(msg("../weird id"));
     await waitFor(() => rung > 0);
     expect((await readdir(paths.doorbellDir)).includes(".._weird_id")).toBe(

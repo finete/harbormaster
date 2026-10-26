@@ -9,7 +9,12 @@ import type {
 } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Task } from "../../../preload/api";
+import { useMessagingStates } from "../core-client";
 import { createSharedStore } from "../lib/shared-store";
+import {
+  deriveMessagingChips,
+  loopCapLabel,
+} from "../lib/task-messaging-chips";
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
@@ -100,11 +105,27 @@ function RunningDot(): JSX.Element {
  */
 export function StatusDot({
   presence,
+  waitingOnParent = false,
 }: {
   presence: SidebarRow["presence"];
+  /** Live but idle because it asked its parent (task messaging): a neutral dot instead of the amber "your move" one. */
+  waitingOnParent?: boolean;
 }): JSX.Element {
   if (presence?.runningTurn) {
     return <RunningDot />;
+  }
+  if (presence?.live && waitingOnParent) {
+    return (
+      <span
+        className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+        data-testid="sidebar-row-waiting-dot"
+        data-status="waiting-on-parent"
+        role="img"
+        aria-label="Waiting on parent"
+      >
+        <span className="h-2 w-2 rounded-full bg-zinc-400" />
+      </span>
+    );
   }
   if (presence?.live) {
     return (
@@ -264,12 +285,21 @@ export function SidebarTaskRow({
 }): JSX.Element {
   const { task, state, presence } = row;
   const time = relativeTime(activityTimestamp(row), now);
+  // Task messaging chips; "waiting on parent" (while its deadline has not
+  // passed on this clock) replaces the amber "your move" with a neutral state.
+  const messaging = deriveMessagingChips(
+    useMessagingStates().get(task.id),
+    now,
+  );
+  const waiting = messaging.waitingOnParent !== undefined;
   const activity = presence?.runningTurn
     ? "working…"
     : presence?.live
-      ? "your move"
+      ? waiting
+        ? "idle"
+        : "your move"
       : undefined;
-  const attention = !presence?.runningTurn && !!presence?.live;
+  const attention = !presence?.runningTurn && !!presence?.live && !waiting;
   const outcome = deriveOutcomeLine(presence);
   const launchMarker = deriveLaunchMarker(task);
   const [draftTitle, setDraftTitle] = useState(task.title);
@@ -386,7 +416,7 @@ export function SidebarTaskRow({
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5">
-          <StatusDot presence={presence} />
+          <StatusDot presence={presence} waitingOnParent={waiting} />
           {pinned && (
             <Pin
               className="h-3 w-3 shrink-0 rotate-45 text-muted-foreground"
@@ -466,6 +496,54 @@ export function SidebarTaskRow({
             {stateChipLabel(task, state)}
           </span>
           <PrChip task={task} />
+          {waiting && (
+            <span
+              data-testid="sidebar-row-waiting-on-parent"
+              title="Asked its parent a question; waiting for the answer"
+              className={cn(
+                CHIP_BASE,
+                "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
+              )}
+            >
+              waiting on parent
+            </span>
+          )}
+          {messaging.approvalsWaiting > 0 && (
+            <span
+              data-testid="sidebar-row-approval-waiting"
+              title="A message to this task is waiting for your approval"
+              className={cn(
+                CHIP_BASE,
+                "border-sky-500/40 bg-sky-500/10 text-sky-300",
+              )}
+            >
+              message awaiting approval
+            </span>
+          )}
+          {messaging.childQuestionsWaiting > 0 && (
+            <span
+              data-testid="sidebar-row-child-question"
+              title="A child task asked this task a question"
+              className={cn(
+                CHIP_BASE,
+                "border-sky-500/40 bg-sky-500/10 text-sky-300",
+              )}
+            >
+              child asked a question
+            </span>
+          )}
+          {messaging.loopCapReached && (
+            <span
+              data-testid="sidebar-row-loop-cap"
+              title={loopCapLabel(messaging.loopCapReached)}
+              className={cn(
+                CHIP_BASE,
+                "border-amber-500/40 bg-amber-500/10 text-amber-300",
+              )}
+            >
+              message cap reached
+            </span>
+          )}
           {launchMarker === "queued" && (
             <span
               data-testid="sidebar-row-launch-queued"
@@ -505,6 +583,15 @@ export function SidebarTaskRow({
               {activity}
             </span>
           </div>
+        )}
+        {messaging.waitingOnParent && (
+          <p
+            className="truncate pl-5 text-[11px] text-muted-foreground"
+            data-testid="sidebar-row-waiting-question"
+            title={messaging.waitingOnParent.question}
+          >
+            {messaging.waitingOnParent.question}
+          </p>
         )}
         {parentTitle && (
           <p

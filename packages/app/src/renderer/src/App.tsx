@@ -2,6 +2,10 @@ import { PanelLeft, RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
+import {
+  ApprovalInboxButton,
+  ApprovalInboxSheet,
+} from "./components/ApprovalInbox";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
@@ -58,6 +62,9 @@ type View = "board" | "workspace";
  */
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
+  // The approval inbox sheet (components/ApprovalInbox.tsx): one instance,
+  // opened from the header button of whichever view is showing.
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
   const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
   const sidebarOrder = useSidebarOrder();
@@ -461,15 +468,21 @@ export function App(): JSX.Element {
               <span className="px-1 text-sm font-medium text-muted-foreground">
                 Board
               </span>
-              <Button
-                size="sm"
-                className="ml-auto h-7 px-2"
-                data-testid="board-new-task-button"
-                onClick={openDraft}
-              >
-                + New task
-                <Kbd>{`${modKeyLabel()}N`}</Kbd>
-              </Button>
+              <div className="ml-auto flex items-center gap-2">
+                <ApprovalInboxButton
+                  testId="board-approval-inbox-button"
+                  onClick={() => setInboxOpen(true)}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 px-2"
+                  data-testid="board-new-task-button"
+                  onClick={openDraft}
+                >
+                  + New task
+                  <Kbd>{`${modKeyLabel()}N`}</Kbd>
+                </Button>
+              </div>
             </header>
             <div className="min-h-0 flex-1">
               <Board
@@ -497,6 +510,7 @@ export function App(): JSX.Element {
               onSelectTask={selectTask}
               onCloseTask={requestCloseTask}
               onShowBoard={() => setView("board")}
+              onOpenApprovals={() => setInboxOpen(true)}
               onNewTask={openDraft}
               draftLabel={draft ? draftLabel(draft) : null}
               draftFocused={draftFocused}
@@ -576,6 +590,7 @@ export function App(): JSX.Element {
             </Button>
           </DialogFooter>
         </Dialog>
+        <ApprovalInboxSheet open={inboxOpen} onOpenChange={setInboxOpen} />
         <ToastHost />
         <ConfirmHost />
       </div>
