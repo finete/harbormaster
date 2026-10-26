@@ -24,6 +24,8 @@ import {
   CoreManager,
   type CoreManagerDependencies,
   createCore,
+  JsonWorkspaceBindingAccess,
+  resolveStatePaths,
   SessionPresenceAccess,
 } from "../src/index.js";
 
@@ -111,7 +113,30 @@ afterEach(async () => {
 
 const c = () => core.commands;
 
+/** A started Dev task with a scratch workspace (a messaging target needs a binding to host a session). */
 async function mk(title: string): Promise<string> {
+  const id = await unbound(title);
+  await bindScratch(id);
+  return id;
+}
+async function bindScratch(taskId: string): Promise<void> {
+  const paths = resolveStatePaths(stateDir);
+  const now = new Date().toISOString();
+  await new JsonWorkspaceBindingAccess(
+    paths.workspaceBindingsFile,
+    paths.workspaceBindingsLockFile,
+  ).attachBinding({
+    id: `binding-${taskId}`,
+    taskId,
+    worktreePath: join(root, "scratch", taskId),
+    scratch: true,
+    detached: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+/** A started Dev task with no workspace binding at all. */
+async function unbound(title: string): Promise<string> {
   return (await c().createTask({ title, initialPrompt: "", start: true })).id;
 }
 async function backlog(title: string): Promise<string> {
@@ -184,6 +209,10 @@ describe("send-time rules", () => {
     const parked = await backlog("Parked");
     await expect(send(a, parked)).rejects.toThrow(
       `Task ${parked} is in Backlog`,
+    );
+    const noWorkspace = await unbound("No workspace");
+    await expect(send(a, noWorkspace)).rejects.toThrow(
+      `Task ${noWorkspace} has no workspace, so it has no session to receive messages`,
     );
     await expect(
       c().sendTaskMessage({
@@ -902,6 +931,7 @@ describe("wiring", () => {
         start: true,
       })
     ).id;
+    await bindScratch(p);
     const k = (
       await real.commands.launchTask({
         relation: "child",

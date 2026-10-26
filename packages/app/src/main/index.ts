@@ -7,6 +7,7 @@ import type {
   BoardColumn,
   CreateTaskInput,
   LaunchTaskInput,
+  MessageMode,
   MoveTaskOptions,
   ReopenTaskInput,
   Task,
@@ -19,6 +20,7 @@ import {
   DEFAULT_STATE_DIR,
   isConnectivityError,
   PiHarnessAdapter,
+  resolveStatePaths,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
 import {
@@ -31,6 +33,7 @@ import {
   shell,
 } from "electron";
 import type {
+  MessagingChangedPayload,
   PresenceChangedPayload,
   PresenceSnapshot,
   TerminalCreateOptions,
@@ -45,6 +48,12 @@ import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
+import {
+  createDedupedPusher,
+  createIntervalGate,
+  isMessagesLogChange,
+  PRUNE_INTERVAL_MS,
+} from "./messaging-push";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
@@ -220,10 +229,25 @@ const backgroundLauncher = createBackgroundLauncher({
     return {
       runningTurn: status.runningTurn,
       hasPresenceRecord: status.record !== undefined,
+      live: status.live,
     };
+  },
+  listPendingMessageTargets: async () => {
+    const [ids, columns] = await Promise.all([
+      core.commands.listTasksWithPendingMessages(),
+      core.commands.listBoard(),
+    ]);
+    const byId = new Map(flattenTasks(columns).map((task) => [task.id, task]));
+    return ids.flatMap((id) => {
+      const task = byId.get(id);
+      return task ? [task] : [];
+    });
   },
   claimPendingLaunches: (limit) => core.commands.claimPendingLaunches(limit),
   startSession: (task) => startBackgroundLaunch(task.id),
+  // A message target with no live session resumes through the very same
+  // path a launch uses (task-messaging decision 5).
+  wakeSession: (taskId) => startBackgroundLaunch(taskId),
   onStartError: (task, error) => {
     console.error(
       `[background-launcher] starting task ${task.id} failed:`,
@@ -348,6 +372,48 @@ function registerCoreIpc(): void {
     },
   );
 
+  // Task messaging (see /docs/task-messaging.md "App"): the approval inbox's
+  // commands. Each mutation pushes fresh messaging state to every window
+  // right away (the state-file watcher would only catch it ~150ms later).
+  ipcMain.handle("core:listPendingApprovals", () => {
+    messagingPusher.invalidate();
+    return core.commands.listPendingApprovals();
+  });
+  ipcMain.handle("core:getMessagingStates", () => {
+    messagingPusher.invalidate();
+    return core.commands.getMessagingStates();
+  });
+  ipcMain.handle(
+    "core:approveMessage",
+    async (
+      _event,
+      messageId: string,
+      edits?: { text?: string; mode?: MessageMode },
+    ) => {
+      try {
+        return await core.commands.approveMessage(messageId, edits);
+      } finally {
+        void messagingPusher.push();
+        void backgroundLauncher.runPass();
+      }
+    },
+  );
+  ipcMain.handle("core:rejectMessage", async (_event, messageId: string) => {
+    try {
+      return await core.commands.rejectMessage(messageId);
+    } finally {
+      void messagingPusher.push();
+    }
+  });
+  ipcMain.handle(
+    "core:readMessageAttachment",
+    (_event, messageId: string, index: number) =>
+      core.commands.readMessageAttachment(messageId, index),
+  );
+  ipcMain.handle("core:listMessages", (_event, filter?: { taskId?: string }) =>
+    core.commands.listMessages(filter),
+  );
+
   // Push channel: forward every core event to every live window. `safeSend`
   // guards against sending to a webContents destroyed mid-flight (window
   // closed, app quitting) — same guard the pty IPC uses above.
@@ -359,6 +425,14 @@ function registerCoreIpc(): void {
     void backgroundLauncher.runPass();
   });
 
+  // In-process message writes (send/approve/claim here) announce themselves;
+  // the extension's writes arrive through `watchMessagingFiles` instead.
+  core.events.on("messages-changed", () => {
+    void messagingPusher.push();
+    // A pending message may have a target to wake.
+    void backgroundLauncher.runPass();
+  });
+
   // External writers share the state files with this process: the pi
   // extension's /todev//toawait//todone and the migration CLI write through
   // their own core instances, which emit events only in *their* process.
@@ -366,6 +440,58 @@ function registerCoreIpc(): void {
   // reflect here in ~moments instead of on the next 30s refresh tick
   // (the missing half of the design's "frontends never poll files" rule).
   watchStateFiles();
+  watchMessagingFiles();
+}
+
+// What the approval inbox and the task chips render: awaiting-approval
+// messages plus derived per-task messaging state. Pushed on every change
+// (deduped, see messaging-push.ts); a window that fetches it itself
+// invalidates the dedupe so it is never skipped against a snapshot that
+// window may not hold.
+const messagingPusher = createDedupedPusher<MessagingChangedPayload>({
+  load: async () => {
+    const [approvals, states] = await Promise.all([
+      core.commands.listPendingApprovals(),
+      core.commands.getMessagingStates(),
+    ]);
+    return { approvals, states };
+  },
+  send: (payload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:messaging-changed", payload);
+    }
+  },
+  onError: () => {
+    // A half-written messages.json mid-atomic-rename can fail a read; the
+    // next change (the rename completing) pushes again.
+  },
+});
+
+let messagingWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+/**
+ * The pi extension (and any other core instance) writes messages through
+ * its own core, which never emits our `messages-changed` event: watch
+ * `<stateDir>/messages` for `messages.json` and push + run a launcher pass
+ * (a freshly pending message may need its target woken). The doorbell and
+ * attachment subfolders change on every send/claim and are ignored.
+ */
+function watchMessagingFiles(): void {
+  let watcher: FSWatcher;
+  try {
+    const messagesDir = resolveStatePaths(activeStateDir).messagesDir;
+    mkdirSync(messagesDir, { recursive: true });
+    watcher = watch(messagesDir, (_event, filename) => {
+      if (!isMessagesLogChange(filename)) return;
+      clearTimeout(messagingWatchDebounce);
+      messagingWatchDebounce = setTimeout(() => {
+        void messagingPusher.push();
+        void backgroundLauncher.runPass();
+      }, 150);
+    });
+  } catch {
+    return;
+  }
+  app.on("before-quit", () => watcher.close());
 }
 
 // Serialized form of the last board pushed to windows. The state-file
@@ -615,9 +741,20 @@ async function performRefresh(): Promise<{
 // wires up). `net.isOnline()` is a fast local hint checked before any gh
 // work: offline, every task's `gh` call is skipped outright instead of each
 // failing individually with "check your internet".
+const pruneGate = createIntervalGate(PRUNE_INTERVAL_MS);
+
+/** Hourly message-attachment prune (task-messaging decision 12), riding the refresh loop; failures are logged, never thrown. */
+function maybePruneMessageAttachments(): void {
+  if (!pruneGate.tryAcquire()) return;
+  core.commands.pruneMessageAttachments().catch((error: unknown) => {
+    console.error("[main] message attachment prune failed:", error);
+  });
+}
+
 const connectivityLoop = createConnectivityLoop({
   isOnline: () => net.isOnline(),
   performRefresh: async () => {
+    maybePruneMessageAttachments();
     const result = await performRefresh();
     return { offline: Boolean(result.connectivity), warnings: result.warnings };
   },

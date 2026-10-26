@@ -1,6 +1,7 @@
-// Pi extension — presence reporting, the in-session command surface, and
-// the task-launching agent tools (see /docs/design-decisions.md "Launching tasks from an agent" and
-// /AGENTS.md: "Agent harnesses are adapters").
+// Pi extension — presence reporting, the in-session command surface, the
+// task-launching agent tools (see /docs/design-decisions.md "Launching tasks
+// from an agent" and /AGENTS.md: "Agent harnesses are adapters") and task
+// messaging (see /docs/task-messaging.md "Extension").
 //
 // Two scopes:
 // - Task-session machinery (presence, the task widget, /todev /toawait
@@ -10,7 +11,10 @@
 //   `HARBORMASTER_TASK_ID` / `HARBORMASTER_STATE_DIR` /
 //   `HARBORMASTER_SESSION_ID`). Outside one (a bare `pi` run, or any other
 //   host) presence/widget/command registration is skipped entirely, and
-//   `harbormaster_subtask_status` errors if ever called.
+//   `harbormaster_subtask_status` errors if ever called. Also here: the
+//   inbox delivery of messages other tasks sent to this one (claimed from
+//   core, delivered natively via `pi.sendMessage`) and the interactive-input
+//   hook that tells core the user is steering this task.
 // - `harbormaster_launch_task`: available in EVERY Pi session, task or not
 //   (a `standalone` task may be launched from a plain Pi session with no
 //   provenance; a `child` requires a task session). It writes through its
@@ -18,6 +22,12 @@
 //   dir, `~/.harbormaster`, when `HARBORMASTER_STATE_DIR` is unset), so it
 //   works even when the Harbormaster app isn't running (the launch is
 //   queued; the app's watcher picks it up once it starts).
+// - `harbormaster_find_tasks` / `harbormaster_send_to_task`: also available
+//   in EVERY Pi session, thin wrappers over core's `findTasks` /
+//   `sendTaskMessage`. The sender is this task only in the pane's own task
+//   session (resolved at execution time), otherwise a non-task `session`
+//   sender (always routed through user approval by core); never taken from
+//   tool arguments.
 //
 // "Am I the task session" is resolved LAZILY (`sessionIsTask`, set inside
 // the `session_start` handler) rather than at module-eval time: the
@@ -48,17 +58,24 @@ import {
   formatChildrenSummaryLine,
   formatChildStatusText,
 } from "./child-status.js";
+import { HARBORMASTER_MESSAGE_TYPE, InboxDrainer } from "./inbox-delivery.js";
 import {
   buildLaunchResultText,
   launchRepositoryLabel,
   resolveLaunchRepository,
 } from "./launch-task-tool.js";
+import { renderInboxMessage } from "./message-renderer.js";
 import { PresenceReporter } from "./presence-reporter.js";
 import {
   runToAwaitCommand,
   runToDevCommand,
   runToDoneCommand,
 } from "./task-commands.js";
+import {
+  deriveMessageSender,
+  formatTaskSearchText,
+  resolveAttachmentPaths,
+} from "./task-message-tools.js";
 import { buildTaskWidgetLines } from "./task-widget.js";
 
 /** Idle heartbeat cadence; well under PRESENCE_STALE_MS (3 minutes) so a live process never looks dead. */
@@ -133,6 +150,35 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       );
     };
 
+    // Inbox delivery (task-messaging): only this pane's own task session
+    // ever claims (nested/subagent sessions return before `sessionIsTask`
+    // is set). Drains are serialized by `InboxDrainer`; they are triggered
+    // by session start, core's inbox doorbell, every agent-loop end (queued
+    // followUps become claimable once idle) and the heartbeat as a backstop.
+    // The latest context is kept for `ctx.isIdle()`; it is dropped on
+    // session switch/shutdown so a stale one is never consulted.
+    let inboxCtx: ExtensionContext | undefined;
+    let unsubscribeInbox: (() => void) | undefined;
+    const stopInbox = (): void => {
+      unsubscribeInbox?.();
+      unsubscribeInbox = undefined;
+      inboxCtx = undefined;
+    };
+    const drainer = new InboxDrainer({
+      claim: (options) => core.commands.claimInboxMessages(taskId, options),
+      isIdle: () => inboxCtx?.isIdle() ?? false,
+      readAttachment: (messageId, index) =>
+        core.commands.readMessageAttachment(messageId, index),
+      send: (message, options) => pi.sendMessage(message, options),
+    });
+    const drainInbox = (): Promise<void> =>
+      sessionIsTask && inboxCtx ? drainer.drain() : Promise.resolve();
+
+    pi.registerMessageRenderer(
+      HARBORMASTER_MESSAGE_TYPE,
+      (message, options, theme) => renderInboxMessage(message, options, theme),
+    );
+
     pi.on("session_start", async (_event, ctx: ExtensionContext) => {
       const sessionPath = ctx.sessionManager.getSessionFile();
       if (!sessionPath) return;
@@ -169,8 +215,19 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       stopHeartbeat();
       heartbeatTimer = setInterval(() => {
         void reporter.heartbeat().catch(() => {});
+        void drainInbox().catch(() => {});
       }, HEARTBEAT_INTERVAL_MS);
       heartbeatTimer.unref();
+
+      // Presence is registered: this session can now receive. Subscribe to
+      // the inbox doorbell, then claim whatever is already waiting (held
+      // while queued, or sent while the session was down).
+      stopInbox();
+      inboxCtx = ctx;
+      unsubscribeInbox = core.commands.subscribeInbox(taskId, () => {
+        void drainInbox().catch(() => {});
+      });
+      void drainInbox().catch(() => {});
 
       const task = await taskState.getTask(taskId).catch(() => undefined);
       if (task) {
@@ -199,16 +256,35 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     });
     pi.on("agent_end", async (_event, ctx: ExtensionContext) => {
       await reporter.setTurnActive(false).catch(() => {});
+      if (sessionIsTask) inboxCtx = ctx;
       await refreshWidget(ctx).catch(() => {});
+      await drainInbox().catch(() => {});
+    });
+    // `agent_end` can fire while Pi still reports streaming; `agent_settled`
+    // is when it is truly idle, so queued followUps are claimed then too.
+    pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {
+      if (sessionIsTask) inboxCtx = ctx;
+      await drainInbox().catch(() => {});
+    });
+
+    // The user typing into this task's session resets the loop cap and ends
+    // "waiting on parent" (core decides); fire-and-forget, input untouched.
+    pi.on("input", async (event) => {
+      if (event.source === "interactive" && sessionIsTask) {
+        void core.commands.recordUserInput(taskId).catch(() => {});
+      }
+      return { action: "continue" as const };
     });
 
     pi.on("session_before_switch", async () => {
+      stopInbox();
       stopHeartbeat();
       stopWidgetRefresh();
       await reporter.end().catch(() => {});
       return undefined;
     });
     pi.on("session_shutdown", async () => {
+      stopInbox();
       stopHeartbeat();
       stopWidgetRefresh();
       await reporter.end().catch(() => {});
@@ -298,8 +374,9 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     });
   }
 
-  // Agent-facing poll for a parent's children (report-and-poll only; no
-  // parent<->child messaging, see /docs/design-decisions.md "Launching tasks from an agent"). Registered
+  // Agent-facing poll for a parent's children (see
+  // /docs/design-decisions.md "Launching tasks from an agent"; steering a
+  // child is `harbormaster_send_to_task`). Registered
   // in EVERY session (like `harbormaster_launch_task`), but "task sessions
   // only; error otherwise": it guards on `sessionIsTask` at EXECUTION time,
   // never at registration time, so a nested subagent inheriting this same
@@ -327,6 +404,92 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: formatChildStatusText(entries) }],
         details: { children: entries },
+      };
+    },
+  });
+
+  // `harbormaster_find_tasks` / `harbormaster_send_to_task` — task messaging
+  // (see /docs/task-messaging.md). Registered in EVERY session; whether this
+  // is the pane's own task session is read at EXECUTION time, exactly like
+  // `harbormaster_subtask_status`.
+  pi.registerTool({
+    name: "harbormaster_find_tasks",
+    label: "Harbormaster find tasks",
+    description:
+      "Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before harbormaster_send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated) and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.",
+    parameters: Type.Object({
+      query: Type.String({
+        description:
+          "Plain words to match, e.g. a title fragment or PR number.",
+      }),
+      includeDone: Type.Optional(
+        Type.Boolean({
+          description: "Also search Done tasks (default false).",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const results = await core.commands.findTasks(params.query, {
+        ...(sessionIsTask && taskId ? { fromTaskId: taskId } : {}),
+        ...(params.includeDone ? { includeDone: true } : {}),
+      });
+      return {
+        content: [
+          { type: "text", text: formatTaskSearchText(results, params.query) },
+        ],
+        details: { results },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "harbormaster_send_to_task",
+    label: "Harbormaster send to task",
+    description:
+      'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use harbormaster_find_tasks first; never guess). Messages to your own children or to your parent are delivered directly. ANY other target (sibling, unrelated task, or any send from a plain non-task Pi session) goes to the user\'s approval in the Harbormaster app, so send those ONLY when the user explicitly asked you to. mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). After asking your parent a question, end your turn and wait for the reply; do not poll. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
+    parameters: Type.Object({
+      taskId: Type.String({
+        description:
+          "Exact id of the target task (from harbormaster_find_tasks, harbormaster_launch_task or harbormaster_subtask_status).",
+      }),
+      message: Type.String({ description: "The message text." }),
+      mode: Type.Optional(
+        Type.Union([Type.Literal("steer"), Type.Literal("followUp")], {
+          description:
+            "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to a parent.",
+        }),
+      ),
+      attachments: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "File paths to attach (relative paths resolve against the current directory).",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cwd = process.cwd();
+      const sessionId = ctx?.sessionManager?.getSessionId?.();
+      const attachments = resolveAttachmentPaths(params.attachments, cwd);
+      const result = await core.commands.sendTaskMessage({
+        from: deriveMessageSender({
+          sessionIsTask,
+          taskId,
+          cwd,
+          ...(sessionId ? { sessionId } : {}),
+        }),
+        targetTaskId: params.taskId,
+        text: params.message,
+        ...(params.mode ? { mode: params.mode } : {}),
+        ...(attachments ? { attachments } : {}),
+      });
+      return {
+        content: [{ type: "text", text: result.note }],
+        details: {
+          messageId: result.message.id,
+          route: result.message.route,
+          status: result.message.status,
+          willWake: result.willWake,
+        },
       };
     },
   });

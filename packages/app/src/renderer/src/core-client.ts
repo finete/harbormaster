@@ -7,14 +7,18 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import type {
   BoardColumn,
+  MessagingChangedPayload,
   PresenceChangedPayload,
   Task,
+  TaskMessage,
+  TaskMessagingState,
   TaskState,
 } from "../../preload/api";
 import {
@@ -75,6 +79,31 @@ const presenceStore = createSharedStore<PresenceChangedPayload>({}, (set) =>
   window.harbormaster.core.onPresenceChanged((payload) => set(payload)),
 );
 
+/**
+ * The one shared task-messaging subscription: awaiting-approval messages
+ * plus derived per-task chip state, fetched once and then replaced wholesale
+ * on every `core:messaging-changed` push (main dedupes unchanged payloads).
+ */
+const messagingStore = createSharedStore<MessagingChangedPayload>(
+  { approvals: [], states: [] },
+  (set) => {
+    let pushed = false;
+    const { core } = window.harbormaster;
+    void Promise.all([core.listPendingApprovals(), core.getMessagingStates()])
+      .then(([approvals, states]) => {
+        // A push that already landed is at least as fresh as this fetch.
+        if (!pushed) set({ approvals, states });
+      })
+      .catch((error: unknown) => {
+        console.error("messaging fetch failed:", error);
+      });
+    return core.onMessagingChanged((payload) => {
+      pushed = true;
+      set(payload);
+    });
+  },
+);
+
 /** Subscribes to the live board (shared across every caller). */
 export function useBoard(): BoardColumn[] {
   return useSyncExternalStore(boardStore.subscribe, boardStore.getSnapshot);
@@ -85,6 +114,27 @@ export function usePresenceMap(): PresenceChangedPayload {
   return useSyncExternalStore(
     presenceStore.subscribe,
     presenceStore.getSnapshot,
+  );
+}
+
+/** Messages awaiting the user's approval, oldest first (shared across every caller). */
+export function useApprovals(): readonly TaskMessage[] {
+  const payload = useSyncExternalStore(
+    messagingStore.subscribe,
+    messagingStore.getSnapshot,
+  );
+  return payload.approvals;
+}
+
+/** Derived messaging chip state by task id (shared across every caller); tasks with nothing to report are absent. */
+export function useMessagingStates(): ReadonlyMap<string, TaskMessagingState> {
+  const payload = useSyncExternalStore(
+    messagingStore.subscribe,
+    messagingStore.getSnapshot,
+  );
+  return useMemo(
+    () => new Map(payload.states.map((state) => [state.taskId, state])),
+    [payload.states],
   );
 }
 

@@ -13,11 +13,14 @@ import type {
   BoardColumn,
   CreateTaskInput,
   LaunchTaskInput,
+  MessageMode,
   MoveTaskOptions,
   PresenceRecord,
   ReopenTaskInput,
   RepositoryInfo,
   Task,
+  TaskMessage,
+  TaskMessagingState,
   TaskState,
   ToAwaitOptions,
   ToDoneResult,
@@ -42,12 +45,19 @@ export type {
   BoardGroup,
   CreateTaskInput,
   LaunchTaskInput,
+  MessageAttachment,
+  MessageMode,
+  MessageRoute,
+  MessageSender,
+  MessageStatus,
   MoveTaskOptions,
   PresenceRecord,
   ReopenTaskInput,
   RepositoryCheckout,
   RepositoryInfo,
   Task,
+  TaskMessage,
+  TaskMessagingState,
   TaskState,
   ToAwaitOptions,
   ToDoneConfirmation,
@@ -55,6 +65,16 @@ export type {
   UpdateTaskInput,
   WorkspaceBinding,
 } from "@harbormaster/core";
+
+/**
+ * Pushed on `core:messaging-changed` whenever task messaging changes (see
+ * `main/messaging-push.ts`): the messages awaiting the user's approval and
+ * the derived per-task chip state (only tasks with something to report).
+ */
+export interface MessagingChangedPayload {
+  approvals: TaskMessage[];
+  states: TaskMessagingState[];
+}
 
 /** The user's answers to a previous `toDone` confirmation question. */
 export interface ToDoneForce {
@@ -364,6 +384,33 @@ export interface HarbormasterApi {
      * limitation, not a bug.
      */
     updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task>;
+    /** Messages awaiting the user's approval, oldest first. See `CoreCommands.listPendingApprovals`. */
+    listPendingApprovals(): Promise<TaskMessage[]>;
+    /**
+     * Approve a message awaiting approval, optionally with the user's edited
+     * text and/or switched delivery mode (sent only when changed). Rejects
+     * when the message is no longer awaiting approval. See
+     * `CoreCommands.approveMessage`.
+     */
+    approveMessage(
+      messageId: string,
+      edits?: { text?: string; mode?: MessageMode },
+    ): Promise<TaskMessage>;
+    /** Reject a message awaiting approval. See `CoreCommands.rejectMessage`. */
+    rejectMessage(messageId: string): Promise<TaskMessage>;
+    /** Derived per-task chip state (approvals waiting, waiting on parent, ...). See `CoreCommands.getMessagingStates`. */
+    getMessagingStates(): Promise<TaskMessagingState[]>;
+    /** One stored attachment copy's bytes (base64), for thumbnails. See `CoreCommands.readMessageAttachment`. */
+    readMessageAttachment(
+      messageId: string,
+      index: number,
+    ): Promise<{ mimeType?: string; base64: string }>;
+    /** The message log, optionally narrowed to one task. See `CoreCommands.listMessages`. */
+    listMessages(filter?: { taskId?: string }): Promise<TaskMessage[]>;
+    /** Subscribes to the messaging push channel (approvals + chip states, deduped); returns an unsubscribe fn. */
+    onMessagingChanged(
+      listener: (payload: MessagingChangedPayload) => void,
+    ): () => void;
     /** Cmd/Ctrl+Shift+ArrowUp/Down intercepted in main; renderer cycles sidebar focus. */
     onCycleTask(listener: (direction: "up" | "down") => void): () => void;
   };
