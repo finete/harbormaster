@@ -12,6 +12,7 @@
  * - If data-renderer="webgl", we run the full lifecycle:
  *   1. Starts WebGL; hidden past the (test-shortened) park delay it
  *      parks (data-renderer="parked", WebGL canvas gone), shown it is WebGL.
+ *   1c. Screen unlock (powerMonitor) → WebGL rebuilt with fresh canvases.
  *   2. Force context loss → DOM, text still readable.
  *   3. Hide → show → WebGL re-acquired.
  *   4. 3 losses in 5 min → stays DOM.
@@ -188,6 +189,39 @@ test.describe("terminal renderer lifecycle (P0-3)", () => {
         timeout: 10_000,
       });
       await expect(panel).toContainText("renderer-test-ready");
+      // ── Step 1c: screen unlock → main asks panes to rebuild WebGL ────────
+      // macOS can blank a WebGL canvas on sleep/lock without a context-loss
+      // event; recovery must swap in a brand-new WebGL canvas (new context
+      // + atlas), not just repaint the old one. Mark the current canvases,
+      // fire powerMonitor's unlock-screen in main, expect fresh canvases.
+      await window.evaluate(() => {
+        for (const c of document.querySelectorAll(
+          "[data-testid='terminal-panel'] canvas",
+        )) {
+          (c as HTMLElement).dataset.e2eStale = "1";
+        }
+      });
+      await app.evaluate(({ powerMonitor }) => {
+        powerMonitor.emit("unlock-screen");
+      });
+      await expect
+        .poll(
+          () =>
+            window.evaluate(() => {
+              const all = document.querySelectorAll(
+                "[data-testid='terminal-panel'] canvas",
+              );
+              const stale = document.querySelectorAll(
+                "[data-testid='terminal-panel'] canvas[data-e2e-stale]",
+              );
+              return all.length > 0 && stale.length === 0;
+            }),
+          { timeout: 10_000 },
+        )
+        .toBe(true);
+      await expect(panel).toHaveAttribute("data-renderer", "webgl");
+      await expect(panel).toContainText("renderer-test-ready");
+
       // Restore the default delay so the loss/recovery steps below exercise
       // the context-loss re-acquire path, not unparking.
       await window.evaluate(() => {
