@@ -1,8 +1,8 @@
 # Harbormaster: architecture rules
 
 Read `docs/design-decisions.md` for the full decision record behind these
-rules before proposing structural changes, and `ai/prds/architecture.md` for
-the volatility-based service layering (Manager / Engine / Resource Access /
+rules before proposing structural changes, including its "Layering" section
+for the volatility-based service layering (Manager / Engine / Resource Access /
 Utility) that `packages/core` follows. Pi-home's `src/` layout
 (`manager/`, `engines/`, `access/`, `utilities/`, `contracts/`) carries over.
 

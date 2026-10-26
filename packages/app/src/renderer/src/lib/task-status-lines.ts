@@ -1,5 +1,5 @@
 // Pure derivation rules for the launch-related secondary lines/chips a
-// TaskCard/SidebarTaskRow shows (see ai/prds/task-launching.md's
+// TaskCard/SidebarTaskRow shows (see /docs/design-decisions.md "Launching tasks from an agent"'s
 // "renderer" bullet and the wave-3 task brief items 2-4): standalone
 // provenance, the reported-outcome secondary line, and the queued/
 // interrupted launch markers. Kept free of React so they're unit-testable

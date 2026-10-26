@@ -1,11 +1,11 @@
-// Background launcher (see /ai/prds/task-launching.md and the wave-2 task
+// Background launcher (see /docs/design-decisions.md "Launching tasks from an agent" and the wave-2 task
 // brief): the single consumer of core's launch queue
 // (`CoreCommands.claimPendingLaunches`). It decides how many queued launches
 // can start right now and asks its (injected) I/O to start each one — a
 // plain pty with no renderer attached (see `ptySessions.ts`'s
 // `createBackgroundPrimarySession`).
 //
-// Kept pure where it matters (Engine-layer: see /ai/prds/architecture.md):
+// Kept pure where it matters (Engine-layer: see /docs/design-decisions.md "Layering"):
 // `isWorking`/`computeCapacity` take plain data and a clock, no I/O of
 // their own, so the concurrency-cap/grace-window/idle-children rules are
 // unit-testable without Electron, node-pty, or core. `createBackgroundLauncher`

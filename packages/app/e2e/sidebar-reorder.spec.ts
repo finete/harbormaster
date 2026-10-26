@@ -1,4 +1,4 @@
-// Sidebar fixed order + drag-and-drop reorder (ai/prds/sidebar-ordering.md,
+// Sidebar fixed order + drag-and-drop reorder (/docs/design-decisions.md "sidebar rail order",
 // R30). One fixture/launch, real pointer drags through dnd-kit's
 // PointerSensor, condition waits only. Fixture: two repo groups
 // (alpha-fixture: Alpha One [+ children Kid Red, Kid Blue], Alpha Two,

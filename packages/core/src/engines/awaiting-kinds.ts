@@ -10,7 +10,7 @@
 //
 // The registry itself is pure; `onEnter` actions reach external systems
 // only through the Resource Access interfaces the Manager hands them
-// (Engine → Access, per /ai/prds/architecture.md).
+// (Engine → Access, per /docs/design-decisions.md "Layering").
 
 import type {
   AwaitingKindField,

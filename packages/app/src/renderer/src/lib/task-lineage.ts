@@ -1,5 +1,5 @@
 // Pure lineage-nesting logic shared by the board (BoardColumn.tsx) and the
-// workspace sidebar (Sidebar.tsx) — see ai/prds/task-launching.md's
+// workspace sidebar (Sidebar.tsx) — see /docs/design-decisions.md "Launching tasks from an agent"'s
 // "renderer: children nested under parents" line and the wave-3 task
 // brief's UI decisions.
 //

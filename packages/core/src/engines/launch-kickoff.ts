@@ -1,6 +1,6 @@
 // Engine: builds the kickoff contract appended to a `launchTask` prompt (see
-// ai/prds/task-launching.md "Kickoff contract"). Pure text generation, no
-// I/O, no session state -- an Engine per ai/prds/architecture.md.
+// /docs/design-decisions.md "Launching tasks from an agent" "Kickoff contract"). Pure text generation, no
+// I/O, no session state -- an Engine per /docs/design-decisions.md "Layering".
 
 /** Input to {@link buildLaunchKickoffPrompt}. */
 export interface LaunchKickoffInput {

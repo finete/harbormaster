@@ -1,5 +1,5 @@
 // Pure ordering + drag-projection logic for the workspace sidebar's fixed,
-// user-owned rail order (ai/prds/sidebar-ordering.md). No React, no
+// user-owned rail order (/docs/design-decisions.md "sidebar rail order"). No React, no
 // `window`: Sidebar.tsx feeds these functions and commits what they return
 // once, on drop. Covered by tests/sidebar-order.test.ts.
 

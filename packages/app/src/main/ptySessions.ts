@@ -2,7 +2,7 @@
 //
 // This is a *skeleton* concern, not core's harness-adapter boundary: the real
 // Pi-session pty lifecycle (per /docs/design-decisions.md and
-// /ai/prds/architecture.md) will live behind packages/core's Access layer
+// /docs/design-decisions.md "Layering") will live behind packages/core's Access layer
 // once sessions are wired through the command API. For now this proves the
 // xterm <-> node-pty <-> IPC plumbing with a plain `$SHELL` process.
 import { randomUUID } from "node:crypto";

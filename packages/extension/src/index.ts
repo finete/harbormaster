@@ -1,5 +1,5 @@
 // Pi extension — presence reporting, the in-session command surface, and
-// the task-launching agent tools (see /ai/prds/task-launching.md and
+// the task-launching agent tools (see /docs/design-decisions.md "Launching tasks from an agent" and
 // /AGENTS.md: "Agent harnesses are adapters").
 //
 // Two scopes:
@@ -299,7 +299,7 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
   }
 
   // Agent-facing poll for a parent's children (report-and-poll only; no
-  // parent<->child messaging, see /ai/prds/task-launching.md). Registered
+  // parent<->child messaging, see /docs/design-decisions.md "Launching tasks from an agent"). Registered
   // in EVERY session (like `harbormaster_launch_task`), but "task sessions
   // only; error otherwise": it guards on `sessionIsTask` at EXECUTION time,
   // never at registration time, so a nested subagent inheriting this same

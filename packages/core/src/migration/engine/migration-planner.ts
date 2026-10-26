@@ -1,5 +1,5 @@
 // Engine: pure mapping from pi-home's on-disk shapes to Harbormaster
-// `Task`/`WorkspaceBinding` pairs. No I/O (see /ai/prds/architecture.md) —
+// `Task`/`WorkspaceBinding` pairs. No I/O (see /docs/design-decisions.md "Layering") —
 // everything volatile (file reads, `bd` shelling-out, worktree existence
 // probes) is resolved by the manager first and handed in as plain data, so
 // this module is trivial to unit-test against fixtures.

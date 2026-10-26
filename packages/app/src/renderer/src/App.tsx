@@ -321,7 +321,7 @@ export function App(): JSX.Element {
   // A submitted draft. "Start" turns the draft row into the real task in the
   // same place (top of the rail) and focuses it - it is our own fresh task, so
   // no takeover check. Park/launch return focus to the origin task: launching
-  // never steals focus (ai/prds/task-launching.md).
+  // never steals focus (/docs/design-decisions.md "Launching tasks from an agent").
   const onDraftSubmitted = useCallback(
     (outcome: NewTaskOutcome) => {
       const originId = draft?.originTaskId ?? null;

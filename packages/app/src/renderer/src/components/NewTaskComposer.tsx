@@ -42,7 +42,7 @@ const CHIP =
  * the prompt). Without a link the footer offers "Park in backlog" and
  * "Start" (lands in Dev, worktree created now). Linking the draft to its
  * ORIGIN task (the task focused when the draft was opened) switches to
- * launch mode, per ai/prds/task-launching.md: relation `child` (Subtask) or
+ * launch mode, per /docs/design-decisions.md "Launching tasks from an agent": relation `child` (Subtask) or
  * `standalone`, prompt required, Clone URL / base-branch / model options
  * appear, and submit calls `core.launchTask` directly.
  *
@@ -88,7 +88,7 @@ export function NewTaskComposer({
 
   const link = origin ? draft.link : "none";
   const launching = link !== "none";
-  // One level only (see ai/prds/task-launching.md): a task that is itself a
+  // One level only (see /docs/design-decisions.md "Launching tasks from an agent"): a task that is itself a
   // child can never launch further children, only standalone tasks.
   const canLaunchChild = !!origin && !origin.parentTaskId;
   // "parent" base branch only ever applies to a child launched into the

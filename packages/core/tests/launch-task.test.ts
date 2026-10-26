@@ -1,5 +1,5 @@
 // Integration tests for the task-launching primitive (see
-// ai/prds/task-launching.md): CoreManager.launchTask, claimPendingLaunches,
+// /docs/design-decisions.md "Launching tasks from an agent"): CoreManager.launchTask, claimPendingLaunches,
 // markLaunchesInterrupted, listChildren, getLaunchSettings, and toDone's new
 // activeChildren confirmation + never-git-scratch-bindings rule. Wired to
 // real git repository/worktree access against real temp git repos, same

@@ -306,7 +306,7 @@ function SortableGroupSection({
  * board inventory -- the Board stays the full inventory. Rows are grouped
  * by repository (collapsible, "scratch" last by default), kept in a FIXED,
  * user-owned order that only a drag rewrites (see sidebar-model.ts and
- * ai/prds/sidebar-ordering.md): rows reorder within their section, nested
+ * /docs/design-decisions.md "sidebar rail order"): rows reorder within their section, nested
  * children can detach/re-attach, and repo groups reorder by their header.
  * Keyboard sorting is deliberately out of scope: dnd-kit's KeyboardSensor
  * activates on Enter/Space, which would steal row activation (no
@@ -661,7 +661,7 @@ export function Sidebar({
     ? rows.find((row) => row.task.id === contextMenu.taskId)
     : undefined;
 
-  // --- Drag and drop (ai/prds/sidebar-ordering.md) --------------------------
+  // --- Drag and drop (/docs/design-decisions.md "sidebar rail order") --------------------------
   // No dragging while filtering (a reordered filtered list is ambiguous) or
   // renaming; the collapsed icon rail renders no sortables at all.
   const dragDisabled = searching || renamingTaskId !== null;

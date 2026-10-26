@@ -38,8 +38,49 @@ control the other:
 | 12 | Terminals | @xterm/xterm + node-pty (lift pi-gui's `terminal-service.ts` wiring). Pane↔process lifecycle glue is ours. |
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
-| 15 | Internal architecture | Volatility-based layering per `ai/prds/architecture.md` (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
+| 15 | Internal architecture | Volatility-based layering (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. See "Layering" below. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
 | 16 | Workflow verbs | Exactly three invariant verbs — **todev / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
+
+## Layering
+
+Decompose by what could change (volatility), not by the order of use-case
+steps. Four service types, `packages/core/src/` folders in parentheses:
+
+| Type | Encapsulates | Rules |
+|---|---|---|
+| **Manager** (`manager/`) | The sequence of a use case / workflow | Coordinates Engines and Access; changes when the workflow changes. Avoid Manager → Manager calls. |
+| **Engine** (`engines/`) | Business rules | Stateless, pure, shareable; changes when rules change. |
+| **Resource Access** (`access/`) | Where/how data lives (state files, git, GitHub, harness sessions, ptys) | Atomic business verbs, not CRUD. The only layer that touches a resource. |
+| **Utility** (`utilities/`) | Cross-cutting infrastructure (locks, atomic JSON, event bus, clocks) | Callable from any layer. |
+
+Call direction is strictly Client → Manager → Engine → Access → Resource
+(Utilities from anywhere, never upward, no layer bypassing; frontends never
+call Access). **Hard rules:** accessor separation and call direction.
+**Advisory:** small rule sets may live in their Manager until they are shared
+or volatile enough to deserve an Engine. Contracts (`contracts/`) are plain
+types at the boundaries.
+
+## Launching tasks from an agent
+
+One core command, `launchTask`, creates a task and queues it to start in
+the background. `relation` is required with no default (guessing went wrong
+in Orca): `child` (nested under the launcher, pollable with
+`harbormaster_subtask_status`, Done-with-active-children confirmation; one
+level only) or `standalone` (display-only `launchedFromTaskId`
+provenance). Every launch gets its own task, worktree, branch, and session;
+a same-repository child may opt into `baseBranch: "parent"` (stacked
+work). Launched tasks run as ordinary interactive Pi sessions in app-owned
+ptys with no pane until opened (attach, never takeover); `launch.maxConcurrent`
+(default 6) counts only *working* launches; quitting the app stops
+everything and marks mid-turn launches `interrupted` (no auto-resume;
+queued launches start when the app comes up). Board columns stay with the
+movers: agents never move their own card. A kickoff contract
+(`engines/launch-kickoff.ts`) is appended to every launch prompt: work only
+in the worktree, run checks, commit + push + draft PR (repository tasks),
+ask only when genuinely blocked, and finish with
+`harbormaster_report_status`, which records an `outcome` on the still-live
+presence record (the task shows "your move", not ended). Tasks can message
+each other: see `docs/task-messaging.md`.
 
 ## Three verbs, awaiting kinds are data
 
@@ -145,7 +186,12 @@ difference not listed here is a bug.
   also works outside task sessions, standalone only). Launched tasks run as
   ordinary interactive Pi sessions in app-owned ptys with no pane until
   opened (attach, never takeover); quitting the app stops them, no detached
-  processes. See `ai/prds/task-launching.md`.
+  processes. See "Launching tasks from an agent" above.
+- **Tasks can steer tasks.** Parent ↔ child messages deliver directly
+  (loop-capped, child questions show "waiting on parent"); every other
+  cross-task send needs the user's approval in the app. Delivery is a
+  harness-adapter concern behind a core message log. See
+  `docs/task-messaging.md`.
 - **The sidebar rail order is fixed and user-owned.** Nothing reorders rows
   except an explicit drag: no activity sort, no board-column order, no
   reaction to presence or core pushes. Rows keep one persisted global task
@@ -156,4 +202,4 @@ difference not listed here is a bug.
   (`harbormaster.sidebar.groupOrder`), and a nested child dragged out of its
   parent's block detaches into a top-level row with the "↳ parent" line
   (`harbormaster.sidebar.detachedChildIds`) until it is dragged back. The
-  order is committed once, on drop. See `ai/prds/sidebar-ordering.md`.
+  order is committed once, on drop.

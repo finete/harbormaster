@@ -1,7 +1,7 @@
 // Pure logic behind `harbormaster_subtask_status` and the task widget's
 // children summary line: deriving a child task's run state from its
 // `launch` status and harness presence (see
-// /ai/prds/task-launching.md's "Completion and status"), and formatting
+// /docs/design-decisions.md "Launching tasks from an agent"'s "Completion and status"), and formatting
 // both the per-child status text and the widget's compact summary. Kept
 // free of `@harbormaster/core`'s I/O (`PiHarnessAdapter.presence`) and the
 // `pi` extension API so it is testable with plain fake `Task`/`PresenceStatus`

@@ -1,5 +1,5 @@
 // Service interfaces — the call-chain boundary between Manager/Engine and
-// Resource Access (see /ai/prds/architecture.md). Managers and Engines only
+// Resource Access (see /docs/design-decisions.md "Layering"). Managers and Engines only
 // ever see these interfaces; concrete file-backed implementations live in
 // access/.
 

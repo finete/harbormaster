@@ -3,7 +3,7 @@
 // `createCore()` is the one entry point frontends use: commands in, state
 // events out. No Electron, filesystem-layout assumption beyond a
 // constructor-injected state directory, or process assumption leaks through
-// this boundary — it must stay daemon-ready (see /ai/prds/architecture.md).
+// this boundary — it must stay daemon-ready (see /docs/design-decisions.md "Layering").
 
 import {
   GithubPrAccess,

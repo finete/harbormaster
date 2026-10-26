@@ -14,7 +14,7 @@ export interface StorageLike {
 export const SIDEBAR_COLLAPSED_GROUPS_KEY =
   "harbormaster.sidebar.collapsedGroups";
 export const SIDEBAR_PINNED_TASKS_KEY = "harbormaster.sidebar.pinnedTaskIds";
-/** Global user-owned task order: task ids, top to bottom (ai/prds/sidebar-ordering.md R2). */
+/** Global user-owned task order: task ids, top to bottom (/docs/design-decisions.md "sidebar rail order" R2). */
 export const SIDEBAR_TASK_ORDER_KEY = "harbormaster.sidebar.taskOrder";
 /** User-owned repo-group order: `repoLabel` strings (R5). */
 export const SIDEBAR_GROUP_ORDER_KEY = "harbormaster.sidebar.groupOrder";

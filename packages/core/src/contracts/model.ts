@@ -166,7 +166,7 @@ export interface Task {
 
 /**
  * A `launchTask`-created task's background-launch state (see
- * `ai/prds/task-launching.md`): queued until the app's launcher claims it
+ * `/docs/design-decisions.md "Launching tasks from an agent"`): queued until the app's launcher claims it
  * (`CoreCommands.claimPendingLaunches`), then started once its session pty
  * is actually running. `interrupted` means the app quit mid-turn; it clears
  * back to `started` on the task's next session launch
@@ -312,7 +312,7 @@ export interface GlobalConfig {
   branchPrefix?: string;
   /** Per-repository settings (deployment pipelines today), keyed by normalized repository id. */
   repositories?: Record<string, RepositoryConfig>;
-  /** Background-task-launch settings (see `ai/prds/task-launching.md`). */
+  /** Background-task-launch settings (see `/docs/design-decisions.md "Launching tasks from an agent"`). */
   launch?: { maxConcurrent?: number; defaultModel?: string };
 }
 

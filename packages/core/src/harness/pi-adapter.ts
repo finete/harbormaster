@@ -2,7 +2,7 @@
 // harnesses are adapters" and /docs/design-decisions.md #13). Pure launch-
 // spec logic plus a presence read through `SessionPresenceAccess`; no
 // process spawning here (accessor separation is a hard rule — ptys are a
-// frontend resource, see /ai/prds/architecture.md).
+// frontend resource, see /docs/design-decisions.md "Layering").
 
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
 import type {

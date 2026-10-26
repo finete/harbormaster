@@ -1,5 +1,5 @@
 // Pure logic behind the `harbormaster_launch_task` agent tool (see
-// /ai/prds/task-launching.md's "one primitive"): resolving the tool's plain-
+// /docs/design-decisions.md "Launching tasks from an agent"'s "one primitive"): resolving the tool's plain-
 // string `repository` parameter into the `LaunchTaskInput["repository"]`
 // union core's `launchTask` expects, and the result text handed back to the
 // calling agent. Kept free of the `pi` extension API and `@harbormaster/core`
@@ -91,7 +91,7 @@ export interface LaunchResultInput {
  * Result text handed back to the launching agent: names the task, states
  * the relation and repository, and is explicit that the task is QUEUED and
  * only starts once the Harbormaster app is running — the agent must never
- * assume the work already began (see /ai/prds/task-launching.md: "Launching
+ * assume the work already began (see /docs/design-decisions.md "Launching tasks from an agent": "Launching
  * while the app is closed").
  */
 export function buildLaunchResultText(input: LaunchResultInput): string {
