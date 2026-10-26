@@ -11,7 +11,7 @@
 // with no pane of ours is still someone else's live external session,
 // exactly as today).
 //
-// Pure (Engine-layer: see /ai/prds/architecture.md) — no I/O, no clock of
+// Pure (Engine-layer: see /docs/design-decisions.md "Layering") — no I/O, no clock of
 // its own; `status` is whatever `PiHarnessAdapter.presence()` already
 // derived (heartbeat + its own pid-liveness probe), `pane` is a read of the
 // app's own in-memory pty registry (see `ptySessions.ts`).

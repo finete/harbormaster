@@ -1,4 +1,4 @@
-// App-owned sidebar order state (ai/prds/sidebar-ordering.md): the global
+// App-owned sidebar order state (/docs/design-decisions.md "sidebar rail order"): the global
 // task order (R2) and the detached-children set (R12), persisted to
 // localStorage. Owned by App.tsx — not Sidebar — because the order is
 // maintained from App's single open path (`openTask`, R3) and single close

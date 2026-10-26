@@ -298,7 +298,7 @@ function registerCoreIpc(): void {
     (_event, taskId: string, input: ReopenTaskInput | undefined) =>
       core.commands.reopenTask(taskId, input),
   );
-  // The one launch primitive (see ai/prds/task-launching.md): creates a
+  // The one launch primitive (see /docs/design-decisions.md "Launching tasks from an agent"): creates a
   // task and queues it for the background launcher below. Wave 3's launch
   // dialog calls this; it never starts a pty itself "-" `backgroundLauncher`
   // picks the queued task up on its next pass (triggered right after, so a

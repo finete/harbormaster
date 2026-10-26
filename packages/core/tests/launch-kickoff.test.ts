@@ -1,5 +1,5 @@
 // Unit tests for the pure kickoff-contract engine (see
-// ai/prds/task-launching.md "Kickoff contract").
+// /docs/design-decisions.md "Launching tasks from an agent" "Kickoff contract").
 
 import { describe, expect, it } from "vitest";
 import { buildLaunchKickoffPrompt } from "../src/engines/launch-kickoff.js";

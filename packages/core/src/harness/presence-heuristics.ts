@@ -2,7 +2,7 @@
 // pi-home's src/engines/presence.ts (PRESENCE_STALE_MS / presenceIsLive),
 // generalized into the `PresenceStatus` shape this package's harness
 // contract exposes. Stateless by design (Engine layer per
-// /ai/prds/architecture.md): no I/O, only a record + clock + optional pid
+// /docs/design-decisions.md "Layering"): no I/O, only a record + clock + optional pid
 // probe in, a liveness verdict out.
 
 import type { PresenceStatus } from "../contracts/harness.js";

@@ -3,7 +3,7 @@
 // compact relative times. Kept free of React and of `window` so it is
 // unit-testable under plain vitest (see packages/app/tests/sidebar-model.test.ts).
 //
-// Rail order is FIXED and USER-OWNED (ai/prds/sidebar-ordering.md, R1): rows
+// Rail order is FIXED and USER-OWNED (/docs/design-decisions.md "sidebar rail order", R1): rows
 // sort by their index in the persisted global task order and groups by the
 // persisted group order (lib/sidebar-order.ts). Nothing here ever reorders
 // by activity (running/live), board column, or core push; ids/labels the

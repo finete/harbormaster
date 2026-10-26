@@ -1,5 +1,5 @@
 // Task-launching e2e lane (wave 3 / renderer UI + e2e, see
-// ai/prds/task-launching.md and the wave-3 task brief): the one integration
+// /docs/design-decisions.md "Launching tasks from an agent" and the wave-3 task brief): the one integration
 // seam the renderer's lineage/queued/attach UI actually depends on. Real
 // @harbormaster/core + a real git fixture repo; `pi` and `gh` are tiny
 // fakes (HARBORMASTER_PI_COMMAND / HARBORMASTER_GH_COMMAND), so nothing

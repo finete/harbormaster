@@ -158,7 +158,7 @@ export interface DeleteTaskOptions {
 }
 
 /**
- * `CoreCommands.launchTask` input (see `ai/prds/task-launching.md`'s "one
+ * `CoreCommands.launchTask` input (see `/docs/design-decisions.md "Launching tasks from an agent"`'s "one
  * primitive"): creates a board task and queues it to start running
  * immediately in the background. `relation` must be stated explicitly, no
  * default.
@@ -224,7 +224,7 @@ export interface CoreCommands {
    */
   createTask(input: CreateTaskInput): Promise<Task>;
   /**
-   * The one launch primitive (see `ai/prds/task-launching.md`): create a
+   * The one launch primitive (see `/docs/design-decisions.md "Launching tasks from an agent"`): create a
    * task and queue it to start running in the background. Lands in `dev`
    * with `launch: { status: "queued" }`; `CoreCommands.claimPendingLaunches`
    * is what actually starts it. Rejects an unknown `fromTaskId`, a `child`

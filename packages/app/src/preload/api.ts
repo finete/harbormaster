@@ -310,7 +310,7 @@ export interface HarbormasterApi {
       input?: ReopenTaskInput,
     ): Promise<{ task: Task; warning?: string }>;
     /**
-     * The one launch primitive (see ai/prds/task-launching.md): creates a
+     * The one launch primitive (see /docs/design-decisions.md "Launching tasks from an agent"): creates a
      * task and queues it to start running in the background "-" the app's
      * background launcher (main/background-launcher.ts) starts its pty with
      * no pane open; opening the task later attaches to it (see
