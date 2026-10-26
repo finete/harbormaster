@@ -314,10 +314,18 @@ export interface GlobalConfig {
   repositories?: Record<string, RepositoryConfig>;
   /** Background-task-launch settings (see `/docs/design-decisions.md "Launching tasks from an agent"`). */
   launch?: { maxConcurrent?: number; defaultModel?: string };
+  /** Task-messaging settings (see `/docs/task-messaging.md`); defaults apply at read time. */
+  messaging?: { parentReplyTimeoutMinutes?: number; loopCap?: number };
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */
 export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
+
+/** `messaging.parentReplyTimeoutMinutes` default: how long a child's question may wait on its parent (counted from delivery) before the child shows amber. */
+export const DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES = 30;
+
+/** `messaging.loopCap` default: autonomous parent↔child messages per pair since the user last typed into either task. */
+export const DEFAULT_MESSAGE_LOOP_CAP = 8;
 
 /** Written to a fresh config file: the built-in movers, spelled out so users see what they can reorder or drop. */
 export const defaultGlobalConfig = (): GlobalConfig => ({

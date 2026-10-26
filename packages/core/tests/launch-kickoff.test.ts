@@ -20,6 +20,11 @@ describe("buildLaunchKickoffPrompt", () => {
       /6\. As your FINAL action call `harbormaster_report_status`/,
     );
     expect(text).not.toContain("Launched as a subtask of");
+    // A standalone task has no parent to ask: the original wording, unchanged.
+    expect(text).not.toContain("harbormaster_send_to_task");
+    expect(text).toContain(
+      `5. If you are genuinely blocked or need a decision, stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`,
+    );
   });
 
   it("skips the commit/push/PR points for a repository-less task, renumbering the rest", () => {
@@ -43,6 +48,25 @@ describe("buildLaunchKickoffPrompt", () => {
     });
     expect(text).toContain(
       "Launched as a subtask of: Fix the thing (parent-1)",
+    );
+  });
+
+  it("lets a child ask its parent by id, but sends product/scope decisions and an unavailable parent to the user", () => {
+    const text = buildLaunchKickoffPrompt({
+      hasRepository: true,
+      parent: { title: "Fix the thing", id: "parent-1" },
+    });
+    expect(text).toMatch(/5\. If you are genuinely blocked/);
+    expect(text).toContain(
+      "ask your parent task (parent-1) with `harbormaster_send_to_task` and then end your turn",
+    );
+    expect(text).toMatch(
+      /Product or scope decisions, or a parent that is unavailable/,
+    );
+    expect(text).toContain(`the user sees your task as "your move"`);
+    // Numbering and the final-report point are unchanged.
+    expect(text).toMatch(
+      /6\. As your FINAL action call `harbormaster_report_status`/,
     );
   });
 

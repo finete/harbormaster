@@ -4,6 +4,7 @@ export * from "./github-pr-access.js";
 export * from "./harness-session-file-access.js";
 export * from "./http-version-access.js";
 export * from "./json-config-access.js";
+export * from "./json-message-access.js";
 export * from "./json-task-state-access.js";
 export * from "./json-workspace-binding-access.js";
 export * from "./scratch-workspace-access.js";

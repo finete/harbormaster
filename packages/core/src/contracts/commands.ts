@@ -4,6 +4,15 @@
 
 import type { SessionLaunch } from "./harness.js";
 import type {
+  ApproveMessageEdits,
+  FindTasksOptions,
+  SendTaskMessageInput,
+  SendTaskMessageResult,
+  TaskMessage,
+  TaskMessagingState,
+  TaskSearchResult,
+} from "./messaging.js";
+import type {
   AwaitingKind,
   AwaitingKindId,
   BoardColumn,
@@ -379,6 +388,82 @@ export interface CoreCommands {
    * failed task.
    */
   refresh(options?: RefreshOptions): Promise<RefreshResult>;
+
+  // --- Task messaging (see /docs/task-messaging.md) ---------------------
+  // Every messaging command rejects with "messaging is not configured" on a
+  // core built without message access (only hand-built managers in tests).
+
+  /**
+   * Find tasks by plain words for `sendTaskMessage`: case-insensitive match
+   * over title, repository id, branch, PR number (`#412` or `412`) and id
+   * prefix (every word of the query must match). Done tasks are left out
+   * unless `includeDone`. Each result carries its relation to
+   * `options.fromTaskId` and its run state. Sorted by relevance, then
+   * recency; `limit` defaults to 20.
+   */
+  findTasks(
+    query: string,
+    options?: FindTasksOptions,
+  ): Promise<TaskSearchResult[]>;
+  /**
+   * Send a message to a task (exact id). Core decides the route from
+   * lineage; the rules run in order and a violation rejects with an
+   * agent-actionable one-line error: sender ≠ target; the target exists and
+   * is not Done/Backlog; child → parent needs a live, non-Done parent and a
+   * harness that can receive; the target's harness must be able to receive;
+   * lineage routes check the loop cap; attachments are validated and copied.
+   * Approval-route messages (siblings, unrelated tasks, every non-task
+   * sender) start `awaiting_approval`; the rest start `pending`.
+   */
+  sendTaskMessage(input: SendTaskMessageInput): Promise<SendTaskMessageResult>;
+  /**
+   * Target side: the task's pending messages, oldest first, atomically
+   * marked delivered with the resolved mode (so two concurrent claimers
+   * never get the same message). `options.idle=false` and a followUp → left
+   * pending (the adapter claims followUps only when idle, so `deliveredAt`
+   * is when the agent actually gets it). Messages for a Done/deleted task
+   * are marked failed instead of returned.
+   */
+  claimInboxMessages(
+    taskId: string,
+    options: { idle: boolean },
+  ): Promise<TaskMessage[]>;
+  /** Cross-process doorbell for the task's inbox; returns unsubscribe. */
+  subscribeInbox(taskId: string, listener: () => void): () => void;
+  /** Called by the adapter when the user types into the task's session: resets the loop cap, ends "waiting on parent". */
+  recordUserInput(taskId: string): Promise<void>;
+  /** Messages awaiting the user's approval, oldest first. */
+  listPendingApprovals(): Promise<TaskMessage[]>;
+  /**
+   * Approve a message awaiting approval (optionally editing its text/mode):
+   * it becomes `pending` for the target. The target is re-checked first: a
+   * Done/deleted/Backlog target makes the message `failed` (with
+   * `failureReason`) instead. A task sender that can receive gets a
+   * `receipt` follow-up with the result.
+   */
+  approveMessage(
+    messageId: string,
+    edits?: ApproveMessageEdits,
+  ): Promise<TaskMessage>;
+  /** Reject a message awaiting approval; a task sender that can receive gets a `receipt` follow-up. */
+  rejectMessage(messageId: string): Promise<TaskMessage>;
+  /**
+   * Task ids with deliverable (pending) messages, for the app's wake pass.
+   * Messages whose target is Done/deleted are marked failed along the way
+   * and never listed.
+   */
+  listTasksWithPendingMessages(): Promise<string[]>;
+  /** Derived chip state per task (only tasks with something to report), evaluated at the core clock's now. */
+  getMessagingStates(): Promise<TaskMessagingState[]>;
+  /** Every message oldest first; `filter.taskId` keeps those sent to or by that task. */
+  listMessages(filter?: { taskId?: string }): Promise<TaskMessage[]>;
+  /** The bytes of a message attachment's stored copy (rejects when pruned or out of range). */
+  readMessageAttachment(
+    messageId: string,
+    index: number,
+  ): Promise<{ mimeType?: string; base64: string }>;
+  /** Removes attachment files per decision 12; returns how many messages were pruned. */
+  pruneMessageAttachments(): Promise<number>;
 }
 
 export interface RefreshResult {

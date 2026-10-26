@@ -16,6 +16,15 @@ export interface StatePaths {
   readonly presenceDir: string;
   /** Root for `launchTask` `{ none: true }` scratch directories: `<stateDir>/scratch/<taskId>`. */
   readonly scratchDir: string;
+  /** Task-messaging storage root: `<stateDir>/messages`. */
+  readonly messagesDir: string;
+  /** `<stateDir>/messages/messages.json`: the message log + last user inputs. */
+  readonly messagesFile: string;
+  readonly messagesLockFile: string;
+  /** `<stateDir>/messages/doorbell/<taskId>`: touched when a task's inbox changes. */
+  readonly doorbellDir: string;
+  /** `<stateDir>/messages/attachments/<messageId>/`: core's copies of message attachments. */
+  readonly attachmentsDir: string;
 }
 
 export function resolveStatePaths(
@@ -30,5 +39,10 @@ export function resolveStatePaths(
     configFile: join(stateDir, "config.json"),
     presenceDir: join(stateDir, "presence"),
     scratchDir: join(stateDir, "scratch"),
+    messagesDir: join(stateDir, "messages"),
+    messagesFile: join(stateDir, "messages", "messages.json"),
+    messagesLockFile: join(stateDir, "messages", "messages.lock"),
+    doorbellDir: join(stateDir, "messages", "doorbell"),
+    attachmentsDir: join(stateDir, "messages", "attachments"),
   };
 }

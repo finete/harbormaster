@@ -11,6 +11,7 @@
 // unimplemented, throwing a clear "wave 4" error, so the interface remains
 // honest about what it can do today.
 
+import type { HarnessMessagingCapabilities } from "./messaging.js";
 import type { PresenceRecord } from "./model.js";
 
 /**
@@ -86,6 +87,9 @@ export interface PresenceStatus {
  * spawning in core (see /AGENTS.md: accessor separation is a hard rule).
  */
 export interface HarnessAdapter {
+  /** What this harness can deliver to a task's session (see `docs/task-messaging.md`): core resolves the actual message mode from this. */
+  readonly messaging: HarnessMessagingCapabilities;
+
   /** Build the command/args/cwd/env a frontend should hand to a pty to start (or resume) an interactive session. */
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec;
 

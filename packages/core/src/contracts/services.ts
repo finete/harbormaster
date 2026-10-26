@@ -4,6 +4,12 @@
 // access/.
 
 import type {
+  MessageAttachment,
+  MessageMode,
+  MessageStoreSnapshot,
+  TaskMessage,
+} from "./messaging.js";
+import type {
   GlobalConfig,
   PresenceMode,
   PresenceRecord,
@@ -115,6 +121,104 @@ export interface SessionFileAccess {
 export interface ScratchWorkspaceAccess {
   /** Create (idempotently) `<stateDir>/scratch/<taskId>` and return its absolute path. */
   ensureScratchDirectory(taskId: string): Promise<string>;
+}
+
+/** Options for {@link MessageAccess.recordMessage}. */
+export interface RecordMessageOptions {
+  /**
+   * Runs under the message-store lock against the store as it is right
+   * before the append; throwing rejects the message without writing. This is
+   * how the Manager makes rules that depend on the log (the loop cap) atomic
+   * with the append.
+   */
+  precondition?: (store: MessageStoreSnapshot) => void;
+}
+
+/** Input to {@link MessageAccess.claimDeliverable}. */
+export interface ClaimDeliverableInput {
+  /** `false`: only `steer` messages are claimed; `followUp` ones stay pending. */
+  idle: boolean;
+  /** Stamped as `deliveredAt`. */
+  deliveredAt: string;
+  /** Maps a message's requested mode to the mode the harness will actually use (stamped as `deliveredMode`). */
+  resolveMode: (requested: MessageMode) => MessageMode;
+}
+
+export interface ApproveMessageInput {
+  approvedAt: string;
+  /** Replaces the text (the original is kept as `originalText`). */
+  text?: string;
+  /** Replaces the requested mode. */
+  mode?: MessageMode;
+}
+
+/**
+ * Durable task-message storage plus the on-disk attachment copies and the
+ * cross-process inbox doorbell (see `/docs/task-messaging.md`). Exposes
+ * atomic business verbs, never raw CRUD: every mutation is one
+ * read-modify-write under the store lock.
+ */
+export interface MessageAccess {
+  /** A read-only copy of the whole store. */
+  readStore(): Promise<MessageStoreSnapshot>;
+  getMessage(id: string): Promise<TaskMessage | undefined>;
+  /** Messages oldest first; `taskId` keeps those sent to or by that task. */
+  listMessages(filter?: { taskId?: string }): Promise<TaskMessage[]>;
+  /** Append a message (status `pending` or `awaiting_approval`; ids are unique). Rings the target's doorbell when it is deliverable. */
+  recordMessage(
+    message: TaskMessage,
+    options?: RecordMessageOptions,
+  ): Promise<void>;
+  /** `awaiting_approval` → `pending`, applying the user's edits; rings the target's doorbell. Rejects any other status. */
+  approveMessage(id: string, input: ApproveMessageInput): Promise<TaskMessage>;
+  /** `awaiting_approval` → `rejected`. Rejects any other status. */
+  rejectMessage(id: string, rejectedAt: string): Promise<TaskMessage>;
+  /**
+   * `awaiting_approval`/`pending` → `failed` with a reason; a message in any
+   * other status is returned untouched. Resolves to the message as stored
+   * (`undefined` when unknown).
+   */
+  failMessage(
+    id: string,
+    failedAt: string,
+    reason: string,
+  ): Promise<TaskMessage | undefined>;
+  /** Fails every `pending` message addressed to `taskId`; returns them. */
+  failPendingForTask(
+    taskId: string,
+    failedAt: string,
+    reason: string,
+  ): Promise<TaskMessage[]>;
+  /**
+   * Atomically marks the task's deliverable `pending` messages delivered
+   * (oldest first) and returns them, so two concurrent claimers never get the
+   * same message. `steer` messages are claimed any time, `followUp` only when
+   * `input.idle`.
+   */
+  claimDeliverable(
+    taskId: string,
+    input: ClaimDeliverableInput,
+  ): Promise<TaskMessage[]>;
+  /** Target task ids that have `pending` messages. */
+  listPendingTargets(): Promise<string[]>;
+  /** The user typed into the task's session at `at`. */
+  recordUserInput(taskId: string, at: string): Promise<void>;
+  /** Stamp `prunedAt` on every attachment of a message (the files are removed by `removeAttachments`). */
+  markAttachmentsPruned(id: string, prunedAt: string): Promise<void>;
+  /**
+   * Validate and copy files into `<messages>/attachments/<messageId>/`
+   * (absolute, existing, regular, ≤ 10 MB each, ≤ 8 files).
+   */
+  copyAttachments(
+    messageId: string,
+    paths: readonly string[],
+  ): Promise<MessageAttachment[]>;
+  /** The bytes of a stored copy as base64; rejects paths outside the attachment store and pruned files. */
+  readAttachment(attachment: MessageAttachment): Promise<string>;
+  /** Delete a message's attachment copies (idempotent). */
+  removeAttachments(messageId: string): Promise<void>;
+  /** Cross-process doorbell: `listener` fires when the task's deliverable inbox changes; returns unsubscribe. Never throws; a no-op unsubscribe when watching is impossible. */
+  watchDoorbell(taskId: string, listener: () => void): () => void;
 }
 
 /** Per-user global configuration storage. */

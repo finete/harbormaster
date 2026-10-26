@@ -31,7 +31,18 @@ import type {
   PullRequestStatus,
   VersionAccess,
 } from "../contracts/github.js";
-import type { SessionLaunch } from "../contracts/harness.js";
+import type { HarnessAdapter, SessionLaunch } from "../contracts/harness.js";
+import type {
+  ApproveMessageEdits,
+  FindTasksOptions,
+  MessageSender,
+  MessageStoreSnapshot,
+  SendTaskMessageInput,
+  SendTaskMessageResult,
+  TaskMessage,
+  TaskMessagingState,
+  TaskSearchResult,
+} from "../contracts/messaging.js";
 import type {
   AwaitingKindId,
   BoardColumn,
@@ -45,12 +56,15 @@ import type {
 } from "../contracts/model.js";
 import {
   DEFAULT_LAUNCH_MAX_CONCURRENT,
+  DEFAULT_MESSAGE_LOOP_CAP,
+  DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
 } from "../contracts/model.js";
 import type {
   Clock,
   ConfigAccess,
   IdGenerator,
+  MessageAccess,
   ScratchWorkspaceAccess,
   SessionFileAccess,
   TaskStateAccess,
@@ -72,6 +86,17 @@ import { branchToAdopt } from "../engines/branch-adoption.js";
 import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
 import { isConnectivityError } from "../engines/connectivity.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
+import {
+  buildReceiptText,
+  classifyRoute,
+  countLoopMessages,
+  defaultMode,
+  deriveMessagingStates,
+  deriveRunState,
+  matchTasks,
+  resolveDeliveredMode,
+  selectMessagesToPrune,
+} from "../engines/messaging.js";
 import {
   activeMoverOrder,
   arbitrateMove,
@@ -104,6 +129,15 @@ export interface CoreManagerDependencies {
   scratch: ScratchWorkspaceAccess;
   pullRequests: PullRequestAccess;
   versions: VersionAccess;
+  /**
+   * Task-messaging storage (log, doorbell, attachment copies). Optional so
+   * hand-built managers that never message keep compiling; every messaging
+   * command throws "messaging is not configured" without it (`createCore`
+   * always supplies it).
+   */
+  messages?: MessageAccess;
+  /** The harness adapter, for presence and messaging capabilities. Required alongside `messages`. */
+  harness?: HarnessAdapter;
 }
 
 const COLUMN_TITLES: Record<TaskState, string> = {
@@ -1603,6 +1637,447 @@ export class CoreManager implements CoreCommands {
     return repo;
   }
 
+  // --- Task messaging (see /docs/task-messaging.md) ---------------------
+
+  async findTasks(
+    query: string,
+    options?: FindTasksOptions,
+  ): Promise<TaskSearchResult[]> {
+    const { harness } = this.requireMessaging();
+    const tasks = await this.deps.tasks.listTasks();
+    const matches = matchTasks(query, tasks, options);
+    return Promise.all(
+      matches.map(async ({ task, relation }): Promise<TaskSearchResult> => {
+        const presence =
+          task.launch?.status === "queued"
+            ? { live: false, runningTurn: false }
+            : await harness.presence(task.id);
+        return {
+          id: task.id,
+          title: task.title,
+          state: task.state,
+          ...(task.repositoryId ? { repositoryId: task.repositoryId } : {}),
+          ...(task.branch ? { branch: task.branch } : {}),
+          ...(task.pr ? { prNumber: task.pr.number } : {}),
+          run: deriveRunState(task, presence),
+          relation,
+        };
+      }),
+    );
+  }
+
+  async sendTaskMessage(
+    input: SendTaskMessageInput,
+  ): Promise<SendTaskMessageResult> {
+    const { messages, harness } = this.requireMessaging();
+    const text = input.text;
+    if (!text.trim()) throw new Error("Message text is empty.");
+
+    // 1. sender ≠ target.
+    let senderTask: Task | undefined;
+    if (input.from.kind === "task") {
+      if (input.from.taskId === input.targetTaskId) {
+        throw new Error("A task can't send a message to itself.");
+      }
+      senderTask = await this.deps.tasks.getTask(input.from.taskId);
+      if (!senderTask) {
+        throw new Error(`Sending task not found: ${input.from.taskId}`);
+      }
+    } else if (input.from.kind === "harbormaster") {
+      throw new Error("Messages can't be sent as Harbormaster.");
+    }
+
+    // 2. The target exists and is not Done/Backlog.
+    const target = await this.deps.tasks.getTask(input.targetTaskId);
+    if (!target) throw new Error(`Task not found: ${input.targetTaskId}`);
+    const unavailable = undeliverableReason(target);
+    if (unavailable) throw new Error(unavailable);
+
+    // 3. Route from lineage (non-task senders always need approval).
+    const route = classifyRoute(input.from, senderTask, target);
+
+    // 4. Child → parent: the parent must be live (and not Done, above) and
+    //    the child's own harness must be able to receive the answer.
+    if (route === "child-to-parent") {
+      if (!(await harness.presence(target.id)).live) {
+        throw new Error(
+          "Your parent task is not running; stop and ask the user instead.",
+        );
+      }
+      if (!harness.messaging.receive) {
+        throw new Error(
+          "Your harness can't receive replies, so your parent couldn't answer; stop and ask the user instead.",
+        );
+      }
+    }
+
+    // 5. The target's harness must be able to receive.
+    if (!harness.messaging.receive) {
+      throw new Error(
+        `Task ${target.id}'s harness can't receive messages; tell the user instead.`,
+      );
+    }
+
+    // 6. Lineage routes check the loop cap.
+    const config = await this.deps.config.load();
+    const cap = config.messaging?.loopCap ?? DEFAULT_MESSAGE_LOOP_CAP;
+    const capCheck =
+      senderTask && (route === "parent-to-child" || route === "child-to-parent")
+        ? (store: MessageStoreSnapshot) => {
+            const parent = route === "parent-to-child" ? senderTask : target;
+            const child = route === "parent-to-child" ? target : senderTask;
+            const count = countLoopMessages(
+              store.messages,
+              store.userInputs,
+              parent.id,
+              child.id,
+            );
+            if (count >= cap) {
+              throw new Error(
+                `Message cap reached between "${child.title}" and "${parent.title}" (${cap} since the user last typed); stop and ask the user.`,
+              );
+            }
+          }
+        : undefined;
+    if (capCheck) capCheck(await messages.readStore());
+
+    // 7. Attachments are validated and copied.
+    const id = this.deps.ids.next();
+    const attachments = await messages.copyAttachments(
+      id,
+      input.attachments ?? [],
+    );
+
+    const mode = input.mode ?? defaultMode(route);
+    const message: TaskMessage = {
+      id,
+      sender: input.from,
+      senderLabel: senderLabelFor(input.from, senderTask),
+      targetTaskId: target.id,
+      route,
+      text,
+      requestedMode: mode,
+      attachments,
+      status: route === "approval" ? "awaiting_approval" : "pending",
+      createdAt: this.deps.clock.now().toISOString(),
+    };
+    try {
+      await messages.recordMessage(message, {
+        ...(capCheck ? { precondition: capCheck } : {}),
+      });
+    } catch (error) {
+      if (attachments.length > 0) await messages.removeAttachments(id);
+      throw error;
+    }
+    this.emitMessagesChanged([target.id, senderTask?.id]);
+
+    if (message.status === "awaiting_approval") {
+      return {
+        message,
+        willWake: false,
+        note:
+          input.from.kind === "task"
+            ? "Awaiting the user's approval in the Harbormaster app; you'll get a follow-up with the result. Don't wait for it -- continue or end your turn."
+            : "Awaiting the user's approval in the Harbormaster app; no result is reported back to this session.",
+      };
+    }
+    if (target.launch?.status === "queued") {
+      return {
+        message,
+        willWake: false,
+        note: `"${target.title}" has a queued launch; the message will be delivered as soon as it starts.`,
+      };
+    }
+    if ((await harness.presence(target.id)).live) {
+      const delivered = resolveDeliveredMode(mode, harness.messaging);
+      return {
+        message,
+        willWake: false,
+        note:
+          delivered === "steer"
+            ? `Delivered to the inbox of "${target.title}" (steer); it arrives at its next step boundary.`
+            : `Delivered to the inbox of "${target.title}" (followUp); it arrives once it finishes its pending work.`,
+      };
+    }
+    return {
+      message,
+      willWake: true,
+      note: `"${target.title}" isn't running; Harbormaster will wake it and deliver the message.`,
+    };
+  }
+
+  async claimInboxMessages(
+    taskId: string,
+    options: { idle: boolean },
+  ): Promise<TaskMessage[]> {
+    const { messages, harness } = this.requireMessaging();
+    const now = this.deps.clock.now().toISOString();
+    const task = await this.deps.tasks.getTask(taskId);
+    const reason = task ? undeliverableReason(task) : undefined;
+    if (!task || reason) {
+      const failed = await messages.failPendingForTask(
+        taskId,
+        now,
+        reason ??
+          `Task ${taskId} no longer exists; messages can't be delivered.`,
+      );
+      if (failed.length > 0) this.emitMessagesChanged(affectedTaskIds(failed));
+      return [];
+    }
+    const claimed = await messages.claimDeliverable(taskId, {
+      idle: options.idle,
+      deliveredAt: now,
+      resolveMode: (requested) =>
+        resolveDeliveredMode(requested, harness.messaging),
+    });
+    if (claimed.length > 0) this.emitMessagesChanged(affectedTaskIds(claimed));
+    return claimed;
+  }
+
+  subscribeInbox(taskId: string, listener: () => void): () => void {
+    return this.requireMessaging().messages.watchDoorbell(taskId, listener);
+  }
+
+  async recordUserInput(taskId: string): Promise<void> {
+    const { messages } = this.requireMessaging();
+    await messages.recordUserInput(taskId, this.deps.clock.now().toISOString());
+    const tasks = await this.deps.tasks.listTasks();
+    const self = tasks.find((task) => task.id === taskId);
+    this.emitMessagesChanged([
+      taskId,
+      self?.parentTaskId,
+      ...tasks
+        .filter((task) => task.parentTaskId === taskId)
+        .map((task) => task.id),
+    ]);
+  }
+
+  async listPendingApprovals(): Promise<TaskMessage[]> {
+    const { messages } = this.requireMessaging();
+    return (await messages.listMessages()).filter(
+      (message) => message.status === "awaiting_approval",
+    );
+  }
+
+  async approveMessage(
+    messageId: string,
+    edits?: ApproveMessageEdits,
+  ): Promise<TaskMessage> {
+    const { messages } = this.requireMessaging();
+    const message = await this.requireAwaitingApproval(messageId);
+    if (edits?.text !== undefined && !edits.text.trim()) {
+      throw new Error("Message text is empty.");
+    }
+    const now = this.deps.clock.now().toISOString();
+    const target = await this.deps.tasks.getTask(message.targetTaskId);
+    const reason = target
+      ? undeliverableReason(target)
+      : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
+    let result: TaskMessage;
+    if (reason) {
+      result = (await messages.failMessage(messageId, now, reason)) ?? message;
+    } else {
+      result = await messages.approveMessage(messageId, {
+        approvedAt: now,
+        ...(edits?.text !== undefined ? { text: edits.text } : {}),
+        ...(edits?.mode ? { mode: edits.mode } : {}),
+      });
+    }
+    await this.sendReceipt(result, target);
+    this.emitMessagesChanged(affectedTaskIds([result]));
+    return result;
+  }
+
+  async rejectMessage(messageId: string): Promise<TaskMessage> {
+    const { messages } = this.requireMessaging();
+    await this.requireAwaitingApproval(messageId);
+    const result = await messages.rejectMessage(
+      messageId,
+      this.deps.clock.now().toISOString(),
+    );
+    await this.sendReceipt(
+      result,
+      await this.deps.tasks.getTask(result.targetTaskId),
+    );
+    this.emitMessagesChanged(affectedTaskIds([result]));
+    return result;
+  }
+
+  async listTasksWithPendingMessages(): Promise<string[]> {
+    const { messages } = this.requireMessaging();
+    const targets = await messages.listPendingTargets();
+    if (targets.length === 0) return [];
+    const now = this.deps.clock.now().toISOString();
+    const wake: string[] = [];
+    for (const taskId of targets) {
+      const task = await this.deps.tasks.getTask(taskId);
+      const reason = task ? undeliverableReason(task) : "gone";
+      if (task && !reason) {
+        wake.push(taskId);
+        continue;
+      }
+      const failed = await messages.failPendingForTask(
+        taskId,
+        now,
+        reason && task
+          ? reason
+          : `Task ${taskId} no longer exists; messages can't be delivered.`,
+      );
+      if (failed.length > 0) this.emitMessagesChanged(affectedTaskIds(failed));
+    }
+    return wake;
+  }
+
+  async getMessagingStates(): Promise<TaskMessagingState[]> {
+    const { messages, harness } = this.requireMessaging();
+    const [tasks, store, config] = await Promise.all([
+      this.deps.tasks.listTasks(),
+      messages.readStore(),
+      this.deps.config.load(),
+    ]);
+    const parentIds = [
+      ...new Set(
+        tasks.flatMap((task) => (task.parentTaskId ? [task.parentTaskId] : [])),
+      ),
+    ];
+    const liveTaskIds = new Set<string>();
+    await Promise.all(
+      parentIds.map(async (parentId) => {
+        if ((await harness.presence(parentId)).live) liveTaskIds.add(parentId);
+      }),
+    );
+    return deriveMessagingStates({
+      tasks,
+      messages: store.messages,
+      userInputs: store.userInputs,
+      liveTaskIds,
+      now: this.deps.clock.now(),
+      parentReplyTimeoutMinutes:
+        config.messaging?.parentReplyTimeoutMinutes ??
+        DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
+      loopCap: config.messaging?.loopCap ?? DEFAULT_MESSAGE_LOOP_CAP,
+    });
+  }
+
+  async listMessages(filter?: { taskId?: string }): Promise<TaskMessage[]> {
+    return this.requireMessaging().messages.listMessages(filter);
+  }
+
+  async readMessageAttachment(
+    messageId: string,
+    index: number,
+  ): Promise<{ mimeType?: string; base64: string }> {
+    const { messages } = this.requireMessaging();
+    const message = await messages.getMessage(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+    const attachment = message.attachments[index];
+    if (!attachment) {
+      throw new Error(`Message ${messageId} has no attachment ${index}.`);
+    }
+    if (attachment.prunedAt) {
+      throw new Error("Attachment was pruned; its file is no longer stored.");
+    }
+    return {
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      base64: await messages.readAttachment(attachment),
+    };
+  }
+
+  async pruneMessageAttachments(): Promise<number> {
+    const { messages } = this.requireMessaging();
+    const [store, tasks] = await Promise.all([
+      messages.readStore(),
+      this.deps.tasks.listTasks(),
+    ]);
+    const now = this.deps.clock.now();
+    const eligible = selectMessagesToPrune(
+      store.messages,
+      new Map(tasks.map((task) => [task.id, task])),
+      now,
+    );
+    for (const message of eligible) {
+      await messages.removeAttachments(message.id);
+      await messages.markAttachmentsPruned(message.id, now.toISOString());
+    }
+    if (eligible.length > 0)
+      this.emitMessagesChanged(affectedTaskIds(eligible));
+    return eligible.length;
+  }
+
+  private requireMessaging(): {
+    messages: MessageAccess;
+    harness: HarnessAdapter;
+  } {
+    const { messages, harness } = this.deps;
+    if (!messages || !harness) throw new Error("messaging is not configured");
+    return { messages, harness };
+  }
+
+  private async requireAwaitingApproval(
+    messageId: string,
+  ): Promise<TaskMessage> {
+    const message =
+      await this.requireMessaging().messages.getMessage(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+    if (message.status !== "awaiting_approval") {
+      throw new Error(`Message ${messageId} is not awaiting approval.`);
+    }
+    return message;
+  }
+
+  /**
+   * Reports an approval decision back to a task sender as a `receipt`
+   * follow-up, when the sender still exists, is not Done, and its harness can
+   * receive. Receipts never count toward the loop cap (route `receipt`).
+   */
+  private async sendReceipt(
+    decided: TaskMessage,
+    target: Task | undefined,
+  ): Promise<void> {
+    const { messages, harness } = this.requireMessaging();
+    if (decided.sender.kind !== "task" || !harness.messaging.receive) return;
+    const sender = await this.deps.tasks.getTask(decided.sender.taskId);
+    if (!sender || sender.state === "done" || sender.state === "backlog")
+      return;
+    const outcome =
+      decided.status === "rejected"
+        ? "rejected"
+        : decided.status === "failed"
+          ? "failed"
+          : "approved";
+    await messages.recordMessage({
+      id: this.deps.ids.next(),
+      sender: { kind: "harbormaster" },
+      senderLabel: "Harbormaster",
+      targetTaskId: sender.id,
+      route: "receipt",
+      text: buildReceiptText({
+        outcome,
+        targetTitle: target?.title ?? decided.targetTaskId,
+        text: decided.text,
+        ...(decided.originalText !== undefined
+          ? { originalText: decided.originalText }
+          : {}),
+        ...(decided.failureReason
+          ? { failureReason: decided.failureReason }
+          : {}),
+      }),
+      requestedMode: "followUp",
+      attachments: [],
+      status: "pending",
+      regardingMessageId: decided.id,
+      createdAt: this.deps.clock.now().toISOString(),
+    });
+  }
+
+  private emitMessagesChanged(taskIds: Array<string | undefined>): void {
+    this.deps.events.emit("messages-changed", {
+      taskIds: [
+        ...new Set(taskIds.filter((id): id is string => id !== undefined)),
+      ],
+    });
+  }
+
   private async requireTask(id: string): Promise<Task> {
     const task = await this.deps.tasks.getTask(id);
     if (!task) throw new Error(`Task not found: ${id}`);
@@ -1703,6 +2178,32 @@ function isProtectedPath(
       root.length > 0 && (target === root || root.startsWith(`${target}/`))
     );
   });
+}
+
+/** Why a task can't receive messages (Done/Backlog), or `undefined` when it can. */
+function undeliverableReason(task: Task): string | undefined {
+  if (task.state === "done") {
+    return `Task ${task.id} is Done; messages can't be delivered.`;
+  }
+  if (task.state === "backlog") {
+    return `Task ${task.id} is in Backlog and has no session yet; messages can't be delivered.`;
+  }
+  return undefined;
+}
+
+/** Display snapshot of who sent a message. */
+function senderLabelFor(sender: MessageSender, senderTask?: Task): string {
+  if (sender.kind === "task") return senderTask?.title ?? sender.taskId;
+  if (sender.kind === "session") return `Pi session in ${sender.cwd}`;
+  return "Harbormaster";
+}
+
+/** Task ids a message mutation touches (targets and task senders), for `messages-changed`. */
+function affectedTaskIds(messages: readonly TaskMessage[]): string[] {
+  return messages.flatMap((message) => [
+    message.targetTaskId,
+    ...(message.sender.kind === "task" ? [message.sender.taskId] : []),
+  ]);
 }
 
 function describeError(error: unknown): string {
