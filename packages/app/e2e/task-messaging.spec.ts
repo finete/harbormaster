@@ -138,9 +138,12 @@ test.afterAll(async () => {
 });
 
 test("an approval-route message shows in the inbox; editing + approving delivers the edited text", async () => {
-  // No badge while nothing awaits approval.
+  // The Inbox nav row is always there; its count badge only while something awaits approval.
   await expect(
     window.getByTestId("workspace-approval-inbox-button"),
+  ).toBeVisible();
+  await expect(
+    window.getByTestId("workspace-approval-inbox-button-count"),
   ).toHaveCount(0);
 
   const sent = await external.commands.sendTaskMessage({

@@ -6,7 +6,7 @@
 // signal, and the sheet only opens when the user clicks.
 import { Inbox } from "lucide-react";
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MessageMode, TaskMessage } from "../../../preload/api";
 import { flattenBoard, useApprovals, useBoard } from "../core-client";
 import {
@@ -77,9 +77,13 @@ export function ApprovalInboxSheet({
     () => new Map(flattenBoard(columns).map((r) => [r.task.id, r.task.title])),
     [columns],
   );
-  // Nothing left to review: close by itself (the badge is gone too).
+  // The last pending message was just handled: close by itself. Opening an
+  // already-empty inbox (the nav row is always there) shows the empty state.
+  const previousCount = useRef(approvals.length);
   useEffect(() => {
-    if (open && approvals.length === 0) onOpenChange(false);
+    const had = previousCount.current;
+    previousCount.current = approvals.length;
+    if (open && had > 0 && approvals.length === 0) onOpenChange(false);
   }, [open, approvals.length, onOpenChange]);
 
   return (
@@ -97,6 +101,14 @@ export function ApprovalInboxSheet({
         </p>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {approvals.length === 0 && (
+          <p
+            data-testid="approval-inbox-empty"
+            className="py-8 text-center text-xs text-muted-foreground"
+          >
+            Nothing awaiting approval.
+          </p>
+        )}
         {approvals.map((message) => (
           <ApprovalCard
             key={message.id}

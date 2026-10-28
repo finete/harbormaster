@@ -24,6 +24,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Inbox,
   LayoutGrid,
   Pencil,
   Pin,
@@ -42,6 +43,7 @@ import { createPortal } from "react-dom";
 import type { Task } from "../../../preload/api";
 import {
   flattenBoard,
+  useApprovals,
   useBoard,
   useMessagingStates,
   usePresenceMap,
@@ -82,7 +84,6 @@ import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
-import { ApprovalInboxButton } from "./ApprovalInbox";
 import {
   type ContextMenuItem,
   SidebarRowContextMenu,
@@ -102,8 +103,7 @@ import {
   sidebarRows,
   visibleTaskOrder,
 } from "./sidebar-model";
-import { Button } from "./ui/button";
-import { Kbd } from "./ui/kbd";
+import { SidebarNavItem } from "./ui/sidebar-nav";
 
 const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
@@ -362,6 +362,11 @@ export function Sidebar({
   onCloseDraft: () => void;
 }): JSX.Element {
   const columns = useBoard();
+  const approvalCount = useApprovals().length;
+  const inboxTitle =
+    approvalCount > 0
+      ? `Inbox: ${approvalCount} message${approvalCount === 1 ? "" : "s"} awaiting approval`
+      : "Inbox: nothing awaiting approval";
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const messagingStates = useMessagingStates();
@@ -1046,7 +1051,37 @@ export function Sidebar({
         >
           <ChevronsRight className="h-4 w-4" aria-hidden />
         </button>
-        <div className="mt-2 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
+        <nav
+          aria-label="Main"
+          className="mt-2 flex w-full flex-col items-center gap-0.5 border-b border-border pb-2"
+        >
+          <SidebarNavItem
+            compact
+            icon={<Plus aria-hidden />}
+            label="New task"
+            shortcut={`${modKeyLabel()}N`}
+            onClick={onNewTask}
+            testId="sidebar-new-task-button"
+          />
+          <SidebarNavItem
+            compact
+            icon={<LayoutGrid aria-hidden />}
+            label="Board"
+            shortcut={`${modKeyLabel()}B`}
+            onClick={onShowBoard}
+            testId="board-button"
+          />
+          <SidebarNavItem
+            compact
+            icon={<Inbox aria-hidden />}
+            label="Inbox"
+            badge={approvalCount}
+            title={inboxTitle}
+            onClick={onOpenApprovals}
+            testId="sidebar-approval-inbox-button"
+          />
+        </nav>
+        <div className="mt-1 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
           {draftLabel !== null && (
             <button
               type="button"
@@ -1087,33 +1122,6 @@ export function Sidebar({
             </button>
           ))}
         </div>
-        <div className="flex flex-col items-center gap-1 border-t border-border py-2">
-          <button
-            type="button"
-            data-testid="sidebar-new-task-button"
-            aria-label="New task"
-            title="New task"
-            onClick={onNewTask}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-          </button>
-          <button
-            type="button"
-            data-testid="board-button"
-            aria-label="Board"
-            title="Board (\u2318B)"
-            onClick={onShowBoard}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-          >
-            <LayoutGrid className="h-4 w-4" aria-hidden />
-          </button>
-          <ApprovalInboxButton
-            compact
-            testId="sidebar-approval-inbox-button"
-            onClick={onOpenApprovals}
-          />
-        </div>
       </div>
     );
   }
@@ -1128,6 +1136,33 @@ export function Sidebar({
         resizing && "select-none",
       )}
     >
+      <nav
+        aria-label="Main"
+        className="flex flex-col gap-0.5 border-b border-border px-2 pb-2 pt-2"
+      >
+        <SidebarNavItem
+          icon={<Plus aria-hidden />}
+          label="New task"
+          shortcut={`${modKeyLabel()}N`}
+          onClick={onNewTask}
+          testId="sidebar-new-task-button"
+        />
+        <SidebarNavItem
+          icon={<LayoutGrid aria-hidden />}
+          label="Board"
+          shortcut={`${modKeyLabel()}B`}
+          onClick={onShowBoard}
+          testId="board-button"
+        />
+        <SidebarNavItem
+          icon={<Inbox aria-hidden />}
+          label="Inbox"
+          badge={approvalCount}
+          title={inboxTitle}
+          onClick={onOpenApprovals}
+          testId="workspace-approval-inbox-button"
+        />
+      </nav>
       <div className="flex items-center gap-2 px-3 pb-2 pt-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Tasks
@@ -1377,35 +1412,6 @@ export function Sidebar({
           document.body,
         )}
       </DndContext>
-      <div className="flex items-center gap-1.5 border-t border-border px-3 py-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="flex-1"
-          onClick={onNewTask}
-          data-testid="sidebar-new-task-button"
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden />
-          New task
-          <Kbd>{`${modKeyLabel()}N`}</Kbd>
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onShowBoard}
-          data-testid="board-button"
-          title="Board (\u2318B)"
-        >
-          <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-          Board
-          <Kbd>{`${modKeyLabel()}B`}</Kbd>
-        </Button>
-        <ApprovalInboxButton
-          compact
-          testId="workspace-approval-inbox-button"
-          onClick={onOpenApprovals}
-        />
-      </div>
       {/* Straddles the right border so the grab target sits on the seam. */}
       {/* biome-ignore lint/a11y/useSemanticElements: an <hr> cannot host pointer/keyboard resize handlers */}
       <div
