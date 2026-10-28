@@ -972,6 +972,14 @@ function createWindow(): void {
   // may already be destroyed/inaccessible.
   const webContentsId = win.webContents.id;
 
+  if (offscreen) {
+    // Test mode is fully invisible, not just off to the side: macOS may
+    // clamp an offscreen window back onto the screen. Opacity 0 keeps it
+    // composited (frames, rAF, screenshots all work) but unseen, and
+    // ignoring mouse events stops an invisible window eating real clicks.
+    win.setOpacity(0);
+    win.setIgnoreMouseEvents(true);
+  }
   win.once("ready-to-show", () =>
     offscreen ? win.showInactive() : win.show(),
   );
@@ -1182,6 +1190,8 @@ registerAppIpc();
 registerTerminalHostIpc();
 
 app.whenReady().then(() => {
+  // Test mode: no dock icon per e2e instance (see createWindow).
+  if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) app.dock?.hide();
   createWindow();
   startPresencePolling();
   startRefreshLoop();
