@@ -40,6 +40,7 @@ control the other:
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
 | 15 | Internal architecture | Volatility-based layering (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. See "Layering" below. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
 | 16 | Workflow verbs | Exactly three invariant verbs — **todev / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
+| 17 | Terminal renderer | xterm's DOM renderer only; no `@xterm/addon-webgl`. See "Terminal renderer: DOM" below. |
 
 ## Layering
 
@@ -131,6 +132,36 @@ without new commands; movers already consume kinds purely as data.
   system exists because of that, and its semantics carry over.
 - shadcn/ui + Tailwind is the dominant 2026 React stack and the default
   output of AI UI generators; shadcn kanban blocks exist (dnd-kit-based).
+
+## Terminal renderer: DOM
+
+Terminal panes use xterm's DOM renderer, never WebGL (decision #17).
+
+- **Why.** After macOS sleep or screen lock the WebGL renderer drew nothing
+  for minutes: inspected live on macOS 26.5 / Electron 33, the buffer was
+  intact, frames were flowing, and even a brand-new WebGL addon on a fresh
+  context painted a blank pane, while the DOM renderer painted the same
+  terminal at once. This is an open problem across xterm.js embedders
+  (VS Code #311614, Wave #2895; everyone's reliable workaround is "GPU
+  acceleration off"). WebGL also needed a growing stack of workarounds:
+  per-pane context parking (Chromium's live-context cap and GPU memory), a
+  context-loss fallback, wake-time resets, and addon-webgl 0.19's shared
+  glyph-atlas corruption (xterm.js #6014, fixed only in 0.20 beta).
+- **Cost, measured.** With the perf-flood harness (synthetic ~20 MB/s ANSI
+  flood): one flooding pane drains ~18 MB/s on DOM vs ~26 MB/s on WebGL
+  with the same frame rate, hover latency (p95 ~19 ms) and renderer CPU;
+  two panes flooding side by side drop DOM to ~60 fps (frame-gap p95
+  16.7 ms vs 9 ms) with hover p95 ~25 ms vs ~21 ms and no long tasks.
+  Real agent output is orders of magnitude below that. Glyphs (box
+  drawing, blocks, braille, Powerline, attributes) render the same; DOM
+  cells are marginally wider (xterm.js #6015), so a pane fits ~1-2% fewer
+  columns.
+- **Revisit when** addon-webgl ships the 0.20 atlas fixes as stable *and*
+  there's evidence the post-wake blank is fixed upstream; re-measure with
+  perf-flood before switching.
+- **Breadcrumbs.** `<userData>/logs/wake.log` records power / lock events,
+  renderer and GPU process exits, and renderer console errors, so the next
+  display incident after sleep leaves evidence.
 
 ## v1 scope (switch-your-daily-driver bar)
 

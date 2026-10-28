@@ -31,18 +31,19 @@ function git(args: string[], cwd: string): void {
 
 /**
  * A fake pi that logs its initial size and every SIGWINCH it receives.
- * Format: "start <rows> <cols>" and "WINCH <rows> <cols>" (stty size order).
+ * Format: "start <rows> <cols> <worktree>" and "WINCH <rows> <cols>" (stty
+ * size order).
  */
 function makeFakePi(log: string): string {
   return `#!/bin/bash
 trap 'echo "WINCH $(stty size)" >> "${log}"' WINCH
-echo "start $(stty size)" >> "${log}"
+echo "start $(stty size) $(basename "$PWD")" >> "${log}"
 printf 'fake-pi ready\\n'
 while true; do sleep 0.05; done
 `;
 }
 
-test("hiding a workspace produces zero SIGWINCH events (P0-2)", async () => {
+test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden never starts pi at a garbage size", async () => {
   test.setTimeout(90_000);
 
   const root = mkdtempSync(path.join(tmpdir(), "hm-resize-hidden-"));
@@ -81,19 +82,21 @@ test("hiding a workspace produces zero SIGWINCH events (P0-2)", async () => {
   writeFileSync(fakePi, makeFakePi(log));
   chmodSync(fakePi, 0o755);
 
-  const app = await electron.launch({
-    args: [mainEntry],
-    env: {
-      ...process.env,
-      HARBORMASTER_STATE_DIR: stateDir,
-      HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
-      HARBORMASTER_WINDOW_OFFSCREEN: "1",
-      HARBORMASTER_PI_COMMAND: fakePi,
-      // e2e needs the a11y mirror to read terminal text; this is already the
-      // default set in playwright.config.ts but explicit here for clarity.
-      HARBORMASTER_TERMINAL_A11Y_MIRROR: "1",
-    },
-  });
+  const launch = () =>
+    electron.launch({
+      args: [mainEntry],
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+        HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        HARBORMASTER_PI_COMMAND: fakePi,
+        // e2e needs the a11y mirror to read terminal text; this is already the
+        // default set in playwright.config.ts but explicit here for clarity.
+        HARBORMASTER_TERMINAL_A11Y_MIRROR: "1",
+      },
+    });
+  let app = await launch();
 
   try {
     const window = await app.firstWindow();
@@ -188,6 +191,62 @@ test("hiding a workspace produces zero SIGWINCH events (P0-2)", async () => {
       winchesTotal,
       `Expected 0 WINCs total for hide+show, got: ${JSON.stringify(winchesTotal)}`,
     ).toHaveLength(0);
+
+    // MOUNTED HIDDEN: open a second task, then relaunch on the same state.
+    // The second task's workspace is restored visible; the first one's
+    // (with a fresh pi) mounts behind it, display:none. An unguarded
+    // mount-time fit sized that pane 11x6, so its pi started at 11 columns
+    // until the task was opened.
+    await window.getByTestId("sidebar-new-task-button").click();
+    await window.getByTestId("new-task-title-input").fill("Other Task");
+    await window
+      .getByTestId("new-task-repo-select")
+      .selectOption("github.com/test/fixture");
+    await window.getByTestId("new-task-submit-backlog").click();
+    await window.getByTestId("board-button").click();
+    await dragTo(
+      window,
+      window
+        .locator('[data-testid^="card-"]')
+        .filter({ hasText: "Other Task" }),
+      window.getByTestId("column-dev"),
+    );
+    await window
+      .locator('[data-testid^="card-"]')
+      .filter({ hasText: "Other Task" })
+      .click();
+    await expect
+      .poll(() => readFileSync(log, "utf8").match(/^start /gm)?.length ?? 0, {
+        timeout: 30_000,
+      })
+      .toBe(2);
+    const firstWorktree = (
+      readFileSync(log, "utf8").match(
+        /^start \d+ \d+ (\S+)$/m,
+      ) as RegExpMatchArray
+    )[1] as string;
+
+    await app.close();
+    app = await launch();
+    await (await app.firstWindow()).waitForLoadState("domcontentloaded");
+    const startsFor = (worktree: string): string[] =>
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter((l) => l.startsWith("start ") && l.endsWith(` ${worktree}`));
+    await expect
+      .poll(() => startsFor(firstWorktree).length, { timeout: 30_000 })
+      .toBe(2);
+    const hiddenStart = startsFor(firstWorktree)[1] as string;
+    console.log("[resize-hidden] hidden-mount start:", hiddenStart);
+    const [, rows, cols] = hiddenStart.split(" ").map(Number);
+    expect(
+      cols,
+      `hidden-mounted pane started at ${hiddenStart}`,
+    ).toBeGreaterThan(20);
+    expect(
+      rows,
+      `hidden-mounted pane started at ${hiddenStart}`,
+    ).toBeGreaterThan(6);
   } finally {
     await app.close();
   }

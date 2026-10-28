@@ -1,26 +1,20 @@
 /**
- * P0-3 acceptance: WebGL renderer state and context-loss recovery.
+ * Terminal renderer: xterm's DOM renderer only (no WebGL).
  *
- * In CI / offscreen mode, Chromium may not create a WebGL context (software
- * rasterizer or disabled GPU). The test detects this upfront:
- *
- * - If data-renderer="dom" from the start, we can't drive loss/recovery via
- *   WEBGL_lose_context (the canvas has no context). We still assert that the
- *   pane is readable and that the attribute is present. The 3-loss cap cannot
- *   be tested without WebGL.
- *
- * - If data-renderer="webgl", we run the full lifecycle:
- *   1. Starts WebGL; hidden past the (test-shortened) park delay it
- *      parks (data-renderer="parked", WebGL canvas gone), shown it is WebGL.
- *   1c. Screen unlock (powerMonitor) → WebGL rebuilt with fresh canvases.
- *   2. Force context loss → DOM, text still readable.
- *   3. Hide → show → WebGL re-acquired.
- *   4. 3 losses in 5 min → stays DOM.
- *
- * The checklist notes "WebGL re-acquire if drivable" for the e2e guard.
+ * WebGL went blank for minutes after macOS sleep / lock, even on a fresh
+ * context, while the DOM renderer kept painting (docs/design-decisions.md
+ * "Terminal renderer: DOM"). This guards that no pane ever holds a canvas /
+ * GL context again, that the text is real DOM, and that power events leave
+ * breadcrumbs in <userData>/logs/wake.log for the next display incident.
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
@@ -37,275 +31,119 @@ printf 'renderer-test-ready\\n'
 while true; do sleep 0.1; done
 `;
 
-test.describe("terminal renderer lifecycle (P0-3)", () => {
-  test("data-renderer attribute present; WebGL lifecycle when available", async () => {
-    test.setTimeout(120_000);
+test("terminal panes render with the DOM renderer; power events reach wake.log", async () => {
+  test.setTimeout(90_000);
 
-    const root = mkdtempSync(path.join(tmpdir(), "hm-renderer-"));
-    const stateDir = path.join(root, "state");
-    const codeRoot = path.join(root, "Code");
-    mkdirSync(stateDir, { recursive: true });
-    mkdirSync(codeRoot, { recursive: true });
+  const root = mkdtempSync(path.join(tmpdir(), "hm-renderer-"));
+  const stateDir = path.join(root, "state");
+  const codeRoot = path.join(root, "Code");
+  mkdirSync(stateDir, { recursive: true });
+  mkdirSync(codeRoot, { recursive: true });
 
-    const repo = path.join(codeRoot, "fixture-repo");
-    git(["init", "-q", "-b", "main", repo]);
-    git(
-      [
-        "-c",
-        "user.name=Harbormaster E2E",
-        "-c",
-        "user.email=harbormaster-e2e@example.invalid",
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "init",
-      ],
-      repo,
-    );
-    git(
-      ["remote", "add", "origin", "https://github.com/test/fixture.git"],
-      repo,
-    );
+  const repo = path.join(codeRoot, "fixture-repo");
+  git(["init", "-q", "-b", "main", repo]);
+  git(
+    [
+      "-c",
+      "user.name=Harbormaster E2E",
+      "-c",
+      "user.email=harbormaster-e2e@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init",
+    ],
+    repo,
+  );
+  git(["remote", "add", "origin", "https://github.com/test/fixture.git"], repo);
+  writeFileSync(
+    path.join(stateDir, "config.json"),
+    JSON.stringify({ automation: true, codeRoot, branchPrefix: "" }),
+  );
+  const fakePi = path.join(root, "fake-pi");
+  writeFileSync(fakePi, fakePiScript);
+  chmodSync(fakePi, 0o755);
 
-    writeFileSync(
-      path.join(stateDir, "config.json"),
-      JSON.stringify({ automation: true, codeRoot, branchPrefix: "" }),
-    );
-
-    const fakePi = path.join(root, "fake-pi");
-    writeFileSync(fakePi, fakePiScript);
-    chmodSync(fakePi, 0o755);
-
-    const app = await electron.launch({
-      args: [mainEntry],
-      env: {
-        ...process.env,
-        HARBORMASTER_STATE_DIR: stateDir,
-        HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
-        HARBORMASTER_WINDOW_OFFSCREEN: "1",
-        HARBORMASTER_PI_COMMAND: fakePi,
-        HARBORMASTER_TERMINAL_A11Y_MIRROR: "1",
-      },
-    });
-
-    try {
-      const window = await app.firstWindow();
-      await window.waitForLoadState("domcontentloaded");
-
-      // Create task + open.
-      await window.getByTestId("sidebar-new-task-button").click();
-      await window.getByTestId("new-task-title-input").fill("Renderer Test");
-      await window
-        .getByTestId("new-task-repo-select")
-        .selectOption("github.com/test/fixture");
-      await window.getByTestId("new-task-submit-backlog").click();
-
-      await window.getByTestId("board-button").click();
-      const card = window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" });
-      const taskId = (await card.getAttribute("data-testid"))!.replace(
-        "card-",
-        "",
-      );
-      await dragTo(window, card, window.getByTestId("column-dev"));
-
-      await expect
-        .poll(
-          async () =>
-            (
-              await window.evaluate(
-                (id) => window.harbormaster.core.getTaskWorkspace(id),
-                taskId,
-              )
-            )?.worktreePath,
-          { timeout: 30_000 },
-        )
-        .toBeTruthy();
-
-      await window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" })
-        .click();
-      await expect(window.getByTestId("terminal-panel").first()).toContainText(
-        "renderer-test-ready",
-        { timeout: 30_000 },
-      );
-
-      const panel = window.getByTestId("terminal-panel").first();
-
-      // ── Baseline: data-renderer attribute is always set ──────────────────
-      // It will be "webgl" or "dom" depending on whether the GPU is available.
-      await expect(panel).toHaveAttribute("data-renderer", /^(webgl|dom)$/, {
-        timeout: 5_000,
-      });
-
-      const initialRenderer = await panel.getAttribute("data-renderer");
-      console.log(`[renderer] initial data-renderer="${initialRenderer}"`);
-
-      if (initialRenderer !== "webgl") {
-        // GPU not available in this environment (offscreen/software rasterizer).
-        // We can only verify the attribute is present and the terminal works.
-        console.log(
-          "[renderer] WebGL not available; skipping loss/recovery assertions (expected in CI/offscreen)",
-        );
-        await expect(panel).toContainText("renderer-test-ready");
-        return; // Skip WebGL lifecycle assertions.
-      }
-
-      // ── Step 1b: hidden past the park delay → parked; shown → WebGL ─────
-      // A hidden pane must not hold a WebGL context (GPU memory + Chromium's
-      // active-context cap). Shorten the 10 s park delay via the renderer's
-      // test knob, read when the hide starts.
-      // Canvas count, not getContext(): probing would create a context. The
-      // DOM renderer draws with divs, so zero canvases = no WebGL renderer.
-      async function webglCanvasCount(): Promise<number> {
-        return window.evaluate(
-          () =>
-            document.querySelectorAll("[data-testid='terminal-panel'] canvas")
-              .length,
-        );
-      }
-      expect(await webglCanvasCount()).toBeGreaterThan(0);
-      await window.evaluate(() => {
-        (
-          window as { __harbormasterWebglParkDelayMs?: number }
-        ).__harbormasterWebglParkDelayMs = 300;
-      });
-      await window.getByTestId("board-button").click();
-      await expect(panel).toHaveAttribute("data-renderer", "parked", {
-        timeout: 10_000,
-      });
-      // The WebGL canvas is gone, not just hidden (context released).
-      expect(await webglCanvasCount()).toBe(0);
-      await window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" })
-        .click();
-      await expect(panel).toHaveAttribute("data-renderer", "webgl", {
-        timeout: 10_000,
-      });
-      await expect(panel).toContainText("renderer-test-ready");
-      // ── Step 1c: screen unlock → main asks panes to rebuild WebGL ────────
-      // macOS can blank a WebGL canvas on sleep/lock without a context-loss
-      // event; recovery must swap in a brand-new WebGL canvas (new context
-      // + atlas), not just repaint the old one. Mark the current canvases,
-      // fire powerMonitor's unlock-screen in main, expect fresh canvases.
-      await window.evaluate(() => {
-        for (const c of document.querySelectorAll(
-          "[data-testid='terminal-panel'] canvas",
-        )) {
-          (c as HTMLElement).dataset.e2eStale = "1";
-        }
-      });
-      await app.evaluate(({ powerMonitor }) => {
-        powerMonitor.emit("unlock-screen");
-      });
-      await expect
-        .poll(
-          () =>
-            window.evaluate(() => {
-              const all = document.querySelectorAll(
-                "[data-testid='terminal-panel'] canvas",
-              );
-              const stale = document.querySelectorAll(
-                "[data-testid='terminal-panel'] canvas[data-e2e-stale]",
-              );
-              return all.length > 0 && stale.length === 0;
-            }),
-          { timeout: 10_000 },
-        )
-        .toBe(true);
-      await expect(panel).toHaveAttribute("data-renderer", "webgl");
-      await expect(panel).toContainText("renderer-test-ready");
-
-      // Restore the default delay so the loss/recovery steps below exercise
-      // the context-loss re-acquire path, not unparking.
-      await window.evaluate(() => {
-        delete (window as { __harbormasterWebglParkDelayMs?: number })
-          .__harbormasterWebglParkDelayMs;
-      });
-
-      /** Force a WebGL context loss by finding the WebGL canvas. */
-      async function forceContextLoss(): Promise<void> {
-        const lost = await window.evaluate((): boolean => {
-          // xterm may have multiple canvases (WebGL + cursor layer).
-          // Find the one that has a live WebGL context.
-          const canvases = Array.from(
-            document.querySelectorAll("[data-testid='terminal-panel'] canvas"),
-          ) as HTMLCanvasElement[];
-          for (const canvas of canvases) {
-            const gl =
-              canvas.getContext("webgl2") ?? canvas.getContext("webgl");
-            if (!gl) continue;
-            const ext = gl.getExtension("WEBGL_lose_context");
-            if (!ext) continue;
-            ext.loseContext();
-            return true;
-          }
-          return false;
-        });
-        if (!lost) throw new Error("Could not find a WebGL canvas to lose");
-      }
-
-      // ── Step 2: force loss → DOM ─────────────────────────────────────────
-      await forceContextLoss();
-      await expect(panel).toHaveAttribute("data-renderer", "dom", {
-        timeout: 10_000,
-      });
-      await expect(panel).toContainText("renderer-test-ready");
-
-      // ── Step 3: hide → show → WebGL re-acquired ──────────────────────────
-      await window.getByTestId("board-button").click();
-      await window.waitForTimeout(500);
-      await window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" })
-        .click();
-      await window.waitForTimeout(500);
-      await expect(panel).toHaveAttribute("data-renderer", "webgl", {
-        timeout: 10_000,
-      });
-
-      // ── Step 4: 3 losses in rapid succession → stays DOM ─────────────────
-      // 2nd loss (1st was above).
-      await forceContextLoss();
-      await expect(panel).toHaveAttribute("data-renderer", "dom", {
-        timeout: 10_000,
-      });
-      // Re-acquire.
-      await window.getByTestId("board-button").click();
-      await window.waitForTimeout(500);
-      await window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" })
-        .click();
-      await window.waitForTimeout(500);
-      await expect(panel).toHaveAttribute("data-renderer", "webgl", {
-        timeout: 10_000,
-      });
-
-      // 3rd loss.
-      await forceContextLoss();
-      await expect(panel).toHaveAttribute("data-renderer", "dom", {
-        timeout: 10_000,
-      });
-      // Hide + show: 3 losses → must STAY on dom.
-      await window.getByTestId("board-button").click();
-      await window.waitForTimeout(500);
-      await window
-        .locator('[data-testid^="card-"]')
-        .filter({ hasText: "Renderer Test" })
-        .click();
-      await window.waitForTimeout(1000);
-      await expect(panel).toHaveAttribute("data-renderer", "dom", {
-        timeout: 5_000,
-      });
-    } finally {
-      await app.close();
-    }
+  const app = await electron.launch({
+    args: [mainEntry],
+    env: {
+      ...process.env,
+      HARBORMASTER_STATE_DIR: stateDir,
+      HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
+      HARBORMASTER_WINDOW_OFFSCREEN: "1",
+      HARBORMASTER_PI_COMMAND: fakePi,
+    },
   });
+
+  try {
+    const window = await app.firstWindow();
+    await window.waitForLoadState("domcontentloaded");
+
+    await window.getByTestId("sidebar-new-task-button").click();
+    await window.getByTestId("new-task-title-input").fill("Renderer Test");
+    await window
+      .getByTestId("new-task-repo-select")
+      .selectOption("github.com/test/fixture");
+    await window.getByTestId("new-task-submit-backlog").click();
+    await window.getByTestId("board-button").click();
+    const card = window
+      .locator('[data-testid^="card-"]')
+      .filter({ hasText: "Renderer Test" });
+    const taskId = (await card.getAttribute("data-testid"))!.replace(
+      "card-",
+      "",
+    );
+    await dragTo(window, card, window.getByTestId("column-dev"));
+    await expect
+      .poll(
+        async () =>
+          (
+            await window.evaluate(
+              (id) => window.harbormaster.core.getTaskWorkspace(id),
+              taskId,
+            )
+          )?.worktreePath,
+        { timeout: 30_000 },
+      )
+      .toBeTruthy();
+    await window
+      .locator('[data-testid^="card-"]')
+      .filter({ hasText: "Renderer Test" })
+      .click();
+
+    const panel = window.getByTestId("terminal-panel").first();
+    await expect(panel).toContainText("renderer-test-ready", {
+      timeout: 30_000,
+    });
+    await expect(panel).toHaveAttribute("data-renderer", "dom");
+    // The DOM renderer paints real text rows and owns no canvas (WebGL
+    // drew into canvases; no canvas means no GL context to lose).
+    await expect(panel.locator(".xterm-rows")).toContainText(
+      "renderer-test-ready",
+    );
+    expect(await panel.locator("canvas").count()).toBe(0);
+
+    // Power events land in the wake log (main's powerMonitor wiring).
+    await app.evaluate(({ powerMonitor }) => {
+      powerMonitor.emit("unlock-screen");
+    });
+    const wakeLog = path.join(stateDir, "electron-profile", "logs", "wake.log");
+    await expect
+      .poll(
+        () => {
+          try {
+            return readFileSync(wakeLog, "utf8");
+          } catch {
+            return "";
+          }
+        },
+        { timeout: 10_000 },
+      )
+      .toContain("power: unlock-screen");
+  } finally {
+    await app.close();
+  }
 });

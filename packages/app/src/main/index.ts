@@ -75,13 +75,7 @@ import {
 } from "./ptySessions";
 import { isAllowedRevealPath } from "./reveal-path";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
-
-// Raise Chromium's WebGL context cap before the GPU process starts.
-// By default Chromium evicts the oldest context once 16 are active; with many
-// terminal panes that causes permanent DOM-renderer fallback (4-5
-// VS Code uses the same flag; see https://github.com/microsoft/vscode/pull/285575
-// Verified on Electron 33: 40 terminals lose 8 contexts instead of 24.
-app.commandLine.appendSwitch("max-active-webgl-contexts", "32");
+import { createWakeLog, isWakeLogWorthy } from "./wake-log";
 
 // Surface main-process crashes to stderr instead of letting Electron's
 // default "uncaught exception" dialog pop up in front of the user. Node only
@@ -793,27 +787,21 @@ function wireSleepWakeGating(): void {
   });
 }
 
-// Terminal WebGL recovery on wake: macOS sleep / screen lock can discard a
-// WebGL canvas's backing store without any `webglcontextlost` event, leaving
-// terminal panes blank (see renderer-reset.ts). A lock fires neither
-// `visibilitychange` nor `focus` in the renderer, so main tells every window
-// to rebuild its terminal renderers. Resume is sent twice: right away, and
-// once more after the GPU process has had a beat to settle (the renderer
-// coalesces a reset already in flight; a second one is cheap).
-const RENDERER_RESET_CHANNEL = "terminal:renderer-reset";
-const RENDERER_RESET_SETTLE_MS = 1_500;
+// Wake / crash breadcrumbs in <userData>/logs/wake.log: power and lock
+// events, renderer and GPU process exits, and the renderer's console errors
+// plus `[terminal]` lines. Display trouble after sleep can't be reproduced
+// in tests, so each real occurrence must leave evidence behind.
+const wakeLog = createWakeLog(
+  join(app.getPath("userData"), "logs", "wake.log"),
+);
 
-function broadcastRendererReset(): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    safeSend(win.webContents, RENDERER_RESET_CHANNEL, null);
-  }
-}
-
-function wireRendererResetOnWake(): void {
-  powerMonitor.on("unlock-screen", broadcastRendererReset);
-  powerMonitor.on("resume", () => {
-    broadcastRendererReset();
-    setTimeout(broadcastRendererReset, RENDERER_RESET_SETTLE_MS);
+function wireWakeLog(): void {
+  powerMonitor.on("suspend", () => wakeLog("power: suspend"));
+  powerMonitor.on("resume", () => wakeLog("power: resume"));
+  powerMonitor.on("lock-screen", () => wakeLog("power: lock-screen"));
+  powerMonitor.on("unlock-screen", () => wakeLog("power: unlock-screen"));
+  app.on("child-process-gone", (_event, details) => {
+    if (details.type === "GPU") wakeLog(`gpu-process-gone: ${details.reason}`);
   });
 }
 
@@ -1046,9 +1034,13 @@ function createWindow(): void {
       releaseSessionsFor(webContentsId);
     }
   });
-  win.webContents.on("render-process-gone", () =>
-    releaseSessionsFor(webContentsId),
-  );
+  win.webContents.on("render-process-gone", (_event, details) => {
+    wakeLog(`render-process-gone: ${details.reason}`);
+    releaseSessionsFor(webContentsId);
+  });
+  win.webContents.on("console-message", (_event, level, message) => {
+    if (isWakeLogWorthy(level, message)) wakeLog(`renderer: ${message}`);
+  });
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -1194,7 +1186,7 @@ app.whenReady().then(() => {
   startPresencePolling();
   startRefreshLoop();
   wireSleepWakeGating();
-  wireRendererResetOnWake();
+  wireWakeLog();
   // Queued launches (from a previous run, or an extension launchTask call
   // that landed before this app ever started) start right away "-" see
   // background-launcher.ts's "on app ready" trigger.
