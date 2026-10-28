@@ -84,3 +84,9 @@ The e2e suite is slow (full run ~2.5 min); spend it deliberately.
   is the behavior, with a comment).
 - **Leave no app instances behind.** Close every Electron app a test or
   scratch script launches; leaked instances slow every later run.
+- **Run headless: the user must never see a test app.** Every e2e or
+  scratch launch sets `HARBORMASTER_WINDOW_OFFSCREEN=1`, which makes the
+  window invisible (opacity 0, click-through, never focused, no dock icon)
+  while it still renders normally for Playwright. Every new spec or script
+  that launches the app must set it too. Never start a visible instance
+  (`npm run dev`, `electron .`) to check something; use the e2e harness.
