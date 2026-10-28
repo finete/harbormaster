@@ -44,6 +44,7 @@ const PR_CHIP_CLASS: Record<ReturnType<typeof prBadgeVariant>, string> = {
   draft: "border-slate-500/40 text-slate-300 hover:bg-slate-500/15",
   merged: "border-violet-500/40 text-violet-300 hover:bg-violet-500/15",
   closed: "border-red-500/40 text-red-300 hover:bg-red-500/15",
+  changes: "border-amber-500/40 text-amber-300 hover:bg-amber-500/15",
 };
 
 const CHIP_BASE =
