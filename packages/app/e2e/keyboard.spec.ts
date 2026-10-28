@@ -124,6 +124,8 @@ test("kbd hint chips are visible on the Board and New task buttons", async () =>
     window.getByTestId("board-new-task-button").locator("kbd"),
   ).toBeVisible();
   await window.getByTestId("workspace-button").click();
+  // Sidebar nav rows reveal their shortcut on hover (Claude/Codex style).
+  await window.getByTestId("board-button").hover();
   await expect(window.getByTestId("board-button").locator("kbd")).toBeVisible();
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
