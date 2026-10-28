@@ -175,6 +175,35 @@ describe("extension wiring", () => {
     await pi.handlers.get("session_shutdown")?.({}, ctx);
   });
 
+  it("a blocking UI prompt mid-loop reads as your move, not working", async () => {
+    const pi = fakePi();
+    harbormasterExtension(pi.api);
+
+    const ctx = fakeCtx(join(dir, "session.jsonl"));
+    await pi.handlers.get("session_start")?.({}, ctx);
+    const presence = new SessionPresenceAccess(
+      resolveStatePaths(dir).presenceDir,
+    );
+
+    // Agent loop running (e.g. executing a bash tool call) -> working.
+    await pi.handlers.get("agent_start")?.({}, ctx);
+    expect((await presence.read("task-1"))?.runningTurn).toBe(true);
+
+    // The commit gate opens its select prompt: the loop is still open but
+    // parked on the user -> your move.
+    await pi.handlers.get("ui_prompt_start")?.({}, ctx);
+    expect((await presence.read("task-1"))?.runningTurn).toBe(false);
+
+    // User approves/blocks, the prompt resolves, the loop resumes -> working.
+    await pi.handlers.get("ui_prompt_end")?.({}, ctx);
+    expect((await presence.read("task-1"))?.runningTurn).toBe(true);
+
+    await pi.handlers.get("agent_end")?.({}, ctx);
+    expect((await presence.read("task-1"))?.runningTurn).toBe(false);
+
+    await pi.handlers.get("session_shutdown")?.({}, ctx);
+  });
+
   it("names the session after its task once (no rename when already named)", async () => {
     const pi = fakePi();
     harbormasterExtension(pi.api);

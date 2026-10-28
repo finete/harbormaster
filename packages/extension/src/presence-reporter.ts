@@ -30,8 +30,24 @@ export interface StartSessionInput {
  */
 export class PresenceReporter {
   private attachment: { taskId: string; pid: number } | undefined;
-  private turnActive = false;
+  /** The agent loop is running (agent_start..agent_end). */
+  private loopActive = false;
+  /**
+   * Pi is blocked on a user-facing extension UI prompt (a `ctx.ui.select` /
+   * `confirm` / `input` / `editor` prompt — e.g. the commit gate). The loop
+   * is technically still open, but nothing proceeds until the user acts, so
+   * the task is "your move", not "working".
+   */
+  private promptPending = false;
   private registering: Promise<void> = Promise.resolve();
+
+  /**
+   * Effective running-turn state reported to presence: the agent is only
+   * "working" when its loop is active AND it is not parked on a user prompt.
+   */
+  private get effectiveRunning(): boolean {
+    return this.loopActive && !this.promptPending;
+  }
 
   constructor(private readonly options: PresenceReporterOptions) {}
 
@@ -70,8 +86,9 @@ export class PresenceReporter {
     this.attachment = { taskId: input.taskId, pid: this.options.pid };
     // Apply any turn that started while registration was in flight. A fresh
     // attachment is idle by construction (register() seeds runningTurn
-    // itself), so there is nothing to reconcile when no turn is active.
-    if (this.turnActive) await this.applyTurnState();
+    // itself), so there is nothing to reconcile when the effective state is
+    // not running — including the case of a prompt already pending at start.
+    if (this.effectiveRunning) await this.applyTurnState();
   }
 
   /** Refresh the heartbeat for the current attachment, if any. */
@@ -85,9 +102,20 @@ export class PresenceReporter {
     );
   }
 
-  /** Record a turn boundary (agent started/stopped working). */
+  /** Record an agent-loop boundary (agent started/stopped working). */
   async setTurnActive(active: boolean): Promise<void> {
-    this.turnActive = active;
+    this.loopActive = active;
+    await this.registering;
+    await this.applyTurnState();
+  }
+
+  /**
+   * Record that Pi started/stopped waiting on a blocking user-facing UI
+   * prompt. While pending, the task reads as "your move" even though the
+   * agent loop is still open; clearing it restores the loop's running state.
+   */
+  async setPromptPending(pending: boolean): Promise<void> {
+    this.promptPending = pending;
     await this.registering;
     await this.applyTurnState();
   }
@@ -97,7 +125,7 @@ export class PresenceReporter {
     await this.options.presence.setTurnActive(
       this.attachment.taskId,
       this.attachment.pid,
-      this.turnActive,
+      this.effectiveRunning,
       this.nowIso(),
     );
   }

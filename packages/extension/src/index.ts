@@ -260,6 +260,20 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       await refreshWidget(ctx).catch(() => {});
       await drainInbox().catch(() => {});
     });
+    // A blocking user-facing prompt (a `ctx.ui.select`/`confirm`/`input`
+    // from any extension; the commit gate is the motivating case) parks the
+    // agent loop on the user: nothing proceeds until they act. Report it as
+    // "your move" (not "working") for its duration, then restore the loop's
+    // running state when the prompt resolves. These fire regardless of the
+    // loop (e.g. a slash-command prompt while idle); the reporter folds them
+    // together (effective running = loop active AND no prompt pending), so an
+    // idle prompt stays idle and a mid-turn gate flips working to your move.
+    pi.on("ui_prompt_start", async () => {
+      await reporter.setPromptPending(true).catch(() => {});
+    });
+    pi.on("ui_prompt_end", async () => {
+      await reporter.setPromptPending(false).catch(() => {});
+    });
     // `agent_end` can fire while Pi still reports streaming; `agent_settled`
     // is when it is truly idle, so queued followUps are claimed then too.
     pi.on("agent_settled", async (_event, ctx: ExtensionContext) => {

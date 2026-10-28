@@ -183,6 +183,53 @@ describe("PresenceReporter", () => {
     ]);
   });
 
+  it("folds a pending UI prompt into the turn state: working -> your move -> working", async () => {
+    const presence = new FakePresenceAccess();
+    const reporter = new PresenceReporter({
+      presence,
+      pid: 123,
+      now: () => "t3",
+    });
+
+    await reporter.start({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      mode: "interactive",
+    });
+    await reporter.setTurnActive(true); // agent loop running -> working
+    await reporter.setPromptPending(true); // gate opens -> your move
+    await reporter.setPromptPending(false); // gate resolves -> working again
+    await reporter.setTurnActive(false); // loop ends -> idle
+
+    const running = presence.calls
+      .filter((c) => c.method === "setTurnActive")
+      .map((c) => c.args[2]);
+    expect(running).toEqual([true, false, true, false]);
+  });
+
+  it("a prompt pending while the loop is idle stays idle (no spurious working)", async () => {
+    const presence = new FakePresenceAccess();
+    const reporter = new PresenceReporter({
+      presence,
+      pid: 123,
+      now: () => "t4",
+    });
+
+    await reporter.start({
+      taskId: "task-1",
+      sessionPath: "/s.jsonl",
+      mode: "interactive",
+    });
+    // No agent loop active (e.g. a slash-command prompt while idle).
+    await reporter.setPromptPending(true);
+    await reporter.setPromptPending(false);
+
+    const running = presence.calls
+      .filter((c) => c.method === "setTurnActive")
+      .map((c) => c.args[2]);
+    expect(running).toEqual([false, false]);
+  });
+
   it("end clears the attachment and is idempotent", async () => {
     const presence = new FakePresenceAccess();
     const reporter = new PresenceReporter({
