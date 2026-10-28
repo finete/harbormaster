@@ -104,12 +104,6 @@ const api: HarbormasterApi = {
           handler,
         );
     },
-    onRendererReset: (cb: () => void): (() => void) => {
-      const handler = (): void => cb();
-      ipcRenderer.on("terminal:renderer-reset", handler);
-      return () =>
-        ipcRenderer.removeListener("terminal:renderer-reset", handler);
-    },
     attachPrimary: (
       taskId: string,
       cols: number,

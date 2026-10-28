@@ -55,8 +55,8 @@ const RUNNING_BLINK_MS = 1_000;
 /**
  * One shared, low-frequency blink for every running-turn dot. Deliberately
  * not a CSS `animate-ping`/`animate-pulse`: an infinite CSS animation makes
- * Chromium produce a frame every vsync (recompositing every WebGL terminal
- * layer) for as long as any agent runs. A 1s toggle costs one tiny repaint
+ * Chromium produce a frame every vsync (recompositing the window, terminal
+ * panes included) for as long as any agent runs. A 1s toggle costs one tiny repaint
  * per second instead, and the timer only runs while a running dot is
  * mounted (ref-counted, see lib/shared-store.ts).
  */

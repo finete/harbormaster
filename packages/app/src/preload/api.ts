@@ -254,12 +254,6 @@ export interface HarbormasterApi {
     /** Subscribe to accessibility-support-changed pushes from main. */
     onScreenReaderModeChanged(cb: (enabled: boolean) => void): () => void;
     /**
-     * Main asks every terminal pane to rebuild its WebGL renderer (system
-     * resume / screen unlock can silently blank WebGL canvases). The
-     * renderer subscribes once and fans out (renderer-reset-host.ts).
-     */
-    onRendererReset(cb: () => void): () => void;
-    /**
      * Rebind a task's live, currently-unattached background-launched
      * primary pty to this renderer (wave-2 task brief point 4): write the
      * returned `snapshot` into the pane's xterm first, then behave exactly

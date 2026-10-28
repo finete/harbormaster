@@ -1,8 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
 // Enable xterm's a11y mirror for the full e2e suite so `toContainText`
-// assertions can read terminal text via the accessibility tree (xterm renders
-// to a <canvas> in WebGL mode, giving no DOM text otherwise).
+// assertions read terminal text the same way in every spec, via the
+// accessibility tree (stable plain text, independent of renderer markup).
 // Performance specs that measure production config pass
 // HARBORMASTER_TERMINAL_A11Y_MIRROR=0 in their own env to override this.
 // See P1-1 in terminal-perf-checklist.md.
