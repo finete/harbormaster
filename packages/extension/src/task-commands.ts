@@ -190,16 +190,30 @@ export const DONE_MESSAGES: Record<
  * retrying with the accumulated `force` flags. Warnings surface via
  * `ctx.ui.notify`; the same question twice means core refused despite the
  * answer, so the loop never repeats a question.
+ *
+ * `protectedPaths` must include this session's own worktree (its cwd): the
+ * command runs *inside* the task's live Pi session, so without it `toDone`
+ * would remove the worktree out from under the running session (the app's
+ * Done path passes live pane cwds for exactly this reason). The worktree is
+ * then left in place with a warning and the refresh sweep reaps it once the
+ * pane closes.
  */
 export async function runToDoneCommand(
   core: TaskCommandsCore,
   taskId: string,
   ui: TaskCommandsUi,
+  options: { protectedPaths?: readonly string[] } = {},
 ): Promise<boolean> {
+  const protectedPaths = options.protectedPaths
+    ? [...options.protectedPaths]
+    : undefined;
   try {
     const force: ToDoneForce = {};
     for (;;) {
-      const result = await core.commands.toDone(taskId, { force });
+      const result = await core.commands.toDone(taskId, {
+        force,
+        ...(protectedPaths ? { protectedPaths } : {}),
+      });
       if (!isToDoneConfirmation(result)) {
         ui.notify(
           result.warning ?? "Moved to Done",
