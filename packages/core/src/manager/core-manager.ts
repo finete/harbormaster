@@ -446,15 +446,36 @@ export class CoreManager implements CoreCommands {
       };
     }
 
+    // A conversation recorded without its id (a task imported from pi-home):
+    // reopen that exact file, never a fresh session next to it. It already
+    // holds the task's prompt, so that is never replayed into it. The
+    // harness's `recordTaskSession` call then binds its id for good.
+    if (
+      binding.sessionPath &&
+      (await this.deps.sessions.exists(binding.sessionPath))
+    ) {
+      if (!task.initialPromptDeliveredAt) {
+        await this.deps.tasks.patchTask(taskId, (fresh) =>
+          fresh.initialPromptDeliveredAt
+            ? undefined
+            : { ...fresh, initialPromptDeliveredAt: now, updatedAt: now },
+        );
+      }
+      return { mode: "open", sessionPath: binding.sessionPath };
+    }
+
     // Legacy binding from before session binding existed: a pane already
     // ran here (its prompt was delivered), so reconnect to the most recent
     // conversation in this per-task worktree rather than starting a new
     // one. The harness's `recordTaskSession` call then binds it for good.
     if (task.initialPromptDeliveredAt) return { mode: "continue" };
 
+    // A recorded file that is gone must not survive next to the fresh id:
+    // a later resume would open it under an id it does not carry.
+    const { sessionPath: _gone, ...fresh } = binding;
     const sessionId = this.deps.ids.next();
     await this.deps.bindings.replaceBinding({
-      ...binding,
+      ...fresh,
       sessionId,
       updatedAt: now,
     });
@@ -480,10 +501,16 @@ export class CoreManager implements CoreCommands {
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (!binding) return false;
     if (binding.sessionId) {
-      // Another conversation started inside the task's pane (e.g. Pi's
-      // /new): the binding stays authoritative, like pi-home's.
-      if (binding.sessionId !== input.sessionId) return false;
-      if (binding.sessionPath === input.sessionPath) return false;
+      if (binding.sessionId !== input.sessionId) {
+        // Another conversation started inside the task's pane (e.g. Pi's
+        // /new): the binding stays authoritative, like pi-home's. Unless it
+        // is the bound file itself reporting a different id: then the file
+        // is the conversation and the id was never written (a pi-home
+        // import launched before `open` existed), so adopt the file's id.
+        if (binding.sessionPath !== input.sessionPath) return false;
+      } else if (binding.sessionPath === input.sessionPath) {
+        return false;
+      }
     } else if (!binding.worktreePath) {
       return false;
     }

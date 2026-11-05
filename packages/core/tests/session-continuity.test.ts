@@ -96,6 +96,8 @@ interface Fixture {
   checkout: string;
   repositoryId: string;
   manager: CoreManager;
+  /** Seed bindings states no command produces (pi-home imports). */
+  bindings: WorkspaceBindingAccess;
   /** Arm a one-shot failure on a bindings/tasks verb (rollback tests). */
   failNext: (verb: "replaceBinding" | "attachBinding" | "replaceTask") => void;
 }
@@ -185,6 +187,7 @@ async function fixture(): Promise<Fixture> {
     checkout,
     repositoryId: "github.com/acme/repo",
     manager,
+    bindings,
     failNext: (verb) => armed.add(verb),
   };
 }
@@ -295,6 +298,72 @@ describe.skipIf(!gitAvailable)("claimSessionLaunch / recordTaskSession", () => {
     expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
       mode: "resume",
       sessionId: "legacy-1",
+      sessionPath: file,
+    });
+  });
+
+  it("opens a recorded file core has no id for (a pi-home import) without replaying its prompt, then binds the id the harness reports", async () => {
+    const f = await fixture();
+    const task = await startedTask(f);
+    const file = await fakeSessionFile(f.root, "imported-1");
+    const binding = await f.manager.getTaskWorkspace(task.id);
+    if (!binding) throw new Error("expected a binding");
+    await f.bindings.replaceBinding({ ...binding, sessionPath: file });
+
+    expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+      mode: "open",
+      sessionPath: file,
+    });
+    expect(await f.manager.claimInitialPrompt(task.id)).toBeUndefined();
+    expect(
+      await f.manager.recordTaskSession(task.id, {
+        sessionId: "imported-1",
+        sessionPath: file,
+      }),
+    ).toBe(true);
+    expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+      mode: "resume",
+      sessionId: "imported-1",
+      sessionPath: file,
+    });
+  });
+
+  it("never pairs a fresh session id with a recorded file that is gone", async () => {
+    const f = await fixture();
+    const task = await startedTask(f);
+    const binding = await f.manager.getTaskWorkspace(task.id);
+    if (!binding) throw new Error("expected a binding");
+    await f.bindings.replaceBinding({
+      ...binding,
+      sessionPath: join(f.root, "gone.jsonl"),
+    });
+
+    expect((await f.manager.claimSessionLaunch(task.id))?.mode).toBe("new");
+    expect(
+      (await f.manager.getTaskWorkspace(task.id))?.sessionPath,
+    ).toBeUndefined();
+  });
+
+  it("heals a binding whose id was never written: the bound file reporting its own id wins", async () => {
+    const f = await fixture();
+    const task = await startedTask(f);
+    const first = await f.manager.claimSessionLaunch(task.id);
+    if (first?.mode !== "new") throw new Error("expected a new session");
+    // The broken pre-fix state: a fresh id next to an imported file.
+    const file = await fakeSessionFile(f.root, "real-1");
+    const binding = await f.manager.getTaskWorkspace(task.id);
+    if (!binding) throw new Error("expected a binding");
+    await f.bindings.replaceBinding({ ...binding, sessionPath: file });
+
+    expect(
+      await f.manager.recordTaskSession(task.id, {
+        sessionId: "real-1",
+        sessionPath: file,
+      }),
+    ).toBe(true);
+    expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+      mode: "resume",
+      sessionId: "real-1",
       sessionPath: file,
     });
   });

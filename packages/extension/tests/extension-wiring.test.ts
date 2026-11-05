@@ -117,6 +117,7 @@ describe("extension wiring", () => {
     process.env.HARBORMASTER_TASK_ID = "task-1";
     process.env.HARBORMASTER_STATE_DIR = dir;
     delete process.env.HARBORMASTER_SESSION_ID;
+    delete process.env.HARBORMASTER_SESSION_PATH;
     const paths = resolveStatePaths(dir);
     // Deterministic, empty codeRoot: listRepositories() must never scan the
     // real $HOME/Code checked out on the machine running these tests.
@@ -393,6 +394,7 @@ describe("extension wiring", () => {
 
     it("relation child rejects when the nested-session guard treats this process as not the task", async () => {
       process.env.HARBORMASTER_SESSION_ID = "pane-session";
+      process.env.HARBORMASTER_SESSION_PATH = join(dir, "pane.jsonl");
       const pi = fakePi();
       harbormasterExtension(pi.api);
       // A nested pi process (subagent) inherits the env but opens its own
@@ -416,6 +418,34 @@ describe("extension wiring", () => {
       await expect(subtaskTool?.execute("call-2", {})).rejects.toThrow(
         /only available inside a Harbormaster task session/,
       );
+    });
+
+    it("the pane's own session file is the task session even when core holds a stale id for it", async () => {
+      // A pi-home import: the pane opened the task's recorded file, whose id
+      // core never knew (or recorded wrongly).
+      process.env.HARBORMASTER_SESSION_ID = "never-written-id";
+      process.env.HARBORMASTER_SESSION_PATH = join(dir, "session.jsonl");
+      const pi = fakePi();
+      harbormasterExtension(pi.api);
+      await pi.handlers.get("session_start")?.(
+        {},
+        fakeCtx(join(dir, "session.jsonl")),
+      );
+
+      const result = (await pi.tools
+        .get("harbormaster_launch_task")
+        ?.execute("call-1", {
+          relation: "child",
+          title: "Fix something",
+          prompt: "Do the thing",
+          repository: "none",
+        })) as { details: { task: { id: string } } };
+      const paths = resolveStatePaths(dir);
+      const child = await new JsonTaskStateAccess(
+        paths.tasksFile,
+        paths.tasksLockFile,
+      ).getTask(result.details.task.id);
+      expect(child?.parentTaskId).toBe("task-1");
     });
 
     it("a child launch passes through to launchTask with fromTaskId set to this task", async () => {
