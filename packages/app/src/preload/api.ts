@@ -449,5 +449,11 @@ export interface HarbormasterApi {
      * same `selectTask` a sidebar row click does).
      */
     onOpenTask(listener: (taskId: string) => void): () => void;
+    /**
+     * A launched task's background session just started (main pushes this
+     * only once its pty exists): the renderer adds it to the sidebar rail
+     * without focusing it, so its pane attaches to that pty.
+     */
+    onTaskLaunched(listener: (taskId: string) => void): () => void;
   };
 }

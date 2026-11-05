@@ -262,6 +262,14 @@ const api: HarbormasterApi = {
       ipcRenderer.on("app:open-task", handler);
       return () => ipcRenderer.removeListener("app:open-task", handler);
     },
+    onTaskLaunched: (listener: (taskId: string) => void): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        taskId: string,
+      ): void => listener(taskId);
+      ipcRenderer.on("app:task-launched", handler);
+      return () => ipcRenderer.removeListener("app:task-launched", handler);
+    },
   },
   terminalHost: {
     resolveClipboardPaste: (): Promise<string | null> =>

@@ -202,7 +202,9 @@ export function App(): JSX.Element {
             [...savedOpened].filter((id) => known.has(id)),
           );
           if (restored.size > 0) {
-            setOpenedTaskIds(restored);
+            // Merge, never replace: a launch that auto-opened while the
+            // board fetch was in flight (onTaskLaunched below) must survive.
+            setOpenedTaskIds((prev) => new Set([...restored, ...prev]));
             setFocusedTaskId(
               savedFocused && restored.has(savedFocused)
                 ? savedFocused
@@ -393,6 +395,24 @@ export function App(): JSX.Element {
         setView("workspace");
       }),
     [selectTask],
+  );
+
+  // A launched task (agent tool or the composer's launch mode) whose
+  // background session just started: add it to the rail so it is one click
+  // away, but never steal focus or the view (/docs/design-decisions.md
+  // "Launching tasks from an agent"). Main pushes this only once the pty
+  // exists, so the pane that mounts here attaches to it (no takeover check:
+  // it is our own app-owned session). Only focuses when nothing else is.
+  useEffect(
+    () =>
+      window.harbormaster.app.onTaskLaunched((taskId) => {
+        setOpenedTaskIds((prev) =>
+          prev.has(taskId) ? prev : new Set(prev).add(taskId),
+        );
+        appendOpened(taskId);
+        setFocusedTaskId((current) => current || taskId);
+      }),
+    [appendOpened],
   );
 
   // Main's 30s automation-refresh loop (see main/index.ts's refreshOnce)

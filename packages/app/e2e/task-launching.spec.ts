@@ -208,7 +208,7 @@ test.afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("launching a subtask nests it under its parent, queued, starting in the background with no pane and no view switch; opening it attaches with exactly one pi process", async () => {
+test("launching a subtask nests it under its parent, queued, starting in the background into the sidebar rail with no focus or view switch; opening it attaches with exactly one pi process", async () => {
   // --- Seed: a repo-backed parent task, started now (Dev + its own pi pane). ---
   await window.getByTestId("board-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Parent Task");
@@ -305,13 +305,26 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
     timeout: 10_000,
   });
 
-  // Started in the background: exactly one pi process for it, no pane.
+  // Started in the background: exactly one pi process for it, and it was
+  // auto-added to the sidebar rail (its workspace mounted, attached to that
+  // pty) without stealing the view or focus from the parent.
   await expect
     .poll(() => invocationsFor("child-under-test").length, {
       timeout: 10_000,
     })
     .toBe(1);
-  await expect(window.getByTestId(`task-workspace-${childId}`)).toHaveCount(0);
+  await expect(window.getByTestId(`sidebar-task-row-${childId}`)).toHaveCount(
+    1,
+    { timeout: 10_000 },
+  );
+  await expect(window.getByTestId(`task-workspace-${childId}`)).toHaveCount(1);
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await expect(
+    window.getByTestId(`sidebar-task-row-${parentId}`),
+  ).toHaveAttribute("data-selected", "true");
+  await expect(
+    window.getByTestId(`sidebar-task-row-${childId}`),
+  ).not.toHaveAttribute("data-selected", "true");
 
   // --- Opening it attaches: no takeover dialog, no second pi process. ---
   await childCard.click();
