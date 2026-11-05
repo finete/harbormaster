@@ -194,9 +194,11 @@ function flattenTasks(columns: BoardColumn[]): Task[] {
  * launch resumes/forks/news the same conversation a manual open would. A
  * task whose binding has no worktree yet, or whose harness command is
  * missing, is logged and left alone with a `lastError` "-" background
- * launches never fall back to a shell.
+ * launches never fall back to a shell. Resolves `true` only once the pty
+ * actually exists (registered as the task's primary, so a pane opened from
+ * here on attaches to it instead of spawning a second pi).
  */
-async function startBackgroundLaunch(taskId: string): Promise<void> {
+async function startBackgroundLaunch(taskId: string): Promise<boolean> {
   const resolution = await resolvePrimaryLaunch(
     taskId,
     activeStateDir,
@@ -212,7 +214,7 @@ async function startBackgroundLaunch(taskId: string): Promise<void> {
         lastError: "Launch failed: no worktree is bound to this task yet.",
       })
       .catch(() => {});
-    return;
+    return false;
   }
   if (resolution.commandMissing || !resolution.spec) {
     console.error(
@@ -223,12 +225,26 @@ async function startBackgroundLaunch(taskId: string): Promise<void> {
         lastError: "Launch failed: the pi command could not be found on PATH.",
       })
       .catch(() => {});
-    return;
+    return false;
   }
   createBackgroundPrimarySession(taskId, resolution.spec, (_exitCode) => {
     void pollPresenceOnce();
     void backgroundLauncher.runPass();
   });
+  return true;
+}
+
+/**
+ * A launched task's background pty just started: every window adds it to
+ * its sidebar rail (attached, never focused; see App.tsx's
+ * `onTaskLaunched`). Pushed only after the pty exists, so the pane the
+ * renderer mounts attaches to it rather than racing it with a second pi.
+ */
+function broadcastTaskLaunched(taskId: string): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    safeSend(win.webContents, "app:task-launched", taskId);
+  }
 }
 
 const backgroundLauncher = createBackgroundLauncher({
@@ -258,10 +274,15 @@ const backgroundLauncher = createBackgroundLauncher({
     });
   },
   claimPendingLaunches: (limit) => core.commands.claimPendingLaunches(limit),
-  startSession: (task) => startBackgroundLaunch(task.id),
+  startSession: async (task) => {
+    if (await startBackgroundLaunch(task.id)) broadcastTaskLaunched(task.id);
+  },
   // A message target with no live session resumes through the very same
-  // path a launch uses (task-messaging decision 5).
-  wakeSession: (taskId) => startBackgroundLaunch(taskId),
+  // path a launch uses (task-messaging decision 5). A wake is not a launch:
+  // it never opens a rail row.
+  wakeSession: async (taskId) => {
+    await startBackgroundLaunch(taskId);
+  },
   onStartError: (task, error) => {
     console.error(
       `[background-launcher] starting task ${task.id} failed:`,
