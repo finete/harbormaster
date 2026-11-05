@@ -520,7 +520,13 @@ test("sidebar rows group under a repository header with a state chip per task", 
   // Alpha was confirmed into Awaiting / Review above; Beta never left backlog.
   await expect(alpha.getByTestId("state-chip")).toHaveText("Review");
   await expect(beta.getByTestId("state-chip")).toHaveText("Backlog");
-  await expect(alpha.getByTestId("sidebar-row-status-dot")).toBeVisible();
+  // Some status dot. Which one depends on Alpha's pi: it survives the tab
+  // close above (kept warm), so it may already read live ("your move").
+  await expect(
+    alpha.locator(
+      '[data-testid="sidebar-row-status-dot"], [data-testid="sidebar-row-attention-dot"], [data-testid="sidebar-row-spinner"]',
+    ),
+  ).toBeVisible();
   await expect(alpha.getByTestId("sidebar-row-time")).toHaveText(
     /^(now|\d+m)$/,
   );

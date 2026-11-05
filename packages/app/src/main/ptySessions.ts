@@ -483,10 +483,14 @@ export function attachPrimarySession(
  * renderer crash keeps the same webContents, so its panes never ran their
  * cleanup — so the reloaded pane's `attachPrimary` reconnects to the SAME
  * pi process instead of spawning a second one on the same session file.
+ * Also used for an explicit tab close (`pty:release`), where the closing
+ * pane passes `screen`: its serialized last screen, seeded into the mirror
+ * so a reopen shows it immediately (the mirror otherwise starts empty, and
+ * an idle pi only redraws on a size change). A reload has no such snapshot.
  * Returns `false` for anything that is not a task's registered primary (a
  * "+ terminal" shell, a shell fallback): the caller disposes those.
  */
-export function detachPrimarySession(id: string): boolean {
+export function detachPrimarySession(id: string, screen?: string): boolean {
   const session = sessions.get(id);
   if (!session?.taskId || primaryTaskSessions.get(session.taskId) !== id) {
     return false;
@@ -515,6 +519,8 @@ export function detachPrimarySession(id: string): boolean {
   // without this a later snapshot would lack alt screen and mouse modes.
   const replay = session.modes?.replaySequence();
   if (replay) headlessTerminal.write(replay);
+  // Writes are applied in order, so this lands before any later live output.
+  if (screen) headlessTerminal.write(screen);
   const taskId = session.taskId;
   session.io.sink = (data) => {
     try {

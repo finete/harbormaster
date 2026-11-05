@@ -79,6 +79,8 @@ const api: HarbormasterApi = {
     },
     dispose: (id: string): Promise<void> =>
       ipcRenderer.invoke("pty:dispose", id),
+    release: (id: string, screen?: string): Promise<void> =>
+      ipcRenderer.invoke("pty:release", id, screen),
     onData: (
       listener: (event: TerminalDataEvent) => void,
       id?: string,

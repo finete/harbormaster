@@ -41,6 +41,7 @@ let window: Page;
 let root: string;
 let stateDir: string;
 let argvLog: string;
+let pidFile: string;
 const mainProcessErrors: string[] = [];
 
 function cardLocator(title: string): Locator {
@@ -84,6 +85,27 @@ async function closeWorkspace(): Promise<void> {
   await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
 }
 
+/**
+ * End the task's (warm, tab-closed) fake pi, standing in for an evicted or
+ * exited session so the next open must cold-start and resume. Kills the
+ * pty's whole process group (the shell and its `sleep`), then waits until
+ * the process is reaped (gone from the process table).
+ */
+async function killPi(): Promise<void> {
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  process.kill(-pid, "SIGKILL");
+  await expect
+    .poll(() => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .toBe(false);
+}
+
 test.beforeAll(async () => {
   root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-session-"));
   stateDir = path.join(root, "state");
@@ -124,6 +146,7 @@ test.beforeAll(async () => {
   // Fake pi: appends "@@launch" + each arg followed by an "@@end" line to
   // the argv log (unambiguous even for multiline args), echoes, idles.
   argvLog = path.join(root, "pi-argv.log");
+  pidFile = path.join(root, "pi.pid");
   const fakePi = path.join(root, "fake-pi");
   writeFileSync(
     fakePi,
@@ -131,6 +154,7 @@ test.beforeAll(async () => {
       "#!/bin/sh",
       'log="$(dirname "$0")/pi-argv.log"',
       '{ printf "@@launch\\n"; for a in "$@"; do printf "%s\\n@@end\\n" "$a"; done; } >> "$log"',
+      'echo $$ > "$(dirname "$0")/pi.pid"',
       'echo "FAKE-PI-UP"',
       "while true; do sleep 3600; done",
       "",
@@ -180,7 +204,7 @@ let taskId = "";
 let sessionId = "";
 let sessionFile = "";
 
-test("the first pane pre-assigns a session id; reopening the task resumes that same session", async () => {
+test("the first pane pre-assigns a session id; a closed tab re-attaches to the same pi; a cold reopen resumes that session", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Continuity");
   await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
@@ -196,10 +220,25 @@ test("the first pane pre-assigns a session id; reopening the task resumes that s
   expect(sessionId).not.toBe("");
   expect(first).toEqual(["--session-id", sessionId, "--", "Kick it off"]);
 
+  await expect(window.getByTestId("terminal-panel")).toContainText(
+    "FAKE-PI-UP",
+  );
+
+  // Closing the tab keeps pi warm: reopening re-attaches to the SAME
+  // process (its earlier output replayed from the snapshot), no relaunch.
   await closeWorkspace();
   await openTask("Continuity");
+  await expect(window.getByTestId("terminal-panel")).toContainText(
+    "FAKE-PI-UP",
+  );
+  expect(launches()).toHaveLength(1);
+
+  // Once that pi is gone (evicted/exited), the next open cold-starts and
+  // resumes the same conversation; the initial prompt is never replayed.
+  await closeWorkspace();
+  await killPi();
+  await openTask("Continuity");
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(2);
-  // Same conversation, and the initial prompt is never replayed.
   expect(launches()[1]).toEqual(["--session-id", sessionId]);
 });
 
@@ -219,6 +258,7 @@ test("once the extension recorded the session file, reopening resumes that exact
   expect(recorded).toBe(true);
 
   await closeWorkspace();
+  await killPi();
   await openTask("Continuity");
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(3);
   expect(launches()[2]).toEqual(["--session", sessionFile]);
@@ -295,6 +335,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   // The fork is handed out once: the next open resumes the new session.
   await window.getByTestId("workspace-button").click();
   await closeWorkspace();
+  await killPi();
   await openTask("Continuity");
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(5);
   expect(launches()[4]).toEqual(["--session-id", newSessionId]);

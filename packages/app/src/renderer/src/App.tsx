@@ -17,7 +17,6 @@ import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { Button } from "./components/ui/button";
-import { Dialog, DialogFooter } from "./components/ui/dialog";
 import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { requestConfirm } from "./confirm";
@@ -117,11 +116,12 @@ export function App(): JSX.Element {
 
   // Close-workspace confirm: set only while the focused task's agent is
   // mid-turn and the user asked to close its workspace anyway.
-  const [pendingClose, setPendingClose] = useState<string | null>(null);
 
-  // Closing unmounts the TaskWorkspace, which disposes every pane's pty
-  // (TerminalPane unmount cleanup); the pi session ends, cmux-style. The
-  // task itself stays on the board; reopening starts fresh panes. Also
+  // Closing unmounts the TaskWorkspace. Its "+ terminal" shells are killed,
+  // but the task's pi keeps running in the background (TerminalPane
+  // releases it; main keeps the few most recently closed warm, see
+  // main/warm-sessions.ts), so reopening re-attaches instantly and closing
+  // never interrupts a working agent. The task stays on the board. Also
   // drops the task's persisted dockview layout (lib/workspace-persistence)
   // so a later reopen never resurrects a stale one — relaunching after a
   // close must not restore it (restore only replays what was open at exit).
@@ -143,19 +143,6 @@ export function App(): JSX.Element {
       removeClosed(taskId);
     },
     [removeClosed],
-  );
-
-  const requestCloseTask = useCallback(
-    (taskId: string) => {
-      void window.harbormaster.core.presence(taskId).then((presence) => {
-        if (presence.live && presence.runningTurn) {
-          setPendingClose(taskId);
-          return;
-        }
-        closeTask(taskId);
-      });
-    },
-    [closeTask],
   );
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
@@ -373,7 +360,7 @@ export function App(): JSX.Element {
       if (key === "n") {
         // No dialog already open, and not mid-typing in some unrelated field
         // (see lib/keyboard-guard.ts) — matches the board's single-key guard.
-        if (takeover || pendingClose) return;
+        if (takeover) return;
         if (isTypingTarget(event.target)) return;
         event.preventDefault();
         openDraft();
@@ -381,7 +368,7 @@ export function App(): JSX.Element {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [takeover, pendingClose, openDraft]);
+  }, [takeover, openDraft]);
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
@@ -390,9 +377,9 @@ export function App(): JSX.Element {
       window.harbormaster.core.onCloseTabShortcut(() => {
         if (view !== "workspace") return;
         if (draftFocused) closeDraft();
-        else if (focusedTaskId) requestCloseTask(focusedTaskId);
+        else if (focusedTaskId) closeTask(focusedTaskId);
       }),
-    [view, draftFocused, focusedTaskId, requestCloseTask, closeDraft],
+    [view, draftFocused, focusedTaskId, closeTask, closeDraft],
   );
 
   // Clicking an OS notification: main pushes the clicked task's id (see
@@ -508,7 +495,7 @@ export function App(): JSX.Element {
               detachedIds={sidebarOrder.detachedIds}
               onDetachedChange={sidebarOrder.setDetachedIds}
               onSelectTask={selectTask}
-              onCloseTask={requestCloseTask}
+              onCloseTask={closeTask}
               onShowBoard={() => setView("board")}
               onOpenApprovals={() => setInboxOpen(true)}
               onNewTask={openDraft}
@@ -523,7 +510,7 @@ export function App(): JSX.Element {
             <WorkspaceView
               focusedTaskId={visibleTaskId}
               openedTaskIds={openedTaskIds}
-              onCloseTask={requestCloseTask}
+              onCloseTask={closeTask}
               composer={
                 draft && draftFocused ? (
                   <NewTaskComposer
@@ -554,42 +541,6 @@ export function App(): JSX.Element {
             openTask(taskId);
           }}
         />
-        <Dialog
-          open={pendingClose !== null}
-          onOpenChange={(open) => {
-            if (!open) setPendingClose(null);
-          }}
-          title="Agent is still working"
-          testId="close-while-running-dialog"
-        >
-          <p className="text-sm text-muted-foreground">
-            “
-            {pendingClose
-              ? (taskTitleRef.current.get(pendingClose) ?? "This task")
-              : ""}
-            ” has an agent mid-turn. Closing the workspace ends its session.
-          </p>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setPendingClose(null)}
-              data-testid="close-while-running-cancel"
-            >
-              Keep it running
-            </Button>
-            <Button
-              variant="outline"
-              className="border-red-900/60 text-red-400 hover:bg-red-950/40"
-              data-testid="close-while-running-confirm"
-              onClick={() => {
-                if (pendingClose) closeTask(pendingClose);
-                setPendingClose(null);
-              }}
-            >
-              Close anyway
-            </Button>
-          </DialogFooter>
-        </Dialog>
         <ApprovalInboxSheet open={inboxOpen} onOpenChange={setInboxOpen} />
         <ToastHost />
         <ConfirmHost />

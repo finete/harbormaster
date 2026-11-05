@@ -232,6 +232,16 @@ export interface HarbormasterApi {
     ack(id: string, chars: number): void;
     dispose(id: string): Promise<void>;
     /**
+     * Release a pane's pty on an explicit tab close: a task primary detaches
+     * back to the background (kept alive, headless screen mirror) so
+     * reopening re-attaches to the same pi instead of cold-starting one, and
+     * a working task's agent is not killed by closing its tab. Non-primary
+     * ptys ("+ terminal" shells, shell fallbacks) are disposed. Prefer this
+     * over `dispose` for pane unmount; `dispose` unconditionally kills.
+     * `screen` is the pane's serialized last screen, replayed on reopen.
+     */
+    release(id: string, screen?: string): Promise<void>;
+    /**
      * Subscribe to pty output. Pass `id` to receive only that session's
      * chunks (routed centrally in the preload: one IPC listener total, not
      * one per pane); omit it to receive every session's.
