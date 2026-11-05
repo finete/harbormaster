@@ -76,6 +76,7 @@ import {
 import { isAllowedRevealPath } from "./reveal-path";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import { createWakeLog, isWakeLogWorthy } from "./wake-log";
+import { WarmSessionCache } from "./warm-sessions";
 
 // Surface main-process crashes to stderr instead of letting Electron's
 // default "uncaught exception" dialog pop up in front of the user. Node only
@@ -105,6 +106,25 @@ function trackSession(webContentsId: number, sessionId: string): void {
 function untrackSession(webContentsId: number, sessionId: string): void {
   sessionsByWebContentsId.get(webContentsId)?.delete(sessionId);
 }
+
+/** Task ids whose agent was mid-turn at the last presence tick (eviction skips them). */
+let workingTaskIds = new Set<string>();
+
+/**
+ * Closed-tab task primaries kept warm for an instant reopen (see
+ * warm-sessions.ts and `pty:release`). Only an explicit tab close feeds it:
+ * a window reload detaches every pane at once (`releaseSessionsFor`) and
+ * must keep them all to re-attach.
+ */
+const warmSessions = new WarmSessionCache({
+  isWarm: (id) => {
+    const session = getSession(id);
+    return Boolean(session && !session.attached);
+  },
+  taskIdOf: (id) => getSession(id)?.taskId,
+  isWorking: (taskId) => workingTaskIds.has(taskId),
+  dispose: (id) => disposeSession(id),
+});
 
 /**
  * The renderer behind `webContentsId` started over without its panes
@@ -298,8 +318,11 @@ function registerCoreIpc(): void {
   // cwds core must never remove a worktree out from under.
   ipcMain.handle(
     "core:toDone",
-    (_event, taskId: string, options: { force?: ToDoneForce } | undefined) =>
-      core.commands.toDone(taskId, {
+    (_event, taskId: string, options: { force?: ToDoneForce } | undefined) => {
+      // A closed tab's warm pi still runs in the worktree; end it so its cwd
+      // doesn't land in protectedPaths and block the cleanup below.
+      warmSessions.disposeForTask(taskId);
+      return core.commands.toDone(taskId, {
         protectedPaths: activeSessionCwds(),
         ...(options?.force
           ? {
@@ -309,7 +332,8 @@ function registerCoreIpc(): void {
               },
             }
           : {}),
-      }),
+      });
+    },
   );
   ipcMain.handle(
     "core:reopenTask",
@@ -624,6 +648,13 @@ async function pollPresenceTick(): Promise<void> {
     }),
   );
   const payload: PresenceChangedPayload = Object.fromEntries(entries);
+  // Warm closed-tab sessions: remember who is mid-turn (never evicted), and
+  // end any whose task left the active set (Done, deleted) so a merged
+  // task's worktree cleanup isn't blocked by a lingering pi.
+  workingTaskIds = new Set(
+    entries.filter(([, p]) => p.runningTurn).map(([taskId]) => taskId),
+  );
+  warmSessions.reconcile(new Set(tasks.map((task) => task.id)));
   const json = JSON.stringify(payload);
   for (const win of windows) {
     if (win.isDestroyed() || win.webContents.isDestroyed()) continue;
@@ -915,6 +946,8 @@ function registerPtyIpc(): void {
       });
       if (!attached) return undefined;
       ref.id = attached.id;
+      // Reopened with a pane again: it is no longer a warm closed-tab session.
+      warmSessions.forget(attached.id);
       // Same per-window 'destroyed' cleanup as `pty:create` (see there).
       trackSession(sender.id, attached.id);
       return { id: attached.id, snapshot: attached.snapshot };
@@ -936,6 +969,26 @@ function registerPtyIpc(): void {
   });
 
   ipcMain.handle("pty:dispose", (event, id: string) => {
+    untrackSession(event.sender.id, id);
+    disposeSession(id);
+  });
+
+  // A pane closed by the user (tab close) releases its pty instead of
+  // killing it: a task's primary goes back to the background (headless
+  // screen mirror, same path as a window reload's `releaseSessionsFor`) so
+  // reopening the tab re-attaches to the SAME pi instead of cold-starting a
+  // new one (resume + MCP reconnect took several seconds), and closing the
+  // tab of a working task no longer kills its agent mid-run. It stays
+  // tracked to this webContents so the window's 'destroyed'/'closed' cleanup
+  // (and app quit) still disposes it. Everything that is not a task primary
+  // ("+ terminal" shells, shell fallbacks) is disposed as before.
+  ipcMain.handle("pty:release", (event, id: string, screen?: unknown) => {
+    if (
+      detachPrimarySession(id, typeof screen === "string" ? screen : undefined)
+    ) {
+      warmSessions.add(id);
+      return;
+    }
     untrackSession(event.sender.id, id);
     disposeSession(id);
   });

@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { Terminal } from "@xterm/xterm";
 import type { IDockviewPanelProps } from "dockview-react";
@@ -78,6 +79,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    // Primary only: on close its last screen is handed to main with the
+    // released pi, so reopening the tab shows it immediately.
+    const serializeAddon = isPrimary ? new SerializeAddon() : undefined;
+    if (serializeAddon) terminal.loadAddon(serializeAddon);
     terminal.open(container);
 
     // Add a data attribute so e2e can assert the unicode version without
@@ -201,7 +206,9 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
       void attachAttempt.then((attached) => {
         if (disposed) {
-          if (attached) void window.harbormaster.terminal.dispose(attached.id);
+          // Pane torn down during the attach race: hand the session back to
+          // the background rather than killing it (see `terminal.release`).
+          if (attached) void window.harbormaster.terminal.release(attached.id);
           return;
         }
         if (attached) {
@@ -221,7 +228,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           })
           .then(({ id, fellBackToShell: fellBack }) => {
             if (disposed) {
-              void window.harbormaster.terminal.dispose(id);
+              void window.harbormaster.terminal.release(id);
               return;
             }
             if (fellBack) setFellBackToShell(true);
@@ -264,7 +271,19 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       unsubscribeData?.();
       unsubscribeExit?.();
       unsubscribeA11y();
-      if (sessionId) void window.harbormaster.terminal.dispose(sessionId);
+      // Tab close / pane unmount: release (detach task primaries to the
+      // background, dispose shells) instead of unconditionally killing, so
+      // reopening re-attaches instantly and a working agent survives a tab
+      // close. The xterm instance itself is always disposed.
+      if (sessionId) {
+        let screen: string | undefined;
+        try {
+          screen = serializeAddon?.serialize({ scrollback: 1000 });
+        } catch {
+          // Best effort: without it a reopen just starts from a blank mirror.
+        }
+        void window.harbormaster.terminal.release(sessionId, screen);
+      }
       terminal.dispose();
     };
   }, []);

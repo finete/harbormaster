@@ -218,6 +218,15 @@ difference not listed here is a bug.
   ordinary interactive Pi sessions in app-owned ptys with no pane until
   opened (attach, never takeover); quitting the app stops them, no detached
   processes. See "Launching tasks from an agent" above.
+- **Closing a task's tab hides it, it does not stop it.** The task's pi is
+  detached back to an app-owned paneless pty (the same path a window reload
+  uses), so reopening re-attaches instantly instead of cold-starting pi
+  (session resume + MCP reconnect took seconds), and closing never
+  interrupts a working agent. Bounded: only the 6 most recently closed stay
+  warm; older idle ones are killed (that reopen cold-starts as before), and a
+  mid-turn agent is never evicted. A warm session ends when its task goes to
+  Done or is deleted, so it never blocks worktree cleanup. "+ terminal"
+  shells still die with their tab. See `packages/app/src/main/warm-sessions.ts`.
 - **Tasks can steer tasks.** Parent ↔ child messages deliver directly
   (loop-capped, child questions show "waiting on parent"); every other
   cross-task send needs the user's approval in the app. Delivery is a
