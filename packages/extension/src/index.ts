@@ -328,7 +328,13 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
     pi.registerCommand("todone", {
       description: "Complete this task and clean its workspace",
       handler: async (_args, ctx: ExtensionCommandContext) => {
-        await runToDoneCommand(core, taskId, ctx.ui);
+        // Protect this session's own worktree (its cwd): /todone runs inside
+        // the task's live Pi session, so without this `toDone` would remove
+        // the worktree out from under the running session. Left in place with
+        // a warning; the app's refresh sweep reaps it once the pane closes.
+        await runToDoneCommand(core, taskId, ctx.ui, {
+          protectedPaths: [process.cwd()],
+        });
         await refreshWidget(ctx).catch(() => {});
       },
     });

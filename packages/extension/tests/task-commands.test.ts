@@ -230,6 +230,22 @@ describe("runToDoneCommand", () => {
     ]);
   });
 
+  it("forwards protectedPaths so it never removes the session's own worktree", async () => {
+    const toDone = vi.fn().mockResolvedValue({ task: {} });
+    const core: TaskCommandsCore = { commands: { toDone } as never };
+    const ui = fakeUi();
+
+    const ok = await runToDoneCommand(core, "task-1", ui, {
+      protectedPaths: ["/code/worktrees/task-1"],
+    });
+
+    expect(ok).toBe(true);
+    expect(toDone).toHaveBeenCalledWith("task-1", {
+      force: {},
+      protectedPaths: ["/code/worktrees/task-1"],
+    });
+  });
+
   it("surfaces a landing warning instead of the default success notice", async () => {
     const toDone = vi
       .fn()
