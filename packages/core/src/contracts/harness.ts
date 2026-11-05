@@ -25,6 +25,9 @@ import type { PresenceRecord } from "./model.js";
  *   id if it was never persisted).
  * - `fork`: first launch after a Done task was reopened — copy the
  *   previous cycle's conversation into a new session with this id.
+ * - `open`: a conversation recorded before core knew its id (a task imported
+ *   from pi-home carries the session file but no id) — reopen that exact
+ *   file; the harness reports its id back through `recordTaskSession`.
  * - `continue`: legacy binding from before session binding existed — reopen
  *   the most recent session for the task's cwd (the worktree is per-task, so
  *   that is the task's conversation).
@@ -44,6 +47,7 @@ export type SessionLaunch =
     }
   | { mode: "resume"; sessionId: string; sessionPath?: string }
   | { mode: "fork"; sessionId: string; forkFrom: string }
+  | { mode: "open"; sessionPath: string }
   | { mode: "continue" };
 
 export interface BuildLaunchSpecInput {

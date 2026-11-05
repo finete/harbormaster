@@ -44,6 +44,8 @@ const TASK_ID_ENV = "HARBORMASTER_TASK_ID";
 const STATE_DIR_ENV = "HARBORMASTER_STATE_DIR";
 /** The exact session this pane launched: lets the extension ignore inherited env in nested pi processes (subagent children). */
 const SESSION_ID_ENV = "HARBORMASTER_SESSION_ID";
+/** The exact session file this pane opened, when it opened one: identifies the pane's own session even when core does not know (or has a stale) id for it. */
+const SESSION_PATH_ENV = "HARBORMASTER_SESSION_PATH";
 /** Overrides the launched command (and only the command) for e2e: a tiny fake binary stands in for `pi`. */
 const PI_COMMAND_ENV = "HARBORMASTER_PI_COMMAND";
 
@@ -93,6 +95,8 @@ export function piPromptArgs(prompt: string | undefined): string[] {
  *   must not be combined with `--session`/`--continue`, and `--session-id`
  *   must not be combined with `--session`/`--continue`).
  * - `--continue` reopens the most recent session for the cwd.
+ * - `open` maps to `--session <path>` as well: the file is known, its id
+ *   is not (yet).
  */
 export function piSessionArgs(session: SessionLaunch | undefined): string[] {
   if (!session) return [];
@@ -107,8 +111,38 @@ export function piSessionArgs(session: SessionLaunch | undefined): string[] {
         : ["--session-id", session.sessionId];
     case "fork":
       return ["--fork", session.forkFrom, "--session-id", session.sessionId];
+    case "open":
+      return ["--session", session.sessionPath];
     case "continue":
       return ["--continue"];
+  }
+}
+
+/**
+ * The pane's own-session identity for the extension's inherited-env guard:
+ * the id core assigned and, when the pane opens a specific file, that file.
+ * The extension accepts a session matching either, so a recorded file whose
+ * id core never knew (or knew wrongly) still counts as the pane's own.
+ */
+function sessionIdentityEnv(
+  session: SessionLaunch | undefined,
+): Record<string, string> {
+  if (!session) return {};
+  switch (session.mode) {
+    case "new":
+    case "fork":
+      return { [SESSION_ID_ENV]: session.sessionId };
+    case "resume":
+      return {
+        [SESSION_ID_ENV]: session.sessionId,
+        ...(session.sessionPath
+          ? { [SESSION_PATH_ENV]: session.sessionPath }
+          : {}),
+      };
+    case "open":
+      return { [SESSION_PATH_ENV]: session.sessionPath };
+    case "continue":
+      return {};
   }
 }
 
@@ -148,9 +182,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
       // actual session id against this value and stands down on mismatch,
       // so a child can never stomp the pane's presence record with its own
       // short-lived pid (the grey-dot-while-working bug).
-      ...(input.session && input.session.mode !== "continue"
-        ? { [SESSION_ID_ENV]: input.session.sessionId }
-        : {}),
+      ...sessionIdentityEnv(input.session),
     };
     return {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary

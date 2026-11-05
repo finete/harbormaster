@@ -9,7 +9,7 @@
 //   only meaningful inside a Harbormaster-launched Pi session (see
 //   `@harbormaster/core`'s `PiHarnessAdapter.buildLaunchSpec`, which sets
 //   `HARBORMASTER_TASK_ID` / `HARBORMASTER_STATE_DIR` /
-//   `HARBORMASTER_SESSION_ID`). Outside one (a bare `pi` run, or any other
+//   `HARBORMASTER_SESSION_ID` / `HARBORMASTER_SESSION_PATH`). Outside one (a bare `pi` run, or any other
 //   host) presence/widget/command registration is skipped entirely, and
 //   `harbormaster_subtask_status` errors if ever called. Also here: the
 //   inbox delivery of messages other tasks sent to this one (claimed from
@@ -37,6 +37,7 @@
 // tools that care (a `child` launch, `harbormaster_subtask_status`) read it
 // at EXECUTION time, never at registration time.
 
+import { resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -89,6 +90,7 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
   const taskId = process.env.HARBORMASTER_TASK_ID;
   const stateDirEnv = process.env.HARBORMASTER_STATE_DIR;
   const expectedSessionId = process.env.HARBORMASTER_SESSION_ID;
+  const expectedSessionPath = process.env.HARBORMASTER_SESSION_PATH;
 
   // One core instance for the whole process, used by every tool below —
   // `createCore` registers no timers of its own, so holding onto this
@@ -190,11 +192,17 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       // everything else stands down. (Running /new inside a pane also
       // mismatches: presence goes quiet until the pane is reopened —
       // flagged tradeoff, far better than children overwriting the
-      // record.)
-      if (
-        expectedSessionId &&
-        ctx.sessionManager.getSessionId() !== expectedSessionId
-      ) {
+      // record.) The pane's session is the one with the expected id or,
+      // when the pane opened a specific file, that file: a recorded
+      // conversation whose id core never knew (a pi-home import) or knew
+      // wrongly is still the pane's own; a nested child matches neither.
+      const isPaneSession =
+        (!expectedSessionId && !expectedSessionPath) ||
+        (expectedSessionId !== undefined &&
+          ctx.sessionManager.getSessionId() === expectedSessionId) ||
+        (expectedSessionPath !== undefined &&
+          resolve(sessionPath) === resolve(expectedSessionPath));
+      if (!isPaneSession) {
         sessionIsTask = false;
         return;
       }
