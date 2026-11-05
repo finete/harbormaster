@@ -55,7 +55,8 @@ describe("createCore", () => {
     });
 
     expect(task.state).toBe("backlog");
-    expect(task.kind).toBe("task");
+    // No repository: scratch ("chat") work.
+    expect(task.kind).toBe("temp_task");
 
     const columns = await core.commands.listBoard();
     const backlog = columns.find((c) => c.state === "backlog") as BoardColumn;

@@ -299,14 +299,19 @@ describe.skipIf(!gitAvailable)("claimSessionLaunch / recordTaskSession", () => {
     });
   });
 
-  it("returns undefined for tasks without a live worktree (scratch, parked)", async () => {
+  it("returns undefined for a task without a live workspace (parked); a started scratch task gets a new session", async () => {
     const f = await fixture();
+    const parked = await f.manager.createTask({
+      title: "Parked",
+      initialPrompt: "",
+    });
+    expect(await f.manager.claimSessionLaunch(parked.id)).toBeUndefined();
     const scratch = await f.manager.createTask({
       title: "Scratch",
       initialPrompt: "",
       start: true,
     });
-    expect(await f.manager.claimSessionLaunch(scratch.id)).toBeUndefined();
+    expect((await f.manager.claimSessionLaunch(scratch.id))?.mode).toBe("new");
   });
 });
 

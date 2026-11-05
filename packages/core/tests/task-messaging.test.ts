@@ -24,8 +24,6 @@ import {
   CoreManager,
   type CoreManagerDependencies,
   createCore,
-  JsonWorkspaceBindingAccess,
-  resolveStatePaths,
   SessionPresenceAccess,
 } from "../src/index.js";
 
@@ -115,29 +113,13 @@ const c = () => core.commands;
 
 /** A started Dev task with a scratch workspace (a messaging target needs a binding to host a session). */
 async function mk(title: string): Promise<string> {
-  const id = await unbound(title);
-  await bindScratch(id);
-  return id;
-}
-async function bindScratch(taskId: string): Promise<void> {
-  const paths = resolveStatePaths(stateDir);
-  const now = new Date().toISOString();
-  await new JsonWorkspaceBindingAccess(
-    paths.workspaceBindingsFile,
-    paths.workspaceBindingsLockFile,
-  ).attachBinding({
-    id: `binding-${taskId}`,
-    taskId,
-    worktreePath: join(root, "scratch", taskId),
-    scratch: true,
-    detached: false,
-    createdAt: now,
-    updatedAt: now,
-  });
-}
-/** A started Dev task with no workspace binding at all. */
-async function unbound(title: string): Promise<string> {
   return (await c().createTask({ title, initialPrompt: "", start: true })).id;
+}
+/** A Dev task with no workspace binding at all (moved, never started). */
+async function unbound(title: string): Promise<string> {
+  const id = await backlog(title);
+  await c().moveTask(id, "dev");
+  return id;
 }
 async function backlog(title: string): Promise<string> {
   return (await c().createTask({ title, initialPrompt: "" })).id;
@@ -931,7 +913,6 @@ describe("wiring", () => {
         start: true,
       })
     ).id;
-    await bindScratch(p);
     const k = (
       await real.commands.launchTask({
         relation: "child",

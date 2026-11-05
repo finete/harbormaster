@@ -25,6 +25,7 @@ import {
   test,
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { fakePiPid, writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -186,6 +187,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
         // Fast presence poll so presence-driven assertions resolve in ms, not seconds.
         HARBORMASTER_PRESENCE_POLL_MS: "250",
+        HARBORMASTER_PI_COMMAND: writeShellPi(root),
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -203,6 +205,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Presence Task");
+    await window.getByTestId("new-task-mode-chat").click();
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
@@ -219,19 +222,16 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     // the app's main process (no mock, no IPC bypass: this is exactly the
     // presence-reporting extension's write path).
     const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
+    // The chat's pane runs the fake pi; the record must carry its pid.
+    const pid = await fakePiPid(stateDir, taskId);
     await presence.register({
       taskId,
       sessionPath: "/tmp/fake-session.jsonl",
-      pid: process.pid,
+      pid: pid,
       mode: "interactive",
       at: new Date().toISOString(),
     });
-    await presence.setTurnActive(
-      taskId,
-      process.pid,
-      true,
-      new Date().toISOString(),
-    );
+    await presence.setTurnActive(taskId, pid, true, new Date().toISOString());
 
     await expect(row.getByTestId("sidebar-row-spinner")).toBeVisible({
       timeout: 10_000,
@@ -250,12 +250,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     // The agent loop ends while the session stays open: pi-home's ● "your
     // move" — attention styling on the card and the sidebar row, not a
     // neutral "attached".
-    await presence.setTurnActive(
-      taskId,
-      process.pid,
-      false,
-      new Date().toISOString(),
-    );
+    await presence.setTurnActive(taskId, pid, false, new Date().toISOString());
     const attention = cardLocator(window, "Presence Task").getByTestId(
       "badge-attention",
     );

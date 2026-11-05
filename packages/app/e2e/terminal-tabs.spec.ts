@@ -199,6 +199,7 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Auto-focus Decoy");
+    await window.getByTestId("new-task-mode-chat").click();
     await window.getByTestId("new-task-submit-backlog").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 

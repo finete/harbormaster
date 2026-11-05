@@ -18,6 +18,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { fakePiPid, writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -69,6 +70,7 @@ async function createScratchTask(window: Page, title: string): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
+  await window.getByTestId("new-task-mode-chat").click();
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 }
@@ -100,6 +102,7 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
         // Fast presence poll so presence-driven assertions resolve in ms, not seconds.
         HARBORMASTER_PRESENCE_POLL_MS: "250",
+        HARBORMASTER_PI_COMMAND: writeShellPi(root),
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -224,19 +227,16 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     const stdout = collectMainStdout(app);
 
     const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
+    // The chat's pane runs the fake pi; the record must carry its pid.
+    const pid = await fakePiPid(stateDir, targetId);
     await presence.register({
       taskId: targetId,
       sessionPath: "/tmp/fake-session-notify.jsonl",
-      pid: process.pid,
+      pid: pid,
       mode: "interactive",
       at: new Date().toISOString(),
     });
-    await presence.setTurnActive(
-      targetId,
-      process.pid,
-      true,
-      new Date().toISOString(),
-    );
+    await presence.setTurnActive(targetId, pid, true, new Date().toISOString());
     await expect(target.getByTestId("sidebar-row-spinner")).toBeVisible({
       timeout: 10_000,
     });
@@ -246,7 +246,7 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     // receipt of unconditionally (see main/index.ts's `registerAppIpc`).
     await presence.setTurnActive(
       targetId,
-      process.pid,
+      pid,
       false,
       new Date().toISOString(),
     );

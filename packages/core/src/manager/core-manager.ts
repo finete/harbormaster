@@ -213,7 +213,10 @@ export class CoreManager implements CoreCommands {
 
     const task: Task = {
       id,
-      kind: input.kind ?? "task",
+      // Repository-less work is scratch ("chat") work, same as
+      // `launchTask`'s `{ none: true }`.
+      kind:
+        input.kind ?? (input.repositoryId !== undefined ? "task" : "temp_task"),
       state: startNow ? "dev" : "backlog",
       title: input.title,
       initialPrompt: input.initialPrompt,
@@ -232,6 +235,14 @@ export class CoreManager implements CoreCommands {
         persist: () => this.deps.tasks.createTask(task),
         undo: () => this.deps.tasks.removeTask(id),
       });
+    } else if (startNow && !repo) {
+      // A started repository-less task still needs a workspace: without a
+      // binding the app has nowhere to launch pi and falls back to a bare
+      // shell in its own cwd.
+      await this.provisionScratchWorkspace(id, now, {
+        persist: () => this.deps.tasks.createTask(task),
+        undo: () => this.deps.tasks.removeTask(id),
+      });
     } else {
       await this.deps.tasks.createTask(task);
     }
@@ -247,10 +258,16 @@ export class CoreManager implements CoreCommands {
         `Only a backlog task can be started (task is in "${task.state}")`,
       );
     }
-    const binding = task.repositoryId
-      ? await this.deps.bindings.getBindingForTask(taskId)
-      : undefined;
-    if (!task.repositoryId || binding?.worktreePath) {
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (binding?.worktreePath) return this.moveTask(taskId, "dev");
+    if (!task.repositoryId) {
+      // Parked scratch task: give it its scratch directory now, exactly
+      // like a repository-backed task gets its worktree on start.
+      const now = this.deps.clock.now().toISOString();
+      await this.provisionScratchWorkspace(taskId, now, {
+        persist: async () => {},
+        undo: async () => {},
+      });
       return this.moveTask(taskId, "dev");
     }
 
@@ -330,6 +347,36 @@ export class CoreManager implements CoreCommands {
       // exist without a consistent binding once a repository was involved.
       await task.undo().catch(() => {});
       await removeWorktree();
+      throw error;
+    }
+  }
+
+  /**
+   * Repository-less counterpart of `provisionTaskWorkspace`: a scratch
+   * directory (`<stateDir>/scratch/<taskId>`) stands in for a worktree, so
+   * the app's "launch pi when a binding has worktreePath" path works
+   * unchanged. `persist` writes the task record; `undo` rolls it back if
+   * the binding cannot be attached.
+   */
+  private async provisionScratchWorkspace(
+    taskId: string,
+    now: string,
+    task: { persist: () => Promise<void>; undo: () => Promise<void> },
+  ): Promise<void> {
+    const scratchPath = await this.deps.scratch.ensureScratchDirectory(taskId);
+    await task.persist();
+    try {
+      await this.deps.bindings.attachBinding({
+        id: this.deps.ids.next(),
+        taskId,
+        worktreePath: scratchPath,
+        scratch: true,
+        detached: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      await task.undo().catch(() => {});
       throw error;
     }
   }
@@ -887,25 +934,10 @@ export class CoreManager implements CoreCommands {
       return next;
     }
 
-    // Repository-less: a scratch directory stands in for a worktree, so the
-    // app's existing "launch pi when a binding has worktreePath" path works
-    // unchanged.
-    const scratchPath = await this.deps.scratch.ensureScratchDirectory(id);
-    await this.deps.tasks.createTask(task);
-    try {
-      await this.deps.bindings.attachBinding({
-        id: this.deps.ids.next(),
-        taskId: id,
-        worktreePath: scratchPath,
-        scratch: true,
-        detached: false,
-        createdAt: now,
-        updatedAt: now,
-      });
-    } catch (error) {
-      await this.deps.tasks.removeTask(id).catch(() => {});
-      throw error;
-    }
+    await this.provisionScratchWorkspace(id, now, {
+      persist: () => this.deps.tasks.createTask(task),
+      undo: () => this.deps.tasks.removeTask(id),
+    });
     await this.publishTaskChange(task);
     return task;
   }

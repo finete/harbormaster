@@ -246,6 +246,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
     .fill("Occupy the only concurrency slot");
   // Repository: "None / scratch" (default) — a scratch task is enough to
   // occupy a launch slot and never touches the fixture repo's worktrees.
+  await window.getByTestId("new-task-mode-chat").click();
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(
