@@ -214,9 +214,10 @@ export interface CoreCommands {
    */
   listRepositories(): Promise<RepositoryInfo[]>;
   /**
-   * The git worktree/branch binding for a task, if one was created for it
-   * (repository-backed tasks only; `undefined` for scratch tasks or tasks
-   * whose binding was removed).
+   * The workspace binding for a task, if one was created for it: a git
+   * worktree/branch for repository-backed tasks, a scratch directory
+   * (`scratch: true`) for started repository-less tasks; `undefined` for
+   * parked tasks or tasks whose binding was removed.
    */
   getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
   /**
@@ -230,6 +231,9 @@ export interface CoreCommands {
    * `WorkspaceBinding` alongside the task. On any git failure the task is
    * not created (or is rolled back if already persisted) and no orphan
    * worktree is left behind; the triggering error is rethrown as-is.
+   * Without `repositoryId` the task defaults to `kind: "temp_task"` and,
+   * when starting now, gets a scratch-directory binding (same as
+   * `launchTask`'s `{ none: true }`) so pi has somewhere to run.
    */
   createTask(input: CreateTaskInput): Promise<Task>;
   /**

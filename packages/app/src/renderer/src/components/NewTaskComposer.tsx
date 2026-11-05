@@ -7,6 +7,8 @@ import type {
 } from "../../../preload/api";
 import {
   CLONE_URL_VALUE,
+  type DraftMode,
+  draftRepository,
   effectiveTitle,
   type NewTaskDraft,
   previewSlug,
@@ -37,6 +39,11 @@ const CHIP =
  * localStorage, lib/new-task-draft.ts): core never sees an unsubmitted
  * task. This component is controlled (`draft` + `onChange`) and talks to
  * core only through `window.harbormaster.core`.
+ *
+ * A Task / Chat toggle (like Claude Desktop's Chat vs Code) picks the kind
+ * of work: Task needs a repository and gets its own branch + worktree; Chat
+ * has no repository and runs pi in a scratch directory. Always opens on
+ * Task.
  *
  * Title is optional (effective title = typed title, else the first line of
  * the prompt). Without a link the footer offers "Park in backlog" and
@@ -96,19 +103,23 @@ export function NewTaskComposer({
   // parked backlog task has none yet) — see CoreCommands.launchTask's
   // rejection rule.
   const baseBranchEligible =
+    draft.mode === "task" &&
     link === "child" &&
     !!origin?.branch &&
     !!origin?.repositoryId &&
     draft.repositoryId === origin.repositoryId;
   const baseBranch = baseBranchEligible ? draft.baseBranch : "default";
 
+  const chat = draft.mode === "chat";
   const title = effectiveTitle(draft);
-  const cloneMissing =
-    draft.repositoryId === CLONE_URL_VALUE && !draft.cloneUrl.trim();
+  const repository = draftRepository(draft);
   const canSubmit =
     !submitting &&
     title.length > 0 &&
-    (!launching || (draft.prompt.trim().length > 0 && !cloneMissing));
+    repository !== null &&
+    // Clone URL is launch-only (core clones it as part of `launchTask`).
+    (launching || !("cloneUrl" in repository)) &&
+    (!launching || draft.prompt.trim().length > 0);
 
   async function submit(kind: "start" | "backlog" | "launch"): Promise<void> {
     if (!canSubmit) return;
@@ -116,20 +127,15 @@ export function NewTaskComposer({
     setError(null);
     try {
       const core = window.harbormaster.core;
+      if (!repository) return;
       if (kind === "launch") {
         if (!origin || link === "none") return;
-        const repository: LaunchTaskInput["repository"] =
-          draft.repositoryId === SCRATCH_VALUE
-            ? { none: true }
-            : draft.repositoryId === CLONE_URL_VALUE
-              ? { cloneUrl: draft.cloneUrl.trim() }
-              : { repositoryId: draft.repositoryId };
         const task = await core.launchTask({
           relation: link,
           fromTaskId: origin.id,
           title,
           prompt: draft.prompt.trim(),
-          repository,
+          repository: repository satisfies LaunchTaskInput["repository"],
           ...(baseBranchEligible && baseBranch === "parent"
             ? { baseBranch: "parent" as const }
             : {}),
@@ -141,8 +147,8 @@ export function NewTaskComposer({
       const task = await core.createTask({
         title,
         initialPrompt: draft.prompt.trim() ? draft.prompt : "",
-        ...(draft.repositoryId && draft.repositoryId !== CLONE_URL_VALUE
-          ? { repositoryId: draft.repositoryId }
+        ...("repositoryId" in repository
+          ? { repositoryId: repository.repositoryId }
           : {}),
         ...(kind === "start" ? { start: true } : {}),
       });
@@ -162,9 +168,9 @@ export function NewTaskComposer({
     }
   }
 
-  const selectedRepo = repositories.find(
-    (repo) => repo.id === draft.repositoryId,
-  );
+  const selectedRepo = chat
+    ? undefined
+    : repositories.find((repo) => repo.id === draft.repositoryId);
   const branchPreview =
     selectedRepo && title
       ? `${previewSlug(title)}-\u2026 \u2192 ${selectedRepo.defaultBranch}`
@@ -201,29 +207,77 @@ export function NewTaskComposer({
           value={draft.prompt}
           onChange={(event) => onChange({ prompt: event.target.value })}
           onKeyDown={onSubmitKey}
-          placeholder="What should pi do?"
+          placeholder={chat ? "Ask pi anything…" : "What should pi do?"}
           className="min-h-[140px] w-full resize-y rounded-lg border border-border/70 bg-transparent px-3 py-2.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            data-testid="new-task-repo-select"
-            aria-label="Repository"
-            className={CHIP}
-            value={draft.repositoryId}
-            onChange={(event) => onChange({ repositoryId: event.target.value })}
+          <fieldset
+            data-testid="new-task-mode"
+            className={cn(CHIP, "flex items-center gap-1 p-0.5")}
           >
-            <option value={SCRATCH_VALUE}>None / scratch</option>
-            {repositories.map((repo) => (
-              <option
-                key={repo.id}
-                value={repo.id}
-                data-testid="new-task-repo-option"
+            <legend className="sr-only">Mode</legend>
+            {(
+              [
+                [
+                  "task",
+                  "Task",
+                  "Work in a repository: its own branch + worktree, tracked on the board",
+                ],
+                [
+                  "chat",
+                  "Chat",
+                  "No repository: pi runs in a scratch directory",
+                ],
+              ] as const satisfies readonly (readonly [
+                DraftMode,
+                string,
+                string,
+              ])[]
+            ).map(([value, label, hint]) => (
+              <button
+                key={value}
+                type="button"
+                title={hint}
+                data-testid={`new-task-mode-${value}`}
+                data-selected={draft.mode === value}
+                aria-pressed={draft.mode === value}
+                onClick={() => onChange({ mode: value })}
+                className={cn(
+                  "rounded-full px-2 py-0.5",
+                  draft.mode === value
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted",
+                )}
               >
-                {repositoryLabel(repo)}
-              </option>
+                {label}
+              </button>
             ))}
-            {launching && <option value={CLONE_URL_VALUE}>Clone URL…</option>}
-          </select>
+          </fieldset>
+          {!chat && (
+            <select
+              data-testid="new-task-repo-select"
+              aria-label="Repository"
+              className={CHIP}
+              value={draft.repositoryId}
+              onChange={(event) =>
+                onChange({ repositoryId: event.target.value })
+              }
+            >
+              <option value={SCRATCH_VALUE} disabled>
+                Choose repository…
+              </option>
+              {repositories.map((repo) => (
+                <option
+                  key={repo.id}
+                  value={repo.id}
+                  data-testid="new-task-repo-option"
+                >
+                  {repositoryLabel(repo)}
+                </option>
+              ))}
+              {launching && <option value={CLONE_URL_VALUE}>Clone URL…</option>}
+            </select>
+          )}
           {baseBranchEligible && origin && (
             <fieldset
               data-testid="new-task-base-branch"
@@ -343,7 +397,7 @@ export function NewTaskComposer({
             />
           )}
         </div>
-        {launching && draft.repositoryId === CLONE_URL_VALUE && (
+        {launching && !chat && draft.repositoryId === CLONE_URL_VALUE && (
           <input
             data-testid="new-task-clone-url-input"
             aria-label="Clone URL"
@@ -382,7 +436,7 @@ export function NewTaskComposer({
               size="sm"
               data-testid="new-task-submit-backlog"
               disabled={!canSubmit}
-              title="No branch or worktree yet"
+              title={chat ? "Save it for later" : "No branch or worktree yet"}
               onClick={() => void submit("backlog")}
             >
               Park in backlog
@@ -400,7 +454,9 @@ export function NewTaskComposer({
                 : link === "child"
                   ? "Launch subtask"
                   : "Launch task"
-              : "Start"}
+              : chat
+                ? "Start chat"
+                : "Start"}
             {!launching && <Kbd>{`${modKeyLabel()}\u21B5`}</Kbd>}
           </Button>
         </div>

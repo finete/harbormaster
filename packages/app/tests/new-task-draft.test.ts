@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLONE_URL_VALUE,
   deriveTitle,
   draftLabel,
+  draftRepository,
   effectiveTitle,
   emptyDraft,
   isDraftEmpty,
@@ -63,6 +65,42 @@ describe("isDraftEmpty", () => {
     expect(isDraftEmpty({ ...emptyDraft(), repositoryId: "r" })).toBe(false);
     expect(isDraftEmpty({ ...emptyDraft("t"), link: "child" })).toBe(false);
   });
+  it("does not count the Task / Chat toggle alone", () => {
+    expect(isDraftEmpty({ ...emptyDraft(), mode: "chat" })).toBe(true);
+  });
+});
+
+describe("draftRepository", () => {
+  const base = { mode: "task" as const, repositoryId: "", cloneUrl: "" };
+  it("task mode needs a repository (or a non-blank clone URL)", () => {
+    expect(draftRepository(base)).toBeNull();
+    expect(
+      draftRepository({ ...base, repositoryId: "github.com/a/b" }),
+    ).toEqual({ repositoryId: "github.com/a/b" });
+    expect(
+      draftRepository({
+        ...base,
+        repositoryId: CLONE_URL_VALUE,
+        cloneUrl: " ",
+      }),
+    ).toBeNull();
+    expect(
+      draftRepository({
+        ...base,
+        repositoryId: CLONE_URL_VALUE,
+        cloneUrl: " https://x/y.git ",
+      }),
+    ).toEqual({ cloneUrl: "https://x/y.git" });
+  });
+  it("chat mode never uses a repository, even a previously chosen one", () => {
+    expect(
+      draftRepository({
+        ...base,
+        mode: "chat",
+        repositoryId: "github.com/a/b",
+      }),
+    ).toEqual({ none: true });
+  });
 });
 
 describe("draft persistence", () => {
@@ -71,6 +109,7 @@ describe("draft persistence", () => {
       ...emptyDraft("t1"),
       title: "A",
       prompt: "B",
+      mode: "chat" as const,
       link: "child" as const,
     };
     expect(parseDraft(serializeDraft(draft))).toEqual(draft);

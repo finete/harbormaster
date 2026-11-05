@@ -216,7 +216,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     );
   });
 
-  it("starting a scratch task now lands in dev with no workspace", async () => {
+  it("starting a scratch task now lands in dev as a temp_task with a scratch-directory binding", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const task = await commands.createTask({
@@ -225,7 +225,11 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
       start: true,
     });
     expect(task.state).toBe("dev");
-    expect(await commands.getTaskWorkspace(task.id)).toBeUndefined();
+    expect(task.kind).toBe("temp_task");
+    const binding = await commands.getTaskWorkspace(task.id);
+    expect(binding?.scratch).toBe(true);
+    expect(binding?.worktreePath).toBe(join(f.stateDir, "scratch", task.id));
+    expect(await exists(binding?.worktreePath ?? "")).toBe(true);
   });
 });
 
@@ -253,16 +257,20 @@ describe.skipIf(!gitAvailable)("startTask", () => {
     );
   });
 
-  it("just moves a scratch backlog task to dev", async () => {
+  it("gives a parked scratch task its scratch directory when started", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const parked = await commands.createTask({
       title: "Note",
       initialPrompt: "",
     });
+    expect(parked.kind).toBe("temp_task");
+    expect(await commands.getTaskWorkspace(parked.id)).toBeUndefined();
     const started = await commands.startTask(parked.id);
     expect(started.state).toBe("dev");
-    expect(await commands.getTaskWorkspace(parked.id)).toBeUndefined();
+    const binding = await commands.getTaskWorkspace(parked.id);
+    expect(binding?.scratch).toBe(true);
+    expect(binding?.worktreePath).toBe(join(f.stateDir, "scratch", parked.id));
   });
 
   it("rejects a task that is not in backlog", async () => {

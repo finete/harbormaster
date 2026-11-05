@@ -11,9 +11,38 @@ export interface StorageLike {
 
 export const NEW_TASK_DRAFT_KEY = "harbormaster.newTaskDraft";
 
-/** "" = scratch; otherwise a repository id, or `CLONE_URL_VALUE` (launch mode only). */
+/** "" = no repository chosen yet; otherwise a repository id, or `CLONE_URL_VALUE` (launch mode only). */
 export const SCRATCH_VALUE = "";
 export const CLONE_URL_VALUE = "__clone-url__";
+
+/**
+ * The composer's Task / Chat toggle (cf. Claude Desktop's Chat vs Code,
+ * Codex's Local vs Worktree): `task` = repository-backed work with its own
+ * branch + worktree (a repository is required); `chat` = no repository, pi
+ * runs in a scratch directory. The repository picker only exists in `task`
+ * mode, and a chosen repository is ignored in `chat` mode.
+ */
+export type DraftMode = "task" | "chat";
+
+/** Where a submitted draft runs, or `null` when task mode still lacks a repository. */
+export type DraftRepository =
+  | { none: true }
+  | { cloneUrl: string }
+  | { repositoryId: string };
+
+export function draftRepository(draft: {
+  mode: DraftMode;
+  repositoryId: string;
+  cloneUrl: string;
+}): DraftRepository | null {
+  if (draft.mode === "chat") return { none: true };
+  if (draft.repositoryId === CLONE_URL_VALUE) {
+    const cloneUrl = draft.cloneUrl.trim();
+    return cloneUrl ? { cloneUrl } : null;
+  }
+  if (draft.repositoryId === SCRATCH_VALUE) return null;
+  return { repositoryId: draft.repositoryId };
+}
 
 /** `none` = plain create (Start / Park in backlog); the others launch in the background. */
 export type DraftLink = "none" | "child" | "standalone";
@@ -21,6 +50,7 @@ export type DraftLink = "none" | "child" | "standalone";
 export interface NewTaskDraft {
   title: string;
   prompt: string;
+  mode: DraftMode;
   repositoryId: string;
   link: DraftLink;
   /** The task that was focused when the draft was opened (never the draft itself). */
@@ -34,6 +64,7 @@ export function emptyDraft(originTaskId: string | null = null): NewTaskDraft {
   return {
     title: "",
     prompt: "",
+    mode: "task",
     repositoryId: SCRATCH_VALUE,
     link: "none",
     originTaskId,
@@ -126,6 +157,7 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
     return {
       title: str("title"),
       prompt: str("prompt"),
+      mode: v.mode === "chat" ? "chat" : "task",
       repositoryId: str("repositoryId"),
       link,
       originTaskId: origin,

@@ -26,6 +26,7 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
+import { writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -228,6 +229,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
         HARBORMASTER_GH_COMMAND: fakeGh,
+        HARBORMASTER_PI_COMMAND: writeShellPi(root),
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -360,6 +362,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Quick Scratch Fix");
+    await window.getByTestId("new-task-mode-chat").click();
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 

@@ -244,12 +244,19 @@ test.afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("the draft composer offers Start (primary) vs Park in backlog, plus a prompt; closing a non-empty draft asks to discard", async () => {
+test("the draft composer offers Start (primary) vs Park in backlog, plus a prompt and a Task / Chat toggle; closing a non-empty draft asks to discard", async () => {
   await openNewTaskComposer();
   const start = window.getByTestId("new-task-submit");
   const backlog = window.getByTestId("new-task-submit-backlog");
+  const repoSelect = window.getByTestId("new-task-repo-select");
   await expect(start).toContainText("Start");
   await expect(backlog).toBeVisible();
+  // Opens in Task mode, which needs a repository.
+  await expect(window.getByTestId("new-task-mode-task")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await expect(repoSelect).toBeVisible();
   // Nothing typed yet: neither can submit (title is optional, but one of
   // title/prompt must exist).
   await expect(start).toBeDisabled();
@@ -259,6 +266,18 @@ test("the draft composer offers Start (primary) vs Park in backlog, plus a promp
   await expect(prompt).toBeFocused();
   await expect(prompt).toHaveAttribute("placeholder", "What should pi do?");
   await prompt.fill("Throwaway");
+  // A prompt alone is not enough for a task: no repository chosen yet.
+  await expect(start).toBeDisabled();
+  await expect(backlog).toBeDisabled();
+  await repoSelect.selectOption(REPO_ID);
+  await expect(start).toBeEnabled();
+  await expect(backlog).toBeEnabled();
+
+  // Chat: no repository picker, nothing else required.
+  await window.getByTestId("new-task-mode-chat").click();
+  await expect(repoSelect).toHaveCount(0);
+  await expect(prompt).toHaveAttribute("placeholder", "Ask pi anything\u2026");
+  await expect(start).toContainText("Start chat");
   await expect(start).toBeEnabled();
   await expect(backlog).toBeEnabled();
 
@@ -388,6 +407,7 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
     .getByTestId("new-task-prompt-input")
     .fill("Derive my title from this line\nand ignore the rest");
   await expect(draftRow).toContainText("Derive my title from this line");
+  await window.getByTestId("new-task-mode-chat").click();
   await window.getByTestId("new-task-submit").click();
 
   // The draft row became the real task, focused, in the workspace.
@@ -403,4 +423,13 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
   );
   const taskId = (await row.getAttribute("data-task-id")) ?? "";
   await expect(window.getByTestId(`task-workspace-${taskId}`)).toBeVisible();
+  // A started chat has a scratch workspace, so its primary pane runs pi
+  // with the prompt (not a bare shell in the app's own cwd).
+  const panel = window
+    .getByTestId(`task-workspace-${taskId}`)
+    .getByTestId("terminal-panel")
+    .first();
+  await expect(panel).toContainText("PI-ARG:Derive my title from this line", {
+    timeout: 20_000,
+  });
 });

@@ -91,6 +91,7 @@ async function createTask(
   // These smoke tasks have no repository, so parking vs starting only decides
   // the landing column; the suite's assertions expect Backlog.
   await window.getByTestId("new-task-title-input").fill(title);
+  await window.getByTestId("new-task-mode-chat").click();
   await window.getByTestId("new-task-submit-backlog").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   // Every create path (board header included) lands in the workspace view

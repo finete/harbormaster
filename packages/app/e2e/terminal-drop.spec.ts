@@ -128,6 +128,7 @@ test("drag-drop file onto terminal pane → escaped path inserted", async () => 
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill("Drop Test Task");
+  await window.getByTestId("new-task-mode-chat").click();
   await window.getByTestId("new-task-submit-backlog").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
