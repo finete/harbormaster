@@ -54,6 +54,30 @@ describe("resolveLaunchRepository", () => {
     });
   });
 
+  it("resolves registered folders by path or unique name, and absolute paths as folders", () => {
+    const locations = [
+      { path: "/Users/me/notes", name: "notes" },
+      {
+        path: "/Users/me/side",
+        name: "side",
+        repositoryId: "github.com/o/side",
+      },
+    ];
+    expect(resolveLaunchRepository("notes", repos, locations)).toEqual({
+      folderPath: "/Users/me/notes",
+    });
+    expect(
+      resolveLaunchRepository("/Users/me/notes", repos, locations),
+    ).toEqual({ folderPath: "/Users/me/notes" });
+    expect(resolveLaunchRepository("/tmp/elsewhere", repos, locations)).toEqual(
+      { folderPath: "/tmp/elsewhere" },
+    );
+    // A git folder is a repository (listRepositories has it), never a folder by name.
+    expect(() => resolveLaunchRepository("side", repos, locations)).toThrow(
+      /Unknown repository/,
+    );
+  });
+
   it("resolves a unique short name", () => {
     expect(resolveLaunchRepository("arnac", repos)).toEqual({
       repositoryId: "github.com/org/arnac",

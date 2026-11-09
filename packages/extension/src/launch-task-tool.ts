@@ -7,7 +7,11 @@
 // `index.ts` is the only place that wires this against a real `pi.registerTool`
 // and `core.commands.launchTask`.
 
-import type { LaunchTaskInput, RepositoryInfo } from "@harbormaster/core";
+import type {
+  KnownLocation,
+  LaunchTaskInput,
+  RepositoryInfo,
+} from "@harbormaster/core";
 
 /** Recognizes a clone-URL-shaped `repository` value: a URL scheme, or scp-like/`.git`-suffixed git syntax. */
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -29,12 +33,15 @@ export function repositoryShortName(id: string): string {
  * parameter against the repositories `listRepositories()` discovered:
  * `"none"` (case-insensitive) -> no repository; a clone-URL-shaped value ->
  * cloned by core; otherwise matched against known repository ids first
- * (exact), then unique short names. Unknown or ambiguous input throws a
- * clear error listing the candidates, instead of guessing.
+ * (exact), then unique short names, then registered non-git folders (by
+ * path or unique folder name); an absolute path runs in that folder.
+ * Unknown or ambiguous input throws a clear error listing the candidates,
+ * instead of guessing.
  */
 export function resolveLaunchRepository(
   input: string,
   repositories: readonly RepositoryInfo[],
+  locations: readonly KnownLocation[] = [],
 ): LaunchTaskInput["repository"] {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -63,10 +70,31 @@ export function resolveLaunchRepository(
     );
   }
 
-  const known = repositories.map((repo) => repo.id);
+  const folders = locations.filter((location) => !location.repositoryId);
+  const byPath = folders.find((location) => location.path === trimmed);
+  if (byPath) return { folderPath: byPath.path };
+  const byName = folders.filter((location) => location.name === trimmed);
+  const [uniqueFolder] = byName;
+  if (byName.length === 1 && uniqueFolder) {
+    return { folderPath: uniqueFolder.path };
+  }
+  if (byName.length > 1) {
+    throw new Error(
+      `Ambiguous folder "${trimmed}": matches ${byName
+        .map((location) => location.path)
+        .join(", ")}. Use the full folder path instead.`,
+    );
+  }
+  // An absolute path: core registers it and resolves git vs. plain folder.
+  if (trimmed.startsWith("/")) return { folderPath: trimmed };
+
+  const known = [
+    ...repositories.map((repo) => repo.id),
+    ...folders.map((location) => location.path),
+  ];
   throw new Error(
     known.length
-      ? `Unknown repository "${trimmed}". Known repositories: ${known.join(", ")}. Use "none" for no repository, or a git clone URL to clone a new one.`
+      ? `Unknown repository "${trimmed}". Known repositories and folders: ${known.join(", ")}. Use "none" for no repository, or a git clone URL to clone a new one.`
       : `Unknown repository "${trimmed}". No repositories are discovered under the configured code root. Use "none" for no repository, or a git clone URL to clone a new one.`,
   );
 }
@@ -77,6 +105,7 @@ export function launchRepositoryLabel(
 ): string {
   if ("none" in repository) return "no repository";
   if ("cloneUrl" in repository) return repository.cloneUrl;
+  if ("folderPath" in repository) return repository.folderPath;
   return repository.repositoryId;
 }
 

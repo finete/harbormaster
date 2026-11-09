@@ -25,6 +25,7 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -38,6 +39,12 @@ let app: ElectronApplication;
 let window: Page;
 let root: string;
 let repoCheckout: string;
+let piAgentDir: string;
+let notesFolder: string;
+
+// 1x1 PNG for seeding the clipboard (same fixture as terminal-paste.spec.ts).
+const TINY_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const mainProcessErrors: string[] = [];
 
 function watchForMainProcessErrors(electronApp: ElectronApplication): void {
@@ -130,17 +137,15 @@ async function submitNewTask(options: {
 }): Promise<void> {
   await openNewTaskComposer();
   await window.getByTestId("new-task-title-input").fill(options.title);
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
+  await chooseWhere(window, REPO_ID);
   if (options.prompt !== undefined) {
     await window.getByTestId("new-task-prompt-input").fill(options.prompt);
   }
-  await window
-    .getByTestId(
-      options.destination === "start"
-        ? "new-task-submit"
-        : "new-task-submit-backlog",
-    )
-    .click();
+  if (options.destination === "start") {
+    await window.getByTestId("new-task-submit").click();
+  } else {
+    await submitAs(window, "park");
+  }
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
@@ -193,6 +198,7 @@ test.beforeAll(async () => {
     [
       "#!/bin/sh",
       'echo "PI-ARGC:$#"',
+      'echo "PI-CWD:$(pwd -P)"',
       'for a in "$@"; do printf "PI-ARG:%s\\n" "$a"; done',
       "while true; do sleep 3600; done",
       "",
@@ -218,6 +224,32 @@ test.beforeAll(async () => {
   );
   chmodSync(fakeGh, 0o755);
 
+  // `pi --list-models` stand-in for the Agent · Model picker.
+  const fakeListModels = path.join(root, "fake-pi-list-models");
+  writeFileSync(
+    fakeListModels,
+    [
+      "#!/bin/sh",
+      "echo 'provider   model             context  max-out  thinking  images'",
+      "echo 'anthropic  claude-opus-4-8   1M       128K     yes       yes'",
+      "echo 'anthropic  claude-haiku-4-5  200K     64K      yes       yes'",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(fakeListModels, 0o755);
+  piAgentDir = path.join(root, "pi-agent");
+  mkdirSync(piAgentDir);
+  writeFileSync(
+    path.join(piAgentDir, "settings.json"),
+    JSON.stringify({
+      defaultProvider: "anthropic",
+      defaultModel: "claude-opus-4-8",
+      defaultThinkingLevel: "medium",
+    }),
+  );
+  notesFolder = path.join(root, "notes");
+  mkdirSync(notesFolder);
+
   app = await electron.launch({
     args: [mainEntry],
     env: {
@@ -227,6 +259,9 @@ test.beforeAll(async () => {
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PI_COMMAND: fakePi,
       HARBORMASTER_GH_COMMAND: fakeGh,
+      HARBORMASTER_PI_LIST_MODELS_COMMAND: fakeListModels,
+      HARBORMASTER_E2E_PICK_FOLDER: notesFolder,
+      PI_CODING_AGENT_DIR: piAgentDir,
     },
   });
   watchForMainProcessErrors(app);
@@ -246,42 +281,47 @@ test.afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("the draft composer offers Start (primary) vs Park in backlog, plus a prompt and a Task / Chat toggle; closing a non-empty draft asks to discard", async () => {
+test("the composer gates submit on a title/prompt and a Where; Start is primary, Park sits in the split menu, and the branch preview follows; closing a non-empty draft asks to discard", async () => {
   await openNewTaskComposer();
   const start = window.getByTestId("new-task-submit");
-  const backlog = window.getByTestId("new-task-submit-backlog");
-  const repoSelect = window.getByTestId("new-task-repo-select");
   await expect(start).toContainText("Start");
-  await expect(backlog).toBeVisible();
-  // Opens in Task mode, which needs a repository.
-  await expect(window.getByTestId("new-task-mode-task")).toHaveAttribute(
-    "data-selected",
-    "true",
+  await expect(start).toHaveAttribute("data-action", "start");
+  // Fresh app, nothing focused, nothing used yet: Where starts unset.
+  await expect(window.getByTestId("new-task-where")).toHaveAttribute(
+    "data-where",
+    "",
   );
-  await expect(repoSelect).toBeVisible();
-  // Nothing typed yet: neither can submit (title is optional, but one of
-  // title/prompt must exist).
   await expect(start).toBeDisabled();
-  await expect(backlog).toBeDisabled();
 
   const prompt = window.getByTestId("new-task-prompt-input");
   await expect(prompt).toBeFocused();
-  await expect(prompt).toHaveAttribute("placeholder", "What should pi do?");
-  await prompt.fill("Throwaway");
-  // A prompt alone is not enough for a task: no repository chosen yet.
+  await prompt.fill("Throwaway idea");
+  // The empty title previews the derived one.
+  await expect(window.getByTestId("new-task-title-input")).toHaveAttribute(
+    "placeholder",
+    "Throwaway idea",
+  );
+  // A prompt alone is not enough: nowhere to run yet.
   await expect(start).toBeDisabled();
-  await expect(backlog).toBeDisabled();
-  await repoSelect.selectOption(REPO_ID);
+  await chooseWhere(window, REPO_ID);
   await expect(start).toBeEnabled();
-  await expect(backlog).toBeEnabled();
+  await expect(window.getByTestId("new-task-branch-preview")).toContainText(
+    "throwaway-idea-",
+  );
+  await expect(window.getByTestId("new-task-base-ref")).toHaveText("main");
 
-  // Chat: no repository picker, nothing else required.
-  await window.getByTestId("new-task-mode-chat").click();
-  await expect(repoSelect).toHaveCount(0);
-  await expect(prompt).toHaveAttribute("placeholder", "Ask pi anything\u2026");
-  await expect(start).toContainText("Start chat");
+  await window.getByTestId("new-task-submit-menu").click();
+  await expect(window.getByTestId("new-task-submit-backlog")).toBeVisible();
+  await expect(
+    window.getByTestId("new-task-submit-backlog"),
+  ).not.toHaveAttribute("data-disabled", /.*/);
+  await window.keyboard.press("Escape");
+
+  // No folder (the old Chat mode): no branch, a chat placeholder.
+  await chooseWhere(window, "none");
+  await expect(prompt).toHaveAttribute("placeholder", "Ask anything\u2026");
+  await expect(window.getByTestId("new-task-branch-preview")).toHaveCount(0);
   await expect(start).toBeEnabled();
-  await expect(backlog).toBeEnabled();
 
   await window.getByTestId("sidebar-draft-close").click();
   await window.getByTestId("confirm-dialog-confirm").click();
@@ -409,7 +449,7 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
     .getByTestId("new-task-prompt-input")
     .fill("Derive my title from this line\nand ignore the rest");
   await expect(draftRow).toContainText("Derive my title from this line");
-  await window.getByTestId("new-task-mode-chat").click();
+  await chooseWhere(window, "none");
   await window.getByTestId("new-task-submit").click();
 
   // The draft row became the real task, focused, in the workspace.
@@ -434,4 +474,81 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
   await expect(panel).toContainText("PI-ARG:Derive my title from this line", {
     timeout: 20_000,
   });
+});
+
+test("Open folder runs a task in place, and the picked model, thinking level and a pasted screenshot all reach the first pi launch", async () => {
+  test.skip(
+    process.platform !== "darwin",
+    "nativeImage clipboard seeding only reliable on macOS",
+  );
+  await window.keyboard.press("ControlOrMeta+N");
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
+  await window.getByTestId("new-task-title-input").fill("Folder Work");
+
+  // Open folder… (native dialog stubbed by HARBORMASTER_E2E_PICK_FOLDER):
+  // a plain folder is registered and becomes the Where, running in place.
+  await window.getByTestId("new-task-where").click();
+  await window.getByTestId("new-task-where-open-folder").click();
+  await expect(window.getByTestId("new-task-where")).toHaveAttribute(
+    "data-where",
+    /^folder:.*\/notes$/,
+  );
+  await expect(window.getByTestId("new-task-composer")).toContainText(
+    "Runs in place",
+  );
+
+  // Agent · Model: a non-default model plus a thinking level from the submenu.
+  await expect(window.getByTestId("new-task-model")).toHaveText(
+    "Pi · claude-opus-4-8",
+  );
+  await window.getByTestId("new-task-model").click();
+  await window
+    .locator(
+      '[data-testid="new-task-model-option"][data-model="anthropic/claude-haiku-4-5"]',
+    )
+    .click();
+  await window.getByTestId("new-task-model").click();
+  await window.getByTestId("new-task-thinking").click();
+  await window
+    .locator('[data-testid="new-task-thinking-option"][data-thinking="high"]')
+    .click();
+  await expect(window.getByTestId("new-task-model")).toHaveText(
+    "Pi · claude-haiku-4-5 · high",
+  );
+
+  // Paste a screenshot into the prompt: the saved temp path lands inline.
+  const prompt = window.getByTestId("new-task-prompt-input");
+  await prompt.fill("Compare");
+  await prompt.focus();
+  await app.evaluate(({ clipboard, nativeImage }, base64) => {
+    clipboard.clear();
+    clipboard.writeImage(
+      nativeImage.createFromDataURL(`data:image/png;base64,${base64}`),
+    );
+  }, TINY_PNG_BASE64);
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.paste();
+  });
+  await expect(prompt).toHaveValue(
+    /^Compare \S*clipboard-\d{4}-\d{2}-\d{2}-\d{6}-[0-9A-F]{8}\.png$/,
+  );
+
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+
+  const row = window
+    .locator('[data-testid^="sidebar-task-row-"]')
+    .filter({ hasText: "Folder Work" });
+  const taskId = (await row.getAttribute("data-task-id")) ?? "";
+  const panel = window
+    .getByTestId(`task-workspace-${taskId}`)
+    .getByTestId("terminal-panel")
+    .first();
+  await expect(panel).toContainText("PI-ARG:--model", { timeout: 20_000 });
+  await expect(panel).toContainText("PI-ARG:anthropic/claude-haiku-4-5");
+  await expect(panel).toContainText("PI-ARG:--thinking");
+  await expect(panel).toContainText("PI-ARG:high");
+  // Ran in the folder itself, and the prompt points at the task's own copy.
+  await expect(panel).toContainText(/PI-CWD:\S*\/notes/);
+  await expect(panel).toContainText(/PI-ARG:Compare \S*task-attachments/);
 });

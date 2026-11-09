@@ -2,7 +2,7 @@
 // events out". Kept separate from model.ts because these are call-shape
 // contracts, not persisted domain data.
 
-import type { SessionLaunch } from "./harness.js";
+import type { HarnessModelCatalog, SessionLaunch } from "./harness.js";
 import type {
   ApproveMessageEdits,
   FindTasksOptions,
@@ -19,6 +19,7 @@ import type {
   Task,
   TaskKind,
   TaskState,
+  ThinkingLevel,
   WorkspaceBinding,
 } from "./model.js";
 import type { RepositoryInfo } from "./workspace.js";
@@ -38,11 +39,55 @@ export interface RecordTaskSessionInput {
   sessionPath: string;
 }
 
-export interface CreateTaskInput {
+/**
+ * Agent choice shared by `createTask` and `launchTask` (see
+ * `/docs/new-task-composer.md` "Agent · Model"). Stored on the task;
+ * model/thinking reach the harness only on the task's first session.
+ */
+export interface TaskAgentInput {
+  /** Harness id (`HarnessAdapter.id`); absent = the default harness. Fixed for the task's lifetime. */
+  harness?: string;
+  /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default. */
+  model?: string;
+  thinking?: ThinkingLevel;
+  /**
+   * Paths of images pasted into the prompt (temp files). Core copies each
+   * into the task's own state directory and rewrites the prompt to point
+   * at the copy, so a parked task never holds a dead temp path.
+   */
+  attachments?: string[];
+}
+
+/** A registered folder outside `codeRoot` (`CoreCommands.listLocations`). */
+export interface KnownLocation {
+  /** Absolute, realpath-resolved folder path. */
+  path: string;
+  /** Last path segment, for display. */
+  name: string;
+  /** Set when the folder is (inside) a git repository: tasks there get a worktree. Absent = runs in place. */
+  repositoryId?: string;
+}
+
+export interface CreateTaskInput extends TaskAgentInput {
   title: string;
   initialPrompt: string;
   kind?: TaskKind;
   repositoryId?: string;
+  /** Clone this URL under `codeRoot` (reused when already there) and use it as the repository. */
+  cloneUrl?: string;
+  /**
+   * A folder path (registered as a known location): a git repository gets a
+   * worktree like `repositoryId`; a non-git folder runs in place.
+   */
+  folderPath?: string;
+  /**
+   * Nest under this task (`Task.parentTaskId`), like `launchTask`'s `child`
+   * relation but without a background launch or kickoff contract. One level
+   * only.
+   */
+  parentTaskId?: string;
+  /** Branch the worktree off this ref instead of the repository's default branch. Kept for a parked task. */
+  baseRef?: string;
   branch?: string;
   targetBranch?: string;
   /**
@@ -216,7 +261,11 @@ export interface LaunchTaskInput {
    * when already present with the same remote), or `{ none: true }` for a
    * repository-less scratch task.
    */
-  repository: { repositoryId: string } | { cloneUrl: string } | { none: true };
+  repository:
+    | { repositoryId: string }
+    | { cloneUrl: string }
+    | { folderPath: string }
+    | { none: true };
   /**
    * `"parent"` (stacked work) is only valid for a `child` whose repository
    * is the same as its parent's, and only once the parent has a branch;
@@ -225,8 +274,14 @@ export interface LaunchTaskInput {
    * branches off the repository's default branch as usual.
    */
   baseBranch?: "default" | "parent";
+  /** Branch off this exact ref instead (any branch); mutually exclusive with `baseBranch: "parent"`. */
+  baseRef?: string;
   /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default; passed to the harness only on the first launch. */
   model?: string;
+  harness?: string;
+  thinking?: ThinkingLevel;
+  /** See `TaskAgentInput.attachments`. */
+  attachments?: string[];
 }
 
 /** The typed command surface frontends call. No frontend touches state files. */
@@ -238,6 +293,18 @@ export interface CoreCommands {
    * `GlobalConfig.codeRoot`), for the task-creation repository picker.
    */
   listRepositories(): Promise<RepositoryInfo[]>;
+  /**
+   * Folders registered outside `codeRoot` (`addLocation`), in registration
+   * order; missing folders are skipped. Git folders also appear in
+   * `listRepositories`.
+   */
+  listLocations(): Promise<KnownLocation[]>;
+  /** Register a folder (realpath-resolved, must exist) so every client can target it; idempotent. */
+  addLocation(path: string): Promise<KnownLocation>;
+  /** Local and remote-tracking branches of a repository, for the base-branch picker. */
+  listBranches(repositoryId: string): Promise<string[]>;
+  /** One catalog per registered harness, for the composer's Agent · Model picker. */
+  listModels(): Promise<HarnessModelCatalog[]>;
   /**
    * The workspace binding for a task, if one was created for it: a git
    * worktree/branch for repository-backed tasks, a scratch directory

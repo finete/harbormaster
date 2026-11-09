@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -122,10 +123,8 @@ test.describe("terminal wheel translation (P0-1)", () => {
       // Create task + move to dev.
       await window.getByTestId("sidebar-new-task-button").click();
       await window.getByTestId("new-task-title-input").fill("Wheel Task");
-      await window
-        .getByTestId("new-task-repo-select")
-        .selectOption("github.com/test/fixture");
-      await window.getByTestId("new-task-submit-backlog").click();
+      await chooseWhere(window, "github.com/test/fixture");
+      await submitAs(window, "park");
 
       await window.getByTestId("board-button").click();
       const card = window

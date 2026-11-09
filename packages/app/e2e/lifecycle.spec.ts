@@ -26,6 +26,7 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 import { writeShellPi } from "./fake-pi";
 
@@ -251,8 +252,8 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Ship Feature");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
@@ -393,7 +394,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Quick Scratch Fix");
-    await window.getByTestId("new-task-mode-chat").click();
+    await chooseWhere(window, "none");
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
@@ -429,8 +430,8 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Review");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
@@ -474,8 +475,8 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Done");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
@@ -608,8 +609,8 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
   test("cancel keeps the task and its changes in place; confirming both questions lands it and removes the worktree", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Dirty Done");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
@@ -723,8 +724,8 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
   test("a repo task with an open PR check fails gh, and the next refresh tick shows a warning toast", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Flaky Gh Task");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();

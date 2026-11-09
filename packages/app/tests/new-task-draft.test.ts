@@ -1,17 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
-  CLONE_URL_VALUE,
+  alternateAction,
+  defaultAction,
   deriveTitle,
   draftLabel,
-  draftRepository,
   effectiveTitle,
   emptyDraft,
+  emptyPrefs,
+  folderWhere,
   isDraftEmpty,
   NEW_TASK_DRAFT_KEY,
+  NEW_TASK_PREFS_KEY,
   parseDraft,
+  parseWhere,
+  planSubmit,
   readDraft,
+  readPrefs,
+  rememberDraft,
+  repoWhere,
   serializeDraft,
   storeDraft,
+  storePrefs,
+  submitBlocker,
+  WHERE_CLONE,
+  WHERE_NONE,
 } from "../src/renderer/src/lib/new-task-draft";
 import { prependToOrder } from "../src/renderer/src/lib/sidebar-order";
 
@@ -57,60 +69,228 @@ describe("effectiveTitle / draftLabel", () => {
 });
 
 describe("isDraftEmpty", () => {
-  it("ignores the origin alone", () => {
-    expect(isDraftEmpty(emptyDraft("t1"))).toBe(true);
+  it("ignores the origin and the prefilled Where / agent defaults", () => {
+    const prefs = {
+      ...emptyPrefs(),
+      where: repoWhere("github.com/a/b"),
+      model: "anthropic/opus",
+    };
+    expect(isDraftEmpty(emptyDraft({ id: "t1" }, prefs))).toBe(true);
   });
-  it("is non-empty with any field or a link", () => {
+  it("is non-empty with typed text, a parent, or a clone URL", () => {
     expect(isDraftEmpty({ ...emptyDraft(), prompt: "x" })).toBe(false);
-    expect(isDraftEmpty({ ...emptyDraft(), repositoryId: "r" })).toBe(false);
-    expect(isDraftEmpty({ ...emptyDraft("t"), link: "child" })).toBe(false);
-  });
-  it("does not count the Task / Chat toggle alone", () => {
-    expect(isDraftEmpty({ ...emptyDraft(), mode: "chat" })).toBe(true);
+    expect(isDraftEmpty({ ...emptyDraft(), parentTaskId: "p" })).toBe(false);
+    expect(isDraftEmpty({ ...emptyDraft(), cloneUrl: "https://x" })).toBe(
+      false,
+    );
   });
 });
 
-describe("draftRepository", () => {
-  const base = { mode: "task" as const, repositoryId: "", cloneUrl: "" };
-  it("task mode needs a repository (or a non-blank clone URL)", () => {
-    expect(draftRepository(base)).toBeNull();
-    expect(
-      draftRepository({ ...base, repositoryId: "github.com/a/b" }),
-    ).toEqual({ repositoryId: "github.com/a/b" });
-    expect(
-      draftRepository({
-        ...base,
-        repositoryId: CLONE_URL_VALUE,
-        cloneUrl: " ",
-      }),
-    ).toBeNull();
-    expect(
-      draftRepository({
-        ...base,
-        repositoryId: CLONE_URL_VALUE,
-        cloneUrl: " https://x/y.git ",
-      }),
-    ).toEqual({ cloneUrl: "https://x/y.git" });
+describe("emptyDraft defaults", () => {
+  const prefs = {
+    ...emptyPrefs(),
+    where: repoWhere("github.com/last/used"),
+    harness: "pi",
+    model: "anthropic/opus",
+    thinking: "high" as const,
+  };
+  it("defaults Where to the origin task's repository, never pre-filling the parent", () => {
+    const draft = emptyDraft(
+      { id: "t1", repositoryId: "github.com/focused/repo" },
+      prefs,
+    );
+    expect(draft.where).toBe(repoWhere("github.com/focused/repo"));
+    expect(draft.parentTaskId).toBeNull();
+    expect(draft.originTaskId).toBe("t1");
+    expect(draft).toMatchObject({ model: "anthropic/opus", thinking: "high" });
   });
-  it("chat mode never uses a repository, even a previously chosen one", () => {
+  it("uses the origin's folder, else the last used Where", () => {
+    expect(emptyDraft({ id: "t", folderPath: "/notes" }, prefs).where).toBe(
+      folderWhere("/notes"),
+    );
+    expect(emptyDraft({ id: "t" }, prefs).where).toBe(prefs.where);
+    expect(emptyDraft(null, prefs).where).toBe(prefs.where);
+  });
+});
+
+describe("rememberDraft", () => {
+  it("keeps the agent choice and Where, with deduplicated capped recents", () => {
+    let prefs = emptyPrefs();
+    for (const id of ["a", "b", "c", "d", "e", "f", "b"]) {
+      prefs = rememberDraft(prefs, {
+        ...emptyDraft(),
+        where: repoWhere(id),
+        model: "m",
+      });
+    }
+    expect(prefs.where).toBe(repoWhere("b"));
+    expect(prefs.model).toBe("m");
+    expect(prefs.recents).toEqual(
+      ["b", "f", "e", "d", "c"].map((id) => repoWhere(id)),
+    );
+  });
+  it("never remembers a clone or 'no folder' as a recent", () => {
+    const before = {
+      ...emptyPrefs(),
+      where: repoWhere("a"),
+      recents: [repoWhere("a")],
+    };
+    const afterClone = rememberDraft(before, {
+      ...emptyDraft(),
+      where: WHERE_CLONE,
+    });
+    expect(afterClone.where).toBe(repoWhere("a"));
+    expect(afterClone.recents).toEqual([repoWhere("a")]);
+    const afterNone = rememberDraft(before, {
+      ...emptyDraft(),
+      where: WHERE_NONE,
+    });
+    expect(afterNone.where).toBe(WHERE_NONE);
+    expect(afterNone.recents).toEqual([repoWhere("a")]);
+  });
+});
+
+describe("submit actions", () => {
+  const ready = { ...emptyDraft(), prompt: "do it", where: repoWhere("r") };
+  it("defaults to Start, or Run in background once a parent is set", () => {
+    expect(defaultAction(ready)).toBe("start");
+    expect(alternateAction(ready)).toBe("background");
+    expect(defaultAction({ ...ready, parentTaskId: "p" })).toBe("background");
+    expect(alternateAction({ ...ready, parentTaskId: "p" })).toBe("start");
+  });
+  it("blocks until there is a title, a Where, a clone URL when cloning, and a prompt for background", () => {
+    expect(submitBlocker({ ...ready, prompt: "" }, "start")).toMatch(/title/);
+    expect(submitBlocker({ ...ready, where: "" }, "start")).toMatch(/where/);
     expect(
-      draftRepository({
-        ...base,
-        mode: "chat",
-        repositoryId: "github.com/a/b",
-      }),
-    ).toEqual({ none: true });
+      submitBlocker({ ...ready, where: WHERE_CLONE, cloneUrl: " " }, "start"),
+    ).toMatch(/clone URL/);
+    expect(
+      submitBlocker({ ...ready, title: "T", prompt: "" }, "background"),
+    ).toMatch(/prompt/);
+    expect(
+      submitBlocker({ ...ready, title: "T", prompt: "" }, "park"),
+    ).toBeNull();
+    expect(submitBlocker(ready, "background")).toBeNull();
+  });
+});
+
+describe("planSubmit", () => {
+  const parent = {
+    id: "parent-1",
+    repositoryId: "github.com/a/repo",
+    branch: "me/parent-branch",
+  };
+  const ready = {
+    ...emptyDraft(),
+    title: "Child",
+    prompt: "look at /tmp/clipboard-1.png",
+    where: repoWhere("github.com/a/repo"),
+    model: "anthropic/opus",
+    thinking: "high" as const,
+    attachments: ["/tmp/clipboard-1.png", "/tmp/removed.png"],
+  };
+
+  it("Start / Park create the task, carrying agent fields and only referenced attachments", () => {
+    expect(planSubmit(ready, "start", null)).toEqual({
+      command: "createTask",
+      input: {
+        title: "Child",
+        initialPrompt: "look at /tmp/clipboard-1.png",
+        repositoryId: "github.com/a/repo",
+        start: true,
+        model: "anthropic/opus",
+        thinking: "high",
+        attachments: ["/tmp/clipboard-1.png"],
+      },
+    });
+    const park = planSubmit({ ...ready, attachments: [] }, "park", null);
+    expect(park.command).toBe("createTask");
+    expect(park.input).not.toHaveProperty("start");
+  });
+
+  it("a child in its parent's repository stacks on the parent's branch by default", () => {
+    const created = planSubmit(ready, "start", parent);
+    expect(created.input).toMatchObject({
+      parentTaskId: "parent-1",
+      baseRef: "me/parent-branch",
+    });
+    const launched = planSubmit(ready, "background", parent);
+    expect(launched).toMatchObject({
+      command: "launchTask",
+      input: {
+        relation: "child",
+        fromTaskId: "parent-1",
+        repository: { repositoryId: "github.com/a/repo" },
+        baseBranch: "parent",
+      },
+    });
+    expect(launched.input).not.toHaveProperty("baseRef");
+  });
+
+  it("an explicit base ref wins; another repository never stacks", () => {
+    expect(
+      planSubmit({ ...ready, baseRef: "release" }, "background", parent).input,
+    ).toMatchObject({ baseRef: "release" });
+    const elsewhere = planSubmit(
+      { ...ready, where: repoWhere("github.com/a/other") },
+      "start",
+      parent,
+    );
+    expect(elsewhere.input).not.toHaveProperty("baseRef");
+  });
+
+  it("background without a parent is a standalone launch; folders, clones and chat map to their repository variants", () => {
+    expect(
+      planSubmit({ ...ready, where: folderWhere("/notes") }, "background", null)
+        .input,
+    ).toMatchObject({
+      relation: "standalone",
+      repository: { folderPath: "/notes" },
+    });
+    expect(
+      planSubmit(
+        { ...ready, where: WHERE_CLONE, cloneUrl: " https://x/y.git " },
+        "background",
+        null,
+      ).input,
+    ).toMatchObject({ repository: { cloneUrl: "https://x/y.git" } });
+    expect(
+      planSubmit({ ...ready, where: WHERE_NONE }, "background", null).input,
+    ).toMatchObject({ repository: { none: true } });
+    expect(
+      planSubmit({ ...ready, where: folderWhere("/notes") }, "start", null)
+        .input,
+    ).toMatchObject({ folderPath: "/notes" });
+  });
+});
+
+describe("parseWhere", () => {
+  it("round-trips tokens and treats junk as unset", () => {
+    expect(parseWhere(repoWhere("github.com/a/b"))).toEqual({
+      kind: "repository",
+      repositoryId: "github.com/a/b",
+    });
+    expect(parseWhere(folderWhere("/x"))).toEqual({
+      kind: "folder",
+      path: "/x",
+    });
+    expect(parseWhere(WHERE_NONE)).toEqual({ kind: "none" });
+    expect(parseWhere("repo:")).toEqual({ kind: "unset" });
+    expect(parseWhere("weird")).toEqual({ kind: "unset" });
   });
 });
 
 describe("draft persistence", () => {
   it("round-trips", () => {
     const draft = {
-      ...emptyDraft("t1"),
+      ...emptyDraft({ id: "t1" }),
       title: "A",
       prompt: "B",
-      mode: "chat" as const,
-      link: "child" as const,
+      where: WHERE_NONE,
+      parentTaskId: "p",
+      thinking: "low" as const,
+      baseRef: "dev",
+      attachments: ["/tmp/a.png"],
     };
     expect(parseDraft(serializeDraft(draft))).toEqual(draft);
   });
@@ -118,7 +298,15 @@ describe("draft persistence", () => {
     expect(parseDraft(null)).toBeNull();
     expect(parseDraft("{nope")).toBeNull();
     expect(parseDraft("[1]")).toBeNull();
-    expect(parseDraft('{"link":"weird","title":3}')).toEqual(emptyDraft());
+    expect(parseDraft('{"thinking":"weird","title":3}')).toEqual(emptyDraft());
+  });
+  it("maps a draft saved by the old Task / Chat composer onto Where", () => {
+    expect(
+      parseDraft('{"mode":"task","repositoryId":"github.com/a/b"}')?.where,
+    ).toBe(repoWhere("github.com/a/b"));
+    expect(parseDraft('{"mode":"chat","repositoryId":"x"}')?.where).toBe(
+      WHERE_NONE,
+    );
   });
   it("stores and forgets", () => {
     const storage = memoryStorage();
@@ -127,6 +315,15 @@ describe("draft persistence", () => {
     storeDraft(storage, null);
     expect(storage.map.has(NEW_TASK_DRAFT_KEY)).toBe(false);
     expect(readDraft(storage)).toBeNull();
+  });
+  it("prefs round-trip and tolerate garbage", () => {
+    const storage = memoryStorage();
+    expect(readPrefs(storage)).toEqual(emptyPrefs());
+    const prefs = { ...emptyPrefs(), model: "m", recents: [repoWhere("a")] };
+    storePrefs(storage, prefs);
+    expect(readPrefs(storage)).toEqual(prefs);
+    storage.setItem(NEW_TASK_PREFS_KEY, "{bad");
+    expect(readPrefs(storage)).toEqual(emptyPrefs());
   });
 });
 

@@ -12,7 +12,39 @@
 // honest about what it can do today.
 
 import type { HarnessMessagingCapabilities } from "./messaging.js";
-import type { PresenceRecord } from "./model.js";
+import type { PresenceRecord, ThinkingLevel } from "./model.js";
+
+/** One model a harness can run, for the composer's Agent · Model picker. */
+export interface HarnessModel {
+  /** What the harness accepts as its model argument (Pi: `"provider/id"`). */
+  id: string;
+  /** Provider group label (e.g. `"anthropic"`). */
+  provider: string;
+  /** Short display name (e.g. `"claude-opus-4-8"`). */
+  name: string;
+  /** Whether the model accepts a thinking level. */
+  thinking: boolean;
+}
+
+/** Everything a frontend needs to render one harness's group in the model picker. */
+export interface HarnessModelCatalog {
+  /** Stable harness id stored on tasks (`Task.harness`). */
+  harness: string;
+  /** Display label (e.g. `"Pi"`). */
+  label: string;
+  models: HarnessModel[];
+  /** The model a session gets when none is chosen (config default, else the harness's own). */
+  defaultModel?: string;
+  /** The thinking level a session gets when none is chosen. */
+  defaultThinking?: ThinkingLevel;
+  /** Why `models` is empty or incomplete (e.g. the harness CLI is missing), for the picker to show. */
+  error?: string;
+}
+
+/** Resource Access behind a harness's model list (spawns the harness CLI / reads its settings). */
+export interface HarnessModelCatalogAccess {
+  listModels(): Promise<Omit<HarnessModelCatalog, "harness" | "label">>;
+}
 
 /**
  * Which conversation a task pane should open, as decided by core's
@@ -38,12 +70,14 @@ export type SessionLaunch =
       sessionId: string;
       /**
        * Pi `--model <pattern>` override for this first launch only (see
-       * `CoreCommands.claimSessionLaunch`: `task.launch.model ??
+       * `CoreCommands.claimSessionLaunch`: `task.model ?? task.launch.model ??
        * GlobalConfig.launch.defaultModel`). Never applied to a
        * resume/fork/continue "- the harness adapter maps it to `--model` only
        * here.
        */
       model?: string;
+      /** Thinking-level override for this first launch only (`task.thinking`). */
+      thinking?: ThinkingLevel;
     }
   | { mode: "resume"; sessionId: string; sessionPath?: string }
   | { mode: "fork"; sessionId: string; forkFrom: string }
@@ -91,6 +125,14 @@ export interface PresenceStatus {
  * spawning in core (see /AGENTS.md: accessor separation is a hard rule).
  */
 export interface HarnessAdapter {
+  /** Stable id stored on tasks (`Task.harness`), e.g. `"pi"`. */
+  readonly id: string;
+  /** Display label, e.g. `"Pi"`. */
+  readonly label: string;
+
+  /** The models this harness can run, for the composer's picker. Never throws: failures come back as `error`. */
+  listModels(): Promise<HarnessModelCatalog>;
+
   /** What this harness can deliver to a task's session (see `docs/task-messaging.md`): core resolves the actual message mode from this. */
   readonly messaging: HarnessMessagingCapabilities;
 

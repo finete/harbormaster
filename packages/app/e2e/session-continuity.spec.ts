@@ -28,6 +28,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -208,7 +209,7 @@ let sessionFile = "";
 test("the first pane pre-assigns a session id; a closed tab re-attaches to the same pi; a cold reopen resumes that session", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Continuity");
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
+  await chooseWhere(window, REPO_ID);
   await window.getByTestId("new-task-prompt-input").fill("Kick it off");
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);

@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -84,10 +85,8 @@ test("terminal panes render with the DOM renderer; power events reach wake.log",
 
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Renderer Test");
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "github.com/test/fixture");
+    await submitAs(window, "park");
     await window.getByTestId("board-button").click();
     const card = window
       .locator('[data-testid^="card-"]')

@@ -123,6 +123,30 @@ export interface ScratchWorkspaceAccess {
   ensureScratchDirectory(taskId: string): Promise<string>;
 }
 
+/**
+ * Resource Access for user folders registered outside `codeRoot` (the
+ * composer's `Open folder…`; see `/docs/new-task-composer.md` "Where"). The
+ * registry is core state (`<stateDir>/locations.json`), so every client and
+ * the agent launch tool see the same list.
+ */
+export interface FolderAccess {
+  /** Registered folder paths, in registration order. */
+  listRegisteredFolders(): Promise<string[]>;
+  /** Realpath-resolve `path`, require an existing directory, and register it (idempotent). Returns the resolved path. */
+  registerFolder(path: string): Promise<string>;
+  /** Whether `path` is an existing directory. Never throws. */
+  isDirectory(path: string): Promise<boolean>;
+}
+
+/** Resource Access for images pasted into a task's prompt. */
+export interface TaskAttachmentAccess {
+  /**
+   * Copy each file into `<stateDir>/task-attachments/<taskId>/` and return
+   * original path -> copy path. Files that cannot be read are left out.
+   */
+  copyIntoTask(taskId: string, paths: string[]): Promise<Map<string, string>>;
+}
+
 /** Options for {@link MessageAccess.recordMessage}. */
 export interface RecordMessageOptions {
   /**

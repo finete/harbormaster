@@ -238,6 +238,11 @@ function validTask(value: unknown): value is Task {
     typeof value.initialPrompt === "string" &&
     isOptionalString(value.initialPromptDeliveredAt) &&
     isOptionalString(value.repositoryId) &&
+    isOptionalString(value.folderPath) &&
+    isOptionalString(value.baseRef) &&
+    isOptionalString(value.harness) &&
+    isOptionalString(value.model) &&
+    isOptionalString(value.thinking) &&
     isOptionalString(value.branch) &&
     isOptionalString(value.targetBranch) &&
     isOptionalString(value.issueRef) &&

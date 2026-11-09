@@ -26,6 +26,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -196,7 +197,7 @@ let sessionId = "";
 test("a task's workspace (primary pi pane + split shell) and the focused rail survive an app restart", async () => {
   await window.getByTestId("sidebar-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Restore Me");
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
+  await chooseWhere(window, REPO_ID);
   await window.getByTestId("new-task-prompt-input").fill("Kick it off");
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);

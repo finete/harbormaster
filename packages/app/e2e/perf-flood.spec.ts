@@ -34,6 +34,7 @@ import {
   test,
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -416,10 +417,8 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
     const title = "Perf Flood Task";
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill(title);
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "github.com/test/fixture");
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
     await window.getByTestId("board-button").click();
     const card = cardLocator(window, title);

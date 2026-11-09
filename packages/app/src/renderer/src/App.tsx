@@ -33,8 +33,12 @@ import {
   emptyDraft,
   isDraftEmpty,
   type NewTaskDraft,
+  type NewTaskPrefs,
   readDraft,
+  readPrefs,
+  rememberDraft,
   storeDraft,
+  storePrefs,
 } from "./lib/new-task-draft";
 import { modKeyLabel } from "./lib/platform";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
@@ -93,9 +97,14 @@ export function App(): JSX.Element {
   useEffect(() => {
     storeDraft(window.localStorage, draft);
   }, [draft]);
+  // Sticky composer choices (last Where / agent / model, recent Wheres).
+  const [newTaskPrefs, setNewTaskPrefs] = useState<NewTaskPrefs>(() =>
+    readPrefs(window.localStorage),
+  );
   const visibleTaskId = draftFocused ? "" : focusedTaskId;
+  const boardTasks = useMemo(() => flatRows.map((row) => row.task), [flatRows]);
   const draftOrigin = draft?.originTaskId
-    ? (flatRows.find((row) => row.task.id === draft.originTaskId)?.task ?? null)
+    ? (boardTasks.find((task) => task.id === draft.originTaskId) ?? null)
     : null;
 
   // OS notifications + dock badge (daily-driver switch, task B). Unread
@@ -292,11 +301,16 @@ export function App(): JSX.Element {
   // draft is only focused; a fresh one captures the focused task as its
   // origin (the task a launch would come from).
   const openDraft = useCallback(() => {
-    setDraft((prev) => prev ?? emptyDraft(focusedTaskId || null));
+    const origin = focusedTaskId
+      ? (boardTasks.find((task) => task.id === focusedTaskId) ?? {
+          id: focusedTaskId,
+        })
+      : null;
+    setDraft((prev) => prev ?? emptyDraft(origin, newTaskPrefs));
     setDraftFocused(true);
     setDraftFocusSignal((count) => count + 1);
     setView("workspace");
-  }, [focusedTaskId]);
+  }, [focusedTaskId, boardTasks, newTaskPrefs]);
 
   const discardDraft = useCallback(() => {
     setDraft(null);
@@ -319,14 +333,20 @@ export function App(): JSX.Element {
 
   // A submitted draft. "Start" turns the draft row into the real task in the
   // same place (top of the rail) and focuses it - it is our own fresh task, so
-  // no takeover check. Park/launch return focus to the origin task: launching
-  // never steals focus (/docs/design-decisions.md "Launching tasks from an agent").
+  // no takeover check. Park/background return focus to the origin task:
+  // launching never steals focus (/docs/design-decisions.md "Launching tasks
+  // from an agent"). The draft's choices become the next draft's defaults.
   const onDraftSubmitted = useCallback(
     (outcome: NewTaskOutcome) => {
       const originId = draft?.originTaskId ?? null;
+      if (draft) {
+        const prefs = rememberDraft(newTaskPrefs, draft);
+        setNewTaskPrefs(prefs);
+        storePrefs(window.localStorage, prefs);
+      }
       setDraft(null);
       setDraftFocused(false);
-      if (outcome.kind === "start") {
+      if (outcome.action === "start") {
         const id = outcome.task.id;
         setOpenedTaskIds((prev) =>
           prev.has(id) ? prev : new Set(prev).add(id),
@@ -337,13 +357,13 @@ export function App(): JSX.Element {
       }
       if (originId && openedTaskIds.has(originId)) setFocusedTaskId(originId);
       pushToast(
-        outcome.kind === "launch"
+        outcome.action === "background"
           ? `Launched ${outcome.task.title} \u2014 queued`
           : `Parked ${outcome.task.title} in Backlog`,
         "success",
       );
     },
-    [draft, openedTaskIds, prependOpened],
+    [draft, newTaskPrefs, openedTaskIds, prependOpened],
   );
 
   useEffect(() => {
@@ -566,6 +586,8 @@ export function App(): JSX.Element {
                       setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
                     }
                     origin={draftOrigin}
+                    tasks={boardTasks}
+                    recents={newTaskPrefs.recents}
                     focusSignal={draftFocusSignal}
                     onSubmitted={onDraftSubmitted}
                   />

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parsePiModelList } from "../src/access/pi-model-catalog-access.js";
 import { SessionPresenceAccess } from "../src/access/session-presence-access.js";
 import type { Clock } from "../src/contracts/services.js";
 import { PiHarnessAdapter, piSessionArgs } from "../src/harness/pi-adapter.js";
@@ -125,6 +126,48 @@ describe("PiHarnessAdapter", () => {
       ]);
       expect(build({ mode: "continue" })).toEqual(["--continue"]);
       expect(build(undefined)).toEqual([]);
+    });
+
+    it("passes model and thinking on a new session only", () => {
+      expect(
+        piSessionArgs({
+          mode: "new",
+          sessionId: "s",
+          model: "anthropic/opus",
+          thinking: "high",
+        }),
+      ).toEqual([
+        "--session-id",
+        "s",
+        "--model",
+        "anthropic/opus",
+        "--thinking",
+        "high",
+      ]);
+    });
+
+    it("parses pi --list-models output, skipping the header and junk rows", () => {
+      const output = [
+        "provider   model            context  max-out  thinking  images",
+        "anthropic  claude-opus-4-8  1M       128K     yes       yes",
+        "openai     gpt-mini         200K     64K      no        no",
+        "",
+        "garbage",
+      ].join("\n");
+      expect(parsePiModelList(output)).toEqual([
+        {
+          id: "anthropic/claude-opus-4-8",
+          provider: "anthropic",
+          name: "claude-opus-4-8",
+          thinking: true,
+        },
+        {
+          id: "openai/gpt-mini",
+          provider: "openai",
+          name: "gpt-mini",
+          thinking: false,
+        },
+      ]);
     });
 
     it("never combines flags Pi rejects together (--session/--continue with --session-id, --fork with --session/--continue)", () => {

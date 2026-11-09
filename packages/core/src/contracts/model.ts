@@ -7,6 +7,32 @@ import { DEFAULT_MOVER_ORDER } from "./addons.js";
 
 export const STATE_VERSION = 1 as const;
 
+/**
+ * A harness-agnostic reasoning-effort level (Pi's `--thinking` values; other
+ * adapters map or ignore it). See `/docs/new-task-composer.md`.
+ */
+export type ThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/** The harness every task ran on before tasks recorded one. */
+export const DEFAULT_HARNESS_ID = "pi";
+
 /** Permanent, repository-backed work vs. local-only scratch work. */
 export type TaskKind = "task" | "temp_task";
 
@@ -121,6 +147,27 @@ export interface Task {
   initialPromptDeliveredAt?: string;
   /** Opaque repository identity; resolved against git access in a later phase. Normalized like "github.com/org/repo". */
   repositoryId?: string;
+  /**
+   * A non-git folder the task runs in place (no worktree, no branch); set
+   * instead of `repositoryId`. See `/docs/new-task-composer.md` "Where".
+   */
+  folderPath?: string;
+  /**
+   * Ref the task's worktree branches off when it is started (any branch,
+   * e.g. the parent's branch for stacked work); absent = the repository's
+   * default branch.
+   */
+  baseRef?: string;
+  /**
+   * Agent harness this task runs on (e.g. `"pi"`); fixed for the task's
+   * lifetime. Absent = `DEFAULT_HARNESS_ID` (tasks created before this
+   * field existed).
+   */
+  harness?: string;
+  /** Model for the task's first session; falls back to `GlobalConfig.launch.defaultModel`, then the harness default. */
+  model?: string;
+  /** Thinking level for the task's first session; absent = the harness default. */
+  thinking?: ThinkingLevel;
   /** Working branch for this task's worktree, once bound. */
   branch?: string;
   /** Branch this task's work will land on (e.g. "main"). */
@@ -177,7 +224,7 @@ export interface TaskLaunch {
   requestedAt: string;
   startedAt?: string;
   interruptedAt?: string;
-  /** Per-launch model override; falls back to `GlobalConfig.launch.defaultModel`, then the harness default. */
+  /** Legacy: launched tasks recorded their model here before `Task.model` existed; still honored as a fallback. */
   model?: string;
 }
 
@@ -247,6 +294,12 @@ export interface WorkspaceBinding {
    * removal.
    */
   scratch?: boolean;
+  /**
+   * A user folder the task runs in place (a `folderPath` task):
+   * `worktreePath` is that folder itself. Like `scratch`, never touched by
+   * git verbs, and never deleted: Done/delete only park the binding.
+   */
+  inPlace?: boolean;
   createdAt: string;
   updatedAt: string;
 }
