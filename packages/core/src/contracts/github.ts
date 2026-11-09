@@ -44,6 +44,16 @@ export interface PullRequestAccess {
     branch: string,
   ): Promise<PullRequestStatus | undefined>;
   /**
+   * {@link status} for many branches of one repository in as few round
+   * trips as the backend allows (the refresh tick observes every live task
+   * at once). Same per-branch answer as `status`; rejects as a whole.
+   * Optional: without it the refresh falls back to one `status` per task.
+   */
+  statusMany?(
+    repositoryId: string,
+    branches: readonly string[],
+  ): Promise<Map<string, PullRequestStatus | undefined>>;
+  /**
    * Reuse an existing PR for `branch` (marking a draft ready), or push the
    * branch and open a fresh one targeting `baseBranch` otherwise.
    */

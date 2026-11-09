@@ -5,8 +5,8 @@
 // supplied path, and with explicit dirty-refusal / safe-branch-delete
 // semantics called out as separate, testable verbs.
 
-import { access as fsAccess, mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { access as fsAccess, mkdir, readFile, rm } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   GitWorktreeAccess,
   RepositoryInfo,
@@ -122,7 +122,18 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     return ref !== undefined;
   }
 
+  /**
+   * Polled once per live task on every refresh tick, so it reads the
+   * worktree's HEAD file directly instead of spawning `git` (each spawn is
+   * an exec the OS may hold for an endpoint-security check). Falls back to
+   * `git branch --show-current` for any layout the file read can't vouch for.
+   */
   async currentBranch(path: string): Promise<string | undefined> {
+    const head = await readHeadFile(path);
+    if (head !== undefined) {
+      const branch = branchFromHead(head);
+      if (branch !== "unknown") return branch;
+    }
     const branch = await tryRun("git", ["branch", "--show-current"], path);
     return branch?.trim() || undefined;
   }
@@ -201,4 +212,39 @@ function parsePorcelain(raw: string): WorktreeInfo[] {
   }
   flush();
   return worktrees;
+}
+
+/**
+ * The raw contents of a checkout's HEAD file: `<path>/.git/HEAD` for a
+ * primary checkout, or `<gitdir>/HEAD` where `<path>/.git` is a linked
+ * worktree's `gitdir: <dir>` pointer file. `undefined` when neither exists.
+ */
+async function readHeadFile(path: string): Promise<string | undefined> {
+  const dotGit = join(path, ".git");
+  const direct = await readFile(join(dotGit, "HEAD"), "utf8").catch(
+    () => undefined,
+  );
+  if (direct !== undefined) return direct;
+  const pointer = await readFile(dotGit, "utf8").catch(() => undefined);
+  const gitDir = pointer?.match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
+  if (!gitDir) return undefined;
+  const resolved = isAbsolute(gitDir) ? gitDir : resolve(path, gitDir);
+  return readFile(join(resolved, "HEAD"), "utf8").catch(() => undefined);
+}
+
+/**
+ * The branch named by a HEAD file's contents: the short name for a symbolic
+ * `ref: refs/heads/<branch>`, `undefined` for a detached HEAD (a bare commit
+ * id), or `"unknown"` for anything else (e.g. reftable's `.invalid`
+ * placeholder), which the caller resolves through `git` instead.
+ */
+export function branchFromHead(head: string): string | undefined | "unknown" {
+  const text = head.trim();
+  const symbolic = text.match(/^ref:\s*refs\/heads\/(.+)$/);
+  if (symbolic) {
+    const branch = symbolic[1] ?? "";
+    return branch && branch !== ".invalid" ? branch : "unknown";
+  }
+  if (/^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(text)) return undefined;
+  return "unknown";
 }

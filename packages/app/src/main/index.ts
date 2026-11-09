@@ -18,9 +18,11 @@ import type {
 import {
   createCore,
   DEFAULT_STATE_DIR,
+  execFileRunner,
   isConnectivityError,
   PiHarnessAdapter,
   resolveStatePaths,
+  setProcessRunner,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
 import {
@@ -31,6 +33,7 @@ import {
   net,
   powerMonitor,
   shell,
+  utilityProcess,
 } from "electron";
 import type {
   MessagingChangedPayload,
@@ -74,6 +77,7 @@ import {
   writeToSession,
 } from "./ptySessions";
 import { isAllowedRevealPath } from "./reveal-path";
+import { createSpawnHostRunner } from "./spawn-host-client";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import { createWakeLog, isWakeLogWorthy } from "./wake-log";
 import { WarmSessionCache } from "./warm-sessions";
@@ -172,6 +176,22 @@ const activeStateDir = process.env.HARBORMASTER_STATE_DIR ?? DEFAULT_STATE_DIR;
 if (process.env.HARBORMASTER_USER_DATA_DIR) {
   app.setPath("userData", process.env.HARBORMASTER_USER_DATA_DIR);
 }
+// Core's `git`/`gh` child processes spawn in a utility process, never on
+// this event loop (see spawn-host-client.ts). Installed before the core is
+// created; a run issued before app-ready (none today) spawns in-process.
+const spawnHost = createSpawnHostRunner({
+  fork: () =>
+    app.isReady()
+      ? utilityProcess.fork(join(__dirname, "spawn-host.js"), [], {
+          serviceName: "harbormaster-spawn-host",
+          stdio: "inherit",
+        })
+      : undefined,
+  fallback: execFileRunner,
+});
+setProcessRunner(spawnHost.run);
+app.on("will-quit", () => spawnHost.dispose());
+
 const core = createCore({ stateDir: activeStateDir });
 
 // The Pi harness adapter: builds pane launch specs and reads presence. Core

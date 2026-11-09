@@ -17,6 +17,9 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
+          // Utility process that runs core's git/gh spawns off the main
+          // event loop (src/main/spawn-host-client.ts).
+          "spawn-host": resolve(__dirname, "src/main/spawn-host.ts"),
         },
       },
     },

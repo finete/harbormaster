@@ -1,14 +1,79 @@
 // Utility: child-process exec helper. Ported from pi-home's
-// src/utilities/exec.ts (same execFile + promisify shape) with the error
+// src/utilities/exec.ts (same execFile shape) with the error
 // path hardened to fold a failed process's stderr into the thrown message,
 // so access-layer callers (git, future GitHub CLI access) get an actionable
 // error without re-parsing anything. Utilities are callable from any layer;
 // this one is consumed by access/ services that shell out to git.
+//
+// The actual spawn goes through a swappable {@link ProcessRunner}. The
+// default runs `execFile` in this process; a host whose event loop must not
+// stall (the Electron main process: on macOS an endpoint-security agent can
+// hold every exec inside `posix_spawn` for tens of milliseconds) installs a
+// runner that spawns in a helper process instead (`setProcessRunner`).
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
+/** One child-process run, fully described as plain data (so a runner can forward it to another process). */
+export interface ProcessRunRequest {
+  command: string;
+  args: string[];
+  cwd?: string;
+  timeoutMs: number;
+  maxBuffer: number;
+}
+
+export interface ProcessRunResult {
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Runs one child process to completion. Rejects with an `Error` carrying
+ * `execFile`'s failure fields (`killed`, `code`, `signal`, `stderr`) so
+ * {@link run}'s error description works the same for every runner.
+ */
+export type ProcessRunner = (
+  request: ProcessRunRequest,
+) => Promise<ProcessRunResult>;
+
+/** The default runner: `execFile` in this process, SIGKILL on timeout. */
+export const execFileRunner: ProcessRunner = (request) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      request.command,
+      request.args,
+      {
+        cwd: request.cwd,
+        maxBuffer: request.maxBuffer,
+        timeout: request.timeoutMs,
+        // SIGKILL, not the default SIGTERM: a child wedged on a prompt or in
+        // uninterruptible network I/O may ignore SIGTERM, and the promise only
+        // settles once the child actually exits.
+        killSignal: "SIGKILL",
+        encoding: "utf8",
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(Object.assign(error, { stdout, stderr }));
+          return;
+        }
+        resolve({ stdout, stderr });
+      },
+    );
+  });
+
+let activeRunner: ProcessRunner = execFileRunner;
+
+/**
+ * Swap the runner every {@link run}/{@link tryRun} call uses; `undefined`
+ * restores {@link execFileRunner}. Process-wide: install it once at startup,
+ * before the core issues any command.
+ */
+export function setProcessRunner(runner: ProcessRunner | undefined): void {
+  activeRunner = runner ?? execFileRunner;
+}
+
+const MAX_BUFFER = 10 * 1024 * 1024;
 
 /**
  * Default wall-clock limit for one child process. A `gh`/`git` call that
@@ -28,15 +93,18 @@ export interface RunOptions {
   timeoutMs?: number;
 }
 
-function execOptions(cwd: string | undefined, options: RunOptions | undefined) {
+function request(
+  command: string,
+  args: string[],
+  cwd: string | undefined,
+  options: RunOptions | undefined,
+): ProcessRunRequest {
   return {
-    cwd,
-    maxBuffer: 10 * 1024 * 1024,
-    timeout: options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
-    // SIGKILL, not the default SIGTERM: a child wedged on a prompt or in
-    // uninterruptible network I/O may ignore SIGTERM, and the promise only
-    // settles once the child actually exits.
-    killSignal: "SIGKILL" as const,
+    command,
+    args,
+    ...(cwd ? { cwd } : {}),
+    maxBuffer: MAX_BUFFER,
+    timeoutMs: options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
   };
 }
 
@@ -52,11 +120,7 @@ export async function run(
   options?: RunOptions,
 ): Promise<string> {
   try {
-    const result = await execFileAsync(
-      command,
-      args,
-      execOptions(cwd, options),
-    );
+    const result = await activeRunner(request(command, args, cwd, options));
     return result.stdout.trimEnd();
   } catch (error) {
     throw new Error(
@@ -73,11 +137,7 @@ export async function tryRun(
   options?: RunOptions,
 ): Promise<string | undefined> {
   try {
-    const result = await execFileAsync(
-      command,
-      args,
-      execOptions(cwd, options),
-    );
+    const result = await activeRunner(request(command, args, cwd, options));
     return result.stdout.trimEnd();
   } catch {
     return undefined;

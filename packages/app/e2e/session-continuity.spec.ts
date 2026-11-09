@@ -28,6 +28,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
@@ -163,7 +164,7 @@ test.beforeAll(async () => {
   chmodSync(fakePi, 0o755);
   // gh: never needed here; an empty PR list keeps any refresh inert.
   const fakeGh = path.join(root, "fake-gh");
-  writeFileSync(fakeGh, "#!/bin/sh\nprintf '[]'\n");
+  writeFileSync(fakeGh, `#!/bin/sh\n${ghGraphqlShimLine(root)}\nprintf '[]'\n`);
   chmodSync(fakeGh, 0o755);
 
   app = await electron.launch({

@@ -23,6 +23,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -95,6 +96,7 @@ function writeFakeGhOfflineSwitchable(root: string): {
     ghPath,
     [
       "#!/bin/sh",
+      ghGraphqlShimLine(root),
       `marker="${markerPath}"`,
       'if [ -f "$marker" ]; then',
       '  echo "error connecting to api.github.com check your internet" >&2',
