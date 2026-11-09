@@ -6,7 +6,7 @@
 // PullRequestAccess: never a real gh/network call.
 
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -89,6 +89,11 @@ async function fixture(pullRequests: PullRequestAccess) {
     checkout,
   );
   await git(["push", "-q", "origin", "main"], checkout);
+  // Pin codeRoot to the temp dir: without it discovery scans the real ~/Code.
+  await writeFile(
+    join(stateDir, "config.json"),
+    JSON.stringify({ codeRoot, branchPrefix: "" }),
+  );
 
   const core = createCore({
     stateDir,
