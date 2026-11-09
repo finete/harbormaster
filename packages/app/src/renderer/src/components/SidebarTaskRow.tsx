@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
 import { createSharedStore } from "../lib/shared-store";
+import { taskAgentLabel } from "../lib/task-agent";
 import {
   deriveMessagingChips,
   loopCapLabel,
@@ -573,7 +574,13 @@ export function SidebarTaskRow({
             className="flex min-w-0 items-center gap-1 pl-5 text-[11px] text-muted-foreground/80"
             data-testid="sidebar-row-activity"
           >
-            <span className="font-medium text-muted-foreground">pi</span>
+            <span
+              className="shrink-0 font-medium text-muted-foreground"
+              data-testid="sidebar-row-agent"
+              title={task.thinking ? `Thinking: ${task.thinking}` : undefined}
+            >
+              {taskAgentLabel(task)}
+            </span>
             <span aria-hidden>·</span>
             <span
               className={cn(

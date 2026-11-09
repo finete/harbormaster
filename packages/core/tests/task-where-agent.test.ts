@@ -132,6 +132,10 @@ async function fixture(config: Record<string, unknown> = {}): Promise<{
     harness: new PiHarnessAdapter({
       stateDir,
       models: {
+        defaults: async () => ({
+          defaultModel: "anthropic/opus",
+          defaultThinking: "medium",
+        }),
         listModels: async () => ({
           models: [
             {
@@ -183,6 +187,20 @@ describe.skipIf(!gitAvailable)("agent fields", () => {
     expect(second?.mode).toBe("resume");
     expect(second).not.toHaveProperty("model");
     expect(second).not.toHaveProperty("thinking");
+  });
+
+  it("records the harness default as the session model when nothing was chosen, without passing it", async () => {
+    const f = await fixture();
+    const task = await f.core.commands.createTask({
+      title: "Plain",
+      initialPrompt: "",
+      start: true,
+    });
+    const first = await f.core.commands.claimSessionLaunch(task.id);
+    expect(first).not.toHaveProperty("model");
+    expect((await f.core.commands.getTask(task.id))?.sessionModel).toBe(
+      "anthropic/opus",
+    );
   });
 
   it("falls back to the configured default model for any task, not only launched ones", async () => {

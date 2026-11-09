@@ -53,6 +53,9 @@ class FakeHarness implements HarnessAdapter {
   async listModels(): Promise<HarnessModelCatalog> {
     return { harness: this.id, label: this.label, models: [] };
   }
+  async defaults(): Promise<Record<string, never>> {
+    return {};
+  }
   messaging: HarnessMessagingCapabilities = { ...ALL };
   private readonly live = new Map<string, { runningTurn: boolean }>();
   setLive(taskId: string, runningTurn = false): void {

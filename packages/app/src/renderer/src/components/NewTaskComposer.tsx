@@ -97,6 +97,22 @@ export function NewTaskComposer({
   const [repositories, setRepositories] = useState<RepositoryInfo[]>([]);
   const [locations, setLocations] = useState<KnownLocation[]>([]);
   const [catalogs, setCatalogs] = useState<HarnessModelCatalog[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  /** Load (or retry) the model catalogs; a failure is shown in the picker, never thrown. */
+  const loadModels = useCallback((): void => {
+    setModelsError(null);
+    void window.harbormaster.core
+      .listModels()
+      .then((next) => {
+        setCatalogs(next);
+        if (next.length === 0) setModelsError("No agent reported any models");
+      })
+      .catch((thrown: unknown) =>
+        setModelsError(
+          thrown instanceof Error ? thrown.message : String(thrown),
+        ),
+      );
+  }, []);
   const [branches, setBranches] = useState<{
     repositoryId: string;
     list: string[];
@@ -111,8 +127,8 @@ export function NewTaskComposer({
     const core = window.harbormaster.core;
     void core.listRepositories().then(setRepositories);
     void core.listLocations().then(setLocations);
-    void core.listModels().then(setCatalogs);
-  }, []);
+    loadModels();
+  }, [loadModels]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focusSignal is the trigger
   useEffect(() => {
@@ -434,7 +450,13 @@ export function NewTaskComposer({
               harness={draft.harness}
               model={draft.model}
               thinking={draft.thinking}
-              {...pickerProps("model")}
+              loadError={modelsError}
+              open={openPicker === "model"}
+              onOpenChange={(open) => {
+                // Retry a failed/empty load whenever the picker opens.
+                if (open && catalogs.length === 0) loadModels();
+                pickerProps("model").onOpenChange(open);
+              }}
               onChange={(patch) => onChange(patch)}
             />
             {!parent && (

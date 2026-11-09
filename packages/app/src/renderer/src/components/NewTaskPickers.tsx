@@ -365,10 +365,13 @@ export function AgentModelPicker({
   harness,
   model,
   thinking,
+  loadError,
   open,
   onOpenChange,
   onChange,
 }: {
+  /** Why the catalogs could not be loaded (shown in place of the model list). */
+  loadError?: string | null;
   catalogs: readonly HarnessModelCatalog[];
   harness: string;
   model: string;
@@ -411,6 +414,21 @@ export function AgentModelPicker({
         className="max-h-[420px] w-72"
         data-testid="new-task-model-menu"
       >
+        {catalogs.length === 0 && (
+          <p
+            data-testid="new-task-model-status"
+            className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground"
+          >
+            {loadError ? (
+              <span className="text-amber-300/90">
+                Couldn't load models: {loadError}. If the app was just updated,
+                restart it.
+              </span>
+            ) : (
+              "Loading models\u2026"
+            )}
+          </p>
+        )}
         <DropdownMenuRadioGroup
           value={value}
           onValueChange={(next) => {

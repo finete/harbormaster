@@ -184,6 +184,12 @@ export class PiHarnessAdapter implements HarnessAdapter {
     this.models = options.models ?? new PiModelCatalogAccess();
   }
 
+  async defaults(): Promise<
+    Pick<HarnessModelCatalog, "defaultModel" | "defaultThinking">
+  > {
+    return this.models.defaults().catch(() => ({}));
+  }
+
   async listModels(): Promise<HarnessModelCatalog> {
     try {
       return {
