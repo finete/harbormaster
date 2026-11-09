@@ -15,6 +15,7 @@ import type {
   LaunchTaskInput,
   MessageMode,
   MoveTaskOptions,
+  OrphanWorktreeReport,
   PresenceRecord,
   ReopenTaskInput,
   RepositoryInfo,
@@ -51,6 +52,7 @@ export type {
   MessageSender,
   MessageStatus,
   MoveTaskOptions,
+  OrphanWorktreeReport,
   PresenceRecord,
   ReopenTaskInput,
   RepositoryCheckout,
@@ -350,6 +352,8 @@ export interface HarbormasterApi {
     }>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
     refresh(): Promise<{ warnings: string[] }>;
+    /** Unbound directories under the worktrees root, sized, plus a warning past the threshold. Slow; see `CoreCommands.scanOrphanWorktrees`. */
+    scanOrphanWorktrees(): Promise<OrphanWorktreeReport>;
     /** Subscribes to the core's board-changed push channel; returns an unsubscribe fn. */
     onBoardChanged(
       listener: (payload: BoardChangedPayload) => void,

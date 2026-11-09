@@ -411,6 +411,11 @@ function registerCoreIpc(): void {
   // triggered refresh (tests, the board's "g"/Refresh button) surfaces both
   // warnings and the offline/restored banner identically instead of only
   // returning warnings to this one caller.
+  // Slow (du over every orphan): the renderer calls it at startup and every
+  // few hours, never on the refresh tick.
+  ipcMain.handle("core:scanOrphanWorktrees", () =>
+    core.commands.scanOrphanWorktrees(),
+  );
   ipcMain.handle("core:refresh", async (): Promise<{ warnings: string[] }> => {
     const outcome = await connectivityLoop.runOnce();
     return { warnings: outcome.warnings };

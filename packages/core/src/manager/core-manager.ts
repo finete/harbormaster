@@ -16,6 +16,7 @@ import type {
   DeleteTaskOptions,
   LaunchTaskInput,
   MoveTaskOptions,
+  OrphanWorktreeReport,
   RecordTaskSessionInput,
   RefreshOptions,
   RefreshResult,
@@ -74,6 +75,7 @@ import type {
   GitRepositoryAccess,
   GitWorktreeAccess,
   RepositoryInfo,
+  WorktreeInfo,
 } from "../contracts/workspace.js";
 import {
   builtinAwaitingKinds,
@@ -83,7 +85,13 @@ import {
 } from "../engines/awaiting-kinds.js";
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { branchToAdopt } from "../engines/branch-adoption.js";
-import { shouldArchive, shouldDeleteBranch } from "../engines/cleanup.js";
+import {
+  findOrphanDirs,
+  isReviewCheckoutOf,
+  orphanWorktreeWarning,
+  shouldArchive,
+  shouldDeleteBranch,
+} from "../engines/cleanup.js";
 import { isConnectivityError } from "../engines/connectivity.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
@@ -720,28 +728,65 @@ export class CoreManager implements CoreCommands {
 
   async deleteTask(id: string, options?: DeleteTaskOptions): Promise<void> {
     const task = await this.requireTask(id);
-    if (options?.removeWorkspace) {
-      const binding = await this.deps.bindings.getBindingForTask(id);
-      if (binding?.worktreePath && task.repositoryId) {
-        const config = await this.deps.config.load();
-        const repos = await this.deps.repositories.discoverRepositories(
-          config.codeRoot ?? "",
-          preferredCheckoutsFromConfig(config),
-        );
-        const repo = repos.find(
-          (candidate) => candidate.id === task.repositoryId,
-        );
-        if (repo) {
-          // Dirty-refusal (see GitWorktreeAccess.removeWorktree) propagates
-          // as-is: the task is left intact rather than deleted out from
-          // under an unremoved worktree.
-          await this.deps.worktrees.removeWorktree(repo, binding.worktreePath);
+    const binding = await this.deps.bindings.getBindingForTask(id);
+    // A deleted task has no reopen path: its worktree would be an orphan
+    // nothing ever reaps, so delete takes it along unless asked not to.
+    // Every refusal (live pane, dirty) throws before anything is touched,
+    // leaving the task intact.
+    if (!options?.keepWorkspace && binding?.worktreePath && task.repositoryId) {
+      const repo = await this.findRepository(task.repositoryId).catch(
+        () => undefined,
+      );
+      if (repo) {
+        const path = binding.worktreePath;
+        const protectedPaths = options?.protectedPaths ?? [];
+        if (isProtectedPath(path, protectedPaths)) {
+          throw new Error(
+            `Can't delete ${task.title}: its worktree is open in a live session (${path}); close it first`,
+          );
+        }
+        const dirty = await this.deps.worktrees
+          .isWorktreeDirty(path)
+          .catch(() => false);
+        if (dirty && !options?.removeDirty) {
+          throw new Error(
+            `Refusing to delete ${task.title}: its worktree is dirty (uncommitted changes in ${path}); pass removeDirty to discard them`,
+          );
+        }
+        await this.deps.worktrees.removeWorktree(repo, path, dirty);
+        // Best-effort from here: the task's own worktree is gone, so the
+        // delete goes through; leftovers surface in the orphan scan.
+        await this.removeReviewCheckouts(repo, path, protectedPaths);
+        if (task.branch) {
+          await this.deleteMergedBranch(repo, task.branch, task.pr);
         }
       }
     }
     await this.deps.bindings.removeBinding(id).catch(() => {});
     await this.deps.tasks.removeTask(id);
     await this.publishBoard();
+  }
+
+  async scanOrphanWorktrees(): Promise<OrphanWorktreeReport> {
+    const config = await this.deps.config.load();
+    if (!config.codeRoot) return { root: "", orphans: [] };
+    const { root, dirs } = await this.deps.worktrees.listTaskWorktreeDirs(
+      config.codeRoot,
+    );
+    // Parked bindings carry no worktreePath, so a Done task's leftover
+    // directory counts as an orphan too (its cleanup failed or never ran).
+    const bound = (await this.deps.bindings.listBindings())
+      .map((binding) => binding.worktreePath)
+      .filter((path): path is string => Boolean(path));
+    const paths = findOrphanDirs(dirs, bound);
+    const orphans = await Promise.all(
+      paths.map(async (path) => {
+        const sizeBytes = await this.deps.worktrees.diskUsageBytes(path);
+        return sizeBytes === undefined ? { path } : { path, sizeBytes };
+      }),
+    );
+    const warning = orphanWorktreeWarning(root, orphans);
+    return { root, orphans, ...(warning ? { warning } : {}) };
   }
 
   async listAwaitingKinds(taskId?: string): Promise<AwaitingKindOption[]> {
@@ -1567,6 +1612,14 @@ export class CoreManager implements CoreCommands {
             if (auto && !removed) return { stayed: true, warning: text };
             addWarning(text);
           }
+          if (removed) {
+            const reviewWarning = await this.removeReviewCheckouts(
+              repo,
+              path,
+              protectedPaths,
+            );
+            if (reviewWarning) addWarning(reviewWarning);
+          }
           if (deleteBranch) {
             const branchWarning = await this.deleteTaskBranch(
               repo,
@@ -1621,6 +1674,42 @@ export class CoreManager implements CoreCommands {
     } catch (error) {
       return `branch left in place: ${describeError(error)}`;
     }
+  }
+
+  /**
+   * Remove the clean, detached PR-review checkouts an agent made next to the
+   * task's worktree (`<dir>-pr<N>` / `<dir>-prlocal`, see
+   * `isReviewCheckoutOf`). Never forced and never touches a live pane's
+   * cwd; returns a warning naming whatever stayed, `undefined` otherwise.
+   */
+  private async removeReviewCheckouts(
+    repo: RepositoryInfo,
+    taskWorktreePath: string,
+    protectedPaths: readonly string[],
+  ): Promise<string | undefined> {
+    let listed: WorktreeInfo[];
+    try {
+      listed = await this.deps.worktrees.listWorktrees(repo);
+    } catch (error) {
+      return `review checkouts left in place: ${describeError(error)}`;
+    }
+    const failures: string[] = [];
+    for (const worktree of listed) {
+      if (
+        !isReviewCheckoutOf(taskWorktreePath, worktree) ||
+        isProtectedPath(worktree.path, protectedPaths)
+      ) {
+        continue;
+      }
+      try {
+        await this.deps.worktrees.removeWorktree(repo, worktree.path, false);
+      } catch (error) {
+        failures.push(describeError(error));
+      }
+    }
+    return failures.length > 0
+      ? `review checkout left in place: ${failures.join("; ")}`
+      : undefined;
   }
 
   /** The retry sweep never asks: it only deletes a merged PR's branch. */
@@ -1704,7 +1793,19 @@ export class CoreManager implements CoreCommands {
           false,
         );
         await this.parkBinding(binding);
-        failure = await this.deleteMergedBranch(repo, task.branch, task.pr);
+        const reviewFailure = await this.removeReviewCheckouts(
+          repo,
+          binding.worktreePath,
+          protectedPaths,
+        );
+        const branchFailure = await this.deleteMergedBranch(
+          repo,
+          task.branch,
+          task.pr,
+        );
+        failure =
+          [reviewFailure, branchFailure].filter(Boolean).join("; ") ||
+          undefined;
       } catch (error) {
         failure = `worktree left in place: ${describeError(error)}`;
       }

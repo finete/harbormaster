@@ -59,6 +59,9 @@ type View = "board" | "workspace";
  *   button, Cmd+B, or landing here from app start. Clicking a card jumps
  *   back into the workspace view focused on that task.
  */
+/** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
+const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   // The approval inbox sheet (components/ApprovalInbox.tsx): one instance,
@@ -425,6 +428,30 @@ export function App(): JSX.Element {
       }),
     [],
   );
+
+  // Orphaned worktrees (no task owns them) silently filled the disk once;
+  // scan at startup and every few hours, and say so once it crosses the
+  // threshold (core decides). Never deletes anything: the toast only opens
+  // the folder.
+  useEffect(() => {
+    const scan = () => {
+      window.harbormaster.core
+        .scanOrphanWorktrees()
+        .then((report) => {
+          if (!report.warning) return;
+          pushToast(report.warning, "warning", {
+            label: "Show in Finder",
+            run: () => {
+              void window.harbormaster.shell.revealInFolder(report.root);
+            },
+          });
+        })
+        .catch(() => {});
+    };
+    scan();
+    const timer = setInterval(scan, ORPHAN_SCAN_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">

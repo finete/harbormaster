@@ -234,22 +234,39 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     expect(worktrees.match(/^worktree /gm)?.length).toBe(2); // main checkout + the one surviving task worktree
   });
 
-  it("deleteTask without removeWorkspace leaves the worktree on disk but removes the task and binding", async () => {
-    const f = await fixture();
+  /** A started task plus a detached `<worktree>-pr7` review checkout next to it. */
+  async function taskWithReviewCheckout(
+    f: Awaited<ReturnType<typeof fixture>>,
+    title: string,
+  ) {
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
-
     const task = await f.core.commands.createTask({
-      title: "Doomed",
+      title,
       initialPrompt: "x",
       repositoryId: repo.id,
       start: true,
     });
-    const binding = await f.core.commands.getTaskWorkspace(task.id);
-    const worktreePath = binding?.worktreePath;
+    const worktreePath = (await f.core.commands.getTaskWorkspace(task.id))
+      ?.worktreePath;
     if (!worktreePath) throw new Error("expected a worktree binding");
+    const review = `${worktreePath}-pr7`;
+    await git(["worktree", "add", "--detach", review, "main"], f.checkout);
+    return { task, worktreePath, review };
+  }
 
-    await f.core.commands.deleteTask(task.id);
+  /** The registered worktree paths (exact, so `-pr7` never matches its task's path). */
+  const listedWorktrees = async (f: { checkout: string }) =>
+    (await git(["worktree", "list", "--porcelain"], f.checkout))
+      .split("\n")
+      .filter((line) => line.startsWith("worktree "))
+      .map((line) => line.slice("worktree ".length));
+
+  it("deleteTask with keepWorkspace leaves the worktree on disk but removes the task and binding", async () => {
+    const f = await fixture();
+    const { task, worktreePath } = await taskWithReviewCheckout(f, "Doomed");
+
+    await f.core.commands.deleteTask(task.id, { keepWorkspace: true });
 
     expect(await f.core.commands.getTask(task.id)).toBeUndefined();
     expect(await f.core.commands.getTaskWorkspace(task.id)).toBeUndefined();
@@ -258,54 +275,93 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     ).resolves.toBeDefined();
   });
 
-  it("deleteTask with removeWorkspace removes a clean worktree", async () => {
+  it("deleteTask removes a clean worktree and its review checkouts by default", async () => {
     const f = await fixture();
-    const [repo] = await f.core.commands.listRepositories();
-    if (!repo) throw new Error("fixture repo not discovered");
+    const { task, worktreePath, review } = await taskWithReviewCheckout(
+      f,
+      "Cleanable",
+    );
 
-    const task = await f.core.commands.createTask({
-      title: "Cleanable",
-      initialPrompt: "x",
-      repositoryId: repo.id,
-      start: true,
-    });
-    const binding = await f.core.commands.getTaskWorkspace(task.id);
-    const worktreePath = binding?.worktreePath;
-    if (!worktreePath) throw new Error("expected a worktree binding");
-
-    await f.core.commands.deleteTask(task.id, { removeWorkspace: true });
+    await f.core.commands.deleteTask(task.id);
 
     expect(await f.core.commands.getTask(task.id)).toBeUndefined();
-    const worktrees = await git(
-      ["worktree", "list", "--porcelain"],
-      f.checkout,
-    );
+    const worktrees = await listedWorktrees(f);
     expect(worktrees).not.toContain(worktreePath);
+    expect(worktrees).not.toContain(review);
   });
 
-  it("deleteTask with removeWorkspace propagates a dirty-refusal and leaves the task intact", async () => {
+  it("deleteTask refuses a dirty or live worktree and leaves the task intact; removeDirty overrides dirty", async () => {
     const f = await fixture();
-    const [repo] = await f.core.commands.listRepositories();
-    if (!repo) throw new Error("fixture repo not discovered");
-
-    const task = await f.core.commands.createTask({
-      title: "Dirty",
-      initialPrompt: "x",
-      repositoryId: repo.id,
-      start: true,
-    });
-    const binding = await f.core.commands.getTaskWorkspace(task.id);
-    const worktreePath = binding?.worktreePath;
-    if (!worktreePath) throw new Error("expected a worktree binding");
+    const { task, worktreePath } = await taskWithReviewCheckout(f, "Dirty");
     await writeFile(join(worktreePath, "scratch.txt"), "uncommitted\n");
 
+    await expect(f.core.commands.deleteTask(task.id)).rejects.toThrow(/dirty/i);
     await expect(
-      f.core.commands.deleteTask(task.id, { removeWorkspace: true }),
-    ).rejects.toThrow(/dirty/i);
-
-    // The task and binding survive the failed cleanup attempt.
+      f.core.commands.deleteTask(task.id, {
+        removeDirty: true,
+        protectedPaths: [worktreePath],
+      }),
+    ).rejects.toThrow(/live session/);
+    // The task and binding survive both refusals.
     expect(await f.core.commands.getTask(task.id)).toBeDefined();
     expect(await f.core.commands.getTaskWorkspace(task.id)).toBeDefined();
+
+    await f.core.commands.deleteTask(task.id, { removeDirty: true });
+    expect(await f.core.commands.getTask(task.id)).toBeUndefined();
+    const left = await listedWorktrees(f);
+    expect(left).not.toContain(worktreePath);
+    expect(left).not.toContain(`${worktreePath}-pr7`);
+  });
+
+  it("toDone reaps clean review checkouts next to the task worktree, but not a live or dirty one", async () => {
+    const f = await fixture();
+    const { task, worktreePath, review } = await taskWithReviewCheckout(
+      f,
+      "Reviewed",
+    );
+    const live = `${worktreePath}-pr8`;
+    const dirty = `${worktreePath}-prlocal`;
+    await git(["worktree", "add", "--detach", live, "main"], f.checkout);
+    await git(["worktree", "add", "--detach", dirty, "main"], f.checkout);
+    await writeFile(join(dirty, "notes.txt"), "keep me\n");
+
+    const result = await f.core.commands.toDone(task.id, {
+      force: { deleteUnmerged: true },
+      protectedPaths: [live],
+    });
+
+    expect("task" in result && result.task.state).toBe("done");
+    expect("warning" in result && result.warning).toMatch(
+      /review checkout left in place/,
+    );
+    const worktrees = await listedWorktrees(f);
+    expect(worktrees).not.toContain(worktreePath);
+    expect(worktrees).not.toContain(review);
+    expect(worktrees).toContain(live);
+    expect(worktrees).toContain(dirty);
+  });
+
+  it("scanOrphanWorktrees lists only unbound directories under the worktrees root, sized", async () => {
+    const f = await fixture();
+    const { worktreePath, review } = await taskWithReviewCheckout(f, "Bound");
+    const stray = join(
+      f.codeRoot,
+      ".harbormaster-worktrees",
+      "observed-abc123",
+    );
+    await mkdir(stray, { recursive: true });
+    await writeFile(join(stray, "blob"), "x".repeat(4096));
+
+    const report = await f.core.commands.scanOrphanWorktrees();
+
+    expect(report.root).toBe(join(f.codeRoot, ".harbormaster-worktrees"));
+    const paths = report.orphans.map((orphan) => orphan.path).sort();
+    expect(paths).toEqual([review, stray].sort());
+    expect(paths).not.toContain(worktreePath);
+    const strayEntry = report.orphans.find((orphan) => orphan.path === stray);
+    expect(strayEntry?.sizeBytes).toBeGreaterThanOrEqual(4096);
+    // Two small orphans stay under both default thresholds.
+    expect(report.warning).toBeUndefined();
   });
 
   it("listRepositories collapses several checkouts of the same repo into one entry, and createTask always provisions off the primary", async () => {

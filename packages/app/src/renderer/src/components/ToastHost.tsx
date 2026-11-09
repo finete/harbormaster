@@ -56,6 +56,19 @@ export function ToastHost(): JSX.Element {
           )}
         >
           <span className="flex-1">{toast.text}</span>
+          {toast.action && (
+            <button
+              type="button"
+              data-testid="toast-action"
+              onClick={() => {
+                toast.action?.run();
+                dismissToast(toast.id);
+              }}
+              className="shrink-0 font-medium underline underline-offset-2 opacity-90 hover:opacity-100"
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button
             type="button"
             aria-label="Dismiss"

@@ -15,6 +15,7 @@ import type {
   MessageMode,
   MessagingChangedPayload,
   MoveTaskOptions,
+  OrphanWorktreeReport,
   PresenceChangedPayload,
   PresenceSnapshot,
   ReopenTaskInput,
@@ -151,6 +152,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:reopenTask", taskId, input),
     refresh: (): Promise<{ warnings: string[] }> =>
       ipcRenderer.invoke("core:refresh"),
+    scanOrphanWorktrees: (): Promise<OrphanWorktreeReport> =>
+      ipcRenderer.invoke("core:scanOrphanWorktrees"),
     launchTask: (input: LaunchTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:launchTask", input),
     listChildren: (parentTaskId: string): Promise<Task[]> =>
