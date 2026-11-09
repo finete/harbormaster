@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -30,6 +30,13 @@ describe("createCore", () => {
     dir = await mkdtemp(join(tmpdir(), "harbormaster-core-test-"));
     counter = 0;
     clock = new FixedClock(new Date("2026-01-01T00:00:00.000Z"));
+    // An empty temp codeRoot: without it the default (~/Code) would make
+    // repository discovery scan the developer's real checkouts.
+    await mkdir(join(dir, "Code"));
+    await writeFile(
+      join(dir, "config.json"),
+      JSON.stringify({ codeRoot: join(dir, "Code") }),
+    );
     core = createCore({ stateDir: dir, clock, ids: sequentialIds });
   });
 
