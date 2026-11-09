@@ -12,10 +12,17 @@
 // stack is capped with a "+N more" row instead of growing unbounded.
 import { isConnectivityError } from "./lib/connectivity-classifier";
 
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface ToastMessage {
   id: string;
   text: string;
   tone: "error" | "warning" | "success";
+  /** One optional button; a toast that carries one stays until dismissed (it asks for a deliberate click). */
+  action?: ToastAction;
 }
 
 type Listener = (toasts: ToastMessage[]) => void;
@@ -59,6 +66,7 @@ export function capVisibleToasts(
 export function pushToast(
   text: string,
   tone: ToastMessage["tone"] = "error",
+  action?: ToastAction,
 ): void {
   // Defense-in-depth: a connectivity-shaped message must never reach the
   // toast stack even if some future call site forgets to route it through
@@ -68,10 +76,10 @@ export function pushToast(
   if (isDuplicateToast(toasts, text)) return;
 
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  toasts = [{ id, text, tone }, ...toasts];
+  toasts = [{ id, text, tone, ...(action ? { action } : {}) }, ...toasts];
   emit();
 
-  if (tone === "warning" || tone === "success") {
+  if (!action && (tone === "warning" || tone === "success")) {
     const timer = setTimeout(() => dismissToast(id), WARNING_AUTO_DISMISS_MS);
     autoDismissTimers.set(id, timer);
   }

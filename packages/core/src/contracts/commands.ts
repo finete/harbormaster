@@ -157,13 +157,38 @@ export interface ToAwaitOptions {
 
 export interface DeleteTaskOptions {
   /**
-   * Also remove the task's git worktree (if any) and its workspace binding.
-   * Removal honors dirty-refusal (see `GitWorktreeAccess.removeWorktree`);
-   * a dirty worktree surfaces a clear error instead of silently skipping
-   * cleanup, and the task itself is left deleted either way only once
-   * worktree removal (when requested) has actually succeeded.
+   * Leave the task's worktree (and branch) on disk. By default delete also
+   * removes the worktree, its PR-review sibling checkouts, and a merged
+   * PR's branch: a deleted task has no reopen path, so anything left behind
+   * would be an orphan only the orphan scan could find.
    */
-  removeWorkspace?: boolean;
+  keepWorkspace?: boolean;
+  /**
+   * Remove the worktree even with uncommitted changes. Without it a dirty
+   * worktree rejects with a clear error and the task is left intact.
+   */
+  removeDirty?: boolean;
+  /**
+   * Live pane cwds: a worktree a session still runs in is never removed;
+   * the delete rejects instead (close the pane first).
+   */
+  protectedPaths?: readonly string[];
+}
+
+/** A directory under the worktrees root that no workspace binding owns. */
+export interface OrphanWorktree {
+  path: string;
+  /** `undefined` when it couldn't be measured. */
+  sizeBytes?: number;
+}
+
+/** `CoreCommands.scanOrphanWorktrees` result. */
+export interface OrphanWorktreeReport {
+  /** The scanned worktrees root (`<codeRoot>/.harbormaster-worktrees`). */
+  root: string;
+  orphans: OrphanWorktree[];
+  /** Set once the orphans cross the count or size threshold: surface it once. */
+  warning?: string;
 }
 
 /**
@@ -468,6 +493,13 @@ export interface CoreCommands {
   ): Promise<{ mimeType?: string; base64: string }>;
   /** Removes attachment files per decision 12; returns how many messages were pruned. */
   pruneMessageAttachments(): Promise<number>;
+  /**
+   * Directories under `<codeRoot>/.harbormaster-worktrees` that no
+   * workspace binding owns (crashed launches, deleted tasks, agent-made
+   * checkouts, leaking tests), each sized with `du`. Slow (walks every
+   * orphan): run it rarely, off the refresh tick. Read-only.
+   */
+  scanOrphanWorktrees(): Promise<OrphanWorktreeReport>;
 }
 
 export interface RefreshResult {

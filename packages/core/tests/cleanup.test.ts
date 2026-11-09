@@ -4,7 +4,13 @@
 
 import { describe, expect, it } from "vitest";
 import type { Task } from "../src/contracts/model.js";
-import { shouldArchive, shouldDeleteBranch } from "../src/engines/cleanup.js";
+import {
+  findOrphanDirs,
+  isReviewCheckoutOf,
+  orphanWorktreeWarning,
+  shouldArchive,
+  shouldDeleteBranch,
+} from "../src/engines/cleanup.js";
 
 function doneTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -58,5 +64,57 @@ describe("shouldDeleteBranch", () => {
     expect(shouldDeleteBranch({ number: 1, state: "open" })).toBe(false);
     expect(shouldDeleteBranch({ number: 1, state: "closed" })).toBe(false);
     expect(shouldDeleteBranch({ number: 1, state: "merged" })).toBe(true);
+  });
+});
+
+describe("isReviewCheckoutOf", () => {
+  const task = "/c/.harbormaster-worktrees/moshe-review-ivan-e50735";
+  const at = (path: string, detached = true) => ({ path, detached });
+
+  it("matches detached -pr<N> and -prlocal siblings of the task worktree", () => {
+    expect(isReviewCheckoutOf(task, at(`${task}-pr26753`))).toBe(true);
+    expect(isReviewCheckoutOf(task, at(`${task}-prlocal`))).toBe(true);
+    expect(isReviewCheckoutOf(`${task}/`, at(`${task}-pr1/`))).toBe(true);
+  });
+
+  it("never matches the task itself, branches, other tasks, other dirs, or near-miss names", () => {
+    expect(isReviewCheckoutOf(task, at(task))).toBe(false);
+    expect(isReviewCheckoutOf(task, at(`${task}-pr26753`, false))).toBe(false);
+    expect(isReviewCheckoutOf(task, at(`${task}-pr`))).toBe(false);
+    expect(isReviewCheckoutOf(task, at(`${task}-pr12x`))).toBe(false);
+    expect(isReviewCheckoutOf(task, at(`${task}-prefix-pr1`))).toBe(false);
+    expect(isReviewCheckoutOf(task, at(`${task}2-pr1`))).toBe(false);
+    expect(
+      isReviewCheckoutOf(task, at("/elsewhere/moshe-review-ivan-e50735-pr1")),
+    ).toBe(false);
+  });
+});
+
+describe("orphan worktree scan rules", () => {
+  it("findOrphanDirs keeps only directories no binding points at (trailing slashes ignored)", () => {
+    expect(
+      findOrphanDirs(["/r/a", "/r/b", "/r/c"], ["/r/a/", "/elsewhere/b"]),
+    ).toEqual(["/r/b", "/r/c"]);
+  });
+
+  it("orphanWorktreeWarning stays quiet under both thresholds and fires on either", () => {
+    const limits = { count: 3, bytes: 100 };
+    const of = (n: number, size: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        path: `/r/${i}`,
+        sizeBytes: size,
+      }));
+    expect(orphanWorktreeWarning("/r", [], limits)).toBeUndefined();
+    expect(orphanWorktreeWarning("/r", of(2, 10), limits)).toBeUndefined();
+    expect(orphanWorktreeWarning("/r", of(3, 0), limits)).toMatch(
+      /^3 worktrees \(0\.0 GB\) in \/r belong to no task$/,
+    );
+    expect(orphanWorktreeWarning("/r", of(1, 100), limits)).toMatch(
+      /^1 worktree \(/,
+    );
+    // Unmeasured orphans still count toward the number threshold.
+    expect(
+      orphanWorktreeWarning("/r", [{ path: "/r/x" }], { count: 1, bytes: 1 }),
+    ).toBeDefined();
   });
 });

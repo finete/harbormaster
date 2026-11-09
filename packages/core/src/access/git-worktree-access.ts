@@ -5,7 +5,13 @@
 // supplied path, and with explicit dirty-refusal / safe-branch-delete
 // semantics called out as separate, testable verbs.
 
-import { access as fsAccess, mkdir, readFile, rm } from "node:fs/promises";
+import {
+  access as fsAccess,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   GitWorktreeAccess,
@@ -151,6 +157,30 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     await run("git", ["push", "--set-upstream", "origin", branch], path, {
       timeoutMs: LONG_RUN_TIMEOUT_MS,
     });
+  }
+
+  async listTaskWorktreeDirs(
+    codeRoot: string,
+  ): Promise<{ root: string; dirs: string[] }> {
+    const root = join(codeRoot, TASK_WORKTREES_DIRNAME);
+    const entries = await readdir(root, { withFileTypes: true }).catch(
+      () => [],
+    );
+    const dirs = entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => join(root, entry.name))
+      .sort();
+    return { root, dirs };
+  }
+
+  async diskUsageBytes(path: string): Promise<number | undefined> {
+    // `du -sk` walks the whole tree (seconds for a multi-GB checkout), so it
+    // only runs from the rare orphan scan, never from the refresh tick.
+    const out = await tryRun("du", ["-sk", path], undefined, {
+      timeoutMs: LONG_RUN_TIMEOUT_MS,
+    });
+    const kib = Number.parseInt(out?.split(/\s/)[0] ?? "", 10);
+    return Number.isFinite(kib) ? kib * 1024 : undefined;
   }
 
   private async inspect(path: string): Promise<WorktreeInfo> {

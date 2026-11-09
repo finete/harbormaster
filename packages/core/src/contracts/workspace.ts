@@ -140,6 +140,17 @@ export interface GitWorktreeAccess {
    * access per the accessor-separation rule.
    */
   pushBranch(path: string, branch: string): Promise<void>;
+  /**
+   * The worktrees root (`<codeRoot>/.harbormaster-worktrees/`) and every
+   * directory directly under it (absolute paths; files and dotfiles
+   * skipped; `dirs: []` when the root does not exist). Feeds the
+   * orphan-worktree scan; never throws.
+   */
+  listTaskWorktreeDirs(
+    codeRoot: string,
+  ): Promise<{ root: string; dirs: string[] }>;
+  /** Apparent on-disk size of `path` in bytes (`du`); `undefined` when it can't be measured. Never throws. */
+  diskUsageBytes(path: string): Promise<number | undefined>;
 }
 
 // Ambient augmentation (not a textual edit of contracts/model.ts, which is
