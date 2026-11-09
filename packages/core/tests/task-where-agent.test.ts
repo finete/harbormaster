@@ -316,6 +316,46 @@ describe.skipIf(!gitAvailable)("registered folders", () => {
     expect(binding?.inPlace).toBeUndefined();
   });
 
+  it("chat mode (inPlace) runs in the repository's own checkout, never as a task worktree", async () => {
+    const f = await fixture();
+    const task = await f.core.commands.createTask({
+      title: "Question",
+      initialPrompt: "how does X work?",
+      repositoryId: f.repositoryId,
+      inPlace: true,
+      baseRef: "ignored",
+      start: true,
+    });
+    expect(task.repositoryId).toBeUndefined();
+    expect(task.folderPath).toBe(f.checkout);
+    expect(task.kind).toBe("temp_task");
+    expect(task.baseRef).toBeUndefined();
+    expect(task.branch).toBeUndefined();
+    expect(await f.core.commands.getTaskWorkspace(task.id)).toMatchObject({
+      worktreePath: f.checkout,
+      inPlace: true,
+    });
+    // Not registered as a folder: the repository is already known.
+    expect(await f.core.commands.listLocations()).toEqual([]);
+
+    await f.core.commands.toDone(task.id);
+    expect(await git(["branch", "--show-current"], f.checkout)).toBe("main");
+    expect(await exists(f.checkout)).toBe(true);
+
+    const launched = await f.core.commands.launchTask({
+      relation: "standalone",
+      title: "Background question",
+      prompt: "look around",
+      repository: { repositoryId: f.repositoryId },
+      inPlace: true,
+    });
+    expect(launched.folderPath).toBe(f.checkout);
+    expect(await f.core.commands.getTaskWorkspace(launched.id)).toMatchObject({
+      worktreePath: f.checkout,
+      inPlace: true,
+    });
+  });
+
   it("rejects a folder that does not exist", async () => {
     const f = await fixture();
     await expect(

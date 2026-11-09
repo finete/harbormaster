@@ -328,6 +328,22 @@ export class CoreManager implements CoreCommands {
       | { folderPath: string }
       | { none: true },
     config: GlobalConfig,
+    inPlace = false,
+  ): Promise<TaskWhere> {
+    const resolved = await this.resolveWhereWorktree(where, config);
+    // Chat mode: a repository runs in its primary checkout, no worktree.
+    return inPlace && resolved.kind === "repository"
+      ? { kind: "folder", path: resolved.repo.root }
+      : resolved;
+  }
+
+  private async resolveWhereWorktree(
+    where:
+      | { repositoryId: string }
+      | { cloneUrl: string }
+      | { folderPath: string }
+      | { none: true },
+    config: GlobalConfig,
   ): Promise<TaskWhere> {
     if ("repositoryId" in where) {
       return {
@@ -415,6 +431,7 @@ export class CoreManager implements CoreCommands {
             ? { folderPath: input.folderPath }
             : { none: true },
       config,
+      input.inPlace,
     );
     const repo = where.kind === "repository" ? where.repo : undefined;
     const baseRef = repo ? input.baseRef?.trim() || undefined : undefined;
@@ -1220,7 +1237,11 @@ export class CoreManager implements CoreCommands {
         "launchTask with a cloneUrl requires codeRoot to be configured",
       );
     }
-    const where = await this.resolveWhere(input.repository, config);
+    const where = await this.resolveWhere(
+      input.repository,
+      config,
+      input.inPlace,
+    );
     const repo = where.kind === "repository" ? where.repo : undefined;
     const hasRepository = where.kind === "repository";
 

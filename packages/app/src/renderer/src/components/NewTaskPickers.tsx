@@ -6,6 +6,7 @@
 // keyboard shortcut and hand focus back to the prompt when it closes.
 
 import {
+  Ban,
   Bot,
   Check,
   ChevronDown,
@@ -27,6 +28,7 @@ import type {
   ThinkingLevel,
 } from "../../../preload/api";
 import {
+  type DraftMode,
   folderWhere,
   parseWhere,
   repoWhere,
@@ -142,7 +144,7 @@ export function whereLabel(
 
 function whereIcon(token: WhereToken): JSX.Element {
   const where = parseWhere(token);
-  if (where.kind === "none") return <MessageSquare />;
+  if (where.kind === "none") return <Ban />;
   if (where.kind === "clone") return <Link2 />;
   if (where.kind === "folder") return <Folder />;
   return <FolderGit2 />;
@@ -197,7 +199,7 @@ export function WherePicker({
           aria-label="Where"
           title={`Where it runs (${modKeyLabel()}P)`}
           className={cn(
-            "max-w-[220px] text-muted-foreground hover:text-foreground",
+            "min-w-0 max-w-[200px] shrink text-muted-foreground hover:text-foreground",
             !value && "text-amber-300/90",
           )}
         >
@@ -250,8 +252,11 @@ export function WherePicker({
                 data-testid="new-task-where-none"
                 onSelect={() => onSelect(WHERE_NONE)}
               >
-                <MessageSquare />
-                No folder (chat)
+                <Ban />
+                No folder
+                <span className="text-[11px] text-muted-foreground">
+                  empty scratch directory
+                </span>
                 <Check4 on={value === WHERE_NONE} />
               </CommandItem>
             </CommandGroup>
@@ -259,6 +264,57 @@ export function WherePicker({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// --- Task / Chat ---------------------------------------------------------
+
+const MODE_HINTS: Record<DraftMode, string> = {
+  task: "Task: its own branch + worktree, tracked on the board through review and merge",
+  chat: "Chat: no branch or worktree. With a repository, the agent runs in its checkout, so you can ask questions with the code as context",
+};
+
+export function ModeSwitch({
+  value,
+  onChange,
+}: {
+  value: DraftMode;
+  onChange: (mode: DraftMode) => void;
+}): JSX.Element {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Task or chat"
+      data-testid="new-task-mode"
+      className="mr-1 flex h-7 shrink-0 items-center rounded-lg bg-muted/60 p-0.5"
+    >
+      {(["task", "chat"] as const).map((mode) => (
+        // biome-ignore lint/a11y/useSemanticElements: a two-option segmented control
+        <button
+          key={mode}
+          type="button"
+          role="radio"
+          aria-checked={value === mode}
+          data-testid={`new-task-mode-${mode}`}
+          data-selected={value === mode}
+          title={MODE_HINTS[mode]}
+          onClick={() => onChange(mode)}
+          className={cn(
+            "flex h-6 items-center gap-1 rounded-md px-2 text-xs transition-colors",
+            value === mode
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {mode === "task" ? (
+            <GitBranch className="size-3.5" />
+          ) : (
+            <MessageSquare className="size-3.5" />
+          )}
+          {mode === "task" ? "Task" : "Chat"}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -341,7 +397,7 @@ export function AgentModelPicker({
           data-testid="new-task-model"
           aria-label="Agent and model"
           title={`Agent and model (${modKeyLabel()}\u21E7M)`}
-          className="max-w-[260px] text-muted-foreground hover:text-foreground"
+          className="min-w-0 max-w-[240px] shrink text-muted-foreground hover:text-foreground"
         >
           <Bot />
           <span className="truncate">
@@ -502,7 +558,7 @@ export function ParentPicker({
           data-testid="new-task-parent-add"
           aria-label="Add parent"
           title={`Make it a subtask of… (${modKeyLabel()}\u21E7P)`}
-          className="text-muted-foreground/70 hover:text-foreground"
+          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
         >
           <Plus />
           Parent
@@ -624,17 +680,35 @@ export const ACTION_LABELS: Record<SubmitAction, string> = {
   park: "Park in backlog",
 };
 
-const ACTION_HINTS: Record<SubmitAction, string> = {
-  start: "Create the task and open it now",
-  background: "Start it in the background; focus stays where you are",
-  park: "Save it in the backlog: no branch or worktree yet",
-};
+/** What each submit action does, for the menu and tooltips (mode/parent aware). */
+export function actionHint(
+  action: SubmitAction,
+  context: { mode: DraftMode; hasParent: boolean; hasWorktree: boolean },
+): string {
+  switch (action) {
+    case "start":
+      return context.mode === "chat"
+        ? "Open the chat now and send the prompt"
+        : context.hasWorktree
+          ? "Create its branch + worktree, open it, and send the prompt"
+          : "Open it now and send the prompt";
+    case "background":
+      return context.hasParent
+        ? "The agent starts on its own, nested under the parent; you stay here"
+        : "The agent starts on its own in the sidebar; you stay here";
+    case "park":
+      return context.hasWorktree
+        ? "Save it to the backlog; the branch + worktree are made when you start it"
+        : "Save it to the backlog to start later";
+  }
+}
 
 export function SubmitSplitButton({
   primary,
   alternate,
   submitting,
   blockerFor,
+  hintFor,
   onSubmit,
 }: {
   primary: SubmitAction;
@@ -642,6 +716,8 @@ export function SubmitSplitButton({
   submitting: boolean;
   /** Why an action is unavailable right now, or `null`. */
   blockerFor: (action: SubmitAction) => string | null;
+  /** What an action does (see `actionHint`). */
+  hintFor: (action: SubmitAction) => string;
   onSubmit: (action: SubmitAction) => void;
 }): JSX.Element {
   const mod = modKeyLabel();
@@ -659,7 +735,7 @@ export function SubmitSplitButton({
         data-testid="new-task-submit"
         data-action={primary}
         disabled={submitting || primaryBlocker !== null}
-        title={primaryBlocker ?? ACTION_HINTS[primary]}
+        title={primaryBlocker ?? hintFor(primary)}
         onClick={() => onSubmit(primary)}
         className="h-8 rounded-l-lg rounded-r-none pr-2.5"
       >
@@ -680,7 +756,7 @@ export function SubmitSplitButton({
             <ChevronDown className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuContent align="end" className="w-72">
           {(["start", "background", "park"] as const).map((action) => {
             const blocker = blockerFor(action);
             return (
@@ -692,11 +768,16 @@ export function SubmitSplitButton({
                     : `new-task-submit-${action}`
                 }
                 disabled={blocker !== null}
-                title={blocker ?? ACTION_HINTS[action]}
                 onSelect={() => onSubmit(action)}
-                className="flex-col items-start gap-0.5"
+                // Disabled rows stay readable: the explanation is the point.
+                className="flex-col items-start gap-0.5 data-[disabled]:opacity-100"
               >
-                <span className="flex w-full items-center">
+                <span
+                  className={cn(
+                    "flex w-full items-center",
+                    blocker && "text-muted-foreground",
+                  )}
+                >
                   {ACTION_LABELS[action]}
                   {shortcut(action) && (
                     <DropdownMenuShortcut>
@@ -704,9 +785,17 @@ export function SubmitSplitButton({
                     </DropdownMenuShortcut>
                   )}
                 </span>
-                <span className="text-[11px] text-muted-foreground">
-                  {blocker ?? ACTION_HINTS[action]}
+                <span className="text-[11px] leading-snug text-muted-foreground">
+                  {hintFor(action)}
                 </span>
+                {blocker && (
+                  <span
+                    data-testid="new-task-submit-blocker"
+                    className="text-[11px] leading-snug text-amber-300/90"
+                  >
+                    {blocker}
+                  </span>
+                )}
               </DropdownMenuItem>
             );
           })}

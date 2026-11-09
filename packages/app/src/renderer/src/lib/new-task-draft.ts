@@ -63,12 +63,21 @@ export function parseWhere(token: WhereToken): ParsedWhere {
   return { kind: "unset" };
 }
 
+/**
+ * The composer's Task / Chat switch: `task` gets its own branch + worktree
+ * (for a repository); `chat` never creates a worktree. A chat with a
+ * repository runs in that repository's checkout, for questions with the
+ * repo as context.
+ */
+export type DraftMode = "task" | "chat";
+
 /** What the split submit button does (see /docs/new-task-composer.md "Submit"). */
 export type SubmitAction = "start" | "background" | "park";
 
 export interface NewTaskDraft {
   title: string;
   prompt: string;
+  mode: DraftMode;
   where: WhereToken;
   /** Only used while `where === "clone"`. */
   cloneUrl: string;
@@ -90,6 +99,7 @@ export interface NewTaskDraft {
 
 /** Sticky composer choices, remembered across drafts. */
 export interface NewTaskPrefs {
+  mode: DraftMode;
   where: WhereToken;
   harness: string;
   model: string;
@@ -102,6 +112,7 @@ const MAX_RECENTS = 5;
 
 export function emptyPrefs(): NewTaskPrefs {
   return {
+    mode: "task",
     where: WHERE_UNSET,
     harness: "",
     model: "",
@@ -132,6 +143,7 @@ export function emptyDraft(
   return {
     title: "",
     prompt: "",
+    mode: prefs.mode,
     where: originWhere || prefs.where,
     cloneUrl: "",
     parentTaskId: null,
@@ -158,6 +170,7 @@ export function rememberDraft(
         )
       : prefs.recents;
   return {
+    mode: draft.mode,
     where,
     harness: draft.harness,
     model: draft.model,
@@ -231,9 +244,11 @@ export function alternateAction(
  * repository's default branch).
  */
 export function effectiveBaseRef(
-  draft: Pick<NewTaskDraft, "baseRef" | "where">,
+  draft: Pick<NewTaskDraft, "baseRef" | "where" | "mode">,
   parent: Pick<Task, "repositoryId" | "branch"> | null,
 ): string | undefined {
+  // A chat never creates a branch.
+  if (draft.mode === "chat") return undefined;
   if (draft.baseRef) return draft.baseRef;
   const where = parseWhere(draft.where);
   if (
@@ -288,7 +303,12 @@ export function planSubmit(
   const attachments = draft.attachments.filter((path) =>
     draft.prompt.includes(path),
   );
+  // Chat: no worktree; a repository (or clone) runs in its own checkout.
+  const inPlace =
+    draft.mode === "chat" &&
+    (where.kind === "repository" || where.kind === "clone");
   const agent = {
+    ...(inPlace ? { inPlace: true } : {}),
     ...(draft.harness ? { harness: draft.harness } : {}),
     ...(draft.model ? { model: draft.model } : {}),
     ...(draft.thinking ? { thinking: draft.thinking } : {}),
@@ -402,7 +422,7 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
   const v = record(raw);
   if (!v) return null;
   let where = stringField(v, "where");
-  if (!where && "mode" in v) {
+  if (!where && "repositoryId" in v) {
     const legacyRepo = stringField(v, "repositoryId");
     where =
       v.mode === "chat"
@@ -417,6 +437,7 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
   return {
     title: stringField(v, "title"),
     prompt: stringField(v, "prompt"),
+    mode: v.mode === "chat" ? "chat" : "task",
     where,
     cloneUrl: stringField(v, "cloneUrl"),
     parentTaskId: id("parentTaskId"),
@@ -461,6 +482,7 @@ export function readPrefs(storage: StorageLike): NewTaskPrefs {
   }
   if (!v) return emptyPrefs();
   return {
+    mode: v.mode === "chat" ? "chat" : "task",
     where: stringField(v, "where"),
     harness: stringField(v, "harness"),
     model: stringField(v, "model"),

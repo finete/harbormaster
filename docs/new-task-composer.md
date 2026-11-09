@@ -13,20 +13,33 @@ shadcn AI Elements (Prompt Input / Model Selector) and the Astryx
 - One rounded composer card (shadcn `InputGroup`): a context tray on top
   (shown only while a parent is set), then the prompt, then a toolbar inside
   the card's bottom edge.
-- Toolbar: `Where ▾` · `Agent · Model ▾` · muted `+ Parent`, and a labeled
-  split submit button on the right.
+- Toolbar: `Task | Chat` switch · `Where ▾` · `Agent · Model ▾` · muted
+  `+ Parent`, and a labeled split submit button on the right.
 - One muted line under the card: the branch preview
   (`<slug>-… ← <base> ▾`). Clicking the base opens a branch picker.
 
-## Where (replaces the Task / Chat toggle)
+## Task / Chat
+
+A two-option switch next to Where (like other harnesses), remembered across
+drafts:
+
+- **Task**: a repository gets its own branch + worktree, tracked on the board.
+- **Chat**: never a worktree. With a repository the agent runs in place in the
+  repository's primary checkout, so questions have the code as context (edits
+  land directly in that checkout; the composer says so). Core stores it as a
+  `folderPath` task with no `repositoryId` (`inPlace` on create/launch), so
+  Done/delete/branch-follow never treat the checkout as a task worktree.
+
+## Where
 
 One searchable picker: Recent, Repositories (discovered under `codeRoot`
 plus registered git folders), Folders (registered non-git folders),
-`Open folder…` (native dialog), `Clone URL…`, `No folder (chat)`.
+`Open folder…` (native dialog), `Clone URL…`, `No folder` (an empty scratch
+directory, in either mode).
 
 - Default: the focused task's repository, else the last one used.
-- A git repository always gets its own branch + worktree. In-place runs on a
-  git repo are out of scope.
+- In Task mode a git repository always gets its own branch + worktree; Chat
+  mode runs in its checkout instead (see above).
 - A non-git folder runs in place: its binding points at the folder itself
   (`inPlace: true`). Nothing in core ever deletes or git-touches it.
 - Opened folders are registered in core state (`<stateDir>/locations.json`,
@@ -67,6 +80,10 @@ A split button whose label always names the action:
 - The menu always offers Start & open · Run in background · Park in backlog.
 - ⌘↵ runs the default action, ⌥⌘↵ the other of Start / Run in background.
 
+Every menu row says what the action does (mode-aware), even while it is
+blocked; a blocked row adds what is missing, and a single hint under the card
+names what the primary action still needs.
+
 ## Base branch
 
 A child in its parent's repository stacks on the parent's branch by default;
@@ -102,4 +119,4 @@ Unchanged (`pi · …`). Model and thinking show in the task tooltip.
 ## Out of scope
 
 The Claude Code adapter (a follow-up), agent profiles, switching agents
-mid-task, in-place runs for git repositories.
+mid-task, in-place *tasks* for git repositories (only chats run in place).

@@ -114,6 +114,16 @@ describe("emptyDraft defaults", () => {
 });
 
 describe("rememberDraft", () => {
+  it("remembers the Task / Chat mode for the next draft", () => {
+    const prefs = rememberDraft(emptyPrefs(), {
+      ...emptyDraft(),
+      mode: "chat",
+      where: repoWhere("a"),
+    });
+    expect(prefs.mode).toBe("chat");
+    expect(emptyDraft(null, prefs).mode).toBe("chat");
+  });
+
   it("keeps the agent choice and Where, with deduplicated capped recents", () => {
     let prefs = emptyPrefs();
     for (const id of ["a", "b", "c", "d", "e", "f", "b"]) {
@@ -239,6 +249,27 @@ describe("planSubmit", () => {
     expect(elsewhere.input).not.toHaveProperty("baseRef");
   });
 
+  it("chat never creates a worktree: a repository runs in place, with no base ref even under a parent", () => {
+    const chat = { ...ready, mode: "chat" as const };
+    const created = planSubmit(chat, "start", parent);
+    expect(created.input).toMatchObject({
+      repositoryId: "github.com/a/repo",
+      inPlace: true,
+      parentTaskId: "parent-1",
+    });
+    expect(created.input).not.toHaveProperty("baseRef");
+    const launched = planSubmit(chat, "background", parent);
+    expect(launched.input).toMatchObject({
+      repository: { repositoryId: "github.com/a/repo" },
+      inPlace: true,
+    });
+    expect(launched.input).not.toHaveProperty("baseBranch");
+    // No folder: nothing to run in place.
+    expect(
+      planSubmit({ ...chat, where: WHERE_NONE }, "start", null).input,
+    ).not.toHaveProperty("inPlace");
+  });
+
   it("background without a parent is a standalone launch; folders, clones and chat map to their repository variants", () => {
     expect(
       planSubmit({ ...ready, where: folderWhere("/notes") }, "background", null)
@@ -286,6 +317,7 @@ describe("draft persistence", () => {
       ...emptyDraft({ id: "t1" }),
       title: "A",
       prompt: "B",
+      mode: "chat" as const,
       where: WHERE_NONE,
       parentTaskId: "p",
       thinking: "low" as const,

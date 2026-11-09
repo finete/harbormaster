@@ -26,11 +26,15 @@ import {
   type WhereToken,
 } from "../lib/new-task-draft";
 import {
+  ACTION_LABELS,
   AgentModelPicker,
+  actionHint,
   BranchPicker,
+  ModeSwitch,
   ParentPicker,
   SubmitSplitButton,
   WherePicker,
+  whereLabel,
   whereOptions,
 } from "./NewTaskPickers";
 import {
@@ -159,6 +163,20 @@ export function NewTaskComposer({
     (action: SubmitAction) => submitBlocker(draft, action),
     [draft],
   );
+  const chat = draft.mode === "chat";
+  // Only a task in a repository (or a clone) gets a branch + worktree.
+  const hasWorktree =
+    !chat && (where.kind === "repository" || where.kind === "clone");
+  const hintFor = useCallback(
+    (action: SubmitAction) =>
+      actionHint(action, {
+        mode: draft.mode,
+        hasParent: !!draft.parentTaskId,
+        hasWorktree,
+      }),
+    [draft.mode, draft.parentTaskId, hasWorktree],
+  );
+  const primaryBlocker = blockerFor(primary);
 
   async function submit(action: SubmitAction): Promise<void> {
     if (submitting || submitBlocker(draft, action)) return;
@@ -387,13 +405,22 @@ export function NewTaskComposer({
             onPaste={(event) => void onPaste(event)}
             onDrop={onDrop}
             placeholder={
-              where.kind === "none"
-                ? "Ask anything…"
+              chat
+                ? selectedRepo || where.kind === "folder"
+                  ? `Ask anything about ${whereLabel(draft.where, options)}\u2026`
+                  : "Ask anything\u2026"
                 : "What should the agent do? Paste screenshots or drop files."
             }
             className="min-h-[132px] text-[13px] leading-relaxed"
           />
           <InputGroupAddon align="block-end" className="gap-0.5">
+            <ModeSwitch
+              value={draft.mode}
+              onChange={(mode) => {
+                onChange({ mode });
+                promptRef.current?.focus();
+              }}
+            />
             <WherePicker
               value={draft.where}
               options={options}
@@ -421,19 +448,29 @@ export function NewTaskComposer({
                 }}
               />
             )}
-            <div className="ml-auto pl-2">
+            <div className="ml-auto shrink-0 pl-2">
               <SubmitSplitButton
                 primary={primary}
                 alternate={alternate}
                 submitting={submitting}
                 blockerFor={blockerFor}
+                hintFor={hintFor}
                 onSubmit={(action) => void submit(action)}
               />
             </div>
           </InputGroupAddon>
         </InputGroup>
         <div className="flex min-h-5 items-center gap-2 px-1 text-[11px] text-muted-foreground">
-          {selectedRepo && base ? (
+          {chat && selectedRepo ? (
+            <span
+              data-testid="new-task-where-hint"
+              className="truncate"
+              title={selectedRepo.root}
+            >
+              Chats in your {whereLabel(draft.where, options)} checkout: no
+              branch or worktree, and any edits land directly in it
+            </span>
+          ) : selectedRepo && base ? (
             <BranchPicker
               branches={
                 branches?.repositoryId === selectedRepo.id
@@ -466,15 +503,21 @@ export function NewTaskComposer({
               </button>
             </BranchPicker>
           ) : where.kind === "folder" ? (
-            <span>Runs in place in {where.path}, no branch or worktree</span>
+            <span data-testid="new-task-where-hint" className="truncate">
+              Runs in place in {where.path}: no branch or worktree
+            </span>
           ) : where.kind === "none" ? (
-            <span>No folder: the agent runs in a scratch directory</span>
+            <span data-testid="new-task-where-hint">
+              No folder: the agent starts in an empty scratch directory
+            </span>
           ) : where.kind === "clone" ? (
-            <span>
-              Cloned under your code root, then a new branch + worktree
+            <span data-testid="new-task-where-hint">
+              {chat
+                ? "Cloned under your code root; the chat runs in the clone"
+                : "Cloned under your code root, then a new branch + worktree"}
             </span>
           ) : null}
-          {error && (
+          {error ? (
             <span
               className="ml-auto text-red-400"
               data-testid="new-task-error"
@@ -482,6 +525,15 @@ export function NewTaskComposer({
             >
               {error}
             </span>
+          ) : (
+            primaryBlocker && (
+              <span
+                data-testid="new-task-blocker"
+                className="ml-auto shrink-0 text-amber-300/80"
+              >
+                {primaryBlocker} to {ACTION_LABELS[primary].toLowerCase()}
+              </span>
+            )
           )}
         </div>
       </div>

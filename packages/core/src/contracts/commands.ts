@@ -88,6 +88,8 @@ export interface CreateTaskInput extends TaskAgentInput {
   parentTaskId?: string;
   /** Branch the worktree off this ref instead of the repository's default branch. Kept for a parked task. */
   baseRef?: string;
+  /** See `LaunchTaskInput.inPlace`. */
+  inPlace?: boolean;
   branch?: string;
   targetBranch?: string;
   /**
@@ -276,6 +278,14 @@ export interface LaunchTaskInput {
   baseBranch?: "default" | "parent";
   /** Branch off this exact ref instead (any branch); mutually exclusive with `baseBranch: "parent"`. */
   baseRef?: string;
+  /**
+   * The composer's Chat mode (see `/docs/new-task-composer.md`): no
+   * worktree. A repository runs in place in its primary checkout (stored as
+   * a `folderPath` task with no `repositoryId`, so Done/delete/branch-follow
+   * never treat the user's checkout as a task worktree); a folder runs in
+   * place as usual.
+   */
+  inPlace?: boolean;
   /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default; passed to the harness only on the first launch. */
   model?: string;
   harness?: string;

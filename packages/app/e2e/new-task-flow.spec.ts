@@ -11,6 +11,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -292,9 +293,21 @@ test("the composer gates submit on a title/prompt and a Where; Start is primary,
     "",
   );
   await expect(start).toBeDisabled();
-
   const prompt = window.getByTestId("new-task-prompt-input");
   await expect(prompt).toBeFocused();
+  // Blocked actions still explain themselves, plus what's missing.
+  await expect(window.getByTestId("new-task-blocker")).toHaveText(
+    "Add a title or a prompt to start",
+  );
+  await window.getByTestId("new-task-submit-menu").click();
+  await expect(window.getByTestId("new-task-submit-backlog")).toContainText(
+    "Save it to the backlog",
+  );
+  await expect(
+    window.getByTestId("new-task-submit-blocker").first(),
+  ).toHaveText("Add a title or a prompt");
+  await window.keyboard.press("Escape");
+
   await prompt.fill("Throwaway idea");
   // The empty title previews the derived one.
   await expect(window.getByTestId("new-task-title-input")).toHaveAttribute(
@@ -317,10 +330,16 @@ test("the composer gates submit on a title/prompt and a Where; Start is primary,
   ).not.toHaveAttribute("data-disabled", /.*/);
   await window.keyboard.press("Escape");
 
-  // No folder (the old Chat mode): no branch, a chat placeholder.
+  // No folder: no branch, a scratch directory.
   await chooseWhere(window, "none");
-  await expect(prompt).toHaveAttribute("placeholder", "Ask anything\u2026");
+  await expect(window.getByTestId("new-task-where-hint")).toContainText(
+    "empty scratch directory",
+  );
   await expect(window.getByTestId("new-task-branch-preview")).toHaveCount(0);
+  // Chat mode only changes the prompt's framing here.
+  await window.getByTestId("new-task-mode-chat").click();
+  await expect(prompt).toHaveAttribute("placeholder", "Ask anything\u2026");
+  await window.getByTestId("new-task-mode-task").click();
   await expect(start).toBeEnabled();
 
   await window.getByTestId("sidebar-draft-close").click();
@@ -449,7 +468,14 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
     .getByTestId("new-task-prompt-input")
     .fill("Derive my title from this line\nand ignore the rest");
   await expect(draftRow).toContainText("Derive my title from this line");
-  await chooseWhere(window, "none");
+  // Chat in the repository: no worktree, pi runs in the checkout itself.
+  await window.getByTestId("new-task-mode-chat").click();
+  await chooseWhere(window, REPO_ID);
+  await expect(window.getByTestId("new-task-where-hint")).toContainText(
+    "no branch or worktree",
+  );
+  await expect(window.getByTestId("new-task-branch-preview")).toHaveCount(0);
+  const worktreesBefore = taskWorktrees().length;
   await window.getByTestId("new-task-submit").click();
 
   // The draft row became the real task, focused, in the workspace.
@@ -465,8 +491,8 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
   );
   const taskId = (await row.getAttribute("data-task-id")) ?? "";
   await expect(window.getByTestId(`task-workspace-${taskId}`)).toBeVisible();
-  // A started chat has a scratch workspace, so its primary pane runs pi
-  // with the prompt (not a bare shell in the app's own cwd).
+  // The chat runs pi with the prompt in the repository's own checkout,
+  // and no worktree was created.
   const panel = window
     .getByTestId(`task-workspace-${taskId}`)
     .getByTestId("terminal-panel")
@@ -474,6 +500,12 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
   await expect(panel).toContainText("PI-ARG:Derive my title from this line", {
     timeout: 20_000,
   });
+  await expect(panel).toContainText(`PI-CWD:${realpathSync(repoCheckout)}`);
+  expect(taskWorktrees()).toHaveLength(worktreesBefore);
+  // Back to Task so the next draft starts as a task again.
+  await window.keyboard.press("ControlOrMeta+N");
+  await window.getByTestId("new-task-mode-task").click();
+  await window.getByTestId("sidebar-draft-close").click();
 });
 
 test("Open folder runs a task in place, and the picked model, thinking level and a pasted screenshot all reach the first pi launch", async () => {
