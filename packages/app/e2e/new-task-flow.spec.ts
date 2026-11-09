@@ -502,9 +502,12 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
   });
   await expect(panel).toContainText(`PI-CWD:${realpathSync(repoCheckout)}`);
   expect(taskWorktrees()).toHaveLength(worktreesBefore);
-  // Back to Task so the next draft starts as a task again.
+  // Chat is never sticky: the next draft opens on Task.
   await window.keyboard.press("ControlOrMeta+N");
-  await window.getByTestId("new-task-mode-task").click();
+  await expect(window.getByTestId("new-task-mode-task")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
   await window.getByTestId("sidebar-draft-close").click();
 });
 

@@ -143,7 +143,8 @@ export function emptyDraft(
   return {
     title: "",
     prompt: "",
-    mode: prefs.mode,
+    // Always opens on Task; Chat is a per-draft choice, never sticky.
+    mode: "task",
     where: originWhere || prefs.where,
     cloneUrl: "",
     parentTaskId: null,

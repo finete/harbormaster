@@ -302,7 +302,7 @@ export function ModeSwitch({
           className={cn(
             "flex h-6 items-center gap-1 rounded-md px-2 text-xs transition-colors",
             value === mode
-              ? "bg-background text-foreground shadow-sm"
+              ? "bg-primary/20 text-primary shadow-sm ring-1 ring-primary/40"
               : "text-muted-foreground hover:text-foreground",
           )}
         >

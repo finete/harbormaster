@@ -114,14 +114,14 @@ describe("emptyDraft defaults", () => {
 });
 
 describe("rememberDraft", () => {
-  it("remembers the Task / Chat mode for the next draft", () => {
+  it("always opens a new draft on Task, even right after a chat", () => {
     const prefs = rememberDraft(emptyPrefs(), {
       ...emptyDraft(),
       mode: "chat",
       where: repoWhere("a"),
     });
-    expect(prefs.mode).toBe("chat");
-    expect(emptyDraft(null, prefs).mode).toBe("chat");
+    expect(emptyDraft(null, prefs).mode).toBe("task");
+    expect(emptyDraft({ id: "t", repositoryId: "a" }, prefs).mode).toBe("task");
   });
 
   it("keeps the agent choice and Where, with deduplicated capped recents", () => {
