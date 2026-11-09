@@ -15,7 +15,7 @@ import type {
   SessionLaunch,
   WorkspaceBinding,
 } from "@harbormaster/core";
-import { commandExists } from "./ptySessions";
+import { commandExists, directoryExists } from "./ptySessions";
 
 /** The slice of `CoreCommands` this module needs — structural so callers (including tests) can pass a minimal fake. */
 export interface PrimaryLaunchCore {
@@ -45,6 +45,15 @@ export interface PrimaryLaunchResolution {
   spec: LaunchSpec | undefined;
   /** `binding.worktreePath` existed but the harness command isn't on PATH. */
   commandMissing: boolean;
+  /**
+   * The binding named a worktree, but that directory no longer exists on
+   * disk (reaped, moved, or carried over from an old layout). Spawning pi
+   * into it would fork-then-exit-1 with no output, so the caller must not
+   * launch; `spec` is `undefined` and neither claim was burned. The branch
+   * usually still exists, so the worktree is recoverable with
+   * `git worktree add <path> <branch>`.
+   */
+  worktreeMissing: boolean;
 }
 
 /**
@@ -61,7 +70,25 @@ export async function resolvePrimaryLaunch(
 ): Promise<PrimaryLaunchResolution> {
   const binding = await core.getTaskWorkspace(taskId);
   if (!binding?.worktreePath) {
-    return { binding, spec: undefined, commandMissing: false };
+    return {
+      binding,
+      spec: undefined,
+      commandMissing: false,
+      worktreeMissing: false,
+    };
+  }
+  // The binding can outlive its worktree directory (reaped on Done, deleted
+  // manually, or an old `.pi-home-worktrees` path from a prior layout).
+  // Catch it here — before claiming the session slot or initial prompt — so
+  // the pane never spawns pi into a dead cwd (a silent exit-1) and neither
+  // one-shot claim is burned on a launch that cannot happen.
+  if (!directoryExists(binding.worktreePath)) {
+    return {
+      binding,
+      spec: undefined,
+      commandMissing: false,
+      worktreeMissing: true,
+    };
   }
   const baseSpecInput: BuildLaunchSpecInput = {
     taskId,
@@ -70,7 +97,12 @@ export async function resolvePrimaryLaunch(
   };
   const probeSpec = harness.buildLaunchSpec(baseSpecInput);
   if (!commandExists(probeSpec.command)) {
-    return { binding, spec: probeSpec, commandMissing: true };
+    return {
+      binding,
+      spec: probeSpec,
+      commandMissing: true,
+      worktreeMissing: false,
+    };
   }
   // Only once pi is actually launchable (a shell fallback, or a dropped
   // background launch, must not burn either claim): core decides which
@@ -85,5 +117,5 @@ export async function resolvePrimaryLaunch(
     ...(session ? { session } : {}),
     ...(initialPrompt ? { initialPrompt } : {}),
   });
-  return { binding, spec, commandMissing: false };
+  return { binding, spec, commandMissing: false, worktreeMissing: false };
 }
