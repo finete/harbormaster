@@ -242,6 +242,7 @@ function validTask(value: unknown): value is Task {
     isOptionalString(value.baseRef) &&
     isOptionalString(value.harness) &&
     isOptionalString(value.model) &&
+    isOptionalString(value.sessionModel) &&
     isOptionalString(value.thinking) &&
     isOptionalString(value.branch) &&
     isOptionalString(value.targetBranch) &&

@@ -114,7 +114,12 @@ focused and returns focus to the prompt.
 
 ## Task rows
 
-Unchanged (`pi · …`). Model and thinking show in the task tooltip.
+Sidebar rows show the agent and model: `pi · claude-opus-4-8 · your move`
+(revised from the original "agent only" decision). The model is the task's
+own choice, else what its first session started with (`Task.sessionModel`,
+recorded by `claimSessionLaunch`: the configured default, else the harness's
+own default from `HarnessAdapter.defaults()`); just `pi` when unknown. The
+thinking level is in the tooltip.
 
 ## Out of scope
 

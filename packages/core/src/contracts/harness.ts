@@ -44,6 +44,10 @@ export interface HarnessModelCatalog {
 /** Resource Access behind a harness's model list (spawns the harness CLI / reads its settings). */
 export interface HarnessModelCatalogAccess {
   listModels(): Promise<Omit<HarnessModelCatalog, "harness" | "label">>;
+  /** Just the harness's own defaults (a settings read, no CLI spawn). */
+  defaults(): Promise<
+    Pick<HarnessModelCatalog, "defaultModel" | "defaultThinking">
+  >;
 }
 
 /**
@@ -132,6 +136,10 @@ export interface HarnessAdapter {
 
   /** The models this harness can run, for the composer's picker. Never throws: failures come back as `error`. */
   listModels(): Promise<HarnessModelCatalog>;
+  /** The harness's own default model/thinking, cheaply (no CLI spawn). Never throws. */
+  defaults(): Promise<
+    Pick<HarnessModelCatalog, "defaultModel" | "defaultThinking">
+  >;
 
   /** What this harness can deliver to a task's session (see `docs/task-messaging.md`): core resolves the actual message mode from this. */
   readonly messaging: HarnessMessagingCapabilities;

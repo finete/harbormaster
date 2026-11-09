@@ -168,6 +168,12 @@ export interface Task {
   model?: string;
   /** Thinking level for the task's first session; absent = the harness default. */
   thinking?: ThinkingLevel;
+  /**
+   * The model the task's first session started with when the task chose
+   * none (`model` unset): the configured default, else the harness's own
+   * default at that moment. Recorded by `claimSessionLaunch`, for display.
+   */
+  sessionModel?: string;
   /** Working branch for this task's worktree, once bound. */
   branch?: string;
   /** Branch this task's work will land on (e.g. "main"). */

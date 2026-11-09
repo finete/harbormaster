@@ -789,6 +789,18 @@ export class CoreManager implements CoreCommands {
     if (!model) {
       const config = await this.deps.config.load();
       model = config.launch?.defaultModel;
+      // Record what "default" meant for this session, for display; the
+      // harness's own default is only recorded, never passed.
+      const sessionModel =
+        model ?? (await this.deps.harness?.defaults())?.defaultModel;
+      if (sessionModel) {
+        const recorded = await this.deps.tasks.patchTask(taskId, (fresh) =>
+          fresh.model || fresh.sessionModel
+            ? undefined
+            : { ...fresh, sessionModel, updatedAt: now },
+        );
+        if (recorded) await this.publishTaskChange(recorded);
+      }
     }
     return {
       mode: "new",

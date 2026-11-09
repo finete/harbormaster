@@ -73,7 +73,7 @@ export class PiModelCatalogAccess implements HarnessModelCatalogAccess {
     if (cached && this.now() - cached.at < CACHE_TTL_MS) {
       return structuredClone(cached.catalog);
     }
-    const defaults = await this.readDefaults();
+    const defaults = await this.defaults();
     const command = this.command();
     if (!command) {
       return { models: [], ...defaults, error: "Model list unavailable" };
@@ -104,9 +104,7 @@ export class PiModelCatalogAccess implements HarnessModelCatalogAccess {
     return process.env.HARBORMASTER_PI_COMMAND ? undefined : "pi";
   }
 
-  private async readDefaults(): Promise<
-    Pick<Catalog, "defaultModel" | "defaultThinking">
-  > {
+  async defaults(): Promise<Pick<Catalog, "defaultModel" | "defaultThinking">> {
     const path =
       this.options.settingsPath ??
       join(
