@@ -23,6 +23,7 @@ import {
   test,
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -80,10 +81,8 @@ async function createTaskWithRepo(
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window
-    .getByTestId("new-task-repo-select")
-    .selectOption("github.com/test/fixture");
-  await window.getByTestId("new-task-submit-backlog").click();
+  await chooseWhere(window, "github.com/test/fixture");
+  await submitAs(window, "park");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   const card = cardLocator(window, title);
@@ -199,8 +198,8 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Auto-focus Decoy");
-    await window.getByTestId("new-task-mode-chat").click();
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "none");
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     const taskId = await createTaskWithRepo(window, "Tab Parity Task");

@@ -23,6 +23,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -167,8 +168,8 @@ test.describe("the connectivity banner replaces per-task warning toasts while gh
   test("a connectivity-shaped gh failure shows one offline banner and never a warning toast, then clears on recovery", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Offline Task");
-    await window.getByTestId("new-task-repo-select").selectOption({ index: 1 });
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, { index: 1 });
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();

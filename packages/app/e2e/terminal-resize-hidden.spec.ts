@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -105,10 +106,8 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
     // Create a task and move it to dev so it gets a worktree + pi pane.
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Resize Hidden Task");
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "github.com/test/fixture");
+    await submitAs(window, "park");
 
     // Navigate to board and drag card to dev column.
     await window.getByTestId("board-button").click();
@@ -199,10 +198,8 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
     // until the task was opened.
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Other Task");
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/fixture");
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "github.com/test/fixture");
+    await submitAs(window, "park");
     await window.getByTestId("board-button").click();
     await dragTo(
       window,

@@ -14,6 +14,7 @@ import type {
   CoreCommands,
   CreateTaskInput,
   DeleteTaskOptions,
+  KnownLocation,
   LaunchTaskInput,
   MoveTaskOptions,
   OrphanWorktreeReport,
@@ -32,7 +33,11 @@ import type {
   PullRequestStatus,
   VersionAccess,
 } from "../contracts/github.js";
-import type { HarnessAdapter, SessionLaunch } from "../contracts/harness.js";
+import type {
+  HarnessAdapter,
+  HarnessModelCatalog,
+  SessionLaunch,
+} from "../contracts/harness.js";
 import type {
   ApproveMessageEdits,
   FindTasksOptions,
@@ -53,9 +58,11 @@ import type {
   TaskLaunch,
   TaskPullRequest,
   TaskState,
+  ThinkingLevel,
   WorkspaceBinding,
 } from "../contracts/model.js";
 import {
+  DEFAULT_HARNESS_ID,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
@@ -64,10 +71,12 @@ import {
 import type {
   Clock,
   ConfigAccess,
+  FolderAccess,
   IdGenerator,
   MessageAccess,
   ScratchWorkspaceAccess,
   SessionFileAccess,
+  TaskAttachmentAccess,
   TaskStateAccess,
   WorkspaceBindingAccess,
 } from "../contracts/services.js";
@@ -146,6 +155,34 @@ export interface CoreManagerDependencies {
   messages?: MessageAccess;
   /** The harness adapter, for presence and messaging capabilities. Required alongside `messages`. */
   harness?: HarnessAdapter;
+  /**
+   * Folders registered outside `codeRoot` (composer "Open folder…").
+   * Optional so hand-built managers keep compiling; folder commands throw
+   * "folders are not configured" without it (`createCore` supplies it).
+   */
+  folders?: FolderAccess;
+  /** Per-task copies of images pasted into a prompt; without it attachments keep their original paths. */
+  attachments?: TaskAttachmentAccess;
+}
+
+/** Where a new task runs, resolved from a create/launch input. */
+type TaskWhere =
+  | { kind: "repository"; repo: RepositoryInfo }
+  | { kind: "folder"; path: string }
+  | { kind: "none" };
+
+/** Agent fields stored on a new task (see `/docs/new-task-composer.md`). */
+function agentFields(input: {
+  harness?: string;
+  model?: string;
+  thinking?: ThinkingLevel;
+}): Pick<Task, "harness" | "model" | "thinking"> {
+  const model = input.model?.trim();
+  return {
+    harness: input.harness?.trim() || DEFAULT_HARNESS_ID,
+    ...(model ? { model } : {}),
+    ...(input.thinking ? { thinking: input.thinking } : {}),
+  };
 }
 
 const COLUMN_TITLES: Record<TaskState, string> = {
@@ -154,6 +191,9 @@ const COLUMN_TITLES: Record<TaskState, string> = {
   awaiting: "Awaiting",
   done: "Done",
 };
+
+/** How long registered folders' repository lookups are reused. */
+const LOCATION_CACHE_TTL_MS = 30_000;
 
 /** PR observations in flight at once during `refresh()` (pi-home parity). */
 const REFRESH_CONCURRENCY = 4;
@@ -170,6 +210,10 @@ export class CoreManager implements CoreCommands {
   private lastValidatedConfig: string | undefined;
   /** Last reported done-cleanup retry failure per task (dedupe). */
   private readonly cleanupWarnings = new Map<string, string>();
+  /** Registered folders resolved to repositories (see `locationEntries`). */
+  private locationCache:
+    | { at: number; entries: Array<{ path: string; repo?: RepositoryInfo }> }
+    | undefined;
 
   constructor(private readonly deps: CoreManagerDependencies) {}
 
@@ -191,10 +235,157 @@ export class CoreManager implements CoreCommands {
 
   async listRepositories(): Promise<RepositoryInfo[]> {
     const config = await this.deps.config.load();
-    return this.deps.repositories.discoverRepositories(
+    return this.allRepositories(config);
+  }
+
+  /** Repositories under `codeRoot`, then git folders registered outside it (deduplicated by identity). */
+  private async allRepositories(
+    config: GlobalConfig,
+  ): Promise<RepositoryInfo[]> {
+    const repos = await this.deps.repositories.discoverRepositories(
       config.codeRoot ?? "",
       preferredCheckoutsFromConfig(config),
     );
+    const known = new Set(repos.map((repo) => repo.id));
+    for (const location of await this.locationEntries()) {
+      if (location.repo && !known.has(location.repo.id)) {
+        known.add(location.repo.id);
+        repos.push(location.repo);
+      }
+    }
+    return repos;
+  }
+
+  /** Every registered folder that still exists, with its repository when it is a git checkout. */
+  private async locationEntries(): Promise<
+    Array<{ path: string; repo?: RepositoryInfo }>
+  > {
+    const folders = this.deps.folders;
+    if (!folders) return [];
+    // Cached briefly: repository lookups run on every refresh tick and
+    // every `findRepository`, and each registered folder costs git spawns.
+    const now = this.deps.clock.now().getTime();
+    const cached = this.locationCache;
+    if (cached && now - cached.at < LOCATION_CACHE_TTL_MS) {
+      return structuredClone(cached.entries);
+    }
+    const entries: Array<{ path: string; repo?: RepositoryInfo }> = [];
+    for (const path of await folders.listRegisteredFolders()) {
+      if (!(await folders.isDirectory(path))) continue;
+      const repo = await this.deps.repositories
+        .resolveRepository(path)
+        .catch(() => undefined);
+      entries.push({ path, ...(repo ? { repo } : {}) });
+    }
+    this.locationCache = { at: now, entries: structuredClone(entries) };
+    return entries;
+  }
+
+  async listLocations(): Promise<KnownLocation[]> {
+    return (await this.locationEntries()).map(({ path, repo }) =>
+      toKnownLocation(path, repo),
+    );
+  }
+
+  async addLocation(path: string): Promise<KnownLocation> {
+    const folders = this.deps.folders;
+    if (!folders) throw new Error("folders are not configured");
+    const resolved = await folders.registerFolder(path);
+    this.locationCache = undefined;
+    const repo = await this.deps.repositories
+      .resolveRepository(resolved)
+      .catch(() => undefined);
+    return toKnownLocation(resolved, repo);
+  }
+
+  async listBranches(repositoryId: string): Promise<string[]> {
+    const repo = await this.findRepository(repositoryId);
+    return this.deps.repositories.listBranches(repo);
+  }
+
+  async listModels(): Promise<HarnessModelCatalog[]> {
+    const harness = this.deps.harness;
+    if (!harness) return [];
+    const [catalog, config] = await Promise.all([
+      harness.listModels(),
+      this.deps.config.load(),
+    ]);
+    // The configured default wins over the harness's own, exactly as
+    // `claimSessionLaunch` resolves it.
+    const defaultModel = config.launch?.defaultModel ?? catalog.defaultModel;
+    return [{ ...catalog, ...(defaultModel ? { defaultModel } : {}) }];
+  }
+
+  /**
+   * Resolve a create/launch input's location. A folder is registered as a
+   * known location first (so agents can target it later); a git folder
+   * becomes its repository, anything else runs in place.
+   */
+  private async resolveWhere(
+    where:
+      | { repositoryId: string }
+      | { cloneUrl: string }
+      | { folderPath: string }
+      | { none: true },
+    config: GlobalConfig,
+  ): Promise<TaskWhere> {
+    if ("repositoryId" in where) {
+      return {
+        kind: "repository",
+        repo: await this.findRepository(where.repositoryId, config),
+      };
+    }
+    if ("cloneUrl" in where) {
+      if (!config.codeRoot) {
+        throw new Error(
+          "Cloning a repository requires codeRoot to be configured",
+        );
+      }
+      return {
+        kind: "repository",
+        repo: await this.deps.repositories.cloneRepository(
+          config.codeRoot,
+          where.cloneUrl,
+        ),
+      };
+    }
+    if ("folderPath" in where) {
+      const location = await this.addLocation(where.folderPath);
+      if (location.repositoryId) {
+        return {
+          kind: "repository",
+          repo: await this.findRepository(location.repositoryId, config),
+        };
+      }
+      return { kind: "folder", path: location.path };
+    }
+    return { kind: "none" };
+  }
+
+  /** Copy pasted images into the task's own state dir and point the prompt at the copies. */
+  private async adoptAttachments(
+    taskId: string,
+    prompt: string,
+    attachments: string[] | undefined,
+  ): Promise<string> {
+    if (!attachments?.length || !this.deps.attachments) return prompt;
+    const used = attachments.filter((path) => prompt.includes(path));
+    const copies = await this.deps.attachments.copyIntoTask(taskId, used);
+    let next = prompt;
+    for (const [from, to] of copies) next = next.replaceAll(from, to);
+    return next;
+  }
+
+  /** One level only: the parent must exist and must not itself be a child. */
+  private async requireParentCandidate(parentTaskId: string): Promise<Task> {
+    const parent = await this.deps.tasks.getTask(parentTaskId);
+    if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
+    if (parent.parentTaskId) {
+      throw new Error(
+        "A child task cannot launch further children (one level only); launch a standalone task instead",
+      );
+    }
+    return parent;
   }
 
   async getTaskWorkspace(
@@ -208,13 +399,27 @@ export class CoreManager implements CoreCommands {
     const id = this.deps.ids.next();
     const startNow = input.start === true;
 
-    let repo: RepositoryInfo | undefined;
+    const parent = input.parentTaskId
+      ? await this.requireParentCandidate(input.parentTaskId)
+      : undefined;
+
     let branch = input.branch;
     let targetBranch = input.targetBranch;
+    const config = await this.deps.config.load();
+    const where = await this.resolveWhere(
+      input.repositoryId !== undefined
+        ? { repositoryId: input.repositoryId }
+        : input.cloneUrl
+          ? { cloneUrl: input.cloneUrl }
+          : input.folderPath
+            ? { folderPath: input.folderPath }
+            : { none: true },
+      config,
+    );
+    const repo = where.kind === "repository" ? where.repo : undefined;
+    const baseRef = repo ? input.baseRef?.trim() || undefined : undefined;
 
-    if (input.repositoryId !== undefined) {
-      const config = await this.deps.config.load();
-      repo = await this.findRepository(input.repositoryId, config);
+    if (repo) {
       // A parked (backlog) task records only what it will need later: the
       // branch is derived when it is actually started (`startTask`), so a
       // parked task never reserves a git ref.
@@ -228,23 +433,40 @@ export class CoreManager implements CoreCommands {
       id,
       // Repository-less work is scratch ("chat") work, same as
       // `launchTask`'s `{ none: true }`.
-      kind:
-        input.kind ?? (input.repositoryId !== undefined ? "task" : "temp_task"),
+      kind: input.kind ?? (repo ? "task" : "temp_task"),
       state: startNow ? "dev" : "backlog",
       title: input.title,
-      initialPrompt: input.initialPrompt,
-      ...(input.repositoryId !== undefined
-        ? { repositoryId: input.repositoryId }
-        : {}),
+      initialPrompt: await this.adoptAttachments(
+        id,
+        input.initialPrompt,
+        input.attachments,
+      ),
+      ...(repo ? { repositoryId: repo.id } : {}),
+      ...(where.kind === "folder" ? { folderPath: where.path } : {}),
       ...(branch !== undefined ? { branch } : {}),
       ...(targetBranch !== undefined ? { targetBranch } : {}),
+      ...(baseRef ? { baseRef } : {}),
+      ...(parent ? { parentTaskId: parent.id } : {}),
+      ...agentFields(input),
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
     };
 
     if (startNow && repo && branch) {
-      await this.provisionTaskWorkspace(repo, id, branch, now, {
+      await this.provisionTaskWorkspace(
+        repo,
+        id,
+        branch,
+        now,
+        {
+          persist: () => this.deps.tasks.createTask(task),
+          undo: () => this.deps.tasks.removeTask(id),
+        },
+        baseRef ?? repo.defaultBranch,
+      );
+    } else if (startNow && where.kind === "folder") {
+      await this.provisionInPlaceWorkspace(id, where.path, now, {
         persist: () => this.deps.tasks.createTask(task),
         undo: () => this.deps.tasks.removeTask(id),
       });
@@ -273,6 +495,14 @@ export class CoreManager implements CoreCommands {
     }
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (binding?.worktreePath) return this.moveTask(taskId, "dev");
+    if (task.folderPath) {
+      const now = this.deps.clock.now().toISOString();
+      await this.provisionInPlaceWorkspace(taskId, task.folderPath, now, {
+        persist: async () => {},
+        undo: async () => {},
+      });
+      return this.moveTask(taskId, "dev");
+    }
     if (!task.repositoryId) {
       // Parked scratch task: give it its scratch directory now, exactly
       // like a repository-backed task gets its worktree on start.
@@ -299,12 +529,54 @@ export class CoreManager implements CoreCommands {
       stateChangedAt: now,
     };
     delete next.awaiting;
-    await this.provisionTaskWorkspace(repo, task.id, branch, now, {
-      persist: () => this.deps.tasks.replaceTask(next),
-      undo: () => this.deps.tasks.replaceTask(task),
-    });
+    await this.provisionTaskWorkspace(
+      repo,
+      task.id,
+      branch,
+      now,
+      {
+        persist: () => this.deps.tasks.replaceTask(next),
+        undo: () => this.deps.tasks.replaceTask(task),
+      },
+      task.baseRef ?? repo.defaultBranch,
+    );
     await this.publishTaskChange(next);
     return next;
+  }
+
+  /**
+   * A non-git folder task's workspace: the binding points at the user's
+   * folder itself (`inPlace: true`). Nothing is created, and nothing in core
+   * ever deletes or git-touches it (Done/delete gate every git verb on
+   * `task.repositoryId`, which a folder task never has).
+   */
+  private async provisionInPlaceWorkspace(
+    taskId: string,
+    folderPath: string,
+    now: string,
+    task: { persist: () => Promise<void>; undo: () => Promise<void> },
+  ): Promise<void> {
+    if (
+      this.deps.folders &&
+      !(await this.deps.folders.isDirectory(folderPath))
+    ) {
+      throw new Error(`Folder not found: ${folderPath}`);
+    }
+    await task.persist();
+    try {
+      await this.deps.bindings.attachBinding({
+        id: this.deps.ids.next(),
+        taskId,
+        worktreePath: folderPath,
+        inPlace: true,
+        detached: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      await task.undo().catch(() => {});
+      throw error;
+    }
   }
 
   /**
@@ -492,18 +764,21 @@ export class CoreManager implements CoreCommands {
       sessionId,
       updatedAt: now,
     });
-    // First-ever launch of a `launchTask` task: pass its model through to
-    // the harness (per-launch override, else the configured default), never
-    // on a later resume/fork/continue.
-    let model: string | undefined;
-    if (task.launch) {
-      model = task.launch.model;
-      if (!model) {
-        const config = await this.deps.config.load();
-        model = config.launch?.defaultModel;
-      }
+    // First-ever launch: pass the task's model/thinking through to the
+    // harness (the task's choice, else the configured default model), never
+    // on a later resume/fork/continue. `launch.model` is where launched
+    // tasks recorded their model before tasks carried one.
+    let model = task.model ?? task.launch?.model;
+    if (!model) {
+      const config = await this.deps.config.load();
+      model = config.launch?.defaultModel;
     }
-    return { mode: "new", sessionId, ...(model ? { model } : {}) };
+    return {
+      mode: "new",
+      sessionId,
+      ...(model ? { model } : {}),
+      ...(task.thinking ? { thinking: task.thinking } : {}),
+    };
   }
 
   async recordTaskSession(
@@ -567,6 +842,19 @@ export class CoreManager implements CoreCommands {
     }
 
     if (!task.repositoryId) {
+      // A folder task runs in place: point its parked binding back at the
+      // folder so the reopened cycle has somewhere to run.
+      const parked = task.folderPath
+        ? await this.deps.bindings.getBindingForTask(taskId)
+        : undefined;
+      if (task.folderPath && parked && !parked.worktreePath) {
+        await this.deps.bindings.replaceBinding({
+          ...parked,
+          worktreePath: task.folderPath,
+          inPlace: true,
+          updatedAt: now,
+        });
+      }
       await this.deps.tasks.replaceTask(reopened);
       await this.publishTaskChange(reopened);
       return { task: reopened };
@@ -923,26 +1211,22 @@ export class CoreManager implements CoreCommands {
     if (input.baseBranch === "parent" && input.relation !== "child") {
       throw new Error('baseBranch "parent" is only valid for a child task');
     }
-
-    let repo: RepositoryInfo | undefined;
-    let hasRepository = true;
-    if ("repositoryId" in input.repository) {
-      repo = await this.findRepository(input.repository.repositoryId, config);
-    } else if ("cloneUrl" in input.repository) {
-      if (!config.codeRoot) {
-        throw new Error(
-          "launchTask with a cloneUrl requires codeRoot to be configured",
-        );
-      }
-      repo = await this.deps.repositories.cloneRepository(
-        config.codeRoot,
-        input.repository.cloneUrl,
-      );
-    } else {
-      hasRepository = false;
+    if (input.baseBranch === "parent" && input.baseRef) {
+      throw new Error('baseBranch "parent" and baseRef are mutually exclusive');
     }
 
-    let baseRef: string | undefined;
+    if ("cloneUrl" in input.repository && !config.codeRoot) {
+      throw new Error(
+        "launchTask with a cloneUrl requires codeRoot to be configured",
+      );
+    }
+    const where = await this.resolveWhere(input.repository, config);
+    const repo = where.kind === "repository" ? where.repo : undefined;
+    const hasRepository = where.kind === "repository";
+
+    let baseRef: string | undefined = repo
+      ? input.baseRef?.trim() || undefined
+      : undefined;
     let dependencyBranch: string | undefined;
     if (input.baseBranch === "parent") {
       if (!repo || !parentTask || parentTask.repositoryId !== repo.id) {
@@ -957,6 +1241,14 @@ export class CoreManager implements CoreCommands {
       }
       baseRef = parentTask.branch;
       dependencyBranch = parentTask.branch;
+    } else if (
+      repo &&
+      baseRef &&
+      baseRef !== repo.defaultBranch &&
+      baseRef !== `origin/${repo.defaultBranch}`
+    ) {
+      // Based on another branch: the agent must state that dependency.
+      dependencyBranch = baseRef;
     }
 
     const kickoff = buildLaunchKickoffPrompt({
@@ -966,12 +1258,16 @@ export class CoreManager implements CoreCommands {
         : {}),
       ...(dependencyBranch ? { dependencyBranch } : {}),
     });
-    const initialPrompt = `${input.prompt.trim()}\n\n${kickoff}`;
+    const prompt = await this.adoptAttachments(
+      id,
+      input.prompt.trim(),
+      input.attachments,
+    );
+    const initialPrompt = `${prompt}\n\n${kickoff}`;
 
     const launch: TaskLaunch = {
       status: "queued",
       requestedAt: now,
-      ...(input.model ? { model: input.model } : {}),
     };
 
     const task: Task = {
@@ -981,6 +1277,9 @@ export class CoreManager implements CoreCommands {
       title: input.title,
       initialPrompt,
       ...(repo ? { repositoryId: repo.id } : {}),
+      ...(where.kind === "folder" ? { folderPath: where.path } : {}),
+      ...(baseRef ? { baseRef } : {}),
+      ...agentFields(input),
       ...(parentTaskId ? { parentTaskId } : {}),
       ...(launchedFromTaskId ? { launchedFromTaskId } : {}),
       launch,
@@ -1009,6 +1308,15 @@ export class CoreManager implements CoreCommands {
       );
       await this.publishTaskChange(next);
       return next;
+    }
+
+    if (where.kind === "folder") {
+      await this.provisionInPlaceWorkspace(id, where.path, now, {
+        persist: () => this.deps.tasks.createTask(task),
+        undo: () => this.deps.tasks.removeTask(id),
+      });
+      await this.publishTaskChange(task);
+      return task;
     }
 
     await this.provisionScratchWorkspace(id, now, {
@@ -1376,10 +1684,7 @@ export class CoreManager implements CoreCommands {
     config: GlobalConfig,
   ): Promise<Map<string, RepositoryInfo> | undefined> {
     try {
-      const repos = await this.deps.repositories.discoverRepositories(
-        config.codeRoot ?? "",
-        preferredCheckoutsFromConfig(config),
-      );
+      const repos = await this.allRepositories(config);
       return new Map(repos.map((repo) => [repo.id, repo]));
     } catch {
       return undefined;
@@ -1848,10 +2153,7 @@ export class CoreManager implements CoreCommands {
     loadedConfig?: GlobalConfig,
   ): Promise<RepositoryInfo> {
     const config = loadedConfig ?? (await this.deps.config.load());
-    const repos = await this.deps.repositories.discoverRepositories(
-      config.codeRoot ?? "",
-      preferredCheckoutsFromConfig(config),
-    );
+    const repos = await this.allRepositories(config);
     const repo = repos.find((candidate) => candidate.id === repositoryId);
     if (!repo) throw new Error(`Repository not found: ${repositoryId}`);
     return repo;
@@ -2442,6 +2744,14 @@ function affectedTaskIds(messages: readonly TaskMessage[]): string[] {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toKnownLocation(path: string, repo?: RepositoryInfo): KnownLocation {
+  return {
+    path,
+    name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
+    ...(repo ? { repositoryId: repo.id } : {}),
+  };
 }
 
 /** Repository id -> configured primary-checkout override, for `GitRepositoryAccess.discoverRepositories`. */

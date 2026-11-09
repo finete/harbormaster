@@ -624,7 +624,7 @@ describe.skipIf(!gitAvailable)(
       expect(first).toMatchObject({ mode: "new", model: "openai/gpt" });
     });
 
-    it("never passes a model for a task not created by launchTask", async () => {
+    it("passes no model when neither the task nor the config sets one", async () => {
       const f = await fixture();
       const task = await startedTask(f);
       const first = await f.manager.claimSessionLaunch(task.id);

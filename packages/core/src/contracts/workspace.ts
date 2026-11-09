@@ -87,6 +87,11 @@ export interface GitRepositoryAccess {
    * exists with a different origin (or isn't a git checkout at all).
    */
   cloneRepository(codeRoot: string, cloneUrl: string): Promise<RepositoryInfo>;
+  /**
+   * Local branches, then remote-tracking branches (`origin/x`, symbolic
+   * `origin/HEAD` skipped), of the repository's primary checkout.
+   */
+  listBranches(repo: RepositoryInfo): Promise<string[]>;
 }
 
 /**

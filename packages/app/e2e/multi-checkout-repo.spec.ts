@@ -15,6 +15,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/multi-checkout";
@@ -142,14 +143,18 @@ test("two checkouts of the same remote collapse into one New Task repository opt
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
 
+  await window.getByTestId("new-task-where").click();
   const options = window
-    .getByTestId("new-task-repo-select")
-    .locator(`option[value="${REPO_ID}"]`);
+    .getByTestId("new-task-where-menu")
+    .locator(
+      `[data-testid="new-task-where-option"][data-where="repo:${REPO_ID}"]`,
+    );
   await expect(options).toHaveCount(1);
-  await expect(options).toHaveText(`${REPO_ID} — 2 checkouts`);
+  await expect(options).toContainText(`${REPO_ID} · 2 checkouts`);
+  await window.keyboard.press("Escape");
 
   await window.getByTestId("new-task-title-input").fill("Multi-checkout task");
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
-  await window.getByTestId("new-task-submit-backlog").click();
+  await chooseWhere(window, REPO_ID);
+  await submitAs(window, "park");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 });

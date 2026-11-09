@@ -14,7 +14,10 @@
   --accent: 210 16% 18%;
   --accent-foreground: 210 20% 95%;
   --border: 210 14% 20%;
+  --input: 210 14% 22%;
   --ring: 199 89% 48%;
+  --popover: 210 18% 10%;
+  --popover-foreground: 210 20% 90%;
   --radius: 0.5rem;
 }
 
@@ -42,4 +45,18 @@ body,
 }
 .terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background: hsl(210 12% 32%);
+}
+
+/* Popovers/menus (Radix portals): thin themed scrollbars instead of the
+   default white ones. */
+[data-radix-popper-content-wrapper] ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+[data-radix-popper-content-wrapper] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-radix-popper-content-wrapper] ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
 }

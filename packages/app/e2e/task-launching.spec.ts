@@ -31,6 +31,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -92,13 +93,18 @@ function invocationsFor(needle: string): string[] {
 
 async function openLaunchComposer(relation: "subtask" | "task"): Promise<void> {
   // Launching lives inside the new-task draft composer (one entry point):
-  // the draft captures the focused task as its origin; the link chip adds
-  // the link (default relation: standalone) and picks the relation.
+  // the draft captures the focused task as its origin, offered first by the
+  // `+ Parent` picker; a parent makes "Run in background" the default.
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
-  await window.getByTestId("new-task-link-add").click();
   if (relation === "subtask") {
-    await window.getByTestId("new-task-link-child").click();
+    await window.getByTestId("new-task-parent-add").click();
+    await window
+      .getByTestId("new-task-parent-menu")
+      .getByTestId("new-task-parent-option")
+      .first()
+      .click();
+    await expect(window.getByTestId("new-task-parent")).toBeVisible();
   }
 }
 
@@ -216,7 +222,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   // --- Seed: a repo-backed parent task, started now (Dev + its own pi pane). ---
   await window.getByTestId("board-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Parent Task");
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
+  await chooseWhere(window, REPO_ID);
   await window
     .getByTestId("new-task-prompt-input")
     .fill("Coordinate the subtasks");
@@ -240,18 +246,19 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   // --- Consume the one concurrency slot with a standalone "Blocker" launch, ---
   // --- so the real task-under-test's launch stays queued, not racy.       ---
   await openLaunchComposer("task");
-  await expect(window.getByTestId("new-task-link-standalone")).toHaveAttribute(
-    "data-selected",
-    "true",
+  // No parent: Start is the default, Run in background sits in the menu.
+  await expect(window.getByTestId("new-task-submit")).toHaveAttribute(
+    "data-action",
+    "start",
   );
   await window.getByTestId("new-task-title-input").fill("Blocker");
   await window
     .getByTestId("new-task-prompt-input")
     .fill("Occupy the only concurrency slot");
-  // Repository: "None / scratch" (default) — a scratch task is enough to
-  // occupy a launch slot and never touches the fixture repo's worktrees.
-  await window.getByTestId("new-task-mode-chat").click();
-  await window.getByTestId("new-task-submit").click();
+  // No folder: a scratch task is enough to occupy a launch slot and never
+  // touches the fixture repo's worktrees.
+  await chooseWhere(window, "none");
+  await submitAs(window, "background");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(
     window.getByTestId("toast-success").filter({ hasText: "Blocker" }),
@@ -262,18 +269,23 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
 
   // --- The actual task-under-test: a child, same repo as its parent. ---
   await openLaunchComposer("subtask");
-  await expect(window.getByTestId("new-task-link-child")).toHaveAttribute(
-    "data-selected",
-    "true",
+  await expect(window.getByTestId("new-task-submit")).toHaveAttribute(
+    "data-action",
+    "background",
   );
   await window.getByTestId("new-task-title-input").fill("Child Under Test");
   await window
     .getByTestId("new-task-prompt-input")
     .fill("Fix the specific bug");
-  await window.getByTestId("new-task-repo-select").selectOption(REPO_ID);
-  // Same repo as the parent + parent has a branch: the base-branch picker
-  // appears (wave-3 task brief item 5).
-  await expect(window.getByTestId("new-task-base-branch")).toBeVisible();
+  // Where defaulted to the focused parent's repository, and a child in its
+  // parent's repository stacks on the parent's branch by default.
+  await expect(window.getByTestId("new-task-where")).toHaveAttribute(
+    "data-where",
+    `repo:${REPO_ID}`,
+  );
+  await expect(window.getByTestId("new-task-base-ref")).toHaveText(
+    /parent-task-/,
+  );
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(

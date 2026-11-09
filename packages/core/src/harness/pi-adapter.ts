@@ -4,10 +4,13 @@
 // process spawning here (accessor separation is a hard rule — ptys are a
 // frontend resource, see /docs/design-decisions.md "Layering").
 
+import { PiModelCatalogAccess } from "../access/pi-model-catalog-access.js";
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
 import type {
   BuildLaunchSpecInput,
   HarnessAdapter,
+  HarnessModelCatalog,
+  HarnessModelCatalogAccess,
   LaunchSpec,
   PresenceStatus,
   SessionLaunch,
@@ -36,6 +39,8 @@ export interface PiHarnessAdapterOptions {
    * below) — tests that register fake pids should override this.
    */
   isAlive?: (pid: number) => boolean;
+  /** Model-catalog access (`pi --list-models` + Pi settings); injectable for tests. */
+  models?: HarnessModelCatalogAccess;
 }
 
 /** Marker env var every launched Pi session can check to detect it is Harbormaster-hosted. */
@@ -102,9 +107,12 @@ export function piSessionArgs(session: SessionLaunch | undefined): string[] {
   if (!session) return [];
   switch (session.mode) {
     case "new":
-      return session.model
-        ? ["--session-id", session.sessionId, "--model", session.model]
-        : ["--session-id", session.sessionId];
+      return [
+        "--session-id",
+        session.sessionId,
+        ...(session.model ? ["--model", session.model] : []),
+        ...(session.thinking ? ["--thinking", session.thinking] : []),
+      ];
     case "resume":
       return session.sessionPath
         ? ["--session", session.sessionPath]
@@ -155,10 +163,13 @@ export const PI_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
 };
 
 export class PiHarnessAdapter implements HarnessAdapter {
+  readonly id = "pi";
+  readonly label = "Pi";
   readonly messaging: HarnessMessagingCapabilities = {
     ...PI_MESSAGING_CAPABILITIES,
   };
   private readonly presenceAccess: PresenceAccess;
+  private readonly models: HarnessModelCatalogAccess;
   private readonly clock: Clock;
   private readonly livenessOptions: PresenceLivenessOptions;
 
@@ -170,6 +181,24 @@ export class PiHarnessAdapter implements HarnessAdapter {
       );
     this.clock = options.clock ?? new SystemClock();
     this.livenessOptions = { isAlive: options.isAlive ?? defaultIsAlive };
+    this.models = options.models ?? new PiModelCatalogAccess();
+  }
+
+  async listModels(): Promise<HarnessModelCatalog> {
+    try {
+      return {
+        harness: this.id,
+        label: this.label,
+        ...(await this.models.listModels()),
+      };
+    } catch (error) {
+      return {
+        harness: this.id,
+        label: this.label,
+        models: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec {

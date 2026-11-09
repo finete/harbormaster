@@ -16,6 +16,7 @@ import {
   test,
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -127,20 +128,22 @@ test("the fixture repo appears in the New Task dialog's repository picker", asyn
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
 
+  await window.getByTestId("new-task-where").click();
   await expect(
     window
-      .getByTestId("new-task-repo-select")
-      .locator('option[value="github.com/test/fixture"]'),
+      .getByTestId("new-task-where-menu")
+      .locator(
+        '[data-testid="new-task-where-option"][data-where="repo:github.com/test/fixture"]',
+      ),
   ).toHaveCount(1);
+  await window.keyboard.press("Escape");
 
   await window.getByTestId("new-task-title-input").fill("Add git workspace");
-  await window
-    .getByTestId("new-task-repo-select")
-    .selectOption("github.com/test/fixture");
+  await chooseWhere(window, "github.com/test/fixture");
 
   await expect(window.getByTestId("new-task-branch-preview")).toBeVisible();
 
-  await window.getByTestId("new-task-submit-backlog").click();
+  await submitAs(window, "park");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 });
 

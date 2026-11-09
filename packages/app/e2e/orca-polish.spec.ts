@@ -18,6 +18,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere } from "./composer";
 import { fakePiPid, writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -70,7 +71,7 @@ async function createScratchTask(window: Page, title: string): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-mode-chat").click();
+  await chooseWhere(window, "none");
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 }
@@ -332,9 +333,7 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Orca Repo Task");
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/orca-fixture");
+    await chooseWhere(window, "github.com/test/orca-fixture");
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   });

@@ -9,6 +9,7 @@ import {
   GithubPrAccess,
   HttpVersionAccess,
   JsonConfigAccess,
+  JsonFolderAccess,
   JsonMessageAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
@@ -16,6 +17,7 @@ import {
   LocalGitWorktreeAccess,
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
+  LocalTaskAttachmentAccess,
   SessionPresenceAccess,
 } from "./access/index.js";
 import type { CoreCommands } from "./contracts/commands.js";
@@ -85,6 +87,8 @@ export function createCore(options: CoreOptions = {}): Core {
   const ids = options.ids ?? new UuidGenerator();
   const events = new CoreEventBus();
   const messages = new JsonMessageAccess(paths);
+  const folders = new JsonFolderAccess(paths.locationsFile);
+  const attachments = new LocalTaskAttachmentAccess(paths.taskAttachmentsDir);
   const harness =
     options.harness ?? new PiHarnessAdapter({ stateDir: paths.root, clock });
 
@@ -103,6 +107,8 @@ export function createCore(options: CoreOptions = {}): Core {
     versions,
     messages,
     harness,
+    folders,
+    attachments,
   });
 
   return { commands, events };

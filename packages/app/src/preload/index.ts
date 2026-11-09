@@ -11,6 +11,8 @@ import type {
   ConnectivityState,
   CreateTaskInput,
   HarbormasterApi,
+  HarnessModelCatalog,
+  KnownLocation,
   LaunchTaskInput,
   MessageMode,
   MessagingChangedPayload,
@@ -121,6 +123,14 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:getTask", id),
     listRepositories: (): Promise<RepositoryInfo[]> =>
       ipcRenderer.invoke("core:listRepositories"),
+    listLocations: (): Promise<KnownLocation[]> =>
+      ipcRenderer.invoke("core:listLocations"),
+    addLocation: (path: string): Promise<KnownLocation> =>
+      ipcRenderer.invoke("core:addLocation", path),
+    listBranches: (repositoryId: string): Promise<string[]> =>
+      ipcRenderer.invoke("core:listBranches", repositoryId),
+    listModels: (): Promise<HarnessModelCatalog[]> =>
+      ipcRenderer.invoke("core:listModels"),
     getTaskWorkspace: (taskId: string): Promise<WorkspaceBinding | undefined> =>
       ipcRenderer.invoke("core:getTaskWorkspace", taskId),
     createTask: (input: CreateTaskInput): Promise<Task> =>
@@ -250,6 +260,8 @@ const api: HarbormasterApi = {
     },
   },
   app: {
+    pickFolder: (): Promise<string | null> =>
+      ipcRenderer.invoke("app:pickFolder"),
     notify: (input: {
       taskId: string;
       title: string;

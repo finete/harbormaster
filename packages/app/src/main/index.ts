@@ -28,6 +28,7 @@ import type { WebContents } from "electron";
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Notification,
   net,
@@ -328,6 +329,32 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:listRepositories", () =>
     core.commands.listRepositories(),
   );
+  ipcMain.handle("core:listLocations", () => core.commands.listLocations());
+  ipcMain.handle("core:addLocation", (_event, path: string) =>
+    core.commands.addLocation(path),
+  );
+  ipcMain.handle("core:listBranches", (_event, repositoryId: string) =>
+    core.commands.listBranches(repositoryId),
+  );
+  ipcMain.handle("core:listModels", () => core.commands.listModels());
+  // The composer's "Open folder…" (see /docs/new-task-composer.md "Where"):
+  // a native directory picker. e2e sets HARBORMASTER_E2E_PICK_FOLDER to
+  // answer it without a real dialog (an empty value = cancelled).
+  ipcMain.handle("app:pickFolder", async (event): Promise<string | null> => {
+    const stub = process.env.HARBORMASTER_E2E_PICK_FOLDER;
+    if (stub !== undefined) return stub || null;
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      title: "Open folder",
+      properties: ["openDirectory", "createDirectory"] as Array<
+        "openDirectory" | "createDirectory"
+      >,
+    };
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
   ipcMain.handle("core:getTaskWorkspace", (_event, taskId: string) =>
     core.commands.getTaskWorkspace(taskId),
   );

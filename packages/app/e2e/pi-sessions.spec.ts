@@ -25,6 +25,7 @@ import {
   test,
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
+import { chooseWhere, submitAs } from "./composer";
 import { fakePiPid, writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -83,10 +84,8 @@ async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window
-    .getByTestId("new-task-repo-select")
-    .selectOption("github.com/test/fixture");
-  await window.getByTestId("new-task-submit-backlog").click();
+  await chooseWhere(window, "github.com/test/fixture");
+  await submitAs(window, "park");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   // Parked in Backlog: Start creates the worktree the pi pane runs in.
@@ -205,7 +204,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Presence Task");
-    await window.getByTestId("new-task-mode-chat").click();
+    await chooseWhere(window, "none");
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
@@ -337,9 +336,7 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Corroboration Task");
-    await window
-      .getByTestId("new-task-repo-select")
-      .selectOption("github.com/test/fixture");
+    await chooseWhere(window, "github.com/test/fixture");
     await window.getByTestId("new-task-submit").click();
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 

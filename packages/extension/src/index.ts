@@ -546,7 +546,7 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
       }),
       repository: Type.String({
         description:
-          '"none" for no repository (a scratch task), a discovered repository id (e.g. "github.com/org/repo") or its unique short name, or a git clone URL to clone a new one.',
+          '"none" for no repository (a scratch task), a discovered repository id (e.g. "github.com/org/repo") or its unique short name, a registered folder\'s name or absolute path (a git folder gets a worktree, a plain folder runs in place), or a git clone URL to clone a new one.',
       }),
       baseBranch: Type.Optional(
         Type.Union([Type.Literal("default"), Type.Literal("parent")], {
@@ -568,10 +568,14 @@ export default function harbormasterExtension(pi: ExtensionAPI): void {
           "child requires launching from a Harbormaster task session",
         );
       }
-      const repositories = await core.commands.listRepositories();
+      const [repositories, locations] = await Promise.all([
+        core.commands.listRepositories(),
+        core.commands.listLocations(),
+      ]);
       const repository = resolveLaunchRepository(
         params.repository,
         repositories,
+        locations,
       );
       const input: LaunchTaskInput = {
         relation: params.relation,

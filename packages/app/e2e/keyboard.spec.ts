@@ -20,6 +20,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -56,8 +57,8 @@ async function createBacklogTask(title: string): Promise<void> {
   await window.getByTestId("board-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-mode-chat").click();
-  await window.getByTestId("new-task-submit-backlog").click();
+  await chooseWhere(window, "none");
+  await submitAs(window, "park");
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   // Creating leaves the board for the workspace view (one create path);
   // come back so the next card / the tests find the board on screen.

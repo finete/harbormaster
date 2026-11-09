@@ -251,6 +251,31 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
     return this.resolveRepository(target);
   }
 
+  async listBranches(repo: RepositoryInfo): Promise<string[]> {
+    const output = await tryRun(
+      "git",
+      [
+        "for-each-ref",
+        "--format=%(refname)",
+        "--sort=-committerdate",
+        "refs/heads",
+        "refs/remotes",
+      ],
+      repo.root,
+    );
+    if (!output) return [];
+    const local: string[] = [];
+    const remote: string[] = [];
+    for (const ref of output.split("\n")) {
+      if (ref.startsWith("refs/heads/")) {
+        local.push(ref.slice("refs/heads/".length));
+      } else if (ref.startsWith("refs/remotes/") && !ref.endsWith("/HEAD")) {
+        remote.push(ref.slice("refs/remotes/".length));
+      }
+    }
+    return [...local, ...remote];
+  }
+
   async resolveRepository(cwd: string): Promise<RepositoryInfo> {
     const topLevel = await tryRun("git", ["rev-parse", "--show-toplevel"], cwd);
     if (!topLevel) throw new Error(`Not inside a Git repository: ${cwd}`);

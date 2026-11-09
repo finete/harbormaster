@@ -12,6 +12,8 @@ import type {
   BoardChangedPayload,
   BoardColumn,
   CreateTaskInput,
+  HarnessModelCatalog,
+  KnownLocation,
   LaunchTaskInput,
   MessageMode,
   MoveTaskOptions,
@@ -45,6 +47,9 @@ export type {
   BoardColumn,
   BoardGroup,
   CreateTaskInput,
+  HarnessModel,
+  HarnessModelCatalog,
+  KnownLocation,
   LaunchTaskInput,
   MessageAttachment,
   MessageMode,
@@ -61,6 +66,7 @@ export type {
   TaskMessage,
   TaskMessagingState,
   TaskState,
+  ThinkingLevel,
   ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneResult,
@@ -286,6 +292,14 @@ export interface HarbormasterApi {
     listBoard(): Promise<BoardColumn[]>;
     getTask(id: string): Promise<Task | undefined>;
     listRepositories(): Promise<RepositoryInfo[]>;
+    /** See `CoreCommands.listLocations`. */
+    listLocations(): Promise<KnownLocation[]>;
+    /** See `CoreCommands.addLocation`. */
+    addLocation(path: string): Promise<KnownLocation>;
+    /** See `CoreCommands.listBranches`. */
+    listBranches(repositoryId: string): Promise<string[]>;
+    /** See `CoreCommands.listModels`. */
+    listModels(): Promise<HarnessModelCatalog[]>;
     getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
     createTask(input: CreateTaskInput): Promise<Task>;
     moveTask(
@@ -424,6 +438,8 @@ export interface HarbormasterApi {
   };
   terminalHost: TerminalHostApi;
   app: {
+    /** Native "Open folder" dialog; `null` when cancelled. */
+    pickFolder(): Promise<string | null>;
     /**
      * Ask main to show a native OS notification for `taskId` (an unread
      * transition "-" finished or blocked, see lib/notifications.ts). Main

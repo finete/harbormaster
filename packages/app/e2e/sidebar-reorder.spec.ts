@@ -27,6 +27,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -192,7 +193,7 @@ async function createRepoTask(
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   await window.getByTestId("new-task-title-input").fill(title);
-  await window.getByTestId("new-task-repo-select").selectOption(repositoryId);
+  await chooseWhere(window, repositoryId);
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(row(window, title)).toBeVisible();

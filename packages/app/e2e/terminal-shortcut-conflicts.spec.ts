@@ -19,6 +19,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -88,8 +89,8 @@ test.describe("Ctrl+W, Ctrl+B, Ctrl+Shift+Up reach the pty on darwin (not stolen
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Shortcut Test");
-    await window.getByTestId("new-task-mode-chat").click();
-    await window.getByTestId("new-task-submit-backlog").click();
+    await chooseWhere(window, "none");
+    await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();

@@ -48,6 +48,11 @@ class TestClock implements Clock {
 }
 
 class FakeHarness implements HarnessAdapter {
+  readonly id = "fake";
+  readonly label = "Fake";
+  async listModels(): Promise<HarnessModelCatalog> {
+    return { harness: this.id, label: this.label, models: [] };
+  }
   messaging: HarnessMessagingCapabilities = { ...ALL };
   private readonly live = new Map<string, { runningTurn: boolean }>();
   setLive(taskId: string, runningTurn = false): void {
