@@ -130,6 +130,90 @@ describe("GithubPrAccess fixtures", () => {
     ).toMatchObject({ humanFeedbackOnHead: true });
   });
 
+  it("statusMany answers every branch from one GraphQL call per 20 branches, same mapping as status", async () => {
+    const node = {
+      number: 12,
+      url: "https://github.example/acme/widgets/pull/12",
+      state: "MERGED",
+      isDraft: false,
+      author: { login: "alice" },
+      headRefOid: "head",
+      reviewDecision: "CHANGES_REQUESTED",
+      reviewRequests: { totalCount: 1 },
+      reviews: {
+        nodes: [{ state: "CHANGES_REQUESTED", commit: { oid: "head" } }],
+      },
+      mergeCommit: { oid: "fedcba9" },
+      baseRefName: "release",
+    };
+    const execute = vi.fn(async (_command: string, args: string[]) => {
+      const heads = args.filter((arg) => /^h\d+=/.test(arg));
+      const repository = Object.fromEntries(
+        heads.map((head) => {
+          const [key, branch] = head.split("=") as [string, string];
+          const alias = `b${key.slice(1)}`;
+          return [alias, { nodes: branch === "feature" ? [node] : [] }];
+        }),
+      );
+      return JSON.stringify({ data: { repository } });
+    });
+    const access = new GithubPrAccess(execute);
+    const branches = [
+      "feature",
+      ...Array.from({ length: 24 }, (_, i) => `other-${i}`),
+      "feature",
+    ];
+    const statuses = await access.statusMany(repositoryId, branches);
+
+    // 25 distinct branches -> two calls (20 + 5); branch names only as variables.
+    expect(execute).toHaveBeenCalledTimes(2);
+    const [command, args] = execute.mock.calls[0] ?? [];
+    expect(command).toBe("gh");
+    expect(args?.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(args).toContain("owner=acme");
+    expect(args).toContain("name=widgets");
+    expect(args).toContain("h0=feature");
+    const query = args?.find((arg) => arg.startsWith("query=")) ?? "";
+    expect(query).not.toContain("feature");
+    expect(query).toContain(
+      "states: [OPEN, CLOSED, MERGED], orderBy: { field: CREATED_AT, direction: DESC }",
+    );
+
+    expect(statuses.size).toBe(25);
+    expect(statuses.get("other-3")).toBeUndefined();
+    expect(statuses.has("other-3")).toBe(true);
+    // Same normalized shape the per-branch `gh pr list` path produces.
+    const viaList = await new GithubPrAccess(async () =>
+      JSON.stringify([
+        {
+          ...node,
+          reviewRequests: [{ login: "r" }],
+          reviews: node.reviews.nodes,
+        },
+      ]),
+    ).status(repositoryId, "feature");
+    const { checkedAt: _a, ...batched } = statuses.get("feature") ?? {};
+    const { checkedAt: _b, ...listed } = viaList ?? {};
+    expect(batched).toEqual(listed);
+    expect(batched).toMatchObject({
+      reviewRequested: true,
+      changesRequestedOnHead: true,
+      mergeCommit: { oid: "fedcba9", targetBranch: "release" },
+    });
+  });
+
+  it("statusMany rejects a payload missing a branch's alias instead of reporting no PR", async () => {
+    const access = new GithubPrAccess(async () =>
+      JSON.stringify({ data: { repository: { b0: { nodes: [] } } } }),
+    );
+    await expect(access.statusMany(repositoryId, ["a", "b"])).rejects.toThrow(
+      /no pull request list for b/,
+    );
+    await expect(
+      new GithubPrAccess(async () => "[]").statusMany(repositoryId, ["a"]),
+    ).rejects.toThrow(/no repository/);
+  });
+
   it("returns undefined without a matching PR", async () => {
     expect(
       await new GithubPrAccess(async () => "[]").status(repositoryId, "branch"),

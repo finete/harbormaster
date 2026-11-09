@@ -25,6 +25,7 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
+import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
@@ -205,6 +206,7 @@ test.beforeAll(async () => {
     fakeGh,
     [
       "#!/bin/sh",
+      ghGraphqlShimLine(root),
       'pr_file="$(dirname "$0")/pr.json"',
       'if [ "$1 $2" = "pr list" ] && [ -f "$pr_file" ]; then',
       '  cat "$pr_file"',

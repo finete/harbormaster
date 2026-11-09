@@ -34,6 +34,12 @@ interface GhPr {
   baseRefName?: string;
 }
 
+/** A PR node from the batched GraphQL lookup (connections instead of gh's flattened lists). */
+interface GqlPr extends Omit<GhPr, "reviewRequests" | "reviews"> {
+  reviewRequests?: { totalCount?: number } | null;
+  reviews?: { nodes?: GhReview[] | null } | null;
+}
+
 export type Execute = (
   command: string,
   args: string[],
@@ -42,6 +48,15 @@ export type Execute = (
 
 /** Overrides the `gh` binary (and only `gh`) for e2e: a tiny fake CLI stands in for a real GitHub login. Mirrors `HARBORMASTER_PI_COMMAND` (see `harness/pi-adapter.ts`). */
 const GH_COMMAND_ENV = "HARBORMASTER_GH_COMMAND";
+
+/** Branches per batched GraphQL lookup: keeps one query's node budget small. */
+const STATUS_BATCH_SIZE = 20;
+
+/** The PR fields `find` asks `gh pr list --json` for, as a GraphQL selection (same order). */
+const PR_GRAPHQL_FIELDS = `number url state isDraft author { login } reviewDecision
+reviewRequests { totalCount }
+reviews(last: 100) { nodes { state commit { oid } author { login } authorAssociation } }
+headRefOid mergeCommit { oid } baseRefName`;
 
 /** Entries kept per memo cache: far above one refresh's working set (one per deploy-stage SHA pair). */
 const MEMO_CAPACITY = 200;
@@ -265,7 +280,91 @@ export class GithubPrAccess implements PullRequestAccess {
     ]);
     const parsed: unknown = JSON.parse(output);
     const pr = (parsed as GhPr[])[0];
-    if (!pr) return undefined;
+    return pr
+      ? this.toStatus(repositoryId, pr, pr.reviewRequests?.length ?? 0)
+      : undefined;
+  }
+
+  /**
+   * One `gh api graphql` call per {@link STATUS_BATCH_SIZE} branches instead
+   * of a `gh pr list` per branch: each alias asks for exactly what `find`'s
+   * `--head <branch> --state all --limit 1` does (newest PR first, any
+   * state). Branch names travel as GraphQL variables, never spliced into
+   * the query text.
+   */
+  async statusMany(
+    repositoryId: string,
+    branches: readonly string[],
+  ): Promise<Map<string, PullRequestStatus | undefined>> {
+    const { owner, name } = this.ownerAndName(repositoryId);
+    const unique = [...new Set(branches)];
+    const statuses = new Map<string, PullRequestStatus | undefined>();
+    for (let start = 0; start < unique.length; start += STATUS_BATCH_SIZE) {
+      const chunk = unique.slice(start, start + STATUS_BATCH_SIZE);
+      const variables = chunk.map((_, index) => `$h${index}: String!`);
+      const aliases = chunk.map(
+        (_, index) =>
+          `b${index}: pullRequests(headRefName: $h${index}, first: 1, states: [OPEN, CLOSED, MERGED], orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...pr } }`,
+      );
+      const query = [
+        `query($owner: String!, $name: String!, ${variables.join(", ")}) {`,
+        "  repository(owner: $owner, name: $name) {",
+        ...aliases.map((alias) => `    ${alias}`),
+        "  }",
+        "}",
+        `fragment pr on PullRequest { ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
+      ].join("\n");
+      const output = await this.execute("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        ...chunk.flatMap((branch, index) => ["-f", `h${index}=${branch}`]),
+        ...this.hostnameArgs(repositoryId),
+      ]);
+      const repository = (
+        JSON.parse(output) as {
+          data?: { repository?: Record<string, { nodes?: GqlPr[] } | null> };
+        }
+      ).data?.repository;
+      if (!repository) {
+        throw new Error("Unexpected GitHub GraphQL payload: no repository");
+      }
+      chunk.forEach((branch, index) => {
+        const connection = repository[`b${index}`];
+        if (!connection || !Array.isArray(connection.nodes)) {
+          throw new Error(
+            `Unexpected GitHub GraphQL payload: no pull request list for ${branch}`,
+          );
+        }
+        const node = connection.nodes[0];
+        if (!node) {
+          statuses.set(branch, undefined);
+          return;
+        }
+        const { reviewRequests, reviews, ...fields } = node;
+        statuses.set(
+          branch,
+          this.toStatus(
+            repositoryId,
+            { ...fields, reviews: reviews?.nodes ?? [] },
+            reviewRequests?.totalCount ?? 0,
+          ),
+        );
+      });
+    }
+    return statuses;
+  }
+
+  private toStatus(
+    repositoryId: string,
+    pr: GhPr,
+    reviewRequestCount: number,
+  ): PullRequestStatus {
     const changesRequestedOnHead = currentHeadChangesRequested(pr);
     const humanFeedbackOnHead = currentHeadHumanFeedback(pr);
     return {
@@ -278,7 +377,7 @@ export class GithubPrAccess implements PullRequestAccess {
         ? {}
         : { changesRequestedOnHead }),
       ...(humanFeedbackOnHead === undefined ? {} : { humanFeedbackOnHead }),
-      reviewRequested: (pr.reviewRequests?.length ?? 0) > 0,
+      reviewRequested: reviewRequestCount > 0,
       reviewSubmitted: (pr.reviews?.length ?? 0) > 0,
       ...(pr.headRefOid ? { headRefOid: pr.headRefOid } : {}),
       ...(pr.state === "MERGED" && pr.mergeCommit?.oid
@@ -327,6 +426,18 @@ export class GithubPrAccess implements PullRequestAccess {
   private hostnameArgs(repositoryId: string): string[] {
     const { host } = this.repoParts(repositoryId);
     return !host || host === "github.com" ? [] : ["--hostname", host];
+  }
+
+  /** GraphQL's `repository(owner:, name:)` arguments for a normalized repository id. */
+  private ownerAndName(repositoryId: string): { owner: string; name: string } {
+    const [owner, ...rest] = this.repoParts(repositoryId).path.split("/");
+    const name = rest.join("/");
+    if (!owner || !name) {
+      throw new Error(
+        `Cannot derive owner/repo from repository id: ${repositoryId}`,
+      );
+    }
+    return { owner, name };
   }
 
   private repoParts(repositoryId: string): { host: string; path: string } {

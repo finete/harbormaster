@@ -26,6 +26,7 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
+import { ghGraphqlShimLine } from "./fake-gh";
 import { writeShellPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -152,6 +153,9 @@ function writeFakeGhSucceeding(root: string): string {
     ghPath,
     [
       "#!/bin/sh",
+      // Who spawned this gh (see the spawn-host assertion below).
+      'echo "$PPID" >> "$(dirname "$0")/gh-ppid.log"',
+      ghGraphqlShimLine(root),
       'created_marker="$(dirname "$0")/pr-created"',
       'merged_marker="$(dirname "$0")/pr-merged"',
       'case "$1 $2" in',
@@ -291,6 +295,33 @@ test.describe("toAwait and toDone drive the board through the real core command 
       .locator(`[data-testid="card-${taskId}"]`);
     await expect(awaitingCard).toBeVisible({ timeout: 15_000 });
     await expect(awaitingCard.getByTestId("badge-pr")).toContainText("PR #42");
+    // Core's gh/git spawns run in the spawn host (a utility process child of
+    // main), never on main's own event loop (src/main/spawn-host-client.ts).
+    const mainPid = app.process().pid;
+    const ghParents = [
+      ...new Set(
+        readFileSync(path.join(root, "gh-ppid.log"), "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map(Number),
+      ),
+    ];
+    expect(ghParents.length).toBeGreaterThan(0);
+    expect(ghParents).not.toContain(mainPid);
+    // The long-lived host is still running; short-lived parents (the
+    // graphql shim) have exited and are skipped.
+    const hostParents = ghParents.flatMap((pid) => {
+      try {
+        return [
+          Number(
+            execFileSync("ps", ["-o", "ppid=", "-p", String(pid)]).toString(),
+          ),
+        ];
+      } catch {
+        return [];
+      }
+    });
+    expect(hostParents).toContain(mainPid);
     await expect(
       window
         .getByTestId("column-awaiting-cards")

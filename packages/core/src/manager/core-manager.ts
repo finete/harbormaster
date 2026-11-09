@@ -150,6 +150,11 @@ const COLUMN_TITLES: Record<TaskState, string> = {
 /** PR observations in flight at once during `refresh()` (pi-home parity). */
 const REFRESH_CONCURRENCY = 4;
 
+/** A refresh tick's batched PR answer for one task: its status (possibly none), or the batch's failure. */
+type PrefetchedPullRequest =
+  | { status: PullRequestStatus | undefined }
+  | { error: unknown };
+
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
   private refreshInFlight: Promise<RefreshResult> | undefined;
@@ -1062,28 +1067,35 @@ export class CoreManager implements CoreCommands {
         .catch(() => new Map<string, WorkspaceBinding>());
       return bindingsByTask.then((byTask) => byTask.get(taskId));
     };
+    // Branch-follow first (a HEAD-file read per task, no spawn), so the
+    // batched PR lookup below asks about each task's current branch.
+    const observed: Task[] = [];
     await forEachConcurrently(
       candidates,
       REFRESH_CONCURRENCY,
-      async (listed) => {
+      async (listed, index) => {
         const adopted = await this.followWorktreeBranch(
           listed,
           repositories,
           await bindingFor(listed.id),
         );
-        const task = adopted ?? listed;
         if (adopted) changed = true;
-        const moved = await this.refreshTask(
-          task,
-          config,
-          repositories,
-          protectedPaths,
-          warnings,
-          connectivity,
-        );
-        if (moved) changed = true;
+        observed[index] = adopted ?? listed;
       },
     );
+    const prefetched = await this.prefetchPullRequests(observed, repositories);
+    await forEachConcurrently(observed, REFRESH_CONCURRENCY, async (task) => {
+      const moved = await this.refreshTask(
+        task,
+        config,
+        repositories,
+        protectedPaths,
+        warnings,
+        connectivity,
+        prefetched.get(task.id),
+      );
+      if (moved) changed = true;
+    });
 
     if (
       await this.retryDoneCleanups(
@@ -1188,6 +1200,50 @@ export class CoreManager implements CoreCommands {
     warnings.push(`${title}: ${message}`);
   }
 
+  /**
+   * One batched PR lookup per repository for this tick's observed tasks
+   * (when the PR access supports it), keyed by task id. A failed batch
+   * hands its error to each of its tasks, so `refreshTask` reports it
+   * exactly as a failed per-task lookup (per-task warning or connectivity
+   * count) and skips their mover steps. Tasks missing from the map (no
+   * batch support, no origin remote) are looked up one by one as before.
+   */
+  private async prefetchPullRequests(
+    tasks: readonly Task[],
+    repositories: Map<string, RepositoryInfo> | undefined,
+  ): Promise<Map<string, PrefetchedPullRequest>> {
+    const prefetched = new Map<string, PrefetchedPullRequest>();
+    const pullRequests = this.deps.pullRequests;
+    if (!pullRequests.statusMany) return prefetched;
+    const byRepository = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (!task.repositoryId || !task.branch) continue;
+      const repo = repositories?.get(task.repositoryId);
+      if (repo && !repo.remoteUrl) continue;
+      const group = byRepository.get(task.repositoryId) ?? [];
+      group.push(task);
+      byRepository.set(task.repositoryId, group);
+    }
+    await Promise.all(
+      [...byRepository].map(async ([repositoryId, group]) => {
+        try {
+          const statuses = await pullRequests.statusMany?.(
+            repositoryId,
+            group.map((task) => task.branch as string),
+          );
+          for (const task of group) {
+            prefetched.set(task.id, {
+              status: statuses?.get(task.branch as string),
+            });
+          }
+        } catch (error) {
+          for (const task of group) prefetched.set(task.id, { error });
+        }
+      }),
+    );
+    return prefetched;
+  }
+
   /** Observe one task's PR and apply at most one mover step; returns whether anything changed. */
   private async refreshTask(
     snapshot: Task,
@@ -1196,6 +1252,7 @@ export class CoreManager implements CoreCommands {
     protectedPaths: readonly string[],
     warnings: string[],
     connectivity: { failedChecks: number },
+    prefetched?: PrefetchedPullRequest,
   ): Promise<boolean> {
     const repositoryId = snapshot.repositoryId;
     const branch = snapshot.branch;
@@ -1208,7 +1265,10 @@ export class CoreManager implements CoreCommands {
     let changed = false;
     let current: Task | undefined = snapshot;
     try {
-      const status = await this.deps.pullRequests.status(repositoryId, branch);
+      if (prefetched && "error" in prefetched) throw prefetched.error;
+      const status = prefetched
+        ? prefetched.status
+        : await this.deps.pullRequests.status(repositoryId, branch);
       if (status) {
         const pr = toTaskPullRequest(
           status,

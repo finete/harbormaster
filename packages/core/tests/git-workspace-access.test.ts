@@ -14,9 +14,15 @@ import {
   normalizeRemoteIdentity,
 } from "../src/access/git-repository-access.js";
 import {
+  branchFromHead,
   LocalGitWorktreeAccess,
   TASK_WORKTREES_DIRNAME,
 } from "../src/access/git-worktree-access.js";
+import {
+  execFileRunner,
+  type ProcessRunRequest,
+  setProcessRunner,
+} from "../src/utilities/run.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -232,6 +238,18 @@ describe.skipIf(!gitAvailable)("LocalGitRepositoryAccess", () => {
   });
 });
 
+describe("branchFromHead", () => {
+  it("parses symbolic, detached and unrecognized HEAD contents", () => {
+    expect(branchFromHead("ref: refs/heads/moshe/feat-x\n")).toBe(
+      "moshe/feat-x",
+    );
+    expect(branchFromHead(`${"a1".repeat(20)}\n`)).toBeUndefined();
+    expect(branchFromHead("ref: refs/heads/.invalid\n")).toBe("unknown");
+    expect(branchFromHead("ref: refs/remotes/origin/main")).toBe("unknown");
+    expect(branchFromHead("")).toBe("unknown");
+  });
+});
+
 describe("normalizeRemoteIdentity", () => {
   it("normalizes ssh, https, and authenticated https remotes to the same identity", () => {
     expect(normalizeRemoteIdentity("git@github.com:acme/harbor-repo.git")).toBe(
@@ -250,6 +268,36 @@ describe("normalizeRemoteIdentity", () => {
 });
 
 describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
+  it("currentBranch reads HEAD without spawning git: primary checkout, linked worktree, detached", async () => {
+    const f = await fixture();
+    const linked = join(f.root, "linked");
+    await git(["worktree", "add", "-b", "task/linked", linked], f.checkout);
+    const detached = join(f.root, "detached");
+    await git(["worktree", "add", "--detach", detached], f.checkout);
+
+    const spawned: ProcessRunRequest[] = [];
+    setProcessRunner((request) => {
+      spawned.push(request);
+      return execFileRunner(request);
+    });
+    try {
+      const worktrees = new LocalGitWorktreeAccess();
+      expect(await worktrees.currentBranch(f.checkout)).toBe("main");
+      expect(await worktrees.currentBranch(linked)).toBe("task/linked");
+      expect(await worktrees.currentBranch(detached)).toBeUndefined();
+      expect(spawned).toEqual([]);
+      // A path with no readable HEAD still answers, through git.
+      expect(await worktrees.currentBranch(join(linked, "README.md"))).toBe(
+        undefined,
+      );
+      expect(spawned.map((r) => r.args.join(" "))).toEqual([
+        "branch --show-current",
+      ]);
+    } finally {
+      setProcessRunner(undefined);
+    }
+  });
+
   it("creates a task worktree under <codeRoot>/.harbormaster-worktrees/ and lists it", async () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
