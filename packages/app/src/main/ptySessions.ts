@@ -6,7 +6,7 @@
 // once sessions are wired through the command API. For now this proves the
 // xterm <-> node-pty <-> IPC plumbing with a plain `$SHELL` process.
 import { randomUUID } from "node:crypto";
-import { accessSync, constants as fsConstants } from "node:fs";
+import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -156,6 +156,21 @@ export function commandExists(command: string): boolean {
   return false;
 }
 
+/**
+ * Whether `path` is an existing directory. node-pty's `spawn` doesn't throw
+ * synchronously for a missing cwd — the fork succeeds and the child dies
+ * when it can't `chdir`, surfacing only as a bare `[process exited with
+ * code 1]`. Callers probe up front (a task's worktree can be reaped out
+ * from under a stale binding) so a dead cwd never silently kills a pane.
+ */
+export function directoryExists(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function createSession(
   cols: number,
   rows: number,
@@ -168,7 +183,12 @@ export function createSession(
   const useSpec = !!spec && commandExists(spec.command);
   const fellBackToShell = !!spec && !useSpec;
 
-  const spawnCwd = useSpec ? spec.cwd || cwd : cwd;
+  // Defense in depth: never spawn into a directory that no longer exists
+  // (node-pty would fork-then-exit-1 with no output). A stale worktree
+  // binding is caught up front by `resolvePrimaryLaunch`, but any caller's
+  // cwd could have been removed since; fall back to the app's own cwd.
+  const requestedCwd = useSpec ? spec.cwd || cwd : cwd;
+  const spawnCwd = directoryExists(requestedCwd) ? requestedCwd : process.cwd();
   const appVersion = safeAppVersion();
   const baseEnv = buildPtyEnv(process.env, useSpec ? spec.env : undefined, {
     appVersion,
@@ -187,7 +207,7 @@ export function createSession(
           name: "xterm-256color",
           cols,
           rows,
-          cwd,
+          cwd: spawnCwd,
           env: baseEnv,
         }),
   );

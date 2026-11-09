@@ -41,6 +41,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
   const [fellBackToShell, setFellBackToShell] = useState(false);
+  const [worktreeMissing, setWorktreeMissing] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Search bar state.
@@ -226,14 +227,17 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
             ...(params?.taskId ? { taskId: params.taskId } : {}),
             ...(params?.primary ? { primary: true } : {}),
           })
-          .then(({ id, fellBackToShell: fellBack }) => {
-            if (disposed) {
-              void window.harbormaster.terminal.release(id);
-              return;
-            }
-            if (fellBack) setFellBackToShell(true);
-            wireSession(id);
-          });
+          .then(
+            ({ id, fellBackToShell: fellBack, worktreeMissing: wtGone }) => {
+              if (disposed) {
+                void window.harbormaster.terminal.release(id);
+                return;
+              }
+              if (fellBack) setFellBackToShell(true);
+              if (wtGone) setWorktreeMissing(true);
+              wireSession(id);
+            },
+          );
       });
     }, 0);
 
@@ -290,6 +294,27 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
 
   return (
     <div className="flex h-full w-full flex-col">
+      {worktreeMissing && !warningDismissed && (
+        <div
+          data-testid="worktree-missing-warning"
+          className="flex items-center justify-between gap-2 bg-amber-900/60 px-2 py-1 text-xs text-amber-200"
+        >
+          <span>
+            Worktree folder is missing — pi was not started. Recreate it from
+            this task's branch (
+            <code>git worktree add &lt;path&gt; &lt;branch&gt;</code>) to
+            resume, then reopen this session.
+          </span>
+          <button
+            type="button"
+            data-testid="worktree-missing-warning-dismiss"
+            onClick={() => setWarningDismissed(true)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-800/60"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {fellBackToShell && !warningDismissed && (
         <div
           data-testid="pi-fallback-warning"

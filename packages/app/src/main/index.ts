@@ -237,6 +237,18 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
       .catch(() => {});
     return false;
   }
+  if (resolution.worktreeMissing) {
+    console.error(
+      `[background-launcher] task ${taskId}: worktree ${resolution.binding.worktreePath} no longer exists; refusing to launch into a missing directory`,
+    );
+    await core.commands
+      .updateTaskState(taskId, {
+        lastError:
+          "Launch failed: this task's worktree folder is missing. Recreate it from the task's branch to resume.",
+      })
+      .catch(() => {});
+    return false;
+  }
   if (resolution.commandMissing || !resolution.spec) {
     console.error(
       `[background-launcher] task ${taskId}: harness command not found; refusing to fall back to a shell for a background launch`,
@@ -926,17 +938,22 @@ function registerPtyIpc(): void {
       // that spec is turned into a pty). Shared with the background
       // launcher (see primary-launch.ts) so a task launches identically
       // whichever path started it.
-      const spec =
+      const resolution =
         options.primary && options.taskId
-          ? (
-              await resolvePrimaryLaunch(
-                options.taskId,
-                activeStateDir,
-                core.commands,
-                harness,
-              )
-            ).spec
+          ? await resolvePrimaryLaunch(
+              options.taskId,
+              activeStateDir,
+              core.commands,
+              harness,
+            )
           : undefined;
+      const spec = resolution?.spec;
+      // A primary pane whose worktree directory has vanished must not spawn
+      // pi (or a shell) into that dead cwd — that is the bare `[process
+      // exited with code 1]`. Drop the cwd so the pane opens a shell in the
+      // app's own directory and tell the renderer to explain the situation.
+      const worktreeMissing = resolution?.worktreeMissing === true;
+      const effectiveCwd = worktreeMissing ? undefined : options.cwd;
 
       const { id, fellBackToShell } = createSession(
         options.cols,
@@ -963,7 +980,7 @@ function registerPtyIpc(): void {
           },
         },
         {
-          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(spec ? { spec } : {}),
           ...(options.taskId ? { taskId: options.taskId } : {}),
           ...(options.primary ? { primary: options.primary } : {}),
@@ -976,7 +993,7 @@ function registerPtyIpc(): void {
       // per spawn/attach piled up past MaxListeners across reloads).
       trackSession(sender.id, id);
 
-      return { id, fellBackToShell };
+      return { id, fellBackToShell, worktreeMissing };
     },
   );
 

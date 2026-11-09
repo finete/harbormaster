@@ -174,6 +174,14 @@ export interface TerminalCreateResult {
   id: string;
   /** True when a pi launch was attempted but its command could not be found, and this session fell back to `$SHELL`. */
   fellBackToShell: boolean;
+  /**
+   * True when this primary pane's task has a worktree binding but that
+   * directory no longer exists on disk, so pi was not launched (spawning
+   * into a dead cwd dies as a bare exit-1). The pane opened a shell in the
+   * app's own cwd instead; the renderer surfaces a recover-the-worktree
+   * hint.
+   */
+  worktreeMissing?: boolean;
 }
 
 export interface TerminalDataEvent {
