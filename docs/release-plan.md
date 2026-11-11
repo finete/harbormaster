@@ -303,10 +303,10 @@ with the full gate green and the acceptance checked.
 
 | Wave | Item | Acceptance | Status |
 |---|---|---|---|
-| A | Local socket + tool catalog in core; `harbormaster` CLI + `harbormaster mcp` | Pi session launched by the app can call `report_status`, `launch_task`, `find_tasks`, `send_to_task` through MCP; CLI returns the same; "not running" error when the app is down | todo |
-| A | OSC 7501 parsing in the app pty layer → `reportPresence` | Fake CLI emitting 7501 drives spinner / your move / idle in e2e; probe answered; unit tests on raw bytes | todo |
-| A | Extension shrunk to inbox delivery; presence reporter, commands, widget, tools removed; auto-install at first run | Steer/followUp messages still arrive in a Pi task session; `packages/extension/src` is one module plus tests | todo |
-| A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | todo |
+| A | Local socket + tool catalog in core; `harbormaster` CLI + `harbormaster mcp` | Pi session launched by the app can call `report_status`, `launch_task`, `find_tasks`, `send_to_task` through MCP; CLI returns the same; "not running" error when the app is down | merged 88b43c1 |
+| A | OSC 7501 parsing in the app pty layer → `reportPresence` | Fake CLI emitting 7501 drives spinner / your move / idle in e2e; probe answered; unit tests on raw bytes | merged 88b43c1 |
+| A | Extension shrunk to inbox delivery; presence reporter, commands, widget, tools removed; auto-install at first run | Steer/followUp messages still arrive in a Pi task session; `packages/extension/src` is one module plus tests | merged 88b43c1 (real-pi smoke only; no e2e inside Pi) |
+| A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | merged 88b43c1 (no /totask or TUI existed anymore) |
 | C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | todo |
 | C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | todo |
 | C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | todo |
@@ -314,3 +314,20 @@ with the full gate green and the acceptance checked.
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | todo |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
 | E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | todo |
+
+## Follow-ups logged during merges
+
+- Wave A: `binding.sessionPath` is no longer recorded (the extension was its
+  only writer); reopening a Done task without a recorded file starts fresh.
+  Follow-up: fork by id (`pi --fork <id>`).
+- Wave A: presence liveness is pid-based; sweep records whose pid is not one
+  of the app's ptys on startup.
+- Wave A: Pi reports `idle` before processing its startup prompt, so a fresh
+  launch can briefly not count as working for the launch slot cap.
+- Wave A: the real `pi-mcp-adapter` path (`-builtin:mcp`) is untested; the
+  user's `~/.pi/agent/settings.json` still lists the old extension package
+  path and should drop it (double load is harmless).
+- Wave A: `harbormaster hook inbox` exits 0 with `{}` on stdout when the app
+  is down (a Stop hook exiting 2 would loop Claude); wave B to confirm.
+- Wave A: AGENTS.md still calls the TUI frozen and the extension a frontend.
+- Wave D: `brew audit` / local install blocked by this machine's Xcode 16.4.
