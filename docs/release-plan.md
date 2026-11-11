@@ -315,7 +315,7 @@ with the full gate green and the acceptance checked.
 | A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | merged 88b43c1 (no /totask or TUI existed anymore) |
 | C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | merged 0f68416 (adds a built-in `harbormaster` board source so rules re-evaluate on column changes) |
 | C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | merged 0f68416 (deploy → done stays a core integration test: https-only version endpoint) |
-| C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | todo |
+| C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | merged |
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | merged (claude 2.1.322 starts with our flags and probes 7501; report/MCP/trust dialogs unproven without login) |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
@@ -352,3 +352,12 @@ with the full gate green and the acceptance checked.
   "Bypass Permissions" one-time dialogs until the pane is opened; check with a
   logged-in claude on the first launched task.
 - Wave B: wire the real-CLI smoke into CI (no secrets needed, ~45 s).
+- Inbox UI: `harbormaster inbox list` lacks the presence-derived items
+  (asked/reported/idle/done/launch-failed/ready-to-land); they are assembled
+  in the renderer. Move `assembleInbox` into a core engine fed by
+  presence + board so the CLI matches the app.
+- Inbox UI: 7501 `error` is filed as an Other "Stopped with an error" item;
+  revisit if errors should be Priority.
+- Inbox UI: "Retry" on a failed launch bypasses `launch.maxConcurrent`.
+- Inbox UI: board drag e2e helpers may share the dnd-kit 50 ms click-guard
+  race the sidebar spec had (fixed there with a condition wait).
