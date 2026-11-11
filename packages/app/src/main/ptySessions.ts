@@ -77,7 +77,17 @@ interface PtySessionRecord {
   headless?: HeadlessHost | undefined;
   /** DEC private modes the program has set, tracked from spawn for the session's whole life (attached or not) — see `terminal-mode-tracker.ts`. Only present for a task primary. */
   modes?: TerminalModeTracker;
+  /** Pending second half of an attach's repaint nudge (see `forceRepaint`). Cleared by any explicit resize or retirement. */
+  repaintTimer?: ReturnType<typeof setTimeout> | undefined;
 }
+
+/**
+ * Gap between the two resizes of a repaint nudge. Long enough that the
+ * program renders the intermediate size first: pi-tui coalesces renders
+ * (16ms minimum interval) and reads the size at render time, so two
+ * back-to-back resizes collapse into one same-size, row-diffed frame.
+ */
+export const REPAINT_NUDGE_MS = 120;
 
 const sessions = new Map<string, PtySessionRecord>();
 
@@ -485,14 +495,53 @@ export function attachPrimarySession(
   session.io.batcher = batcher;
   session.attached = true;
 
-  try {
-    session.process.resize(cols, rows);
-  } catch {
-    // The process can die between the registry lookup above and here; its
-    // own exit disposable (already wired at creation) reports that separately.
-  }
+  forceRepaint(session, cols, rows);
 
   return { id: session.id, pid: session.process.pid, snapshot };
+}
+
+/**
+ * Resizes an attaching session's pty to the pane's size AND makes sure the
+ * program repaints its whole screen. Fullscreen pi (pi-tui alt screen)
+ * redraws only the rows it believes changed, and everything only on a size
+ * change. The snapshot the pane just received can be blank or stale behind
+ * pi's back (Cmd+K/Clear wiped xterm's buffer before the tab was closed; a
+ * window reload's mirror never saw the screen), and re-attaching at the
+ * pty's current size sends no SIGWINCH at all, so that pane stayed black
+ * until pi happened to touch each row again. When the size is unchanged,
+ * nudge it one row smaller and restore it a beat later: two real size
+ * changes, each a full repaint.
+ */
+function forceRepaint(
+  session: PtySessionRecord,
+  cols: number,
+  rows: number,
+): void {
+  clearRepaintTimer(session);
+  const unchanged =
+    session.process.cols === cols && session.process.rows === rows;
+  try {
+    session.process.resize(cols, unchanged && rows > 1 ? rows - 1 : rows);
+  } catch {
+    // The process can die between the registry lookup and here; its own
+    // exit disposable (already wired at creation) reports that separately.
+    return;
+  }
+  if (!unchanged || rows <= 1) return;
+  session.repaintTimer = setTimeout(() => {
+    session.repaintTimer = undefined;
+    try {
+      session.process.resize(cols, rows);
+    } catch {
+      // Exited in the meantime; nothing left to repaint.
+    }
+  }, REPAINT_NUDGE_MS);
+}
+
+function clearRepaintTimer(session: PtySessionRecord): void {
+  if (session.repaintTimer === undefined) return;
+  clearTimeout(session.repaintTimer);
+  session.repaintTimer = undefined;
 }
 
 /**
@@ -581,6 +630,8 @@ export function acknowledgeSessionData(id: string, chars: number): void {
 export function resizeSession(id: string, cols: number, rows: number): void {
   const session = sessions.get(id);
   if (!session) return;
+  // The pane's own size wins over a pending repaint-nudge restore.
+  clearRepaintTimer(session);
   try {
     session.process.resize(cols, rows);
   } catch {
@@ -617,6 +668,7 @@ function retireSession(id: string): void {
   if (session.taskId && primaryTaskSessions.get(session.taskId) === id) {
     primaryTaskSessions.delete(session.taskId);
   }
+  clearRepaintTimer(session);
   session.dataDisposable.dispose();
   session.exitDisposable.dispose();
   // The renderer asked for (or is gone with) this pane: pending output has

@@ -17,6 +17,8 @@ import {
   disposeSession,
   getSession,
   lookupPanePid,
+  REPAINT_NUDGE_MS,
+  resizeSession,
   writeToSession,
 } from "../src/main/ptySessions";
 
@@ -177,6 +179,50 @@ describe("attachPrimarySession", () => {
     // session stays alive/attachable-once semantics hold (covered above).
     // A resize ioctl failure would throw synchronously inside
     // attachPrimarySession and fail this test via an uncaught exception.
+    expect(getSession(id)?.process.cols).toBe(132);
+    expect(getSession(id)?.process.rows).toBe(50);
+  });
+
+  describe("forces a full repaint even when the size is unchanged", () => {
+    /** An attached-then-detached primary whose pty is already 100x30. */
+    async function detachedAt100x30(): Promise<{
+      taskId: string;
+      id: string;
+    }> {
+      const taskId = `task-${randomUUID()}`;
+      const { id } = createBackgroundPrimarySession(
+        taskId,
+        shellSpec(),
+        () => {},
+      );
+      track(id);
+      attachPrimarySession(taskId, 100, 30, noCallbacks);
+      expect(detachPrimarySession(id)).toBe(true);
+      // The first attach changed the size, so it never nudged.
+      expect(getSession(id)?.process.rows).toBe(30);
+      return { taskId, id };
+    }
+    const noCallbacks = { onData: () => {}, onExit: () => {} };
+    const size = (id: string) => ({
+      cols: getSession(id)?.process.cols,
+      rows: getSession(id)?.process.rows,
+    });
+
+    it("nudges one row smaller, then restores the pane's size", async () => {
+      const { taskId, id } = await detachedAt100x30();
+      attachPrimarySession(taskId, 100, 30, noCallbacks);
+      expect(size(id)).toEqual({ cols: 100, rows: 29 });
+      await sleep(REPAINT_NUDGE_MS + 80);
+      expect(size(id)).toEqual({ cols: 100, rows: 30 });
+    });
+
+    it("lets the pane's own resize win over a pending restore", async () => {
+      const { taskId, id } = await detachedAt100x30();
+      attachPrimarySession(taskId, 100, 30, noCallbacks);
+      resizeSession(id, 90, 25);
+      await sleep(REPAINT_NUDGE_MS + 80);
+      expect(size(id)).toEqual({ cols: 90, rows: 25 });
+    });
   });
 });
 

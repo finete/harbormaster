@@ -5,6 +5,7 @@
  */
 
 import type { JSX } from "react";
+import { clearTerminal } from "../lib/terminal-host/clear";
 import type { HostContext } from "../lib/terminal-host/context";
 import { pasteFromClipboard } from "../lib/terminal-host/paste";
 import {
@@ -50,7 +51,7 @@ export function TerminalContextMenu({
       key: "clear",
       label: "Clear",
       separatorBefore: true,
-      onSelect: () => terminal.clear(),
+      onSelect: () => clearTerminal(terminal),
     },
   ];
 

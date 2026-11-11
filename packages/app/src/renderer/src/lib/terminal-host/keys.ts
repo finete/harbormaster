@@ -13,6 +13,7 @@ import {
   csiUSequenceForKeyEvent,
   macTextEditingSequence,
 } from "../terminal-key-sequences";
+import { clearTerminal } from "./clear";
 import type { HostContext, IDisposable } from "./context";
 
 interface KeyHandler {
@@ -51,7 +52,7 @@ export function installKeys(ctx: HostContext): IDisposable {
         e.key.toLowerCase() === "k"
       ) {
         e.preventDefault();
-        ctx.terminal.clear();
+        clearTerminal(ctx.terminal);
         return false;
       }
       return undefined;
