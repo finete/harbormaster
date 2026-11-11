@@ -37,6 +37,13 @@ import type {
   WorkspaceBinding,
 } from "./model.js";
 import type {
+  CodeRootScan,
+  DetectedAgent,
+  GithubAuthStatus,
+  OnboardingState,
+  SetDefaultAgentInput,
+} from "./onboarding.js";
+import type {
   AddonInfo,
   AuditEntry,
   CreateTaskActionInput,
@@ -719,6 +726,40 @@ export interface CoreCommands {
    * never pushes); otherwise a plain task in `repository`.
    */
   createTaskFromAction(input: CreateTaskActionInput): Promise<Task>;
+
+  // --- Onboarding (docs/release-plan.md "Onboarding (four screens)") ----
+
+  /** What the first-run wizard starts from (and whether it was finished). */
+  getOnboardingState(): Promise<OnboardingState>;
+  /**
+   * Git repositories directly under `path` (a candidate code root, "~"
+   * expanded), plus whether it is a macOS-protected folder. Read-only.
+   */
+  scanCodeRoot(path: string): Promise<CodeRootScan>;
+  /**
+   * Save `codeRoot` (an existing folder; `options.create` makes it first,
+   * for "Use ~/Code instead"); returns the scan of the saved root.
+   */
+  setCodeRoot(
+    path: string,
+    options?: { create?: boolean },
+  ): Promise<CodeRootScan>;
+  /** `pi --version` / `claude --version`, each with a short timeout. */
+  detectAgents(): Promise<DetectedAgent[]>;
+  /**
+   * Save the default agent (`launch.defaultHarness`), optionally adding a
+   * custom CLI agent (`agents.custom[]`, validated: an id that is not a
+   * built-in) and the launch permission bypass (`launch.bypassPermissions`).
+   */
+  setDefaultAgent(input: SetDefaultAgentInput): Promise<OnboardingState>;
+  /** `gh auth status` with a short timeout: installed, logged in, which account. */
+  githubAuthStatus(): Promise<GithubAuthStatus>;
+  /** Turn an event source on or off (`sources.<id>.enabled`; e.g. `github`). */
+  setSourceEnabled(sourceId: string, enabled: boolean): Promise<void>;
+  /** Write the default `rules.yaml` when missing (never overwrites). */
+  ensureDefaultRules(): Promise<{ created: boolean }>;
+  /** Stamp `onboardingCompletedAt`: the wizard does not show again. */
+  completeOnboarding(): Promise<OnboardingState>;
 }
 
 export interface RefreshResult {

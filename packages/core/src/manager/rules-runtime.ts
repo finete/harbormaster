@@ -467,6 +467,26 @@ export class RulesRuntime {
     this.subscriptions.clear();
   }
 
+  /**
+   * Make sure the global `rules.yaml` exists (the onboarding wizard's
+   * GitHub step): written with the defaults when missing, never
+   * overwritten. Rejects when it could not be written.
+   */
+  async ensureDefaults(): Promise<{ created: boolean }> {
+    const existed = await this.deps.rules.hasGlobalRules();
+    if (existed) return { created: false };
+    // Deleted since the last tick: write the defaults again.
+    this.defaultsEnsured = false;
+    const warnings: string[] = [];
+    await this.ensureDefaultRules(warnings);
+    if (!(await this.deps.rules.hasGlobalRules())) {
+      throw new Error(
+        warnings[0] ?? "Could not write the default rules (rules.yaml).",
+      );
+    }
+    return { created: true };
+  }
+
   // --- internals --------------------------------------------------------
 
   private async ensureDefaultRules(warnings: string[]): Promise<void> {

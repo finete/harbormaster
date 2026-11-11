@@ -8,6 +8,12 @@ import { defineConfig } from "@playwright/test";
 // See P1-1 in terminal-perf-checklist.md.
 process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR ??= "1";
 
+// Every spec starts on a fresh state dir, which would show the first-run
+// wizard (components/Onboarding.tsx) before the normal UI. Skip it suite
+// wide; e2e/onboarding.spec.ts sets HARBORMASTER_SKIP_ONBOARDING=0 to
+// exercise it. The packaged app never sets this.
+process.env.HARBORMASTER_SKIP_ONBOARDING ??= "1";
+
 // Smoke-lane e2e config for the Electron app shell. Playwright drives the
 // already-built electron-vite output (`out/main/index.js`) via its Electron
 // support (`_electron.launch`) — see e2e/smoke.spec.ts. `npm run build` must

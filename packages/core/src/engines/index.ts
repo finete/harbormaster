@@ -7,6 +7,7 @@ export * from "./deployment.js";
 export * from "./inbox-priority.js";
 export * from "./launch-kickoff.js";
 export * from "./messaging.js";
+export * from "./onboarding.js";
 export * from "./pull-request-url.js";
 export * from "./repository-label.js";
 export * from "./rules/index.js";

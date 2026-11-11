@@ -10,6 +10,7 @@ import type {
   TaskMessage,
 } from "./messaging.js";
 import type {
+  CustomAgentConfig,
   GlobalConfig,
   PresenceMode,
   PresenceRecord,
@@ -264,6 +265,30 @@ export interface ConfigAccess {
    * into the first `rules.yaml` (optional: hand-built fakes may omit it).
    */
   legacyMoverOrders?(): Promise<LegacyMoverOrders>;
+  /**
+   * Apply user settings (the onboarding wizard's writes) to the config
+   * file under its lock, keeping every other key exactly as written
+   * (unknown and retired keys included). The result is validated like
+   * `load()` before anything is written; returns the loaded config.
+   * Optional: hand-built fakes may omit it.
+   */
+  applySettings?(patch: ConfigSettingsPatch): Promise<GlobalConfig>;
+}
+
+/** One `ConfigAccess.applySettings` change set; absent fields are left alone. */
+export interface ConfigSettingsPatch {
+  /** `codeRoot` (absolute or `~/…`). */
+  codeRoot?: string;
+  /** `launch.defaultHarness`. */
+  defaultHarness?: string;
+  /** `launch.bypassPermissions`. */
+  bypassPermissions?: boolean;
+  /** Added to `agents.custom[]`, replacing an entry with the same id. */
+  customAgent?: CustomAgentConfig;
+  /** `sources.<id>.enabled`. */
+  sourceEnabled?: { id: string; enabled: boolean };
+  /** `onboardingCompletedAt`. */
+  onboardingCompletedAt?: string;
 }
 
 /** Pre-rules `movers` config lists (global and per repository). */

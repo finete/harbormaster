@@ -446,6 +446,8 @@ export interface GlobalConfig {
    * each producer's default.
    */
   inbox?: { priorityFilter?: string };
+  /** ISO time the first-run wizard was finished (`CoreCommands.completeOnboarding`); absent = show it. */
+  onboardingCompletedAt?: string;
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */

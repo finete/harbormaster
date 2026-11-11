@@ -58,6 +58,7 @@ import type {
 import type {
   AwaitingKindId,
   BoardColumn,
+  CustomAgentConfig,
   DeploymentStageConfig,
   GlobalConfig,
   PullRequestRole,
@@ -70,11 +71,21 @@ import type {
 } from "../contracts/model.js";
 import {
   DEFAULT_HARNESS_ID,
+  DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
 } from "../contracts/model.js";
+import type {
+  CodeRootScan,
+  DetectedAgent,
+  GithubAuthStatus,
+  OnboardingProbeAccess,
+  OnboardingState,
+  ProbeOutcome,
+  SetDefaultAgentInput,
+} from "../contracts/onboarding.js";
 import type {
   AddonAccess,
   AddonInfo,
@@ -91,6 +102,7 @@ import type {
 import type {
   Clock,
   ConfigAccess,
+  ConfigSettingsPatch,
   FolderAccess,
   IdGenerator,
   MessageAccess,
@@ -136,6 +148,16 @@ import {
   resolveDeliveredMode,
   selectMessagesToPrune,
 } from "../engines/messaging.js";
+import {
+  BUILTIN_AGENT_IDS,
+  customAgentProblems,
+  expandHome,
+  parseCliVersion,
+  parseGhAuthStatus,
+  protectedHomeFolder,
+  suggestedCodeRoot,
+  toScannedRepositories,
+} from "../engines/onboarding.js";
 import { parsePullRequestUrl } from "../engines/pull-request-url.js";
 import type { ResolvedMove } from "../engines/rules/evaluation.js";
 import { effectivePipeline } from "../engines/rules/views.js";
@@ -215,6 +237,8 @@ export interface CoreManagerDependencies {
   };
   /** Persisted inbox; inbox commands throw "inbox is not configured" without it. */
   inbox?: InboxAccess;
+  /** The first-run wizard's machine probes; onboarding commands throw "onboarding is not configured" without it. */
+  onboarding?: OnboardingProbeAccess;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -3076,6 +3100,173 @@ export class CoreManager implements CoreCommands {
     });
   }
 
+  // --- Onboarding (docs/release-plan.md "Onboarding (four screens)") ----
+
+  async getOnboardingState(): Promise<OnboardingState> {
+    return this.onboardingState(await this.deps.config.load());
+  }
+
+  private onboardingState(config: GlobalConfig): OnboardingState {
+    const suggested = suggestedCodeRoot(this.requireOnboarding().homeDir());
+    return {
+      ...(config.onboardingCompletedAt
+        ? { completedAt: config.onboardingCompletedAt }
+        : {}),
+      codeRoot: config.codeRoot || suggested,
+      suggestedCodeRoot: suggested,
+      defaultHarness: config.launch?.defaultHarness ?? DEFAULT_HARNESS_ID,
+      bypassPermissions:
+        config.launch?.bypassPermissions ?? DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
+      customAgents: config.agents?.custom ?? [],
+      githubEnabled: config.sources?.github?.enabled !== false,
+    };
+  }
+
+  async scanCodeRoot(path: string): Promise<CodeRootScan> {
+    const probes = this.requireOnboarding();
+    if (!path.trim()) throw new Error("Choose a folder for your code.");
+    const home = probes.homeDir();
+    const root = expandHome(path, home);
+    const exists = await probes.isDirectory(root);
+    const repositories = exists
+      ? toScannedRepositories(
+          await this.deps.repositories.discoverRepositories(root),
+        )
+      : [];
+    const protectedFolder = protectedHomeFolder(root, home);
+    return {
+      root,
+      exists,
+      ...(protectedFolder ? { protectedFolder } : {}),
+      suggestedRoot: suggestedCodeRoot(home),
+      repositories,
+    };
+  }
+
+  async setCodeRoot(
+    path: string,
+    options?: { create?: boolean },
+  ): Promise<CodeRootScan> {
+    let scan = await this.scanCodeRoot(path);
+    if (!scan.exists && options?.create) {
+      await this.requireOnboarding().createDirectory(scan.root);
+      scan = await this.scanCodeRoot(scan.root);
+    }
+    if (!scan.exists) throw new Error(`${scan.root} is not a folder.`);
+    await this.applySettings({ codeRoot: scan.root });
+    return scan;
+  }
+
+  async detectAgents(): Promise<DetectedAgent[]> {
+    const probes = this.requireOnboarding();
+    return Promise.all(
+      probes.builtinAgentCommands().map(async (agent) => {
+        const outcome = await probes.cliVersion(agent.command);
+        if (outcome.ok) {
+          const version = parseCliVersion(outcome.output);
+          return { ...agent, available: true, ...(version ? { version } : {}) };
+        }
+        return {
+          ...agent,
+          available: false,
+          error: probeError(outcome, "not found"),
+        };
+      }),
+    );
+  }
+
+  async setDefaultAgent(input: SetDefaultAgentInput): Promise<OnboardingState> {
+    const harness = input.harness.trim();
+    if (!harness) throw new Error("Choose a default agent.");
+    let customAgent: CustomAgentConfig | undefined;
+    if (input.customAgent) {
+      const problems = customAgentProblems(input.customAgent);
+      if (problems.length > 0) throw new Error(problems.join(" "));
+      if (input.customAgent.id.trim() !== harness) {
+        throw new Error("The default agent must be the custom agent's id.");
+      }
+      const args = input.customAgent.args?.filter((arg) => arg.length > 0);
+      customAgent = {
+        id: harness,
+        label: input.customAgent.label.trim(),
+        command: input.customAgent.command.trim(),
+        ...(args && args.length > 0 ? { args } : {}),
+        ...(input.customAgent.promptArg
+          ? { promptArg: input.customAgent.promptArg }
+          : {}),
+      };
+    } else if (!BUILTIN_AGENT_IDS.includes(harness)) {
+      const config = await this.deps.config.load();
+      if (!config.agents?.custom?.some((agent) => agent.id === harness)) {
+        throw new Error(`Unknown agent "${harness}".`);
+      }
+    }
+    const config = await this.applySettings({
+      defaultHarness: harness,
+      ...(customAgent ? { customAgent } : {}),
+      ...(input.bypassPermissions !== undefined
+        ? { bypassPermissions: input.bypassPermissions }
+        : {}),
+    });
+    return this.onboardingState(config);
+  }
+
+  async githubAuthStatus(): Promise<GithubAuthStatus> {
+    const outcome = await this.requireOnboarding().githubAuthStatus();
+    if (outcome.notFound) {
+      return {
+        installed: false,
+        authenticated: false,
+        error: "The GitHub CLI (gh) is not installed.",
+      };
+    }
+    const login = parseGhAuthStatus(outcome.output);
+    if (login) {
+      return {
+        installed: true,
+        authenticated: true,
+        account: login.account,
+        host: login.host,
+      };
+    }
+    if (outcome.ok) return { installed: true, authenticated: true };
+    return {
+      installed: true,
+      authenticated: false,
+      error: probeError(outcome, "gh is not logged in"),
+    };
+  }
+
+  async setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
+    const id = sourceId.trim();
+    if (!id) throw new Error("A source id is required.");
+    await this.applySettings({ sourceEnabled: { id, enabled } });
+  }
+
+  async ensureDefaultRules(): Promise<{ created: boolean }> {
+    return this.requireRules().ensureDefaults();
+  }
+
+  async completeOnboarding(): Promise<OnboardingState> {
+    const config = await this.applySettings({
+      onboardingCompletedAt: this.deps.clock.now().toISOString(),
+    });
+    return this.onboardingState(config);
+  }
+
+  private async applySettings(
+    patch: ConfigSettingsPatch,
+  ): Promise<GlobalConfig> {
+    const config = this.deps.config;
+    if (!config.applySettings) throw new Error("settings are not writable");
+    return config.applySettings(patch);
+  }
+
+  private requireOnboarding(): OnboardingProbeAccess {
+    if (!this.deps.onboarding) throw new Error("onboarding is not configured");
+    return this.deps.onboarding;
+  }
+
   private requireRules(): RulesRuntime {
     if (!this.rules) throw new Error("rules are not configured");
     return this.rules;
@@ -3090,6 +3281,17 @@ export class CoreManager implements CoreCommands {
     const columns = await this.listBoard();
     this.deps.events.emit("board-changed", { columns });
   }
+}
+
+/** A failed probe in one line: timed out, not found, or its first output line. */
+function probeError(outcome: ProbeOutcome, notFound: string): string {
+  if (outcome.timedOut) return "Timed out.";
+  if (outcome.notFound) return notFound;
+  const line = outcome.output
+    .split(/\r?\n/)
+    .map((text) => text.trim())
+    .find(Boolean);
+  return line ?? "Failed.";
 }
 
 /**

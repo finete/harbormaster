@@ -78,6 +78,7 @@ export function controlFakeClaude(
  * A stand-in `claude` (for `HARBORMASTER_CLAUDE_COMMAND`, a node script)
  * that behaves like Claude Code on the seams Harbormaster relies on:
  *
+ * - answers `--version` like Claude Code 2.1.322 (onboarding's detection);
  * - parses `--session-id`, `--settings`, `--mcp-config`,
  *   `--dangerously-skip-permissions` and the prompt after `--` from argv and
  *   records them (plus the `HARBORMASTER*` env) as JSON in
@@ -96,6 +97,11 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const args = process.argv.slice(2);
+// Onboarding's agent detection runs "claude --version".
+if (args[0] === "--version") {
+  process.stdout.write("2.1.322 (Claude Code)\n");
+  process.exit(0);
+}
 const flag = (name) => {
   const index = args.indexOf(name);
   return index === -1 ? null : args[index + 1];

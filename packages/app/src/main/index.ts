@@ -92,6 +92,10 @@ import {
   PRUNE_INTERVAL_MS,
 } from "./messaging-push";
 import {
+  registerOnboardingIpc,
+  showOnboardingInWindows,
+} from "./onboarding-ipc";
+import {
   availableOpenInApps,
   buildOpenInArgv,
   currentOpenInPlatform,
@@ -1800,6 +1804,12 @@ function installApplicationMenu(): void {
     label: "Export Diagnostics…",
     click: exportDiagnosticsFromMenu,
   };
+  // Reopens the first-run wizard (docs/release-plan.md "Onboarding").
+  const setupItem: MenuItemConstructorOptions = {
+    id: "welcome-setup",
+    label: "Welcome / Setup…",
+    click: showOnboardingInWindows,
+  };
   const template: MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin"
       ? [
@@ -1807,6 +1817,7 @@ function installApplicationMenu(): void {
             label: app.name,
             submenu: [
               { role: "about" },
+              setupItem,
               { type: "separator" },
               exportItem,
               { type: "separator" },
@@ -1828,6 +1839,9 @@ function installApplicationMenu(): void {
     {
       role: "help",
       submenu: [
+        ...(process.platform === "darwin"
+          ? []
+          : [{ ...setupItem, id: "welcome-setup-help" }]),
         {
           id: "export-diagnostics-help",
           label: "Export Diagnostics…",
@@ -1855,6 +1869,7 @@ function registerReleaseIpc(): void {
 }
 
 registerCoreIpc();
+registerOnboardingIpc(ipcMain, core.commands);
 registerReleaseIpc();
 registerPtyIpc();
 registerShellIpc();
