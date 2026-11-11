@@ -1,0 +1,9 @@
+<!-- Harbormaster monochrome glyph (sidebar, README, favicons): the
+     lighthouse from build/icon.svg with no background; uses currentColor so
+     it inherits the UI's text color, lamp stays amber. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" stroke="currentColor" stroke-width="10" stroke-linejoin="round" stroke-linecap="round">
+  <path d="M50 44 L78 44 L90 112 L38 112 Z"/>
+  <path d="M38 80 L90 80"/>
+  <circle cx="64" cy="32" r="11" fill="#ffc34d" stroke="none"/>
+  <path d="M14 122 C30 114 46 114 62 122 S94 130 114 122" stroke="#6ef5d6"/>
+</svg>

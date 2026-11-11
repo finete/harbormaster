@@ -1,3 +1,5 @@
+<p align="center"><img src="packages/app/build/icon.png" alt="Harbormaster" width="128"></p>
+
 # Harbormaster
 
 Harbormaster is a macOS desktop app for running many coding-agent tasks at
