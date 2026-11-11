@@ -15,7 +15,15 @@ const png = join(appDir, "build", "icon.png");
 const icns = join(appDir, "build", "icon.icns");
 
 function render(size, out) {
-  execFileSync("rsvg-convert", ["-w", `${size}`, "-h", `${size}`, svg, "-o", out]);
+  execFileSync("rsvg-convert", [
+    "-w",
+    `${size}`,
+    "-h",
+    `${size}`,
+    svg,
+    "-o",
+    out,
+  ]);
 }
 
 render(1024, png);

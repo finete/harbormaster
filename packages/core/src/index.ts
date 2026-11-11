@@ -10,11 +10,16 @@ import {
   HttpVersionAccess,
   JsonConfigAccess,
   JsonFolderAccess,
+  JsonInboxAccess,
+  JsonlAuditLogAccess,
   JsonMessageAccess,
+  JsonSourceStateAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
+  LocalAddonAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalRulesFileAccess,
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
   LocalTaskAttachmentAccess,
@@ -111,6 +116,13 @@ export function createCore(options: CoreOptions = {}): Core {
     folders,
     attachments,
     presence,
+    rules: {
+      files: new LocalRulesFileAccess(paths.rulesDir),
+      state: new JsonSourceStateAccess(paths.sourcesDir),
+      audit: new JsonlAuditLogAccess(paths.eventsDir),
+      addons: new LocalAddonAccess(paths.addonsDir),
+    },
+    inbox: new JsonInboxAccess(paths.inboxFile, paths.inboxLockFile),
   });
 
   return { commands, events };

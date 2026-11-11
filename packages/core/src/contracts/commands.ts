@@ -8,6 +8,12 @@ import type {
   SessionLaunch,
 } from "./harness.js";
 import type {
+  InboxItem,
+  ListInboxOptions,
+  ResolveInboxItemOptions,
+  ResolveInboxItemResult,
+} from "./inbox.js";
+import type {
   ApproveMessageEdits,
   FindTasksOptions,
   SendTaskMessageInput,
@@ -20,12 +26,21 @@ import type {
   AwaitingKind,
   AwaitingKindId,
   BoardColumn,
+  PullRequestRole,
   Task,
   TaskKind,
   TaskState,
   ThinkingLevel,
   WorkspaceBinding,
 } from "./model.js";
+import type {
+  AddonInfo,
+  AuditEntry,
+  ListEventsFilter,
+  RulesCheckInput,
+  RulesCheckResult,
+  RulesListing,
+} from "./rules.js";
 import type { RepositoryInfo } from "./workspace.js";
 
 /** One program-status report for `CoreCommands.reportPresence`. */
@@ -107,6 +122,19 @@ export interface CreateTaskInput extends TaskAgentInput {
   branch?: string;
   targetBranch?: string;
   /**
+   * Bind the task to an existing pull request (number, in `repositoryId`):
+   * its head branch becomes the task's branch and starting the task
+   * checks that head out (`git fetch origin pull/<n>/head`). Needs a
+   * repository and GitHub access.
+   */
+  pullRequest?: number;
+  /**
+   * With `pullRequest`: `reviewer` (someone else's PR: the task checks out
+   * the head and never pushes or opens a PR) or `author`. Default: from
+   * GitHub (`viewerDidAuthor`), else `author`.
+   */
+  role?: PullRequestRole;
+  /**
    * pi-home's "Start a new task" vs "Add to Backlog" choice. `true` starts
    * the task right away: it lands in `dev` and, when `repositoryId` is set,
    * its branch + worktree + binding are created now. Absent/`false` parks it
@@ -171,7 +199,7 @@ export function isToDoneConfirmation(
 export interface RefreshOptions {
   /**
    * Same meaning as `ToDoneOptions.protectedPaths`: live pane cwds the
-   * refresh must never remove a worktree out from under (mover-driven
+   * refresh must never remove a worktree out from under (rule-driven
    * landing and the done-cleanup retry sweep both honor it).
    */
   protectedPaths?: string[];
@@ -494,8 +522,10 @@ export interface CoreCommands {
    * Re-fetch PR status for every repository-backed task with an open PR
    * (a few tasks concurrently), patch `task.pr` onto the task as currently
    * persisted (never a stale snapshot, so a concurrent move is never
-   * clobbered), and — when `config.automation` is true — let the
-   * configured movers propose at most one board move per task. Repositories
+   * clobbered), and — when `config.automation` is true — run one rules
+   * engine tick: poll the event sources, diff their snapshots into events,
+   * and execute the matching rules (`<stateDir>/rules/`; at most one move
+   * per task per tick). Repositories
    * without an `origin` remote are skipped silently. Also retries the safe
    * worktree cleanup for done tasks whose worktree is still on disk, and
    * flags `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
@@ -615,6 +645,41 @@ export interface CoreCommands {
    * orphan): run it rarely, off the refresh tick. Read-only.
    */
   scanOrphanWorktrees(): Promise<OrphanWorktreeReport>;
+
+  // --- Rules engine (see docs/release-plan.md "Rules engine") ------------
+
+  /**
+   * The rules audit log (every event and every action outcome, with rule
+   * id, file and line), oldest first; `filter.taskId` keeps entries about
+   * one task, `filter.since` (ISO or `YYYY-MM-DD`) bounds it, `limit`
+   * (default 500) keeps the newest entries.
+   */
+  listEvents(filter?: ListEventsFilter): Promise<AuditEntry[]>;
+  /**
+   * Dry run: the current rules over recorded events (`replayFrom`, ISO or
+   * `YYYY-MM-DD`; default everything retained), optionally one task's,
+   * evaluated against current task state and facts. Executes nothing.
+   */
+  rulesCheck(input?: RulesCheckInput): Promise<RulesCheckResult>;
+  /** Every rules file as currently loaded, with its problems (a file with problems contributes no rules). */
+  listRules(): Promise<RulesListing>;
+  /** The built-in sources (read-only) and every user addon, loaded or skipped with its problems. */
+  listAddons(): Promise<AddonInfo[]>;
+
+  // --- Inbox --------------------------------------------------------------
+
+  /** Unresolved, unsnoozed inbox items oldest first (options include the rest). */
+  listInbox(options?: ListInboxOptions): Promise<InboxItem[]>;
+  /**
+   * Resolve an inbox item, optionally by pressing one of its buttons:
+   * `createTask` creates the pre-filled task, `openTask` returns the task to
+   * open, `snooze` hides it (`with.until`, default 1 hour) without
+   * resolving, `dismiss`/none just resolves. Emits `inbox-changed`.
+   */
+  resolveInboxItem(
+    itemId: string,
+    options?: ResolveInboxItemOptions,
+  ): Promise<ResolveInboxItemResult>;
 }
 
 export interface RefreshResult {

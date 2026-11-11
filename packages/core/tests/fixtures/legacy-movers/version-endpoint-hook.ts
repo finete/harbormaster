@@ -8,17 +8,17 @@
 // number in its subject. Disable the scan with `options.hotfixScan: false`
 // or bound it with `options.hotfixDepth` (1-100 commits, default 100).
 
+import {
+  commitReferencesTask,
+  type DeployedVersion,
+  parseDeployedVersion,
+} from "../../../src/engines/deployment.js";
 import type {
   CommitLogEntry,
   StageHook,
   StageHookHelpers,
   StageHookInput,
-} from "../../contracts/addons.js";
-import {
-  commitReferencesTask,
-  type DeployedVersion,
-  parseDeployedVersion,
-} from "../deployment.js";
+} from "./addons.js";
 
 const DEFAULT_HOTFIX_DEPTH = 100;
 

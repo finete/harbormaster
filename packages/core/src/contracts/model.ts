@@ -3,8 +3,6 @@
 // pipelines, no cmux. Those return in later phases behind the same shapes
 // where it makes sense.
 
-import { DEFAULT_MOVER_ORDER } from "./addons.js";
-
 export const STATE_VERSION = 1 as const;
 
 /**
@@ -48,6 +46,7 @@ export type TaskState = "backlog" | "dev" | "awaiting" | "done";
 export type AwaitingKind =
   | { kind: "review" }
   | { kind: "slack"; permalink?: string }
+  | { kind: "author-response" }
   | { kind: "deploy"; stageId: string; stageLabel: string };
 
 /**
@@ -58,10 +57,17 @@ export type AwaitingKind =
 export type AwaitingKindId = AwaitingKind["kind"];
 
 /**
+ * Whose PR a task works on: `author` (the task's own PR) or `reviewer`
+ * (someone else's PR the task reviews: it checks out the PR head branch and
+ * never pushes or opens a PR).
+ */
+export type PullRequestRole = "author" | "reviewer";
+
+/**
  * Pull-request linkage and GitHub review/merge snapshot for a task, as
  * refreshed by `CoreCommands.refresh()`. Ported and pruned from pi-home's
  * richer `PullRequestMeta` (src/contracts/model.ts): no Slack-thread or
- * cmux-specific fields, but the review/merge signal the movers need
+ * cmux-specific fields, but the review/merge signal the rules need
  * (reviewDecision, head-tracking flags, merge commit) carries over.
  */
 export interface TaskPullRequest {
@@ -78,19 +84,24 @@ export interface TaskPullRequest {
   headRefOid?: string;
   /** The exact squash/merge commit that entered the destination branch, once merged. */
   mergeCommit?: { oid: string; targetBranch: string };
+  /**
+   * Set at task creation (reviewer tasks) or, when unset, from GitHub's
+   * `viewerDidAuthor` on the first observation. Absent = author.
+   */
+  role?: PullRequestRole;
 }
 
 /**
  * One configured deployment-pipeline stage for a repository. A stage without
- * a hook is a manual gate: movers enter it but never advance past it on
- * their own. Ported from pi-home's `DeploymentStageConfig`.
+ * a hook is a manual gate: rules enter it but nothing advances past it on
+ * its own. Ported from pi-home's `DeploymentStageConfig`.
  */
 export interface DeploymentStageConfig {
   id: string;
   label: string;
-  /** Registry name of the built-in stage hook that decides when this stage's wait is over. */
+  /** Id of the event source that decides when this stage's wait is over (built-in: `version-endpoint`). */
   hook?: string;
-  /** Opaque options passed to the hook (e.g. `{ url, hotfixScan, hotfixDepth }`). */
+  /** Opaque options the source reads (e.g. `{ url, hotfixScan, hotfixDepth }`). */
   options?: Record<string, unknown>;
 }
 
@@ -105,8 +116,6 @@ export interface DeploymentPipeline {
 /** Per-repository settings from the global config, keyed by normalized repository id. */
 export interface RepositoryConfig {
   deployment?: DeploymentPipeline;
-  /** Mover order for this repository's tasks; overrides the global `movers` (an empty list disables automatic moves here). */
-  movers?: string[];
   /**
    * Explicit primary-checkout override for a repository with several
    * checkouts under `codeRoot` (e.g. `arnac`, `arnac2`, `arnac3`). Validated
@@ -361,18 +370,24 @@ export interface PresenceRecord {
   };
 }
 
+/** Per-source settings (`config.sources.<id>`). */
+export interface SourceConfig {
+  /** `false` turns the source off (no polling, no events). */
+  enabled?: boolean;
+  /** Validated against the source's `settingsSchema`. */
+  settings?: Record<string, unknown>;
+}
+
 /**
- * Global per-user configuration. Minimal in phase 1 — the mover/automation
- * fields are a placeholder seam for phase 2; nothing reads them yet.
+ * Global per-user configuration. Board automation itself is the rules
+ * engine (`<stateDir>/rules/`); this file only holds the kill switch and
+ * source settings.
  */
 export interface GlobalConfig {
-  /** Global kill switch for future addon-driven board moves. */
+  /** Global kill switch for rule-driven board automation. */
   automation: boolean;
-  /**
-   * Ordered names of active movers. Absent = the built-in default order;
-   * an explicit empty list disables automatic moves (pi-home semantics).
-   */
-  movers?: string[];
+  /** Event-source settings keyed by source id (see `contracts/rules.ts`). */
+  sources?: Record<string, SourceConfig>;
   /** Folder containing all repository checkouts (absolute; "~" expanded on load). */
   codeRoot?: string;
   /** Git namespace for new task branches (e.g. "alice/"); may be empty. */
@@ -394,8 +409,7 @@ export const DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES = 30;
 /** `messaging.loopCap` default: autonomous parent↔child messages per pair since the user last typed into either task. */
 export const DEFAULT_MESSAGE_LOOP_CAP = 8;
 
-/** Written to a fresh config file: the built-in movers, spelled out so users see what they can reorder or drop. */
+/** Written to a fresh config file. Automation rules live in `<stateDir>/rules/rules.yaml`. */
 export const defaultGlobalConfig = (): GlobalConfig => ({
   automation: true,
-  movers: [...DEFAULT_MOVER_ORDER],
 });

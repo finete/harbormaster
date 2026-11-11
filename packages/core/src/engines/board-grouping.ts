@@ -1,5 +1,4 @@
-// Engine: stateless board-grouping rules. Shared by the Manager (and, once
-// it exists, mover automation); no I/O, no session state — pure projection
+// Engine: stateless board-grouping rules. Used by the Manager; no I/O, no session state — pure projection
 // over a list of tasks already in one column.
 
 import type { BoardGroup, Task, TaskState } from "../contracts/model.js";
@@ -7,6 +6,7 @@ import type { BoardGroup, Task, TaskState } from "../contracts/model.js";
 const AWAITING_PRIMARY_LABELS = {
   review: "Review",
   slack: "Slack response",
+  "author-response": "Author response",
 } as const;
 
 function repoShortName(repositoryId: string): string {
@@ -34,6 +34,13 @@ function awaitingGroupKey(task: Task): AwaitingGroupKey {
       order: [0, awaiting.stageLabel],
       primaryLabel: awaiting.stageLabel,
       groupKindId: `deploy:${awaiting.stageId}`,
+    };
+  }
+  if (awaiting.kind === "author-response") {
+    return {
+      order: [1, "author-response"],
+      primaryLabel: AWAITING_PRIMARY_LABELS["author-response"],
+      groupKindId: "author-response",
     };
   }
   if (awaiting.kind === "slack") {

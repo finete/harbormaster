@@ -12,7 +12,8 @@ export type MessageMode = "steer" | "followUp";
 export type MessageSender =
   | { kind: "task"; taskId: string }
   | { kind: "session"; cwd: string; sessionId?: string } // non-task Pi session
-  | { kind: "harbormaster" }; // receipts
+  | { kind: "harbormaster" } // receipts
+  | { kind: "rule"; ruleId: string }; // a rules-engine `message` action (needs approval like any non-task sender)
 
 /** Decided by core at send time from lineage; never supplied by the agent. */
 export type MessageRoute =

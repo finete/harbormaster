@@ -9,6 +9,7 @@
 import type {
   CommitLogEntry,
   PullRequestAccess,
+  PullRequestSearchHit,
   PullRequestStatus,
 } from "../contracts/github.js";
 import { LruMap } from "../utilities/lru-map.js";
@@ -19,6 +20,12 @@ interface GhReview {
   commit?: { oid?: string } | null;
   author?: { login?: string } | null;
   authorAssociation?: string;
+  submittedAt?: string;
+}
+interface GhComment {
+  author?: { login?: string } | null;
+  authorAssociation?: string;
+  createdAt?: string;
 }
 interface GhPr {
   number: number;
@@ -32,12 +39,34 @@ interface GhPr {
   headRefOid?: string;
   mergeCommit?: { oid?: string } | null;
   baseRefName?: string;
+  headRefName?: string;
+  mergedAt?: string | null;
+  closed?: boolean;
+  /** GraphQL only (gh's `--json` has no equivalent). */
+  viewerDidAuthor?: boolean;
+  /** Derived from GraphQL connections (see `fromGraphql`). */
+  derived?: {
+    checks?: string;
+    unresolvedThreads?: number;
+    lastAuthorActivityAt?: string;
+    lastReviewerActivityAt?: string;
+  };
 }
 
 /** A PR node from the batched GraphQL lookup (connections instead of gh's flattened lists). */
-interface GqlPr extends Omit<GhPr, "reviewRequests" | "reviews"> {
+interface GqlPr extends Omit<GhPr, "reviewRequests" | "reviews" | "derived"> {
   reviewRequests?: { totalCount?: number } | null;
   reviews?: { nodes?: GhReview[] | null } | null;
+  reviewThreads?: { nodes?: Array<{ isResolved?: boolean }> | null } | null;
+  commits?: {
+    nodes?: Array<{
+      commit?: {
+        committedDate?: string;
+        statusCheckRollup?: { state?: string } | null;
+      } | null;
+    }> | null;
+  } | null;
+  comments?: { nodes?: GhComment[] | null } | null;
 }
 
 export type Execute = (
@@ -55,8 +84,11 @@ const STATUS_BATCH_SIZE = 20;
 /** The PR fields `find` asks `gh pr list --json` for, as a GraphQL selection (same order). */
 const PR_GRAPHQL_FIELDS = `number url state isDraft author { login } reviewDecision
 reviewRequests { totalCount }
-reviews(last: 100) { nodes { state commit { oid } author { login } authorAssociation } }
-headRefOid mergeCommit { oid } baseRefName`;
+reviews(last: 100) { nodes { state commit { oid } author { login } authorAssociation submittedAt } }
+headRefOid mergeCommit { oid } baseRefName headRefName mergedAt closed viewerDidAuthor
+reviewThreads(first: 100) { nodes { isResolved } }
+commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
+comments(last: 50) { nodes { author { login } authorAssociation createdAt } }`;
 
 /** Entries kept per memo cache: far above one refresh's working set (one per deploy-stage SHA pair). */
 const MEMO_CAPACITY = 200;
@@ -276,7 +308,7 @@ export class GithubPrAccess implements PullRequestAccess {
       "--repo",
       this.ghRepo(repositoryId),
       "--json",
-      "number,url,state,isDraft,author,reviewDecision,reviewRequests,reviews,headRefOid,mergeCommit,baseRefName",
+      "number,url,state,isDraft,author,reviewDecision,reviewRequests,reviews,headRefOid,mergeCommit,baseRefName,headRefName,mergedAt,closed",
     ]);
     const parsed: unknown = JSON.parse(output);
     const pr = (parsed as GhPr[])[0];
@@ -346,18 +378,155 @@ export class GithubPrAccess implements PullRequestAccess {
           statuses.set(branch, undefined);
           return;
         }
-        const { reviewRequests, reviews, ...fields } = node;
-        statuses.set(
-          branch,
-          this.toStatus(
-            repositoryId,
-            { ...fields, reviews: reviews?.nodes ?? [] },
-            reviewRequests?.totalCount ?? 0,
-          ),
-        );
+        statuses.set(branch, this.fromGraphql(repositoryId, node));
       });
     }
     return statuses;
+  }
+
+  async view(
+    repositoryId: string,
+    pullRequestNumber: number,
+  ): Promise<PullRequestStatus> {
+    const { owner, name } = this.ownerAndName(repositoryId);
+    const query = [
+      "query($owner: String!, $name: String!, $number: Int!) {",
+      "  repository(owner: $owner, name: $name) { pullRequest(number: $number) { ...pr } }",
+      "}",
+      `fragment pr on PullRequest { ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
+    ].join("\n");
+    const output = await this.execute("gh", [
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-f",
+      `owner=${owner}`,
+      "-f",
+      `name=${name}`,
+      "-F",
+      `number=${pullRequestNumber}`,
+      ...this.hostnameArgs(repositoryId),
+    ]);
+    const node = (
+      JSON.parse(output) as {
+        data?: { repository?: { pullRequest?: GqlPr | null } | null };
+      }
+    ).data?.repository?.pullRequest;
+    if (!node) {
+      throw new Error(
+        `Pull request #${pullRequestNumber} not found in ${repositoryId}`,
+      );
+    }
+    return this.fromGraphql(repositoryId, node);
+  }
+
+  async searchPullRequests(query: string): Promise<PullRequestSearchHit[]> {
+    const graphql = [
+      "query($q: String!) {",
+      "  search(query: $q, type: ISSUE, first: 50) {",
+      "    nodes { ... on PullRequest { number url title updatedAt author { login } repository { url } } }",
+      "  }",
+      "}",
+    ].join("\n");
+    const output = await this.execute("gh", [
+      "api",
+      "graphql",
+      "-f",
+      `query=${graphql}`,
+      "-f",
+      `q=${query}`,
+    ]);
+    const nodes =
+      (
+        JSON.parse(output) as {
+          data?: {
+            search?: {
+              nodes?: Array<{
+                number?: number;
+                url?: string;
+                title?: string;
+                updatedAt?: string;
+                author?: { login?: string } | null;
+                repository?: { url?: string } | null;
+              } | null>;
+            };
+          };
+        }
+      ).data?.search?.nodes ?? [];
+    const hits: PullRequestSearchHit[] = [];
+    for (const node of nodes) {
+      if (!node?.number || !node.url || !node.repository?.url) continue;
+      hits.push({
+        repository: node.repository.url
+          .replace(/^[a-z]+:\/\//i, "")
+          .replace(/\/$/, "")
+          .toLowerCase(),
+        number: node.number,
+        url: node.url,
+        title: node.title ?? "",
+        ...(node.author?.login ? { author: node.author.login } : {}),
+        ...(node.updatedAt ? { updatedAt: node.updatedAt } : {}),
+      });
+    }
+    return hits;
+  }
+
+  /** A GraphQL PR node → status, deriving the rules-engine facts from its connections. */
+  private fromGraphql(repositoryId: string, node: GqlPr): PullRequestStatus {
+    const {
+      reviewRequests,
+      reviews,
+      reviewThreads,
+      commits,
+      comments,
+      ...fields
+    } = node;
+    const reviewList = reviews?.nodes ?? [];
+    const head = commits?.nodes?.[0]?.commit ?? undefined;
+    const authorLogin = node.author?.login;
+    const human = (entry: {
+      author?: { login?: string } | null;
+      authorAssociation?: string;
+    }) => !isBotReview(entry);
+    const byAuthor = (entry: { author?: { login?: string } | null }) =>
+      Boolean(authorLogin) && entry.author?.login === authorLogin;
+    const authorTimes = [
+      head?.committedDate,
+      ...reviewList.filter(byAuthor).map((review) => review.submittedAt),
+      ...(comments?.nodes ?? []).filter(byAuthor).map((c) => c.createdAt),
+    ];
+    const reviewerTimes = [
+      ...reviewList
+        .filter((review) => human(review) && !byAuthor(review))
+        .map((review) => review.submittedAt),
+      ...(comments?.nodes ?? [])
+        .filter((comment) => human(comment) && !byAuthor(comment))
+        .map((comment) => comment.createdAt),
+    ];
+    const lastAuthorActivityAt = latest(authorTimes);
+    const lastReviewerActivityAt = latest(reviewerTimes);
+    const rollup = head?.statusCheckRollup?.state;
+    return this.toStatus(
+      repositoryId,
+      {
+        ...fields,
+        reviews: reviewList,
+        derived: {
+          ...(head ? { checks: rollup ? rollup.toLowerCase() : "none" } : {}),
+          ...(reviewThreads?.nodes
+            ? {
+                unresolvedThreads: reviewThreads.nodes.filter(
+                  (thread) => thread.isResolved === false,
+                ).length,
+              }
+            : {}),
+          ...(lastAuthorActivityAt ? { lastAuthorActivityAt } : {}),
+          ...(lastReviewerActivityAt ? { lastReviewerActivityAt } : {}),
+        },
+      },
+      reviewRequests?.totalCount ?? 0,
+    );
   }
 
   private toStatus(
@@ -392,6 +561,14 @@ export class GithubPrAccess implements PullRequestAccess {
           }
         : {}),
       checkedAt: new Date().toISOString(),
+      ...(pr.headRefName ? { headRefName: pr.headRefName } : {}),
+      ...(pr.mergedAt ? { mergedAt: pr.mergedAt } : {}),
+      ...(typeof pr.closed === "boolean" ? { closed: pr.closed } : {}),
+      ...(pr.author?.login ? { author: pr.author.login } : {}),
+      ...(typeof pr.viewerDidAuthor === "boolean"
+        ? { viewerIsAuthor: pr.viewerDidAuthor }
+        : {}),
+      ...(pr.derived ?? {}),
     };
   }
 
@@ -501,8 +678,20 @@ function isAuthorReview(pr: GhPr, review: GhReview): boolean {
   return Boolean(authorLogin) && review.author?.login === authorLogin;
 }
 
+/** The newest of some ISO timestamps (undefined entries ignored). */
+function latest(times: ReadonlyArray<string | undefined>): string | undefined {
+  let newest: string | undefined;
+  for (const time of times) {
+    if (time && (!newest || time > newest)) newest = time;
+  }
+  return newest;
+}
+
 /** GitHub Apps review with authorAssociation NONE; classic bot accounts end in "[bot]". */
-function isBotReview(review: GhReview): boolean {
+function isBotReview(review: {
+  author?: { login?: string } | null;
+  authorAssociation?: string;
+}): boolean {
   if (review.authorAssociation === "NONE") return true;
   const login = review.author?.login ?? "";
   return login.endsWith("[bot]");

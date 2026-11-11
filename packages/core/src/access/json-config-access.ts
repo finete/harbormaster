@@ -1,7 +1,7 @@
 // Resource Access: per-user global config file. Simplified from pi-home's
 // src/access/global-config-access.ts — repositories/headless-model fields
 // are GitHub/addon concerns that return with those phases; the automation
-// kill switch and mover order placeholder survive as a seam, and phase 2b
+// kill switch survives (board automation itself is the rules engine), and phase 2b
 // adds back codeRoot/branchPrefix (see contracts/workspace.ts) now that git
 // repository/worktree access needs them.
 
@@ -13,9 +13,10 @@ import type {
   DeploymentStageConfig,
   GlobalConfig,
   RepositoryConfig,
+  SourceConfig,
 } from "../contracts/model.js";
 import { defaultGlobalConfig } from "../contracts/model.js";
-import type { ConfigAccess } from "../contracts/services.js";
+import type { ConfigAccess, LegacyMoverOrders } from "../contracts/services.js";
 // Imported for its side-effecting declare-module augmentation of
 // GlobalConfig (codeRoot/branchPrefix) — contracts/workspace.ts owns those
 // fields' types.
@@ -54,12 +55,12 @@ export class JsonConfigAccess implements ConfigAccess {
     if (!isRecord(raw)) throw this.invalid();
     try {
       const repositories = normalizeRepositories(raw.repositories);
-      const movers = normalizeMovers("movers", raw.movers);
       const launch = normalizeLaunch(raw.launch);
       const messaging = normalizeMessaging(raw.messaging);
+      const sources = normalizeSources(raw.sources);
       return {
         automation: normalizeAutomation(raw.automation),
-        ...(movers ? { movers } : {}),
+        ...(sources ? { sources } : {}),
         codeRoot: normalizeCodeRoot(raw.codeRoot),
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
         ...(repositories ? { repositories } : {}),
@@ -73,6 +74,31 @@ export class JsonConfigAccess implements ConfigAccess {
 
   async save(config: GlobalConfig): Promise<void> {
     await writeJsonAtomic(this.path, config);
+  }
+
+  /**
+   * The retired `movers` lists of a pre-rules config (global and per
+   * repository), read once to migrate them into the first `rules.yaml`.
+   * The live config ignores them.
+   */
+  async legacyMoverOrders(): Promise<LegacyMoverOrders> {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await readFile(this.path, "utf8"));
+    } catch {
+      return { repositories: {} };
+    }
+    if (!isRecord(raw)) return { repositories: {} };
+    const legacy: LegacyMoverOrders = { repositories: {} };
+    const global = legacyMovers(raw.movers);
+    if (global) legacy.global = global;
+    if (isRecord(raw.repositories)) {
+      for (const [id, entry] of Object.entries(raw.repositories)) {
+        const movers = isRecord(entry) ? legacyMovers(entry.movers) : undefined;
+        if (movers) legacy.repositories[id] = movers;
+      }
+    }
+    return legacy;
   }
 
   private invalid(cause?: unknown): Error {
@@ -111,11 +137,8 @@ function normalizeRepositories(
     if (entry.deployment !== undefined) {
       config.deployment = normalizeDeployment(repositoryId, entry.deployment);
     }
-    const movers = normalizeMovers(
-      `repositories.${repositoryId}.movers`,
-      entry.movers,
-    );
-    if (movers) config.movers = movers;
+    // Retired: `movers` was migrated into rules files (see legacyMoverOrders).
+    delete (config as { movers?: unknown }).movers;
     const preferredCheckout = normalizePreferredCheckout(
       repositoryId,
       entry.preferredCheckout,
@@ -288,28 +311,36 @@ function normalizeAutomation(value: unknown): boolean {
   return value;
 }
 
-/**
- * Absent = `undefined` (built-in default order); an explicit empty list is
- * kept as-is and disables automatic moves. Whether each name is a
- * registered mover is a registry concern checked by the manager (one
- * load-time warning), not here.
- */
-function normalizeMovers(at: string, value: unknown): string[] | undefined {
+/** A retired `movers` list, when it is a list of strings. */
+function legacyMovers(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((name): name is string => typeof name === "string");
+}
+
+/** `sources.<id>`: `{ enabled?: boolean, settings?: object }` (settings checked against the source's schema at use). */
+function normalizeSources(
+  value: unknown,
+): Record<string, SourceConfig> | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value))
-    throw new Error(`${at} must be an array of strings`);
-  const seen = new Set<string>();
-  return value.map((name) => {
-    if (typeof name !== "string" || !name.trim()) {
-      throw new Error(`${at} entries must be non-empty mover names`);
+  if (!isRecord(value))
+    throw new Error("sources must be an object keyed by source id");
+  const sources: Record<string, SourceConfig> = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (!isRecord(entry)) throw new Error(`sources.${id} must be an object`);
+    if (entry.enabled !== undefined && typeof entry.enabled !== "boolean") {
+      throw new Error(`sources.${id}.enabled must be a boolean`);
     }
-    const trimmed = name.trim();
-    if (seen.has(trimmed)) {
-      throw new Error(`${at} lists mover "${trimmed}" twice`);
+    if (entry.settings !== undefined && !isRecord(entry.settings)) {
+      throw new Error(`sources.${id}.settings must be an object`);
     }
-    seen.add(trimmed);
-    return trimmed;
-  });
+    sources[id] = {
+      ...(entry.enabled !== undefined ? { enabled: entry.enabled } : {}),
+      ...(entry.settings !== undefined
+        ? { settings: entry.settings as Record<string, unknown> }
+        : {}),
+    };
+  }
+  return sources;
 }
 
 /** Absolute folder containing every repository checkout (default `~/Code`). */

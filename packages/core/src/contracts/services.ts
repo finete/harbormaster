@@ -259,6 +259,17 @@ export interface MessageAccess {
 export interface ConfigAccess {
   load(): Promise<GlobalConfig>;
   save(config: GlobalConfig): Promise<void>;
+  /**
+   * The retired `movers` lists of a pre-rules config, for migrating them
+   * into the first `rules.yaml` (optional: hand-built fakes may omit it).
+   */
+  legacyMoverOrders?(): Promise<LegacyMoverOrders>;
+}
+
+/** Pre-rules `movers` config lists (global and per repository). */
+export interface LegacyMoverOrders {
+  global?: string[];
+  repositories: Record<string, string[]>;
 }
 
 export interface Clock {

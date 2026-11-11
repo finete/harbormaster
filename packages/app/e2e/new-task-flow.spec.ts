@@ -80,7 +80,7 @@ function taskWorktrees(): string[] {
 }
 
 /** The fake gh answers `pr list` with whatever PR json the test last wrote (none = `[]`). */
-function writePr(number: number): void {
+function writePr(number: number, overrides: object = {}): void {
   writeFileSync(
     path.join(root, "pr.json"),
     JSON.stringify([
@@ -95,6 +95,7 @@ function writePr(number: number): void {
         headRefOid: "abc1234",
         mergeCommit: null,
         baseRefName: "main",
+        ...overrides,
       },
     ]),
   );
@@ -586,4 +587,43 @@ test("Open folder runs a task in place, and the picked model, thinking level and
   // Ran in the folder itself, and the prompt points at the task's own copy.
   await expect(panel).toContainText(/PI-CWD:\S*\/notes/);
   await expect(panel).toContainText(/PI-ARG:Compare \S*task-attachments/);
+});
+
+// Last in this file on purpose: it walks "Started Work" through the board.
+test("the refresh tick runs the default rules: a requested review moves the card to Awaiting, changes requested on the head sends it back to Dev, a merge parks it in Production deploy", async () => {
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  const card = cardLocator("Started Work");
+  const inColumn = (state: string) =>
+    window.getByTestId(`column-${state}-cards`).filter({ has: card });
+  const refresh = () =>
+    window.evaluate(() => window.harbormaster.core.refresh());
+
+  writePr(44, { reviewRequests: [{ login: "reviewer" }] });
+  await refresh();
+  await expect(inColumn("awaiting")).toHaveCount(1);
+
+  writePr(44, {
+    reviewDecision: "CHANGES_REQUESTED",
+    reviews: [
+      {
+        state: "CHANGES_REQUESTED",
+        commit: { oid: "abc1234" },
+        author: { login: "reviewer" },
+        authorAssociation: "MEMBER",
+      },
+    ],
+  });
+  await refresh();
+  await expect(inColumn("dev")).toHaveCount(1);
+
+  writePr(44, { state: "MERGED", mergeCommit: { oid: "fedcba9876543" } });
+  await refresh();
+  await expect(inColumn("awaiting")).toHaveCount(1);
+  await expect(
+    window
+      .getByTestId("column-awaiting-cards")
+      .getByTestId("group-primary-label")
+      .filter({ hasText: "Production deploy" }),
+  ).toBeVisible();
 });

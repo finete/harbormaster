@@ -32,6 +32,17 @@ export interface StatePaths {
   readonly attachmentsDir: string;
   /** The app's local tool socket (see `resolveSocketPath`). */
   readonly socketFile: string;
+  /** `<stateDir>/rules/`: `rules.yaml`, `repos/<repository id>.yaml`, JS escape-hatch modules. */
+  readonly rulesDir: string;
+  /** `<stateDir>/sources/`: last snapshot + cursor per event source, the pending-move queue. */
+  readonly sourcesDir: string;
+  /** `<stateDir>/events/`: the rules audit log, `YYYY-MM-DD.jsonl`. */
+  readonly eventsDir: string;
+  /** `<stateDir>/addons/<name>/`: user addons (`addon.json` + `source.mjs`). */
+  readonly addonsDir: string;
+  /** `<stateDir>/inbox/items.json`: persisted inbox items. */
+  readonly inboxFile: string;
+  readonly inboxLockFile: string;
 }
 
 /** Unix socket paths are capped (104 bytes on macOS); stay safely under it. */
@@ -74,5 +85,11 @@ export function resolveStatePaths(
     doorbellDir: join(stateDir, "messages", "doorbell"),
     attachmentsDir: join(stateDir, "messages", "attachments"),
     socketFile: resolveSocketPath(stateDir),
+    rulesDir: join(stateDir, "rules"),
+    sourcesDir: join(stateDir, "sources"),
+    eventsDir: join(stateDir, "events"),
+    addonsDir: join(stateDir, "addons"),
+    inboxFile: join(stateDir, "inbox", "items.json"),
+    inboxLockFile: join(stateDir, "inbox", "items.lock"),
   };
 }

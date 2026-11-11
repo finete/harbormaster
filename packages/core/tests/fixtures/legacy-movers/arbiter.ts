@@ -7,14 +7,14 @@
 // error means "stay" plus a warning, never a movement — errors never move
 // anything.
 
+import type { TaskState } from "../../../src/contracts/model.js";
+import { isAllowedTransition } from "../../../src/engines/task-transitions.js";
 import type {
   BoardMove,
   MoverHelpers,
   MoverInput,
   TaskMover,
-} from "../../contracts/addons.js";
-import type { TaskState } from "../../contracts/model.js";
-import { isAllowedTransition } from "../task-transitions.js";
+} from "./addons.js";
 
 export interface ArbiterDecision {
   move: BoardMove;

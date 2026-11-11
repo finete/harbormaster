@@ -206,7 +206,7 @@ function isValidPr(value: unknown): boolean {
 function isValidAwaiting(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isRecord(value)) return false;
-  if (value.kind === "review") return true;
+  if (value.kind === "review" || value.kind === "author-response") return true;
   if (value.kind === "slack") return isOptionalString(value.permalink);
   if (value.kind === "deploy") {
     return isString(value.stageId) && isString(value.stageLabel);

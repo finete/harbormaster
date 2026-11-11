@@ -146,6 +146,7 @@ export function stateChipLabel(task: Task, state: TaskState): string {
       if (!awaiting) return "Awaiting";
       if (awaiting.kind === "review") return "Review";
       if (awaiting.kind === "slack") return "Slack";
+      if (awaiting.kind === "author-response") return "Author";
       return awaiting.stageLabel || "Deploy";
     }
   }

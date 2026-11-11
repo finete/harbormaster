@@ -25,6 +25,7 @@ export const TASK_STATE_LABELS: Record<TaskState, string> = {
 export function awaitingReasonLabel(awaiting: AwaitingKind): string {
   if (awaiting.kind === "review") return "review";
   if (awaiting.kind === "slack") return "slack";
+  if (awaiting.kind === "author-response") return "author response";
   return awaiting.stageLabel;
 }
 
