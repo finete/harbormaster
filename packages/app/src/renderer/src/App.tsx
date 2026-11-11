@@ -16,6 +16,7 @@ import {
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { Button } from "./components/ui/button";
 import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
@@ -479,6 +480,8 @@ export function App(): JSX.Element {
           ConnectivityBanner): an environmental state, never a per-task
           warning toast. */}
       <ConnectivityBanner />
+      {/* "vX is available: brew upgrade --cask harbormaster" (see UpdateBanner). */}
+      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
           (and its pty-backed terminals) alive across board/workspace switches. */}

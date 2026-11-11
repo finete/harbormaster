@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.1",
   "description": "Electron desktop app: kanban board + session panes.",
+  "license": "MIT",
+  "author": "finete",
+  "homepage": "https://github.com/finete/harbormaster",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -15,7 +18,9 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "test:e2e": "playwright test",
     "test": "npm run build && npm run test:e2e",
-    "postinstall": "electron-rebuild --force --only node-pty"
+    "postinstall": "electron-rebuild --force --only node-pty",
+    "dist": "node scripts/bundle-cli.mjs && electron-builder --mac --arm64 --publish never",
+    "icon": "node scripts/make-icon.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
@@ -51,6 +56,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "10.4.20",
     "electron": "33.3.1",
+    "electron-builder": "26.18.0",
     "electron-vite": "2.3.0",
     "postcss": "8.5.1",
     "tailwindcss": "3.4.17",

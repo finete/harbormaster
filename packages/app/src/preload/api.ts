@@ -483,5 +483,21 @@ export interface HarbormasterApi {
      * without focusing it, so its pane attaches to that pty.
      */
     onTaskLaunched(listener: (taskId: string) => void): () => void;
+    /** The newest release found by main's update check, or `null` (none newer, not checked yet, or checks off). */
+    getUpdate(): Promise<UpdateInfo | null>;
+    /** Main's update check found a newer release (startup, then every 6h). */
+    onUpdateAvailable(listener: (update: UpdateInfo) => void): () => void;
+    /** Writes `text` to the system clipboard via main (works without window focus). */
+    copyText(text: string): Promise<void>;
+    /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
+    exportDiagnostics(): Promise<string | null>;
   };
+}
+
+/** A newer Harbormaster release (see main/update-check.ts). */
+export interface UpdateInfo {
+  /** Version without a leading `v`, e.g. `1.2.0`. */
+  version: string;
+  /** The command that upgrades the installed app (`brew upgrade --cask harbormaster`). */
+  command: string;
 }

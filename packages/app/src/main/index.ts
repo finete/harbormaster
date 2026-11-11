@@ -1,5 +1,6 @@
 // Electron main process entry — see /AGENTS.md for the fixed UI stack.
-import { type FSWatcher, mkdirSync, watch } from "node:fs";
+import { execFile } from "node:child_process";
+import { type FSWatcher, mkdirSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
@@ -19,6 +20,7 @@ import {
   createCore,
   DEFAULT_STATE_DIR,
   execFileRunner,
+  HttpVersionAccess,
   isConnectivityError,
   PiHarnessAdapter,
   resolveStatePaths,
@@ -28,8 +30,11 @@ import type { WebContents } from "electron";
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
+  Menu,
+  type MenuItemConstructorOptions,
   Notification,
   net,
   powerMonitor,
@@ -46,8 +51,10 @@ import type {
 } from "../preload/api";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import { createBackgroundLauncher } from "./background-launcher";
+import { resolveCliPath } from "./cli-path";
 import type { ConnectivityState } from "./connectivity-loop";
 import { createConnectivityLoop } from "./connectivity-loop";
+import { buildDiagnosticsZip, diagnosticsFileName } from "./diagnostics";
 import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
@@ -80,6 +87,11 @@ import {
 import { isAllowedRevealPath } from "./reveal-path";
 import { createSpawnHostRunner } from "./spawn-host-client";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
+import {
+  createUpdateChecker,
+  DEFAULT_UPDATE_URL,
+  type UpdateInfo,
+} from "./update-check";
 import { createWakeLog, isWakeLogWorthy } from "./wake-log";
 import { WarmSessionCache } from "./warm-sessions";
 
@@ -1326,7 +1338,188 @@ function registerAppIpc(): void {
   });
 }
 
+/** The `harbormaster` CLI (agent hooks, MCP, diagnostics); `undefined` when not built/bundled. */
+function cliPath(): string | undefined {
+  return resolveCliPath({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    override: process.env.HARBORMASTER_CLI_PATH,
+  });
+}
+
+// "New version available" banner (see update-check.ts). Packaged builds ask
+// GitHub Releases on startup and every 6h; dev and e2e runs check only when
+// `HARBORMASTER_UPDATE_URL` points somewhere (e2e serves a stub release),
+// so no test ever calls the real GitHub API. `HARBORMASTER_UPDATE_CHECK=off`
+// disables it outright.
+const updateUrl =
+  process.env.HARBORMASTER_UPDATE_URL ??
+  (app.isPackaged ? DEFAULT_UPDATE_URL : undefined);
+const releaseVersions = new HttpVersionAccess();
+const updateChecker = createUpdateChecker({
+  currentVersion: app.getVersion(),
+  url: updateUrl ?? DEFAULT_UPDATE_URL,
+  fetchText: (url) => releaseVersions.fetchText(url),
+  onUpdate: (update: UpdateInfo) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "app:update-available", update);
+    }
+  },
+});
+app.on("will-quit", () => updateChecker.stop());
+
+function startUpdateChecks(): void {
+  if (!updateUrl || process.env.HARBORMASTER_UPDATE_CHECK === "off") return;
+  updateChecker.start();
+}
+
+/** Best-effort `harbormaster rules list` for the diagnostics bundle. */
+function rulesListOutput(): Promise<string> {
+  const cli = cliPath();
+  if (!cli) return Promise.resolve("harbormaster CLI not found\n");
+  return new Promise((resolveOutput) => {
+    execFile(
+      cli,
+      ["rules", "list"],
+      {
+        timeout: 5_000,
+        env: { ...process.env, HARBORMASTER_STATE_DIR: activeStateDir },
+      },
+      (error, stdout, stderr) => {
+        resolveOutput(
+          error
+            ? `harbormaster rules list failed: ${error.message}\n${stdout}${stderr}`
+            : stdout,
+        );
+      },
+    );
+  });
+}
+
+/**
+ * "Export diagnostics" (Harbormaster menu and Help menu): zips
+ * <userData>/logs, a redacted config.json and version facts, then asks
+ * where to save it. e2e sets HARBORMASTER_E2E_SAVE_PATH to skip the native
+ * dialog (same pattern as HARBORMASTER_E2E_PICK_FOLDER). Resolves the saved
+ * path, or null when cancelled.
+ */
+async function exportDiagnostics(): Promise<string | null> {
+  const stub = process.env.HARBORMASTER_E2E_SAVE_PATH;
+  let target: string | undefined = stub;
+  if (!target) {
+    const win = BrowserWindow.getFocusedWindow();
+    const options = {
+      title: "Export diagnostics",
+      defaultPath: join(app.getPath("downloads"), diagnosticsFileName()),
+      filters: [{ name: "Zip archive", extensions: ["zip"] }],
+    };
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return null;
+    target = result.filePath;
+  }
+  const cli = cliPath();
+  const zip = buildDiagnosticsZip({
+    logsDir: join(app.getPath("userData"), "logs"),
+    configFile: resolveStatePaths(activeStateDir).configFile,
+    versions: {
+      app: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: process.getSystemVersion(),
+      packaged: app.isPackaged,
+      cli: cli ?? "not found",
+    },
+    rulesList: await rulesListOutput(),
+  });
+  writeFileSync(target, zip);
+  console.log(`[main] diagnostics exported: ${target}`);
+  if (!stub) shell.showItemInFolder(target);
+  return target;
+}
+
+function exportDiagnosticsFromMenu(): void {
+  exportDiagnostics().catch((error) => {
+    console.error("[main] export diagnostics failed:", error);
+    dialog.showErrorBox(
+      "Export diagnostics failed",
+      error instanceof Error ? error.message : String(error),
+    );
+  });
+}
+
+/**
+ * Electron's default menu (app, File, Edit, View, Window), plus "Export
+ * Diagnostics…" in the app menu and a Help menu that replaces Electron's
+ * own links.
+ */
+function installApplicationMenu(): void {
+  const exportItem: MenuItemConstructorOptions = {
+    id: "export-diagnostics",
+    label: "Export Diagnostics…",
+    click: exportDiagnosticsFromMenu,
+  };
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              exportItem,
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          } satisfies MenuItemConstructorOptions,
+        ]
+      : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+    {
+      role: "help",
+      submenu: [
+        {
+          id: "export-diagnostics-help",
+          label: "Export Diagnostics…",
+          click: exportDiagnosticsFromMenu,
+        },
+        {
+          label: "Harbormaster on GitHub",
+          click: () =>
+            void shell.openExternal("https://github.com/finete/harbormaster"),
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function registerReleaseIpc(): void {
+  ipcMain.handle("app:getUpdate", (): UpdateInfo | null => {
+    return updateChecker.latest() ?? null;
+  });
+  ipcMain.handle("app:copyText", (_event, text: unknown): void => {
+    if (typeof text === "string") clipboard.writeText(text);
+  });
+  ipcMain.handle("app:exportDiagnostics", () => exportDiagnostics());
+}
+
 registerCoreIpc();
+registerReleaseIpc();
 registerPtyIpc();
 registerShellIpc();
 registerAppIpc();
@@ -1335,9 +1528,11 @@ registerTerminalHostIpc();
 app.whenReady().then(() => {
   // Test mode: no dock icon per e2e instance (see createWindow).
   if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) app.dock?.hide();
+  installApplicationMenu();
   createWindow();
   startPresencePolling();
   startRefreshLoop();
+  startUpdateChecks();
   wireSleepWakeGating();
   wireWakeLog();
   // Queued launches (from a previous run, or an extension launchTask call

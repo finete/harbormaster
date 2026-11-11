@@ -33,6 +33,7 @@ import type {
   ToAwaitOptions,
   ToDoneForce,
   ToDoneResult,
+  UpdateInfo,
   UpdateTaskInput,
   WorkspaceBinding,
 } from "./api";
@@ -285,6 +286,22 @@ const api: HarbormasterApi = {
       ipcRenderer.on("app:task-launched", handler);
       return () => ipcRenderer.removeListener("app:task-launched", handler);
     },
+    getUpdate: (): Promise<UpdateInfo | null> =>
+      ipcRenderer.invoke("app:getUpdate"),
+    onUpdateAvailable: (
+      listener: (update: UpdateInfo) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        update: UpdateInfo,
+      ): void => listener(update);
+      ipcRenderer.on("app:update-available", handler);
+      return () => ipcRenderer.removeListener("app:update-available", handler);
+    },
+    copyText: (text: string): Promise<void> =>
+      ipcRenderer.invoke("app:copyText", text),
+    exportDiagnostics: (): Promise<string | null> =>
+      ipcRenderer.invoke("app:exportDiagnostics"),
   },
   terminalHost: {
     resolveClipboardPaste: (): Promise<string | null> =>
