@@ -20,6 +20,7 @@ amended to match.
 | R7 | Permissions | Launched (background) tasks bypass permissions by default; visible and switchable per launch; per-repo override. Interactive panes keep the user's own defaults. |
 | R8 | Agent choice | App default → per-repo override → per-task dropdown. Children inherit the parent's agent. Reopen keeps the agent. |
 | R9 | Automation | Event → condition → action rules engine (see "Rules engine" below). Mover engine deleted. |
+| R12a | Signing | Not now. First item once there are more than a handful of users: Apple Developer ID ($99/yr) under `finete`, flip `identity`/`notarize` in electron-builder.yml, turn on electron-updater. Unsigned builds re-prompt folder access under Documents/Desktop/Downloads after every upgrade. |
 | R12 | Build | Apple Silicon only, unsigned, electron-builder zip on GitHub Releases, installed/upgraded only via a Homebrew cask (`finete/homebrew-tap`). In-app banner shows the upgrade command. Pipeline produces `latest-mac.yml` so signing + electron-updater later is a config flip. |
 | R13 | First run installs | Pi's one-file inbox extension is auto-installed into Pi's extension dir, no prompt. Nothing else global (`harbormaster` CLI comes from the cask). |
 | R14 | Onboarding | Four-screen wizard: code root + repository; default agent (detected); enable GitHub (detects `gh auth`); concepts (columns and verbs, rules, inbox, tasks talking to each other). |
@@ -287,7 +288,9 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
 
 ## Onboarding (four screens)
 
-1. Code root + add a repository (detects git repos under the root).
+1. Code root + add a repository (detects git repos under the root). Warns
+   when the root is inside `~/Documents`, `~/Desktop` or `~/Downloads`
+   (unsigned build: folder permission re-prompts) and suggests `~/Code`.
 2. Default agent: detected Pi / Claude Code (with versions), "other CLI"
    with command + args.
 3. Enable GitHub: detects `gh auth status`; explains it powers card moves

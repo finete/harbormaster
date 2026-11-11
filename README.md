@@ -86,6 +86,17 @@ your inbox for approval first.
 
 Pick the default agent in the app; override it per repository or per task.
 
+## Known limitations
+
+- **The build is unsigned.** Homebrew clears the quarantine flag so the app
+  opens, but macOS ties folder permissions to the exact build: if your code
+  root is under `~/Documents`, `~/Desktop` or `~/Downloads`, macOS may ask
+  "Harbormaster would like to access files in your Documents folder" again
+  after every upgrade. Keep code under a plain folder such as `~/Code` and it
+  never asks. Signing (and the automatic updater it unlocks) is planned once
+  there are more than a handful of users.
+- **Apple Silicon only.**
+
 ## Development
 
 Requires Node.js 20+ and macOS (Apple Silicon for packaging).
