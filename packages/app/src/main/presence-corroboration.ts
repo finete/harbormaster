@@ -60,6 +60,20 @@ export interface CorroboratedPresence {
    * for a `"pane-only"` verdict.
    */
   outcome?: { status: "done" | "blocked"; note?: string };
+  /** The live agent's last OSC 7501 status (state + message), under the same trust rule as `outcome`. */
+  status?: {
+    state: NonNullable<PresenceRecord["status"]>["state"];
+    message?: string;
+  };
+}
+
+function statusFrom(
+  status: NonNullable<PresenceRecord["status"]>,
+): NonNullable<CorroboratedPresence["status"]> {
+  return {
+    state: status.state,
+    ...(status.message ? { message: status.message } : {}),
+  };
 }
 
 function endedFrom(ended: PresenceOutcome): PresenceOutcome {
@@ -110,6 +124,9 @@ export function corroboratePresence(
           : {}),
         ...(record.ended ? { ended: endedFrom(record.ended) } : {}),
         ...(record.outcome ? { outcome: outcomeFrom(record.outcome) } : {}),
+        ...(status.live && record.status
+          ? { status: statusFrom(record.status) }
+          : {}),
       };
     }
     // A pane of ours exists, but the record either doesn't exist or points
@@ -133,6 +150,7 @@ export function corroboratePresence(
       ...(record.heartbeatAt ? { heartbeatAt: record.heartbeatAt } : {}),
       ...(record.ended ? { ended: endedFrom(record.ended) } : {}),
       ...(record.outcome ? { outcome: outcomeFrom(record.outcome) } : {}),
+      ...(record.status ? { status: statusFrom(record.status) } : {}),
     };
   }
 

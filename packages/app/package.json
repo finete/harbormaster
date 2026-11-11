@@ -9,10 +9,10 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "prebuild": "npm run build -w @harbormaster/core",
+    "prebuild": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "pretypecheck": "npm run build -w @harbormaster/core",
+    "pretypecheck": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",

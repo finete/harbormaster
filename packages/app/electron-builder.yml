@@ -47,6 +47,9 @@ extraResources:
     to: cli
   - from: resources/bin
     to: bin
+  # The Pi inbox extension source the app auto-installs into ~/.pi (R13).
+  - from: ../extension/src/index.ts
+    to: pi-extension/harbormaster-inbox.ts
 
 mac:
   target:

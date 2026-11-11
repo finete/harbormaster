@@ -23,8 +23,11 @@ import {
   HttpVersionAccess,
   isConnectivityError,
   PiHarnessAdapter,
+  resolveSocketPath,
   resolveStatePaths,
   setProcessRunner,
+  startToolSocketServer,
+  type ToolSocketServer,
 } from "@harbormaster/core";
 import type { WebContents } from "electron";
 import {
@@ -49,6 +52,12 @@ import type {
   TerminalCreateResult,
   ToDoneForce,
 } from "../preload/api";
+import {
+  installPiExtension,
+  piExtensionsDir,
+  resolvePiExtensionSource,
+  type ToolingLocations,
+} from "./agent-tooling";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import { createBackgroundLauncher } from "./background-launcher";
 import { resolveCliPath } from "./cli-path";
@@ -74,6 +83,7 @@ import {
   activeSessionCwds,
   activeSessionPids,
   attachPrimarySession,
+  commandExists,
   createBackgroundPrimarySession,
   createSession,
   detachPrimarySession,
@@ -82,6 +92,7 @@ import {
   getSession,
   lookupPanePid,
   resizeSession,
+  setProgramStatusListener,
   writeToSession,
 } from "./ptySessions";
 import { isAllowedRevealPath } from "./reveal-path";
@@ -207,11 +218,105 @@ app.on("will-quit", () => spawnHost.dispose());
 
 const core = createCore({ stateDir: activeStateDir });
 
+// Where the app's agent-facing pieces live (the `harbormaster` CLI, the Pi
+// inbox extension): absolute paths, the app's PATH is not the shell's.
+const toolingLocations: ToolingLocations = {
+  env: process.env,
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  mainDir: __dirname,
+};
+const cliPath = resolveCliPath({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  override: process.env.HARBORMASTER_CLI_PATH,
+});
+if (!cliPath) {
+  console.error(
+    "[main] harbormaster CLI not found: task sessions start without the Harbormaster tools (build packages/cli)",
+  );
+}
+
 // The Pi harness adapter: builds pane launch specs and reads presence. Core
 // never spawns processes itself (accessor separation) — this is the only
 // place main talks to it, and it only ever calls `buildLaunchSpec`/
 // `presence`, never the presence access layer directly.
-const harness = new PiHarnessAdapter({ stateDir: activeStateDir });
+const harness = new PiHarnessAdapter({
+  stateDir: activeStateDir,
+  ...(cliPath ? { cliPath } : {}),
+});
+
+// Program status (OSC 7501, decision #18): the pty layer parses it out of a
+// task primary's output; core records it. Each report also pushes fresh
+// presence right away instead of waiting out the poll interval.
+setProgramStatusListener({
+  onReport: (taskId, pid, report) => {
+    void core.commands
+      .reportPresence(taskId, {
+        state: report.state,
+        ...(report.message ? { message: report.message } : {}),
+        pid,
+      })
+      .then(() => pollPresenceOnce())
+      .catch((error: unknown) => {
+        console.error(`[presence] report for ${taskId} failed:`, error);
+      });
+  },
+  onExit: (taskId, pid) => {
+    void core.commands
+      .endPresence(taskId, { pid })
+      .then(() => pollPresenceOnce())
+      .catch((error: unknown) => {
+        console.error(`[presence] end for ${taskId} failed:`, error);
+      });
+  },
+});
+
+// The local tool socket (decision #18, R5): `harbormaster mcp` and the CLI
+// reach core through it. Started once the app is ready; closed on quit.
+let toolSocket: ToolSocketServer | undefined;
+async function startToolSocket(): Promise<void> {
+  try {
+    toolSocket = await startToolSocketServer({
+      socketPath: resolveSocketPath(activeStateDir),
+      commands: core.commands,
+    });
+  } catch (error) {
+    console.error("[main] tool socket failed to start:", error);
+  }
+}
+app.on("will-quit", () => {
+  void toolSocket?.close();
+});
+
+/**
+ * First-run install (decision R13): when Pi is installed, copy the bundled
+ * inbox extension into Pi's extensions dir if it is missing or older. A
+ * test instance (`HARBORMASTER_WINDOW_OFFSCREEN`) only ever installs into an
+ * explicit `HARBORMASTER_PI_EXTENSIONS_DIR`, never the real `~/.pi`.
+ */
+function ensurePiExtensionInstalled(): void {
+  const env = process.env;
+  if (
+    env.HARBORMASTER_WINDOW_OFFSCREEN &&
+    !env.HARBORMASTER_PI_EXTENSIONS_DIR
+  ) {
+    return;
+  }
+  if (!commandExists(env.HARBORMASTER_PI_COMMAND || "pi")) return;
+  try {
+    const outcome = installPiExtension({
+      sourcePath: resolvePiExtensionSource(toolingLocations),
+      targetDir: piExtensionsDir(env),
+    });
+    if (outcome === "installed" || outcome === "updated") {
+      console.log(`[main] Pi inbox extension ${outcome}`);
+    }
+  } catch (error) {
+    console.error("[main] installing the Pi inbox extension failed:", error);
+  }
+}
 
 /** Every task across every board column, flattened (groups carry no ordering meaning here). */
 function flattenTasks(columns: BoardColumn[]): Task[] {
@@ -540,20 +645,20 @@ function registerCoreIpc(): void {
     void backgroundLauncher.runPass();
   });
 
-  // In-process message writes (send/approve/claim here) announce themselves;
-  // the extension's writes arrive through `watchMessagingFiles` instead.
+  // In-process message writes (send/approve/claim here, including every
+  // agent tool call over the tool socket) announce themselves; any other
+  // core instance's writes arrive through `watchMessagingFiles` instead.
   core.events.on("messages-changed", () => {
     void messagingPusher.push();
     // A pending message may have a target to wake.
     void backgroundLauncher.runPass();
   });
 
-  // External writers share the state files with this process: the pi
-  // extension's /todev//toawait//todone and the migration CLI write through
-  // their own core instances, which emit events only in *their* process.
-  // Watch the state files and republish a fresh board so in-session commands
-  // reflect here in ~moments instead of on the next 30s refresh tick
-  // (the missing half of the design's "frontends never poll files" rule).
+  // Agents reach core through the tool socket (in this process), but any
+  // other core instance over the same state dir (tests, a future second
+  // client) emits events only in *its* process. Watch the state files and
+  // republish a fresh board so such writes reflect here in ~moments instead
+  // of on the next 30s refresh tick.
   watchStateFiles();
   watchMessagingFiles();
 }
@@ -652,11 +757,10 @@ function watchStateFiles(): void {
             // A half-written file mid-atomic-rename can fail a read; the next
             // watch event (the rename completing) retries.
           });
-        // External writers (the pi extension's own launchTask calls, the
-        // migration CLI) queue launches through their own core instance,
-        // which never emits our `board-changed` event "-" this state-file
-        // watcher push is this process's only signal that a new launch may
-        // be waiting (see background-launcher.ts's matching trigger).
+        // An external core instance's launchTask never emits our
+        // `board-changed` event "-" this state-file watcher push is this
+        // process's only signal that such a launch may be waiting (see
+        // background-launcher.ts's matching trigger).
         void backgroundLauncher.runPass();
       }, 150);
     });
@@ -712,7 +816,7 @@ async function pollPresenceTick(): Promise<void> {
     tasks.map(async (task) => {
       const status = await harness.presence(task.id);
       // Outside-observation corroboration (see presence-corroboration.ts):
-      // cross-checks the extension's self-reported record against the
+      // cross-checks the reported presence record against the
       // app's own pane-pid registry before trusting its turn/outcome
       // semantics.
       const corroborated = corroboratePresence(status, lookupPanePid(task.id));
@@ -740,6 +844,7 @@ async function pollPresenceTick(): Promise<void> {
           // Live self-reported done/blocked verdict (distinct from `ended`
           // "-" see `CorroboratedPresence.outcome`'s doc comment).
           ...(corroborated.outcome ? { outcome: corroborated.outcome } : {}),
+          ...(corroborated.status ? { status: corroborated.status } : {}),
         },
       ] as const;
     }),
@@ -1058,6 +1163,14 @@ function registerPtyIpc(): void {
 
   ipcMain.on("pty:write", (_event, id: string, data: string) => {
     writeToSession(id, data);
+    // The user submitting input into a task's agent (decision #18: this
+    // signal comes from the pty input path, not the agent): resets the
+    // message loop cap and ends "waiting on parent". Enter only, so a
+    // keystroke never costs a state write.
+    const taskId = getSession(id)?.taskId;
+    if (taskId && data.includes("\r")) {
+      void core.commands.recordUserInput(taskId).catch(() => {});
+    }
   });
 
   ipcMain.on("pty:resize", (_event, id: string, cols: number, rows: number) => {
@@ -1339,13 +1452,8 @@ function registerAppIpc(): void {
 }
 
 /** The `harbormaster` CLI (agent hooks, MCP, diagnostics); `undefined` when not built/bundled. */
-function cliPath(): string | undefined {
-  return resolveCliPath({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    appPath: app.getAppPath(),
-    override: process.env.HARBORMASTER_CLI_PATH,
-  });
+function cliPathForTools(): string | undefined {
+  return cliPath;
 }
 
 // "New version available" banner (see update-check.ts). Packaged builds ask
@@ -1376,7 +1484,7 @@ function startUpdateChecks(): void {
 
 /** Best-effort `harbormaster rules list` for the diagnostics bundle. */
 function rulesListOutput(): Promise<string> {
-  const cli = cliPath();
+  const cli = cliPathForTools();
   if (!cli) return Promise.resolve("harbormaster CLI not found\n");
   return new Promise((resolveOutput) => {
     execFile(
@@ -1420,7 +1528,7 @@ async function exportDiagnostics(): Promise<string | null> {
     if (result.canceled || !result.filePath) return null;
     target = result.filePath;
   }
-  const cli = cliPath();
+  const cli = cliPathForTools();
   const zip = buildDiagnosticsZip({
     logsDir: join(app.getPath("userData"), "logs"),
     configFile: resolveStatePaths(activeStateDir).configFile,
@@ -1530,12 +1638,14 @@ app.whenReady().then(() => {
   if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) app.dock?.hide();
   installApplicationMenu();
   createWindow();
+  void startToolSocket();
+  ensurePiExtensionInstalled();
   startPresencePolling();
   startRefreshLoop();
   startUpdateChecks();
   wireSleepWakeGating();
   wireWakeLog();
-  // Queued launches (from a previous run, or an extension launchTask call
+  // Queued launches (from a previous run, or a launch_task call
   // that landed before this app ever started) start right away "-" see
   // background-launcher.ts's "on app ready" trigger.
   void backgroundLauncher.runPass();

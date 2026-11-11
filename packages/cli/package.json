@@ -1,0 +1,26 @@
+{
+  "name": "@harbormaster/cli",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "The `harbormaster` CLI: a thin client of the running app's local socket. Exposes the agent tool catalog as an MCP stdio server (`harbormaster mcp`), as CLI verbs, and as agent hooks.",
+  "bin": {
+    "harbormaster": "bin/harbormaster.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@harbormaster/core": "0.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -9,6 +9,10 @@ import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
+import {
+  ProgramStatusParser,
+  type ProgramStatusReport,
+} from "@harbormaster/core";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { app } from "electron";
@@ -79,6 +83,8 @@ interface PtySessionRecord {
   modes?: TerminalModeTracker;
   /** Pending second half of an attach's repaint nudge (see `forceRepaint`). Cleared by any explicit resize or retirement. */
   repaintTimer?: ReturnType<typeof setTimeout> | undefined;
+  /** OSC 7501 filter of a task primary (see `createProgramStatusFilter`); retiring it reports the exit. */
+  statusFilter?: { dispose: () => void };
 }
 
 /**
@@ -90,6 +96,74 @@ interface PtySessionRecord {
 export const REPAINT_NUDGE_MS = 120;
 
 const sessions = new Map<string, PtySessionRecord>();
+
+/**
+ * Where a task primary's OSC 7501 program status goes (decision #18: the
+ * pty owner parses status and reports it to core; core never sees terminal
+ * bytes). Wired once by main/index.ts to core's `reportPresence` /
+ * `endPresence`.
+ */
+export interface ProgramStatusListener {
+  onReport(taskId: string, pid: number, report: ProgramStatusReport): void;
+  /** The task primary's process exited (pid liveness is the "ended" signal). */
+  onExit(taskId: string, pid: number): void;
+}
+
+let programStatusListener: ProgramStatusListener | undefined;
+
+export function setProgramStatusListener(
+  listener: ProgramStatusListener | undefined,
+): void {
+  programStatusListener = listener;
+}
+
+/** How long a possibly-incomplete trailing 7501 sequence is held before it is passed through as-is. */
+export const PROGRAM_STATUS_HOLD_MS = 100;
+
+/**
+ * Wraps a task primary's raw pty output: strips OSC 7501 reports (reported
+ * to the listener), answers the feature-detection probe by writing the
+ * reply into the pty, and forwards everything else to `forward`. A
+ * sequence split across chunks is held back briefly (see
+ * `PROGRAM_STATUS_HOLD_MS`) so it never reaches the terminal half-parsed.
+ */
+function createProgramStatusFilter(
+  taskId: string,
+  ptyProcess: pty.IPty,
+  forward: (data: string) => void,
+): { feed: (raw: string) => void; dispose: () => void } {
+  const parser = new ProgramStatusParser();
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearHold = (): void => {
+    if (holdTimer !== undefined) clearTimeout(holdTimer);
+    holdTimer = undefined;
+  };
+  return {
+    feed: (raw) => {
+      clearHold();
+      const result = parser.feed(raw);
+      for (const reply of result.replies) {
+        try {
+          ptyProcess.write(reply);
+        } catch {
+          // Already gone; nothing to answer.
+        }
+      }
+      for (const report of result.reports) {
+        programStatusListener?.onReport(taskId, ptyProcess.pid, report);
+      }
+      if (result.output) forward(result.output);
+      if (parser.hasPending) {
+        holdTimer = setTimeout(() => {
+          holdTimer = undefined;
+          const held = parser.flush();
+          if (held) forward(held);
+        }, PROGRAM_STATUS_HOLD_MS);
+      }
+    },
+    dispose: clearHold,
+  };
+}
 
 /**
  * Pane-pid registry: taskId -> the id of its one primary pty session, if
@@ -110,7 +184,7 @@ function defaultShell(): string {
   return process.env.SHELL ?? "/bin/bash";
 }
 
-/** The spec a harness adapter hands a frontend for its launch command (see `@harbormaster/core`'s `LaunchSpec`). Declared locally (not imported) to keep this module's dependency on core to types only. */
+/** The spec a harness adapter hands a frontend for its launch command (see `@harbormaster/core`'s `LaunchSpec`). Declared locally (structural) so callers need not import core's type. */
 export interface LaunchSpecLike {
   command: string;
   args: string[];
@@ -270,9 +344,18 @@ export function createSession(
   // Only task primaries can later be detached/re-attached, so only they need
   // their modes tracked; plain shells skip the scan entirely.
   const modes = registerAsPane ? createTerminalModeTracker() : undefined;
-  const dataDisposable = ptyProcess.onData((data) => {
+  const forward = (data: string): void => {
     modes?.feed(data);
     io.sink(data);
+  };
+  // Only a task primary running the harness reports program status.
+  const statusFilter =
+    registerAsPane && options?.taskId
+      ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
+      : undefined;
+  const dataDisposable = ptyProcess.onData((data) => {
+    if (statusFilter) statusFilter.feed(data);
+    else forward(data);
   });
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
     // Deliver every byte the process wrote before announcing its exit, so
@@ -306,6 +389,7 @@ export function createSession(
     io,
     attached: true,
     ...(registerAsPane && modes ? { taskId: options.taskId, modes } : {}),
+    ...(statusFilter ? { statusFilter } : {}),
   });
   if (registerAsPane && options?.taskId) {
     primaryTaskSessions.set(options.taskId, id);
@@ -388,10 +472,11 @@ export function createBackgroundPrimarySession(
     },
   };
   const modes = createTerminalModeTracker();
-  const dataDisposable = ptyProcess.onData((data) => {
+  const statusFilter = createProgramStatusFilter(taskId, ptyProcess, (data) => {
     modes.feed(data);
     io.sink(data);
   });
+  const dataDisposable = ptyProcess.onData((data) => statusFilter.feed(data));
   const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
     // Attached by now (`attachPrimarySession`)? Deliver its last output
     // ahead of the exit, exactly like a renderer-created session.
@@ -399,6 +484,7 @@ export function createBackgroundPrimarySession(
     if (primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
     }
+
     try {
       onExit(exitCode);
       io.exitSink(exitCode);
@@ -420,6 +506,7 @@ export function createBackgroundPrimarySession(
     taskId,
     modes,
     headless: { terminal: headlessTerminal, serialize },
+    statusFilter,
   });
   primaryTaskSessions.set(taskId, id);
   return { id, pid: ptyProcess.pid };
@@ -671,6 +758,11 @@ function retireSession(id: string): void {
   clearRepaintTimer(session);
   session.dataDisposable.dispose();
   session.exitDisposable.dispose();
+  if (session.statusFilter && session.taskId) {
+    // Exited or disposed: either way the agent process is gone.
+    session.statusFilter.dispose();
+    programStatusListener?.onExit(session.taskId, session.process.pid);
+  }
   // The renderer asked for (or is gone with) this pane: pending output has
   // nowhere to go, and a late timer flush must not outlive the session.
   session.io.batcher?.dispose();

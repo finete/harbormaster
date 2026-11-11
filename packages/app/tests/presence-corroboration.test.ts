@@ -163,4 +163,21 @@ describe("corroboratePresence", () => {
       corroboration: "none",
     });
   });
+
+  it("forwards the live agent's program status only when the record is trusted", () => {
+    const status: PresenceStatus = {
+      live: true,
+      runningTurn: false,
+      record: record({
+        pid: 4242,
+        status: { state: "error", message: "rate limited", at: "t" },
+      }),
+    };
+    expect(
+      corroboratePresence(status, { pid: 4242, alive: true }).status,
+    ).toEqual({ state: "error", message: "rate limited" });
+    expect(
+      corroboratePresence(status, { pid: 9999, alive: true }).status,
+    ).toBeUndefined();
+  });
 });

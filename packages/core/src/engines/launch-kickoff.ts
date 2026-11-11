@@ -18,7 +18,7 @@ export interface LaunchKickoffInput {
  * two (worktree discipline, running checks) and the last two (ask-or-
  * decide, final report) always present; the middle two (commit/push, open a
  * draft PR) only for a repository-backed task. The tool name in point 6 is
- * `harbormaster_report_status` (shipped by the extension, wave 3).
+ * the catalog's `report_status` (see `tools/catalog.ts`).
  */
 export function buildLaunchKickoffPrompt(input: LaunchKickoffInput): string {
   const lines: string[] = [];
@@ -44,9 +44,9 @@ export function buildLaunchKickoffPrompt(input: LaunchKickoffInput): string {
   }
   points.push(
     input.parent
-      ? `If you are genuinely blocked or need a decision, you may ask your parent task (${input.parent.id}) with \`harbormaster_send_to_task\` and then end your turn; it can only answer what its brief settles. Product or scope decisions, or a parent that is unavailable (the send fails), go to the user: stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`
+      ? `If you are genuinely blocked or need a decision, you may ask your parent task (${input.parent.id}) with the Harbormaster \`send_to_task\` tool and then end your turn; it can only answer what its brief settles. Product or scope decisions, or a parent that is unavailable (the send fails), go to the user: stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`
       : `If you are genuinely blocked or need a decision, stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`,
-    "As your FINAL action call `harbormaster_report_status`: `done` with a one-line summary, or `blocked` with the concrete blocker.",
+    "As your FINAL action call the Harbormaster `report_status` tool: `done` with a one-line summary, or `blocked` with the concrete blocker.",
   );
 
   points.forEach((point, index) => {

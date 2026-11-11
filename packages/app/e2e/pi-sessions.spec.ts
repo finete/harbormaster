@@ -26,7 +26,12 @@ import {
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
 import { chooseWhere, submitAs } from "./composer";
-import { fakePiPid, writeShellPi } from "./fake-pi";
+import {
+  fakePiPid,
+  PROBE_ANSWER_FILE,
+  STATUS_CONTROL_FILE,
+  writeStatusPi,
+} from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -165,7 +170,7 @@ test.describe("a missing pi binary falls back to a plain shell with a dismissibl
   });
 });
 
-test.describe("the presence poll surfaces a running badge within one poll interval", () => {
+test.describe("OSC 7501 program status drives the badges: probe answered, working spinner, blocked your move, done idle, error warning", () => {
   let app: ElectronApplication;
   let window: Page;
   let root: string;
@@ -186,7 +191,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
         // Fast presence poll so presence-driven assertions resolve in ms, not seconds.
         HARBORMASTER_PRESENCE_POLL_MS: "250",
-        HARBORMASTER_PI_COMMAND: writeShellPi(root),
+        HARBORMASTER_PI_COMMAND: writeStatusPi(root),
       },
     });
     watchForMainProcessErrors(app, mainProcessErrors);
@@ -200,7 +205,7 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("a presence record written straight through SessionPresenceAccess shows a spinner on the sidebar row within ~5s", async () => {
+  test("the fake agent's OSC 7501 reports move the sidebar row and the card", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await expect(window.getByTestId("new-task-composer")).toBeVisible();
     await window.getByTestId("new-task-title-input").fill("Presence Task");
@@ -215,41 +220,40 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     const rowTestId = await row.getAttribute("data-testid");
     if (!rowTestId) throw new Error("sidebar row missing data-testid");
     const taskId = rowTestId.replace("sidebar-task-row-", "");
+    // The chat's pane runs the fake agent in its scratch directory.
+    await fakePiPid(stateDir, taskId);
+    const scratch = path.join(stateDir, "scratch", taskId);
+    const report = (body: string): void =>
+      writeFileSync(path.join(scratch, STATUS_CONTROL_FILE), body);
 
-    // Writes straight into this run's state dir from the test process
-    // itself — the same access class the harness adapter reads through in
-    // the app's main process (no mock, no IPC bypass: this is exactly the
-    // presence-reporting extension's write path).
-    const presence = new SessionPresenceAccess(path.join(stateDir, "presence"));
-    // The chat's pane runs the fake pi; the record must carry its pid.
-    const pid = await fakePiPid(stateDir, taskId);
-    await presence.register({
-      taskId,
-      sessionPath: "/tmp/fake-session.jsonl",
-      pid: pid,
-      mode: "interactive",
-      at: new Date().toISOString(),
-    });
-    await presence.setTurnActive(taskId, pid, true, new Date().toISOString());
+    // The probe was answered by the app's pty layer (the fake blocks on it).
+    await expect
+      .poll(() => {
+        try {
+          return readFileSync(path.join(scratch, PROBE_ANSWER_FILE), "utf8");
+        } catch {
+          return "";
+        }
+      })
+      .toBe("1b5d373530313b3f07");
 
+    report("state=working");
     await expect(row.getByTestId("sidebar-row-spinner")).toBeVisible({
       timeout: 10_000,
     });
-    // Live-and-working rows also get the activity line and sort first.
     await expect(row.getByTestId("sidebar-row-activity")).toContainText(
       "working",
     );
     await expect(row.getByTestId("sidebar-row-time")).toHaveText("now");
-
     await window.getByTestId("board-button").click();
     await expect(
       cardLocator(window, "Presence Task").getByTestId("badge-running"),
     ).toBeVisible({ timeout: 10_000 });
 
-    // The agent loop ends while the session stays open: pi-home's ● "your
-    // move" — attention styling on the card and the sidebar row, not a
-    // neutral "attached".
-    await presence.setTurnActive(taskId, pid, false, new Date().toISOString());
+    // blocked = waiting on the user: "your move" on the card and the row.
+    report(
+      `state=blocked:kind=question:msg=${Buffer.from("Pick one").toString("base64")}`,
+    );
     const attention = cardLocator(window, "Presence Task").getByTestId(
       "badge-attention",
     );
@@ -259,12 +263,26 @@ test.describe("the presence poll surfaces a running badge within one poll interv
     await expect(row.getByTestId("sidebar-row-attention-dot")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(row.getByTestId("sidebar-row-attention-dot")).toHaveAttribute(
-      "data-status",
-      "attention",
-    );
     await expect(row.getByTestId("sidebar-row-activity")).toContainText(
       "your move",
+    );
+
+    // done = at rest: idle, no amber attention.
+    report("state=done");
+    await expect(row.getByTestId("sidebar-row-idle-dot")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(row.getByTestId("sidebar-row-activity-text")).toHaveText(
+      "idle",
+    );
+
+    // error = at rest with a warning carrying the program's message.
+    report(`state=error:msg=${Buffer.from("rate limited").toString("base64")}`);
+    await expect(row.getByTestId("sidebar-row-error-dot")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(row.getByTestId("sidebar-row-activity-text")).toHaveText(
+      "error: rate limited",
     );
   });
 });

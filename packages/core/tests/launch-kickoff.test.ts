@@ -17,11 +17,11 @@ describe("buildLaunchKickoffPrompt", () => {
     expect(text).toMatch(/4\. Open a DRAFT pull request/);
     expect(text).toMatch(/5\. If you are genuinely blocked/);
     expect(text).toMatch(
-      /6\. As your FINAL action call `harbormaster_report_status`/,
+      /6\. As your FINAL action call the Harbormaster `report_status` tool/,
     );
     expect(text).not.toContain("Launched as a subtask of");
     // A standalone task has no parent to ask: the original wording, unchanged.
-    expect(text).not.toContain("harbormaster_send_to_task");
+    expect(text).not.toContain("send_to_task");
     expect(text).toContain(
       `5. If you are genuinely blocked or need a decision, stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`,
     );
@@ -37,7 +37,7 @@ describe("buildLaunchKickoffPrompt", () => {
     expect(text).not.toMatch(/DRAFT pull request/);
     expect(text).toMatch(/3\. If you are genuinely blocked/);
     expect(text).toMatch(
-      /4\. As your FINAL action call `harbormaster_report_status`/,
+      /4\. As your FINAL action call the Harbormaster `report_status` tool/,
     );
   });
 
@@ -58,7 +58,7 @@ describe("buildLaunchKickoffPrompt", () => {
     });
     expect(text).toMatch(/5\. If you are genuinely blocked/);
     expect(text).toContain(
-      "ask your parent task (parent-1) with `harbormaster_send_to_task` and then end your turn",
+      "ask your parent task (parent-1) with the Harbormaster `send_to_task` tool and then end your turn",
     );
     expect(text).toMatch(
       /Product or scope decisions, or a parent that is unavailable/,
@@ -66,7 +66,7 @@ describe("buildLaunchKickoffPrompt", () => {
     expect(text).toContain(`the user sees your task as "your move"`);
     // Numbering and the final-report point are unchanged.
     expect(text).toMatch(
-      /6\. As your FINAL action call `harbormaster_report_status`/,
+      /6\. As your FINAL action call the Harbormaster `report_status` tool/,
     );
   });
 

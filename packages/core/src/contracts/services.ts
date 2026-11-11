@@ -95,6 +95,16 @@ export interface PresenceAccess {
     at: string,
   ): Promise<void>;
   end(taskId: string, pid: number, at: string): Promise<void>;
+  /**
+   * Atomically replace the task's record with `next(current)` (serialized
+   * with every other mutation): the write path for program-status reports,
+   * whose register-or-update decision is a pure rule
+   * (`applyProgramStatus`). Resolves the record written.
+   */
+  applyReport(
+    taskId: string,
+    next: (current: PresenceRecord | undefined) => PresenceRecord,
+  ): Promise<PresenceRecord>;
   read(taskId: string): Promise<PresenceRecord | undefined>;
   list(): Promise<PresenceRecord[]>;
   acknowledge(taskId: string): Promise<void>;

@@ -154,7 +154,7 @@ describe.skipIf(!gitAvailable)("launchTask", () => {
     expect(task.launchedFromTaskId).toBeUndefined();
     expect(task.launch).toMatchObject({ status: "queued" });
     expect(task.initialPrompt).toContain("Fix the flaky test");
-    expect(task.initialPrompt).toContain("harbormaster_report_status");
+    expect(task.initialPrompt).toContain("`report_status` tool");
     expect(task.branch).toBeDefined();
     const workspace = await f.core.commands.getTaskWorkspace(task.id);
     expect(workspace?.worktreePath).toBeDefined();

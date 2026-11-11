@@ -30,6 +30,38 @@ describe("PiHarnessAdapter", () => {
       expect(spec.env.HARBORMASTER_TASK_ID).toBe("task-1");
       expect(spec.env.HARBORMASTER_STATE_DIR).toBe("/state");
       expect(spec.env.HARBORMASTER).toBe("1");
+      // OSC 7501 without the probe round-trip, and the tool socket.
+      expect(spec.env.PI_PROGRAM_STATUS).toBe("1");
+      expect(spec.env.HARBORMASTER_SOCKET).toBe("/state/harbormaster.sock");
+      // No CLI known: no MCP server is offered.
+      expect(spec.env.HARBORMASTER_MCP_SERVER).toBeUndefined();
+    });
+
+    it("passes the per-session MCP server (absolute CLI path, identity in its env)", () => {
+      const adapter = new PiHarnessAdapter({
+        stateDir: "/state",
+        cliPath: "/opt/hm/bin/harbormaster",
+      });
+      const spec = adapter.buildLaunchSpec({
+        taskId: "task-1",
+        workspacePath: "/work/task-1",
+        stateDir: "/state",
+        session: { mode: "new", sessionId: "sess-1" },
+      });
+      expect(spec.env.HARBORMASTER_CLI).toBe("/opt/hm/bin/harbormaster");
+      expect(JSON.parse(spec.env.HARBORMASTER_MCP_SERVER ?? "")).toEqual({
+        command: "/opt/hm/bin/harbormaster",
+        args: ["mcp"],
+        env: {
+          HARBORMASTER_TASK_ID: "task-1",
+          HARBORMASTER_STATE_DIR: "/state",
+          HARBORMASTER_SOCKET: "/state/harbormaster.sock",
+          HARBORMASTER_SESSION_ID: "sess-1",
+        },
+        cwd: "/work/task-1",
+        exposure: "direct",
+        description: expect.stringContaining("Harbormaster"),
+      });
     });
 
     it("passes an initial prompt through as an argument", () => {

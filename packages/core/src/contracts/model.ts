@@ -180,14 +180,12 @@ export interface Task {
   targetBranch?: string;
   /** Pull-request linkage, once opened; kept current by `CoreCommands.refresh()`. */
   pr?: TaskPullRequest;
-  /** Opaque reference to a tracked issue (Beads/GitHub), resolved in a later phase. */
+  /** Opaque reference to a tracked issue, resolved in a later phase. */
   issueRef?: string;
   /**
-   * Idempotency marker set by `migration/` when this task was imported from
-   * pi-home: the source pi-home Beads issue id (permanent tasks) or
-   * temporary-workspace id (scratch tasks). Re-running the migration tool
-   * matches on this to skip already-imported tasks. Unset for tasks created
-   * natively in Harbormaster.
+   * Legacy: the pi-home id of a task imported by the (since removed)
+   * pi-home migration tool. Kept so existing state files round-trip; nothing
+   * sets it anymore.
    */
   pihomeIssueId?: string;
   /** Set only while `state === "awaiting"`; cleared on any move out of it. */
@@ -339,7 +337,7 @@ export interface PresenceRecord {
   /** Whether an agent turn is running right now. */
   runningTurn?: boolean;
   /**
-   * Self-reported done/blocked verdict from `harbormaster_report_status`
+   * Self-reported done/blocked verdict from `report_status`
    * while the process is STILL LIVE (see `PresenceAccess.reportOutcome`):
    * recorded without ending the attachment, so the task stays live ("your
    * move" for a finished/blocked child) and the card can show the note as
@@ -351,6 +349,16 @@ export interface PresenceRecord {
   outcome?: { status: "done" | "blocked"; note?: string; at: string };
   /** Present once the attachment ended; absence + fresh heartbeat = live. */
   ended?: PresenceOutcome;
+  /**
+   * The program's last OSC 7501 report (decision #18), as recorded by
+   * `CoreCommands.reportPresence`. `runningTurn` is derived from it
+   * (`working`); `blocked` is "your move", `error` carries a warning.
+   */
+  status?: {
+    state: "idle" | "working" | "blocked" | "done" | "error";
+    message?: string;
+    at: string;
+  };
 }
 
 /**

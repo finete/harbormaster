@@ -19,6 +19,7 @@ import {
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
+  derivePresenceActivity,
 } from "../lib/task-status-lines";
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
@@ -113,8 +114,35 @@ export function StatusDot({
   /** Live but idle because it asked its parent (task messaging): a neutral dot instead of the amber "your move" one. */
   waitingOnParent?: boolean;
 }): JSX.Element {
-  if (presence?.runningTurn) {
+  const activity = derivePresenceActivity(presence, waitingOnParent);
+  if (activity === "working") {
     return <RunningDot />;
+  }
+  if (activity === "error") {
+    return (
+      <span
+        className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+        data-testid="sidebar-row-error-dot"
+        data-status="error"
+        role="img"
+        aria-label="Agent stopped with an error"
+      >
+        <span className="h-2 w-2 rounded-full bg-red-400" />
+      </span>
+    );
+  }
+  if (activity === "idle" && !waitingOnParent) {
+    return (
+      <span
+        className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+        data-testid="sidebar-row-idle-dot"
+        data-status="idle"
+        role="img"
+        aria-label="Agent idle"
+      >
+        <span className="h-2 w-2 rounded-full bg-emerald-400/70" />
+      </span>
+    );
   }
   if (presence?.live && waitingOnParent) {
     return (
@@ -294,14 +322,16 @@ export function SidebarTaskRow({
     now,
   );
   const waiting = messaging.waitingOnParent !== undefined;
-  const activity = presence?.runningTurn
-    ? "working…"
-    : presence?.live
-      ? waiting
-        ? "idle"
-        : "your move"
-      : undefined;
-  const attention = !presence?.runningTurn && !!presence?.live && !waiting;
+  const presenceActivity = derivePresenceActivity(presence, waiting);
+  const activity =
+    presenceActivity === "working"
+      ? "working…"
+      : presenceActivity === "your-move"
+        ? "your move"
+        : presenceActivity === "error"
+          ? `error${presence?.status?.message ? `: ${presence.status.message}` : ""}`
+          : presenceActivity;
+  const attention = presenceActivity === "your-move";
   const outcome = deriveOutcomeLine(presence);
   const launchMarker = deriveLaunchMarker(task);
   const [draftTitle, setDraftTitle] = useState(task.title);
@@ -586,7 +616,9 @@ export function SidebarTaskRow({
               className={cn(
                 "truncate",
                 attention && "font-medium text-amber-300",
+                presenceActivity === "error" && "text-red-300",
               )}
+              data-testid="sidebar-row-activity-text"
             >
               {activity}
             </span>

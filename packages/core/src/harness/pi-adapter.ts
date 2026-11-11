@@ -18,7 +18,10 @@ import type {
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
 import { SystemClock } from "../utilities/defaults.js";
-import { resolveStatePaths } from "../utilities/state-paths.js";
+import {
+  resolveSocketPath,
+  resolveStatePaths,
+} from "../utilities/state-paths.js";
 import {
   derivePresenceStatus,
   type PresenceLivenessOptions,
@@ -41,6 +44,15 @@ export interface PiHarnessAdapterOptions {
   isAlive?: (pid: number) => boolean;
   /** Model-catalog access (`pi --list-models` + Pi settings); injectable for tests. */
   models?: HarnessModelCatalogAccess;
+  /**
+   * Absolute path of the `harbormaster` CLI executable (the app's PATH is
+   * not the user's shell PATH, so never a bare name). When set, every
+   * launch gets the per-session MCP server (`harbormaster mcp`) in
+   * `HARBORMASTER_MCP_SERVER`, which the Harbormaster Pi extension registers
+   * for the pane's own session (`pi.registerMcpServer`), plus
+   * `HARBORMASTER_CLI` for hooks and shells.
+   */
+  cliPath?: string;
 }
 
 /** Marker env var every launched Pi session can check to detect it is Harbormaster-hosted. */
@@ -53,6 +65,39 @@ const SESSION_ID_ENV = "HARBORMASTER_SESSION_ID";
 const SESSION_PATH_ENV = "HARBORMASTER_SESSION_PATH";
 /** Overrides the launched command (and only the command) for e2e: a tiny fake binary stands in for `pi`. */
 const PI_COMMAND_ENV = "HARBORMASTER_PI_COMMAND";
+/** The app's local tool socket (see `transport/`): what the CLI, the MCP server and the extension talk to. */
+const SOCKET_ENV = "HARBORMASTER_SOCKET";
+/** Absolute path of the `harbormaster` CLI. */
+const CLI_ENV = "HARBORMASTER_CLI";
+/** JSON `mcpServers` entry for the per-session `harbormaster mcp` server (see `piMcpServerConfig`). */
+const MCP_SERVER_ENV = "HARBORMASTER_MCP_SERVER";
+/** Pi reports OSC 7501 program status without waiting for the probe round-trip (decision #18). */
+const PROGRAM_STATUS_ENV = "PI_PROGRAM_STATUS";
+
+/** The MCP server name tools appear under in Pi (`mcp__harbormaster__<tool>`). */
+export const HARBORMASTER_MCP_SERVER_NAME = "harbormaster";
+
+/**
+ * The per-session `mcpServers` entry for `harbormaster mcp` (Pi's `mcp.json`
+ * shape, as `pi.registerMcpServer` takes it). Identity travels in the
+ * server's own env, never in tool arguments; `direct` exposure declares the
+ * catalog to the model like built-in tools.
+ */
+export function piMcpServerConfig(input: {
+  cliPath: string;
+  env: Record<string, string>;
+  cwd: string;
+}): Record<string, unknown> {
+  return {
+    command: input.cliPath,
+    args: ["mcp"],
+    env: input.env,
+    cwd: input.cwd,
+    exposure: "direct",
+    description:
+      "Harbormaster: report this task's status, launch and poll tasks, find tasks and message them.",
+  };
+}
 
 /**
  * Real-world default pid probe: a process that no longer exists cannot be
@@ -172,6 +217,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
   private readonly models: HarnessModelCatalogAccess;
   private readonly clock: Clock;
   private readonly livenessOptions: PresenceLivenessOptions;
+  private readonly cliPath: string | undefined;
 
   constructor(options: PiHarnessAdapterOptions = {}) {
     this.presenceAccess =
@@ -182,6 +228,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
     this.clock = options.clock ?? new SystemClock();
     this.livenessOptions = { isAlive: options.isAlive ?? defaultIsAlive };
     this.models = options.models ?? new PiModelCatalogAccess();
+    this.cliPath = options.cliPath;
   }
 
   async defaults(): Promise<
@@ -218,7 +265,25 @@ export class PiHarnessAdapter implements HarnessAdapter {
       // so a child can never stomp the pane's presence record with its own
       // short-lived pid (the grey-dot-while-working bug).
       ...sessionIdentityEnv(input.session),
+      [SOCKET_ENV]: resolveSocketPath(input.stateDir),
+      [PROGRAM_STATUS_ENV]: "1",
     };
+    if (this.cliPath) {
+      env[CLI_ENV] = this.cliPath;
+      const identity: Record<string, string> = {
+        [TASK_ID_ENV]: input.taskId,
+        [STATE_DIR_ENV]: input.stateDir,
+        [SOCKET_ENV]: env[SOCKET_ENV] as string,
+      };
+      if (env[SESSION_ID_ENV]) identity[SESSION_ID_ENV] = env[SESSION_ID_ENV];
+      env[MCP_SERVER_ENV] = JSON.stringify(
+        piMcpServerConfig({
+          cliPath: this.cliPath,
+          env: identity,
+          cwd: input.workspacePath,
+        }),
+      );
+    }
     return {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
       // instead of a real `pi` install; unset (the normal case) runs `pi`.
