@@ -9,7 +9,7 @@ import type {
   AwaitingKind,
   TaskPullRequest,
   TaskState,
-} from "../contracts/model.js";
+} from "../../../src/contracts/model.js";
 
 export type PullRequestObservationOutcome =
   | "stay"

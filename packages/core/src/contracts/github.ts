@@ -30,6 +30,36 @@ export interface PullRequestStatus {
   /** `targetBranch` is absent when GitHub did not report the PR's base branch. */
   mergeCommit?: { oid: string; targetBranch?: string; url: string };
   checkedAt: string;
+  // Rules-engine facts (the `github` source); absent when the backend did
+  // not report them.
+  /** The PR's head branch. */
+  headRefName?: string;
+  mergedAt?: string;
+  /** GitHub's `closed`: true for closed *and* merged PRs. */
+  closed?: boolean;
+  /** PR author login. */
+  author?: string;
+  /** Whether the authenticated `gh` user opened the PR. */
+  viewerIsAuthor?: boolean;
+  /** Head commit's check rollup, lowercased (`success`, `failure`, `pending`, `error`, `expected`), `none` when there are no checks. */
+  checks?: string;
+  /** Review threads not yet resolved. */
+  unresolvedThreads?: number;
+  /** Latest author activity: head commit, author comments/reviews (ISO). */
+  lastAuthorActivityAt?: string;
+  /** Latest human non-author review or comment (ISO). */
+  lastReviewerActivityAt?: string;
+}
+
+/** One open PR found by a GitHub search (`searchPullRequests`). */
+export interface PullRequestSearchHit {
+  /** Normalized `host/owner/repo`. */
+  repository: string;
+  number: number;
+  url: string;
+  title: string;
+  author?: string;
+  updatedAt?: string;
 }
 
 /**
@@ -87,6 +117,17 @@ export interface PullRequestAccess {
     startOid: string,
     limit: number,
   ): Promise<CommitLogEntry[]>;
+  /**
+   * One PR by number (any state), with `headRefName` and
+   * `viewerIsAuthor`: what a reviewer task needs to check out the PR head.
+   * Optional: without it reviewer tasks cannot be created from a PR.
+   */
+  view?(
+    repositoryId: string,
+    pullRequestNumber: number,
+  ): Promise<PullRequestStatus>;
+  /** Open PRs matching a GitHub search query (e.g. `review-requested:@me`); optional. */
+  searchPullRequests?(query: string): Promise<PullRequestSearchHit[]>;
 }
 
 /**

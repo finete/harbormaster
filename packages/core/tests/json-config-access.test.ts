@@ -21,8 +21,8 @@ describe("JsonConfigAccess", () => {
     const access = new JsonConfigAccess(path);
     const config = await access.load();
     expect(config.automation).toBe(true);
-    // Written out explicitly (pi-home parity) so users see what to reorder.
-    expect(config.movers).toEqual(["github-review", "deployment-pipeline"]);
+    // Board automation lives in rules files now: no `movers` key.
+    expect(config).not.toHaveProperty("movers");
     expect(config.codeRoot).toBe(join(homedir(), "Code"));
     expect(config.branchPrefix).toBe("");
 
@@ -143,9 +143,11 @@ describe("JsonConfigAccess", () => {
     expect(repository?.futureField).toBe("kept");
   });
 
-  it("distinguishes absent movers (defaults) from an explicit empty list, and parses per-repository movers", async () => {
+  it("ignores the retired movers lists in the live config but reports them for the rules migration", async () => {
     await writeFile(path, JSON.stringify({ codeRoot: "/tmp/code" }));
-    expect((await new JsonConfigAccess(path).load()).movers).toBeUndefined();
+    expect(await new JsonConfigAccess(path).legacyMoverOrders()).toEqual({
+      repositories: {},
+    });
 
     await writeFile(
       path,
@@ -154,14 +156,42 @@ describe("JsonConfigAccess", () => {
         repositories: { "github.com/acme/x": { movers: ["github-review"] } },
       }),
     );
-    const config = await new JsonConfigAccess(path).load();
-    expect(config.movers).toEqual([]);
-    expect(config.repositories?.["github.com/acme/x"]?.movers).toEqual([
-      "github-review",
-    ]);
+    const access = new JsonConfigAccess(path);
+    const config = await access.load();
+    expect(config).not.toHaveProperty("movers");
+    expect(config.repositories?.["github.com/acme/x"]).not.toHaveProperty(
+      "movers",
+    );
+    expect(await access.legacyMoverOrders()).toEqual({
+      global: [],
+      repositories: { "github.com/acme/x": ["github-review"] },
+    });
   });
 
-  it("rejects stage options without a hook and duplicate mover names at load", async () => {
+  it("parses per-source settings and rejects malformed ones", async () => {
+    await writeFile(
+      path,
+      JSON.stringify({
+        sources: {
+          github: { settings: { watchReviewRequests: true } },
+          "version-endpoint": { enabled: false },
+        },
+      }),
+    );
+    expect((await new JsonConfigAccess(path).load()).sources).toEqual({
+      github: { settings: { watchReviewRequests: true } },
+      "version-endpoint": { enabled: false },
+    });
+    await writeFile(
+      path,
+      JSON.stringify({ sources: { github: { enabled: 1 } } }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      "sources.github.enabled",
+    );
+  });
+
+  it("rejects stage options without a hook at load", async () => {
     await writeFile(
       path,
       JSON.stringify({
@@ -177,12 +207,6 @@ describe("JsonConfigAccess", () => {
     await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
       "options requires a hook",
     );
-
-    await writeFile(
-      path,
-      JSON.stringify({ movers: ["github-review", "github-review"] }),
-    );
-    await expect(new JsonConfigAccess(path).load()).rejects.toThrow("twice");
   });
 
   it("rejects an empty stages array and duplicate stage ids", async () => {

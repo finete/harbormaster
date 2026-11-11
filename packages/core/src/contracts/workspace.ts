@@ -112,6 +112,19 @@ export interface GitWorktreeAccess {
     baseRef: string,
   ): Promise<WorktreeInfo>;
   /**
+   * A worktree for an existing pull request's head (reviewer tasks, or
+   * continuing an open PR): fetches `pull/<n>/head` from origin and checks
+   * `branch` out under the task worktrees root — creating it at the PR
+   * head when it does not exist locally, else checking the local branch
+   * out as-is (`createdBranch: false`, so a rollback must not delete it).
+   * Optional: without it PR-bound tasks cannot be started.
+   */
+  checkoutPullRequest?(
+    repo: RepositoryInfo,
+    branch: string,
+    pullRequestNumber: number,
+  ): Promise<{ worktree: WorktreeInfo; createdBranch: boolean }>;
+  /**
    * Remove a worktree. Refuses when the worktree has uncommitted changes
    * (staged, unstaged, or untracked) unless `force` is true.
    */

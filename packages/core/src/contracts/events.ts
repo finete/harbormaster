@@ -16,6 +16,9 @@ export interface PresenceChangedPayload {
   record: PresenceRecord | undefined;
 }
 
+/** The inbox changed (an item was added, resolved or snoozed); re-read it with `listInbox`. */
+export type InboxChangedPayload = Record<string, never>;
+
 export interface MessagesChangedPayload {
   /** Tasks whose messaging state may have changed (targets and task senders). */
   taskIds: string[];
@@ -27,6 +30,7 @@ export interface CoreEventMap {
   "task-changed": TaskChangedPayload;
   "presence-changed": PresenceChangedPayload;
   "messages-changed": MessagesChangedPayload;
+  "inbox-changed": InboxChangedPayload;
 }
 
 export type CoreEventName = keyof CoreEventMap;

@@ -83,12 +83,24 @@ export interface AwaitingKindDefinition {
   onEnter?(context: AwaitingKindEnterContext): Promise<AwaitingKindEnterResult>;
 }
 
+/** A reviewer task works on someone else's PR: it never pushes, opens or merges one. */
+function isReviewerTask(task: Task): boolean {
+  return task.pr?.role === "reviewer";
+}
+
 const reviewKind: AwaitingKindDefinition = {
   id: "review",
   label: "Review",
   description: "Waiting on a pull-request review",
   fields: [],
   assess(task) {
+    if (isReviewerTask(task)) {
+      return {
+        available: false,
+        reason:
+          "it reviews someone else's PR (it never pushes or opens one); await the author's response instead",
+      };
+    }
     if (task.awaiting?.kind === "deploy") {
       return {
         available: false,
@@ -110,6 +122,12 @@ const reviewKind: AwaitingKindDefinition = {
   // reuse the PR), so a GitHub failure leaves the task untouched. A
   // repository-less task has nothing to push and simply waits.
   async onEnter({ task, resolveWorkspace, worktrees, pullRequests }) {
+    // Guard: a reviewer task never pushes or opens a PR, whoever asks.
+    if (isReviewerTask(task)) {
+      throw new Error(
+        "A reviewer task never pushes or opens a pull request; await the author's response instead",
+      );
+    }
     if (!task.repositoryId) return {};
     if (!task.branch) {
       throw new Error(
@@ -176,6 +194,12 @@ const deployKind: AwaitingKindDefinition = {
         reason: "it needs a repository-backed task with a pull request",
       };
     }
+    if (isReviewerTask(task)) {
+      return {
+        available: false,
+        reason: "it reviews someone else's PR (it never merges one)",
+      };
+    }
     if (task.awaiting?.kind === "deploy") {
       return { available: false, reason: "it is already awaiting deployment" };
     }
@@ -209,8 +233,11 @@ const deployKind: AwaitingKindDefinition = {
   },
   // pi-home's `/towaitprod` (`awaitProduction`): merge a still-open PR
   // (squash), refuse anything not merged afterwards, then wait at the
-  // pipeline's entry stage. Stage hooks/movers take it from there.
+  // pipeline's entry stage. The rules (version-endpoint source) take it from there.
   async onEnter({ task, resolveWorkspace, pullRequests }) {
+    if (isReviewerTask(task)) {
+      throw new Error("A reviewer task never merges a pull request");
+    }
     if (!task.repositoryId || !task.branch) {
       throw new Error(
         `Deployment requires a repository-backed task with a branch: ${task.id}`,
@@ -247,9 +274,37 @@ const deployKind: AwaitingKindDefinition = {
   },
 };
 
+/**
+ * Reviewer tasks: the review is submitted, now the PR author has to push or
+ * reply (the default `reviewer-author-activity` rule returns the task to
+ * Dev when they do). No side effect.
+ */
+const authorResponseKind: AwaitingKindDefinition = {
+  id: "author-response",
+  label: "Author response",
+  description: "Reviewed; waiting on the PR author to push or reply",
+  fields: [],
+  assess(task) {
+    if (!task.pr) {
+      return {
+        available: false,
+        reason: "it needs a pull request to review",
+      };
+    }
+    if (!isReviewerTask(task)) {
+      return {
+        available: false,
+        reason: "only a reviewer task (someone else's PR) waits on its author",
+      };
+    }
+    return { available: true };
+  },
+  awaitingFor: () => ({ kind: "author-response" }),
+};
+
 /** Built-in awaiting kinds, in picker order; the first is the default. */
 export const builtinAwaitingKinds: readonly AwaitingKindDefinition[] =
-  Object.freeze([reviewKind, slackKind, deployKind]);
+  Object.freeze([reviewKind, slackKind, deployKind, authorResponseKind]);
 
 /** The kind a picker preselects (the fast path). */
 export const DEFAULT_AWAITING_KIND_ID: AwaitingKindId = "review";

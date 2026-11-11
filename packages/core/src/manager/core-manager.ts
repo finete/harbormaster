@@ -4,12 +4,6 @@
 // `CoreCommands`; frontends never see anything beneath this layer.
 
 import type {
-  BoardMove,
-  MoverHelpers,
-  MoverInput,
-  MoverTaskView,
-} from "../contracts/addons.js";
-import type {
   AwaitingKindOption,
   CoreCommands,
   CreateTaskInput,
@@ -41,6 +35,13 @@ import type {
   SessionLaunch,
 } from "../contracts/harness.js";
 import type {
+  InboxAccess,
+  InboxItem,
+  ListInboxOptions,
+  ResolveInboxItemOptions,
+  ResolveInboxItemResult,
+} from "../contracts/inbox.js";
+import type {
   ApproveMessageEdits,
   FindTasksOptions,
   MessageSender,
@@ -56,6 +57,7 @@ import type {
   BoardColumn,
   DeploymentStageConfig,
   GlobalConfig,
+  PullRequestRole,
   Task,
   TaskLaunch,
   TaskPullRequest,
@@ -70,6 +72,19 @@ import {
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
 } from "../contracts/model.js";
+import type {
+  AddonAccess,
+  AddonInfo,
+  AuditEntry,
+  AuditLogAccess,
+  CreateTaskActionInput,
+  ListEventsFilter,
+  RulesCheckInput,
+  RulesCheckResult,
+  RulesFileAccess,
+  RulesListing,
+  SourceStateAccess,
+} from "../contracts/rules.js";
 import type {
   Clock,
   ConfigAccess,
@@ -117,15 +132,9 @@ import {
   resolveDeliveredMode,
   selectMessagesToPrune,
 } from "../engines/messaging.js";
-import {
-  activeMoverOrder,
-  arbitrateMove,
-  automationConfigProblems,
-  builtinAutomationNames,
-  builtinHooks,
-  builtinMovers,
-  effectivePipeline,
-} from "../engines/movers/index.js";
+import { parsePullRequestUrl } from "../engines/pull-request-url.js";
+import type { ResolvedMove } from "../engines/rules/evaluation.js";
+import { effectivePipeline } from "../engines/rules/views.js";
 import {
   assertAllowedTransition,
   assertMayReturnToDev,
@@ -134,6 +143,11 @@ import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
+import {
+  type ActionResult,
+  type RuleActionExecutor,
+  RulesRuntime,
+} from "./rules-runtime.js";
 
 export interface CoreManagerDependencies {
   tasks: TaskStateAccess;
@@ -169,6 +183,20 @@ export interface CoreManagerDependencies {
   attachments?: TaskAttachmentAccess;
   /** Presence registry written by `reportPresence` / `endPresence` / `reportTaskOutcome` (`createCore` supplies it). */
   presence?: PresenceAccess;
+  /**
+   * Rules-engine storage (rules dir, source state, audit log; addons
+   * optional). Optional so hand-built managers keep compiling: without it
+   * `refresh()` runs no automation and the rules commands throw "rules
+   * are not configured" (`createCore` always supplies it).
+   */
+  rules?: {
+    files: RulesFileAccess;
+    state: SourceStateAccess;
+    audit: AuditLogAccess;
+    addons?: AddonAccess;
+  };
+  /** Persisted inbox; inbox commands throw "inbox is not configured" without it. */
+  inbox?: InboxAccess;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -212,8 +240,6 @@ type PrefetchedPullRequest =
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
   private refreshInFlight: Promise<RefreshResult> | undefined;
-  /** Serialized config whose problems were last reported (once per distinct config). */
-  private lastValidatedConfig: string | undefined;
   /** Last reported done-cleanup retry failure per task (dedupe). */
   private readonly cleanupWarnings = new Map<string, string>();
   /** Registered folders resolved to repositories (see `locationEntries`). */
@@ -221,7 +247,41 @@ export class CoreManager implements CoreCommands {
     | { at: number; entries: Array<{ path: string; repo?: RepositoryInfo }> }
     | undefined;
 
-  constructor(private readonly deps: CoreManagerDependencies) {}
+  /** The rules engine's tick/check/list workflow (see manager/rules-runtime.ts). */
+  private readonly rules: RulesRuntime | undefined;
+
+  constructor(private readonly deps: CoreManagerDependencies) {
+    this.rules = deps.rules
+      ? new RulesRuntime({
+          rules: deps.rules.files,
+          state: deps.rules.state,
+          audit: deps.rules.audit,
+          ...(deps.rules.addons ? { addons: deps.rules.addons } : {}),
+          config: deps.config,
+          now: () => deps.clock.now(),
+          services: {
+            github: {
+              containsCommit: (repositoryId, ancestor, descendant) =>
+                deps.pullRequests.containsCommit(
+                  repositoryId,
+                  ancestor,
+                  descendant,
+                ),
+              commitLog: (repositoryId, start, limit) =>
+                deps.pullRequests.commitLog(repositoryId, start, limit),
+              ...(deps.pullRequests.searchPullRequests
+                ? {
+                    searchPullRequests: (query: string) =>
+                      deps.pullRequests.searchPullRequests?.(query) ??
+                      Promise.resolve([]),
+                  }
+                : {}),
+            },
+            http: { fetchText: (url) => deps.versions.fetchText(url) },
+          },
+        })
+      : undefined;
+  }
 
   async listBoard(): Promise<BoardColumn[]> {
     const tasks = await this.deps.tasks.listTasks();
@@ -442,6 +502,33 @@ export class CoreManager implements CoreCommands {
     const repo = where.kind === "repository" ? where.repo : undefined;
     const baseRef = repo ? input.baseRef?.trim() || undefined : undefined;
 
+    // A PR-bound task (reviewer tasks): the PR's head branch is the task's
+    // branch, and the PR is known from the start.
+    let pr: TaskPullRequest | undefined;
+    if (input.pullRequest !== undefined) {
+      if (!repo) {
+        throw new Error("A pull-request task needs a repository");
+      }
+      if (!this.deps.pullRequests.view) {
+        throw new Error("Pull-request tasks need GitHub access");
+      }
+      const status = await this.deps.pullRequests.view(
+        repo.id,
+        input.pullRequest,
+      );
+      if (!status.headRefName) {
+        throw new Error(
+          `Pull request #${input.pullRequest} has no head branch`,
+        );
+      }
+      branch = status.headRefName;
+      pr = toTaskPullRequest(
+        status,
+        repo.defaultBranch,
+        input.role ?? roleFromViewer(status.viewerIsAuthor) ?? "author",
+      );
+    }
+
     if (repo) {
       // A parked (backlog) task records only what it will need later: the
       // branch is derived when it is actually started (`startTask`), so a
@@ -470,6 +557,7 @@ export class CoreManager implements CoreCommands {
       ...(targetBranch !== undefined ? { targetBranch } : {}),
       ...(baseRef ? { baseRef } : {}),
       ...(parent ? { parentTaskId: parent.id } : {}),
+      ...(pr ? { pr } : {}),
       ...agentFields(input),
       createdAt: now,
       updatedAt: now,
@@ -487,6 +575,7 @@ export class CoreManager implements CoreCommands {
           undo: () => this.deps.tasks.removeTask(id),
         },
         baseRef ?? repo.defaultBranch,
+        pr?.number,
       );
     } else if (startNow && where.kind === "folder") {
       await this.provisionInPlaceWorkspace(id, where.path, now, {
@@ -562,6 +651,8 @@ export class CoreManager implements CoreCommands {
         undo: () => this.deps.tasks.replaceTask(task),
       },
       task.baseRef ?? repo.defaultBranch,
+      // A PR-bound task (created with `pullRequest`) checks its PR head out.
+      task.pr && task.branch ? task.pr.number : undefined,
     );
     await this.publishTaskChange(next);
     return next;
@@ -617,20 +708,41 @@ export class CoreManager implements CoreCommands {
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
     /** Branch the worktree off this ref instead of the repository's default branch (`launchTask`'s `baseBranch: "parent"`). */
     baseRef: string = repo.defaultBranch,
+    /** Check out this pull request's head as `branch` instead (PR-bound tasks). */
+    pullRequestNumber?: number,
   ): Promise<void> {
     // Branch collision, dirty baseRef, missing repo, ... — createTaskWorktree
     // itself guarantees no leftover directory/bookkeeping on failure, so
     // there is nothing to clean up on this path beyond rethrowing.
-    const worktree = await this.deps.worktrees.createTaskWorktree(
-      repo,
-      branch,
-      baseRef,
-    );
+    let worktree: WorktreeInfo;
+    let createdBranch = true;
+    if (pullRequestNumber !== undefined) {
+      if (!this.deps.worktrees.checkoutPullRequest) {
+        throw new Error("Pull-request checkouts are not supported here");
+      }
+      const checkout = await this.deps.worktrees.checkoutPullRequest(
+        repo,
+        branch,
+        pullRequestNumber,
+      );
+      worktree = checkout.worktree;
+      createdBranch = checkout.createdBranch;
+    } else {
+      worktree = await this.deps.worktrees.createTaskWorktree(
+        repo,
+        branch,
+        baseRef,
+      );
+    }
     // Undo both halves of `git worktree add -b`: the directory and the
     // freshly-created (commit-less) branch, so a retry never collides with
-    // a leftover ref.
+    // a leftover ref. A pre-existing local branch is never deleted.
     const removeWorktree = () =>
-      this.discardTaskWorktree(repo, worktree.path, branch);
+      createdBranch
+        ? this.discardTaskWorktree(repo, worktree.path, branch)
+        : this.deps.worktrees
+            .removeWorktree(repo, worktree.path, true)
+            .catch(() => {});
 
     try {
       await task.persist();
@@ -1172,7 +1284,11 @@ export class CoreManager implements CoreCommands {
         ...fresh,
         ...(entered.pullRequest
           ? {
-              pr: toTaskPullRequest(entered.pullRequest, entered.targetBranch),
+              pr: toTaskPullRequest(
+                entered.pullRequest,
+                entered.targetBranch,
+                fresh.pr?.role,
+              ),
             }
           : {}),
         state: "awaiting",
@@ -1196,7 +1312,7 @@ export class CoreManager implements CoreCommands {
         task.repositoryId
           ? config.repositories?.[task.repositoryId]?.deployment
           : undefined,
-        builtinAutomationNames,
+        this.rules?.knownSourceIds() ?? new Set<string>(),
       )?.stages ?? []
     );
   }
@@ -1428,7 +1544,7 @@ export class CoreManager implements CoreCommands {
     protectedPaths: readonly string[],
   ): Promise<RefreshResult> {
     const config = await this.deps.config.load();
-    const warnings: string[] = [...this.configWarningsOnce(config)];
+    const warnings: string[] = [];
     // Connectivity-class failures (offline, DNS down, ...) are counted here
     // instead of pushed onto `warnings`: one tick talking to a dead network
     // produces one `connectivity` marker, never a per-task warning (see
@@ -1476,18 +1592,37 @@ export class CoreManager implements CoreCommands {
       },
     );
     const prefetched = await this.prefetchPullRequests(observed, repositories);
+    // This tick's PR observations, by task id, for the `github` source.
+    const observations = new Map<string, { status?: PullRequestStatus }>();
     await forEachConcurrently(observed, REFRESH_CONCURRENCY, async (task) => {
-      const moved = await this.refreshTask(
+      const patched = await this.refreshTask(
         task,
-        config,
         repositories,
-        protectedPaths,
         warnings,
         connectivity,
+        observations,
         prefetched.get(task.id),
       );
-      if (moved) changed = true;
+      if (patched) changed = true;
     });
+
+    // Board automation: the rules engine (sources → events → rules →
+    // actions), only with the kill switch on.
+    if (config.automation && this.rules) {
+      const result = await this.rules.tick({
+        tasks: await this.deps.tasks.listTasks(),
+        config,
+        observed: observations,
+        protectedPaths,
+        executor: this.ruleExecutor(),
+      });
+      warnings.push(...result.warnings);
+      for (const failure of result.sourceFailures) {
+        if (isConnectivityError(failure)) connectivity.failedChecks += 1;
+        else warnings.push(failure);
+      }
+      if (result.changed) changed = true;
+    }
 
     if (
       await this.retryDoneCleanups(
@@ -1597,7 +1732,7 @@ export class CoreManager implements CoreCommands {
    * (when the PR access supports it), keyed by task id. A failed batch
    * hands its error to each of its tasks, so `refreshTask` reports it
    * exactly as a failed per-task lookup (per-task warning or connectivity
-   * count) and skips their mover steps. Tasks missing from the map (no
+   * count) and records no observation for the rules engine. Tasks missing from the map (no
    * batch support, no origin remote) are looked up one by one as before.
    */
   private async prefetchPullRequests(
@@ -1636,14 +1771,18 @@ export class CoreManager implements CoreCommands {
     return prefetched;
   }
 
-  /** Observe one task's PR and apply at most one mover step; returns whether anything changed. */
+  /**
+   * Observe one task's PR and patch `task.pr`; returns whether the task
+   * changed. Records the observation in `observations` for the rules
+   * engine's `github` source (a failed lookup records nothing: its facts
+   * stay as they were, and nothing moves on stale data).
+   */
   private async refreshTask(
     snapshot: Task,
-    config: GlobalConfig,
     repositories: Map<string, RepositoryInfo> | undefined,
-    protectedPaths: readonly string[],
     warnings: string[],
     connectivity: { failedChecks: number },
+    observations: Map<string, { status?: PullRequestStatus }>,
     prefetched?: PrefetchedPullRequest,
   ): Promise<boolean> {
     const repositoryId = snapshot.repositoryId;
@@ -1655,67 +1794,43 @@ export class CoreManager implements CoreCommands {
     if (repo && !repo.remoteUrl) return false;
 
     let changed = false;
-    let current: Task | undefined = snapshot;
     try {
       if (prefetched && "error" in prefetched) throw prefetched.error;
       const status = prefetched
         ? prefetched.status
         : await this.deps.pullRequests.status(repositoryId, branch);
       if (status) {
-        const pr = toTaskPullRequest(
-          status,
-          snapshot.targetBranch ?? repo?.defaultBranch,
-        );
         // Re-read under the lock and patch only `pr`: the task may have
         // been moved, reopened onto a new branch, or completed while gh was
         // answering — never write the stale snapshot back over that.
-        current = await this.deps.tasks.patchTask(snapshot.id, (fresh) => {
-          if (!sameObservation(fresh, snapshot) || prEquals(fresh.pr, pr)) {
-            return undefined;
-          }
-          changed = true;
-          return {
-            ...fresh,
-            pr,
-            updatedAt: this.deps.clock.now().toISOString(),
-          };
-        });
+        const current = await this.deps.tasks.patchTask(
+          snapshot.id,
+          (fresh) => {
+            if (!sameObservation(fresh, snapshot)) return undefined;
+            const pr = toTaskPullRequest(
+              status,
+              snapshot.targetBranch ?? repo?.defaultBranch,
+              fresh.pr?.role ?? roleFromViewer(status.viewerIsAuthor),
+            );
+            if (prEquals(fresh.pr, pr)) return undefined;
+            changed = true;
+            return {
+              ...fresh,
+              pr,
+              updatedAt: this.deps.clock.now().toISOString(),
+            };
+          },
+        );
+        if (current && sameObservation(current, snapshot)) {
+          observations.set(snapshot.id, { status });
+        }
       } else {
-        current = await this.deps.tasks.getTask(snapshot.id);
+        observations.set(snapshot.id, {});
       }
-    } catch (error) {
-      this.recordFailure(snapshot.title, error, warnings, connectivity);
-      // Errors never move anything: skip the mover step for this task too.
-      return false;
-    }
-
-    if (!config.automation || !current || !sameObservation(current, snapshot)) {
-      return changed;
-    }
-    try {
-      const moved = await this.applyMoverStep(
-        current,
-        config,
-        protectedPaths,
-        warnings,
-      );
-      if (moved) changed = true;
     } catch (error) {
       this.recordFailure(snapshot.title, error, warnings, connectivity);
     }
     return changed;
-  }
-
-  /**
-   * Config problems (unregistered mover/hook names, an empty mover list)
-   * are reported once per distinct config, at the refresh that first loads
-   * it — not on every tick.
-   */
-  private configWarningsOnce(config: GlobalConfig): string[] {
-    const key = JSON.stringify(config);
-    if (key === this.lastValidatedConfig) return [];
-    this.lastValidatedConfig = key;
-    return automationConfigProblems(config, builtinAutomationNames);
   }
 
   /** Repositories by id for this refresh; `undefined` when discovery itself failed (then nothing is skipped). */
@@ -1730,100 +1845,70 @@ export class CoreManager implements CoreCommands {
     }
   }
 
-  /** One addon-decided board move per task, at most, per `refresh()` call. */
-  private async applyMoverStep(
-    task: Task,
-    config: GlobalConfig,
-    protectedPaths: readonly string[],
-    warnings: string[],
-  ): Promise<boolean> {
-    const pipeline = effectivePipeline(
-      task.repositoryId
-        ? config.repositories?.[task.repositoryId]?.deployment
-        : undefined,
-      builtinAutomationNames,
-    );
-    const view: MoverTaskView = {
-      id: task.id,
-      kind: task.kind,
-      state: task.state,
-      ...(task.awaiting ? { awaiting: task.awaiting } : {}),
-      ...(task.branch ? { branch: task.branch } : {}),
-      ...(task.repositoryId ? { repositoryId: task.repositoryId } : {}),
-      ...(task.pr ? { pr: task.pr } : {}),
-    };
-    const input: MoverInput = { task: view, ...(pipeline ? { pipeline } : {}) };
-    const helpers = this.moverHelpers(task.repositoryId);
-    // Unregistered names were already reported once (configWarningsOnce).
-    const movers = activeMoverOrder(config, task.repositoryId)
-      .map((name) => [name, builtinMovers[name]] as const)
-      .filter((entry): entry is [string, (typeof builtinMovers)[string]] =>
-        Boolean(entry[1]),
-      );
-    if (movers.length === 0) return false;
-    const decision = await arbitrateMove(input, helpers, movers);
-    warnings.push(...decision.warnings);
-    if (decision.move.type === "stay") return false;
-    return this.executeMove(task, decision.move, protectedPaths, warnings);
-  }
-
-  private moverHelpers(repositoryId: string | undefined): MoverHelpers {
-    const helpers: MoverHelpers = {
-      fetchText: (url) => this.deps.versions.fetchText(url),
-      containsCommit: (ancestorOid, descendantOid) => {
-        if (!repositoryId) {
-          throw new Error(
-            "Commit comparison requires a repository-backed task",
-          );
-        }
-        return this.deps.pullRequests.containsCommit(
-          repositoryId,
-          ancestorOid,
-          descendantOid,
-        );
+  /** The core commands rule actions run through (see manager/rules-runtime.ts). */
+  private ruleExecutor(): RuleActionExecutor {
+    return {
+      move: (task, move, protectedPaths, warnings) =>
+        this.executeRuleMove(task, move, protectedPaths, warnings),
+      inbox: async (input, provenance) => {
+        const item = await this.addInboxItem({
+          kind: "rule",
+          title: String(input.title),
+          ...(input.body !== undefined ? { body: String(input.body) } : {}),
+          buttons: (input.buttons ?? []).map((button, index) => ({
+            id: `b${index}`,
+            label: String(button.label),
+            action: button.action,
+            ...(button.with ? { with: button.with } : {}),
+          })),
+          ...(provenance.taskId ? { taskId: provenance.taskId } : {}),
+          ruleId: provenance.ruleId,
+          eventId: provenance.eventId,
+        });
+        return { outcome: "applied", detail: item.id };
       },
-      commitLog: (startOid, limit) => {
-        if (!repositoryId) {
-          throw new Error("Commit history requires a repository-backed task");
-        }
-        return this.deps.pullRequests.commitLog(repositoryId, startOid, limit);
+      createTask: async (input) => {
+        const task = await this.createTaskFromAction(input);
+        return { outcome: "applied", detail: task.id };
       },
-      runHook: async (name, hookInput) => {
-        const hook = builtinHooks[name];
-        if (!hook) throw new Error(`Stage hook "${name}" is not registered`);
-        return hook.check(hookInput, helpers);
+      message: async (input, provenance) => {
+        const target = input.to ?? provenance.taskId;
+        if (!target) {
+          throw new Error("message needs a task-bound event or `to`");
+        }
+        const result = await this.sendTaskMessage({
+          from: { kind: "rule", ruleId: provenance.ruleId },
+          targetTaskId: String(target),
+          text: String(input.text),
+          ...(input.mode ? { mode: input.mode } : {}),
+        });
+        return { outcome: "applied", detail: result.message.id };
       },
     };
-    return helpers;
   }
 
-  /** Execute a mover's winning proposal; returns whether the task actually moved. */
-  private async executeMove(
+  /** Execute a rule's winning move; `stayed` when auto-landing was refused. */
+  private async executeRuleMove(
     task: Task,
-    move: BoardMove,
+    move: ResolvedMove,
     protectedPaths: readonly string[],
     warnings: string[],
-  ): Promise<boolean> {
-    switch (move.type) {
-      case "stay":
-        return false;
+  ): Promise<ActionResult> {
+    switch (move.state) {
       case "dev":
         await this.moveTask(task.id, "dev");
-        return true;
-      case "review":
-        await this.moveTask(task.id, "awaiting", {
-          awaiting: { kind: "review" },
-        });
-        return true;
-      case "deploy":
-        await this.moveTask(task.id, "awaiting", {
-          awaiting: {
-            kind: "deploy",
-            stageId: move.stageId,
-            stageLabel: move.stageLabel,
-          },
-        });
-        return true;
+        return { outcome: "applied" };
+      case "awaiting":
+        if (move.enter && move.kind) {
+          await this.toAwait(task.id, move.kind, {
+            ...(move.inputs ? { inputs: move.inputs } : {}),
+          });
+        } else {
+          await this.moveTask(task.id, "awaiting", {
+            ...(move.awaiting ? { awaiting: move.awaiting } : {}),
+          });
+        }
+        return { outcome: "applied" };
       case "done": {
         const result = await this.executeSafeDone(task, protectedPaths, {
           mode: "auto",
@@ -1834,11 +1919,13 @@ export class CoreManager implements CoreCommands {
           warnings.push(
             `${task.title}: deployed and ready to land — mark it Done (${result.warning})`,
           );
-          return false;
+          return { outcome: "stayed", detail: result.warning ?? "" };
         }
         if (result.warning) warnings.push(`${task.title}: ${result.warning}`);
-        return true;
+        return { outcome: "applied" };
       }
+      default:
+        return { outcome: "skipped", detail: `cannot move to ${move.state}` };
     }
   }
 
@@ -1875,7 +1962,7 @@ export class CoreManager implements CoreCommands {
       warning = warning ? `${warning}; ${text}` : text;
     };
     // A manual Done on a parent with active children asks first (children
-    // are never touched either way); auto-landing (mover-driven) never asks
+    // are never touched either way); auto-landing (rule-driven) never asks
     // anyone, so it skips straight past this "- and a non-empty answer never
     // blocks it.
     if (how.mode === "manual" && !how.force.leaveChildren) {
@@ -2719,6 +2806,149 @@ export class CoreManager implements CoreCommands {
     await this.publishBoard();
   }
 
+  // --- Rules engine + inbox (see manager/rules-runtime.ts) ----------------
+
+  async listEvents(filter?: ListEventsFilter): Promise<AuditEntry[]> {
+    return this.requireRules().listEvents(filter);
+  }
+
+  async rulesCheck(input?: RulesCheckInput): Promise<RulesCheckResult> {
+    const [tasks, config] = await Promise.all([
+      this.deps.tasks.listTasks(),
+      this.deps.config.load(),
+    ]);
+    return this.requireRules().check(input ?? {}, tasks, config);
+  }
+
+  async listRules(): Promise<RulesListing> {
+    return this.requireRules().listRules();
+  }
+
+  async listAddons(): Promise<AddonInfo[]> {
+    return this.requireRules().listAddons();
+  }
+
+  async listInbox(options?: ListInboxOptions): Promise<InboxItem[]> {
+    const now = this.deps.clock.now().toISOString();
+    return (await this.requireInbox().list()).filter(
+      (item) =>
+        (options?.includeResolved || !item.resolvedAt) &&
+        (options?.includeSnoozed ||
+          !item.snoozedUntil ||
+          item.snoozedUntil <= now),
+    );
+  }
+
+  async resolveInboxItem(
+    itemId: string,
+    options?: ResolveInboxItemOptions,
+  ): Promise<ResolveInboxItemResult> {
+    const inbox = this.requireInbox();
+    const existing = (await inbox.list()).find((item) => item.id === itemId);
+    if (!existing) throw new Error(`Inbox item not found: ${itemId}`);
+    if (existing.resolvedAt) return { item: existing };
+    const button = options?.buttonId
+      ? existing.buttons.find((candidate) => candidate.id === options.buttonId)
+      : undefined;
+    if (options?.buttonId && !button) {
+      throw new Error(`Inbox item ${itemId} has no button ${options.buttonId}`);
+    }
+    const now = this.deps.clock.now();
+    let taskId: string | undefined;
+    if (button?.action === "snooze") {
+      const until =
+        typeof button.with?.until === "string"
+          ? button.with.until
+          : new Date(now.getTime() + 60 * 60_000).toISOString();
+      const item = await inbox.update(itemId, (current) => ({
+        ...current,
+        snoozedUntil: until,
+      }));
+      this.deps.events.emit("inbox-changed", {});
+      return { item: item ?? existing };
+    }
+    if (button?.action === "createTask") {
+      const task = await this.createTaskFromAction(
+        (button.with ?? {}) as unknown as CreateTaskActionInput,
+      );
+      taskId = task.id;
+    } else if (button?.action === "openTask") {
+      taskId =
+        typeof button.with?.taskId === "string"
+          ? button.with.taskId
+          : existing.taskId;
+    }
+    const item = await inbox.update(itemId, (current) => ({
+      ...current,
+      resolvedAt: now.toISOString(),
+      ...(button ? { resolvedBy: button.id } : {}),
+    }));
+    this.deps.events.emit("inbox-changed", {});
+    return { item: item ?? existing, ...(taskId ? { taskId } : {}) };
+  }
+
+  /** Append an inbox item (rules' `inbox` action). */
+  private async addInboxItem(
+    fields: Omit<InboxItem, "id" | "createdAt">,
+  ): Promise<InboxItem> {
+    const item: InboxItem = {
+      id: this.deps.ids.next(),
+      ...fields,
+      createdAt: this.deps.clock.now().toISOString(),
+    };
+    await this.requireInbox().add(item);
+    this.deps.events.emit("inbox-changed", {});
+    return item;
+  }
+
+  /**
+   * The `createTask` rule action / inbox button: a PR URL (or number with
+   * `repository`) makes a PR-bound task (`role: reviewer` checks out the
+   * PR head and never pushes); otherwise a plain task in `repository`.
+   */
+  private async createTaskFromAction(
+    input: CreateTaskActionInput,
+  ): Promise<Task> {
+    if (typeof input.title !== "string" || !input.title.trim()) {
+      throw new Error("createTask needs a title");
+    }
+    const fromUrl =
+      typeof input.pr === "string" ? parsePullRequestUrl(input.pr) : undefined;
+    const pullRequest =
+      fromUrl?.number ??
+      (input.pr !== undefined && input.pr !== ""
+        ? Number(input.pr)
+        : undefined);
+    if (pullRequest !== undefined && !Number.isInteger(pullRequest)) {
+      throw new Error(
+        `createTask: not a PR number or URL: ${String(input.pr)}`,
+      );
+    }
+    const repositoryId = input.repository ?? fromUrl?.repositoryId;
+    const role =
+      input.role === "reviewer" || input.role === "author"
+        ? input.role
+        : undefined;
+    return this.createTask({
+      title: input.title.trim(),
+      initialPrompt: typeof input.prompt === "string" ? input.prompt : "",
+      ...(repositoryId ? { repositoryId } : {}),
+      ...(pullRequest !== undefined ? { pullRequest } : {}),
+      ...(role ? { role } : {}),
+      start: input.start === true || String(input.start) === "true",
+    });
+  }
+
+  private requireRules(): RulesRuntime {
+    if (!this.rules) throw new Error("rules are not configured");
+    return this.rules;
+  }
+
+  private requireInbox(): InboxAccess {
+    if (!this.deps.inbox) throw new Error("inbox is not configured");
+    return this.deps.inbox;
+  }
+
   private async publishBoard(): Promise<void> {
     const columns = await this.listBoard();
     this.deps.events.emit("board-changed", { columns });
@@ -2744,6 +2974,7 @@ function sameObservation(current: Task, snapshot: Task): boolean {
 function toTaskPullRequest(
   status: PullRequestStatus,
   fallbackTargetBranch?: string,
+  role?: PullRequestRole,
 ): TaskPullRequest {
   const state: TaskPullRequest["state"] =
     status.state === "MERGED"
@@ -2776,7 +3007,16 @@ function toTaskPullRequest(
           },
         }
       : {}),
+    ...(role ? { role } : {}),
   };
+}
+
+/** The PR role GitHub's `viewerDidAuthor` implies, when it reported one. */
+function roleFromViewer(
+  viewerIsAuthor: boolean | undefined,
+): PullRequestRole | undefined {
+  if (viewerIsAuthor === undefined) return undefined;
+  return viewerIsAuthor ? "author" : "reviewer";
 }
 
 function prEquals(a: TaskPullRequest | undefined, b: TaskPullRequest): boolean {
@@ -2791,7 +3031,8 @@ function prEquals(a: TaskPullRequest | undefined, b: TaskPullRequest): boolean {
     a.reviewSubmitted === b.reviewSubmitted &&
     a.headRefOid === b.headRefOid &&
     a.mergeCommit?.oid === b.mergeCommit?.oid &&
-    a.mergeCommit?.targetBranch === b.mergeCommit?.targetBranch
+    a.mergeCommit?.targetBranch === b.mergeCommit?.targetBranch &&
+    a.role === b.role
   );
 }
 
@@ -2825,6 +3066,7 @@ function undeliverableReason(task: Task): string | undefined {
 function senderLabelFor(sender: MessageSender, senderTask?: Task): string {
   if (sender.kind === "task") return senderTask?.title ?? sender.taskId;
   if (sender.kind === "session") return `Pi session in ${sender.cwd}`;
+  if (sender.kind === "rule") return `Rule ${sender.ruleId}`;
   return "Harbormaster";
 }
 

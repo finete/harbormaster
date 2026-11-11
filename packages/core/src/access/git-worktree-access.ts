@@ -69,6 +69,37 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     return this.inspect(path);
   }
 
+  async checkoutPullRequest(
+    repo: RepositoryInfo,
+    branch: string,
+    pullRequestNumber: number,
+  ): Promise<{ worktree: WorktreeInfo; createdBranch: boolean }> {
+    // `pull/<n>/head` works for same-repository and fork PRs alike.
+    await run(
+      "git",
+      ["fetch", "--quiet", "origin", `pull/${pullRequestNumber}/head`],
+      repo.root,
+      { timeoutMs: LONG_RUN_TIMEOUT_MS },
+    );
+    const head = (
+      await run("git", ["rev-parse", "FETCH_HEAD"], repo.root)
+    ).trim();
+    if (!(await this.branchExists(repo, branch))) {
+      return {
+        worktree: await this.createTaskWorktree(repo, branch, head),
+        createdBranch: true,
+      };
+    }
+    // The branch already exists locally (e.g. the author's own checkout):
+    // check it out as-is, never resetting local commits.
+    const path = taskWorktreePath(repo, branch);
+    await mkdir(dirname(path), { recursive: true });
+    await run("git", ["worktree", "add", path, branch], repo.root, {
+      timeoutMs: LONG_RUN_TIMEOUT_MS,
+    });
+    return { worktree: await this.inspect(path), createdBranch: false };
+  }
+
   async removeWorktree(
     repo: RepositoryInfo,
     path: string,

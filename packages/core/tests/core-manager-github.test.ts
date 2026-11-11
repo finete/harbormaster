@@ -510,7 +510,12 @@ describe.skipIf(!gitAvailable)("CoreManager listAwaitingKinds", () => {
   it("lists the built-in kinds in picker order with review first; no task = all available, no notices", async () => {
     const f = await fixture();
     const kinds = await f.core.commands.listAwaitingKinds();
-    expect(kinds.map((kind) => kind.id)).toEqual(["review", "slack", "deploy"]);
+    expect(kinds.map((kind) => kind.id)).toEqual([
+      "review",
+      "slack",
+      "deploy",
+      "author-response",
+    ]);
     expect(kinds.every((kind) => kind.available && !kind.notice)).toBe(true);
     expect(kinds[1]?.fields).toEqual([
       expect.objectContaining({ id: "permalink", optional: true }),

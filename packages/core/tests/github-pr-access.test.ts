@@ -593,3 +593,121 @@ describe("GithubPrAccess fixtures", () => {
     }
   });
 });
+
+describe("GithubPrAccess rules-engine facts", () => {
+  const node = {
+    number: 9,
+    url: "https://github.com/acme/widgets/pull/9",
+    state: "OPEN",
+    isDraft: false,
+    author: { login: "alice" },
+    headRefOid: "head",
+    headRefName: "alice/feature",
+    mergedAt: null,
+    closed: false,
+    viewerDidAuthor: false,
+    reviewRequests: { totalCount: 0 },
+    reviews: {
+      nodes: [
+        {
+          state: "COMMENTED",
+          commit: { oid: "head" },
+          author: { login: "bob" },
+          authorAssociation: "MEMBER",
+          submittedAt: "2026-01-02T00:00:00Z",
+        },
+        {
+          state: "COMMENTED",
+          commit: { oid: "head" },
+          author: { login: "ci[bot]" },
+          authorAssociation: "NONE",
+          submittedAt: "2026-01-05T00:00:00Z",
+        },
+      ],
+    },
+    reviewThreads: { nodes: [{ isResolved: false }, { isResolved: true }] },
+    commits: {
+      nodes: [
+        {
+          commit: {
+            committedDate: "2026-01-03T00:00:00Z",
+            statusCheckRollup: { state: "FAILURE" },
+          },
+        },
+      ],
+    },
+    comments: {
+      nodes: [
+        {
+          author: { login: "alice" },
+          authorAssociation: "MEMBER",
+          createdAt: "2026-01-04T00:00:00Z",
+        },
+      ],
+    },
+  };
+
+  it("view() fetches one PR by number over GraphQL with the derived facts", async () => {
+    const execute = vi.fn(async () =>
+      JSON.stringify({ data: { repository: { pullRequest: node } } }),
+    );
+    const status = await new GithubPrAccess(execute).view(repositoryId, 9);
+    expect(execute.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining(["api", "graphql", "number=9", "owner=acme"]),
+    );
+    expect(status).toMatchObject({
+      number: 9,
+      headRefName: "alice/feature",
+      viewerIsAuthor: false,
+      author: "alice",
+      closed: false,
+      checks: "failure",
+      unresolvedThreads: 1,
+      lastAuthorActivityAt: "2026-01-04T00:00:00Z",
+      lastReviewerActivityAt: "2026-01-02T00:00:00Z",
+      humanFeedbackOnHead: true,
+    });
+    await expect(
+      new GithubPrAccess(async () =>
+        JSON.stringify({ data: { repository: { pullRequest: null } } }),
+      ).view(repositoryId, 9),
+    ).rejects.toThrow("not found");
+  });
+
+  it("searchPullRequests() normalizes repositories from a GitHub search", async () => {
+    const execute = vi.fn(async () =>
+      JSON.stringify({
+        data: {
+          search: {
+            nodes: [
+              {
+                number: 3,
+                url: "https://github.com/Acme/API/pull/3",
+                title: "Fix",
+                author: { login: "bob" },
+                repository: { url: "https://github.com/Acme/API" },
+              },
+              {},
+            ],
+          },
+        },
+      }),
+    );
+    expect(
+      await new GithubPrAccess(execute).searchPullRequests(
+        "is:pr review-requested:@me",
+      ),
+    ).toEqual([
+      {
+        repository: "github.com/acme/api",
+        number: 3,
+        url: "https://github.com/Acme/API/pull/3",
+        title: "Fix",
+        author: "bob",
+      },
+    ]);
+    expect(execute.mock.calls[0]?.[1]).toContain(
+      "q=is:pr review-requested:@me",
+    );
+  });
+});

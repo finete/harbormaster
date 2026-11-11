@@ -15,15 +15,15 @@
 // jumps past the first satisfied one; a hookless (manual) stage is a
 // deliberate gate that is never scanned past.
 
-import type { BoardMove, TaskMover } from "../../contracts/addons.js";
-import type { DeploymentStageConfig } from "../../contracts/model.js";
+import type { DeploymentStageConfig } from "../../../src/contracts/model.js";
 import {
   firstStage,
   isProductionWait,
   PRODUCTION_STAGE,
   stageAfter,
-} from "../deployment.js";
-import { observePullRequest } from "../pull-request-observation.js";
+} from "../../../src/engines/deployment.js";
+import type { BoardMove, TaskMover } from "./addons.js";
+import { observePullRequest } from "./pull-request-observation.js";
 
 export const deploymentPipelineMover: TaskMover = {
   async decide(input, helpers) {

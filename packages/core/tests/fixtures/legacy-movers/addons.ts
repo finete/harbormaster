@@ -12,7 +12,7 @@ import type {
   TaskKind,
   TaskPullRequest,
   TaskState,
-} from "./model.js";
+} from "../../../src/contracts/model.js";
 
 /** Everything a stage hook may know about the task whose wait it checks. */
 export interface StageHookInput {

@@ -4,8 +4,8 @@
 // current head returns Awaiting/review work to Dev. Everything after a merge
 // belongs to the deployment-pipeline mover.
 
-import type { TaskMover } from "../../contracts/addons.js";
-import { observePullRequest } from "../pull-request-observation.js";
+import type { TaskMover } from "./addons.js";
+import { observePullRequest } from "./pull-request-observation.js";
 
 export const githubReviewMover: TaskMover = {
   async decide(input) {

@@ -1,7 +1,7 @@
 // Behavioral-parity fixes for refresh()/movers/done cleanup (pi-home audit):
 // lost-update safety (patch-under-lock + single-flight), bounded
 // parallelism, auto-done stay-put, the stage-less Production deploy wait,
-// per-repo mover overrides and config warnings, the done-cleanup retry
+// per-repo rules overrides and config warnings, the done-cleanup retry
 // sweep, the awaiting(deploy)→dev block, done→dev bookkeeping, and the
 // no-remote silent skip. Real temp git repos (createCore's real git access)
 // with a fake, gate-able PullRequestAccess: never a real gh/network call.
@@ -11,12 +11,13 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
@@ -27,6 +28,7 @@ import type {
 } from "../src/contracts/github.js";
 import type { Clock, GlobalConfig, Task } from "../src/contracts/index.js";
 import { PRODUCTION_STAGE } from "../src/engines/deployment.js";
+import { repositoryRulesFile } from "../src/engines/rules/rule-files.js";
 import { type Core, createCore } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -509,10 +511,22 @@ describe("board-transition parity (#16, #17)", () => {
   });
 });
 
-describe("mover config parity (#12, #13, #14)", () => {
-  it("per-repository movers override the global list ([] disables them for that repo)", async () => {
+describe("rules config parity (#12, #13, #14)", () => {
+  async function writeRules(f: Fixture, file: string, yaml: string) {
+    const path = join(f.stateDir, "rules", file);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, yaml);
+  }
+  const REVIEW_RULE = `rules:
+  - id: review-requested-enter-review
+    on: [github.pr.*, harbormaster.task.*]
+    if: task.state == "dev" && "reviewRequested" in facts.github && facts.github.reviewRequested == true
+    do: [{ action: move, with: { to: await, kind: review } }]
+`;
+
+  it("a repository rules file replaces the global list ([] disables rules for that repo)", async () => {
     const f = await fixture();
-    await f.writeConfig({ repositories: { [f.repositoryId]: { movers: [] } } });
+    await writeRules(f, repositoryRulesFile(f.repositoryId), "rules: []\n");
     const task = await f.startedTask("Overridden");
     f.pullRequests.statusByBranch.set(
       task.branch!,
@@ -521,17 +535,21 @@ describe("mover config parity (#12, #13, #14)", () => {
     await f.core.commands.refresh();
     expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
 
-    await f.writeConfig({
-      movers: [],
-      repositories: { [f.repositoryId]: { movers: ["github-review"] } },
-    });
+    await writeRules(f, "rules.yaml", "rules: []\n");
+    await writeRules(f, repositoryRulesFile(f.repositoryId), REVIEW_RULE);
+    // Rules react to events: the next PR change is evaluated against the
+    // repository's own list now.
+    f.pullRequests.statusByBranch.set(
+      task.branch!,
+      pr({ reviewRequested: true, reviewSubmitted: true }),
+    );
     await f.core.commands.refresh();
     expect((await f.core.commands.getTask(task.id))?.state).toBe("awaiting");
   });
 
-  it("a global movers: [] disables all automatic moves", async () => {
+  it("an empty global rules list disables all automatic moves", async () => {
     const f = await fixture();
-    await f.writeConfig({ movers: [] });
+    await writeRules(f, "rules.yaml", "rules: []\n");
     const task = await f.startedTask("Frozen");
     f.pullRequests.statusByBranch.set(
       task.branch!,
@@ -543,10 +561,26 @@ describe("mover config parity (#12, #13, #14)", () => {
     expect(reloaded?.pr).toMatchObject({ reviewRequested: true });
   });
 
-  it("reports unregistered mover/hook names once per config, not every tick", async () => {
+  it("migrates a legacy `movers: []` config into an empty rules.yaml on first run", async () => {
+    const f = await fixture();
+    await f.writeConfig({ movers: [] } as Partial<GlobalConfig>);
+    const task = await f.startedTask("Legacy frozen");
+    f.pullRequests.statusByBranch.set(
+      task.branch!,
+      pr({ reviewRequested: true }),
+    );
+    await f.core.commands.refresh();
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    const rules = await readFile(
+      join(f.stateDir, "rules", "rules.yaml"),
+      "utf8",
+    );
+    expect(rules).toContain("rules: []");
+  });
+
+  it("reports unregistered hook names and invalid rule files once, not every tick", async () => {
     const f = await fixture();
     await f.writeConfig({
-      movers: ["github-review", "nope-mover"],
       repositories: {
         [f.repositoryId]: {
           deployment: {
@@ -555,9 +589,12 @@ describe("mover config parity (#12, #13, #14)", () => {
         },
       },
     });
+    await writeRules(f, "rules.yaml", "rules:\n  - id: broken\n    on: x\n");
     const first = await f.core.commands.refresh();
     expect(first.warnings).toEqual([
-      expect.stringContaining('unregistered mover "nope-mover"'),
+      expect.stringContaining(
+        "rules.yaml: /rules/0 must have required property 'do'",
+      ),
       expect.stringContaining('unregistered hook "nope-hook"'),
     ]);
     expect((await f.core.commands.refresh()).warnings).toEqual([]);
