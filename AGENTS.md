@@ -26,9 +26,9 @@ Utility) that `packages/core` follows. Pi-home's `src/` layout
   extension never runs rules (it only delivers inbox messages).
 - **Agent harnesses are adapters.** Anything Pi-specific (session
   spawn/attach, presence, running-detection) lives behind the harness adapter
-  interface in core. Core logic never imports Pi directly. Pi is the only
-  adapter today; the interface exists so other agents (Claude Code, Codex, …)
-  can be added without touching core logic.
+  interface in core. Core logic never imports Pi directly. Adapters today:
+  Pi, Claude Code, and configured custom CLIs; others (Codex, …) are added
+  without touching core logic.
 - **UI stack is fixed**: Electron + Vite + React + TypeScript (no Next.js, no
   router), Tailwind + shadcn/ui (copy-in), dnd-kit (kanban board), dockview
   (tabs/splits: a tab and a split are the same panel model), @xterm/xterm +

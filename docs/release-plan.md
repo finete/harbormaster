@@ -91,9 +91,12 @@ unknown) goes away with the migration code.
 
 ### Launch flags (Claude Code)
 
-`claude --session-id <id> [--model <m>] [--dangerously-skip-permissions]
---settings <hooks json> --mcp-config <json> [--] <prompt>`. Permission bypass
-per R7. The adapter never touches `~/.claude/settings.json`.
+`claude --session-id <id> [--model <m>] [--effort <level>] [--dangerously-skip-permissions]
+--settings <hooks json> --mcp-config <json> -- <prompt>`. The `--` is
+mandatory (`--mcp-config` is variadic). Thinking maps to `--effort`
+(`off` omitted, `minimal`→`low`). Fork = `--resume <from> --fork-session
+--session-id <new>`. Permission bypass per R7. The adapter never touches
+`~/.claude/settings.json`.
 
 ### Adapter contract tests (R15)
 
@@ -313,8 +316,8 @@ with the full gate green and the acceptance checked.
 | C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | merged 0f68416 (adds a built-in `harbormaster` board source so rules re-evaluate on column changes) |
 | C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | merged 0f68416 (deploy → done stays a core integration test: https-only version endpoint) |
 | C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | todo |
-| B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | todo |
-| B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | todo |
+| B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | merged (claude 2.1.322 starts with our flags and probes 7501; report/MCP/trust dialogs unproven without login) |
+| B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
 | E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | todo |
 
@@ -331,7 +334,7 @@ with the full gate green and the acceptance checked.
   user's `~/.pi/agent/settings.json` still lists the old extension package
   path and should drop it (double load is harmless).
 - Wave A: `harbormaster hook inbox` exits 0 with `{}` on stdout when the app
-  is down (a Stop hook exiting 2 would loop Claude); wave B to confirm.
+  is down (a Stop hook exiting 2 would loop Claude); confirmed by wave B.
 - Wave A: AGENTS.md still calls the TUI frozen and the extension a frontend.
 - Wave D: `brew audit` / local install blocked by this machine's Xcode 16.4.
 - Wave C: rule-sent messages (`MessageSender {kind: "rule"}`) take the
@@ -342,3 +345,10 @@ with the full gate green and the acceptance checked.
 - Wave C: AGENTS.md / design-decisions "Three verbs" still say "movers".
 - Wave C: on first start after merge, a config's `movers` list becomes the
   first `rules.yaml`; every task fires `.appeared` once.
+- Wave B: reopening a Done Claude task starts fresh (core forks only from a
+  recorded `sessionPath`); fix = fork by id in `claimSessionLaunch` (the
+  adapter already maps `fork` to `--resume <from> --fork-session`).
+- Wave B: a real first Claude launch may stall on the workspace-trust and
+  "Bypass Permissions" one-time dialogs until the pane is opened; check with a
+  logged-in claude on the first launched task.
+- Wave B: wire the real-CLI smoke into CI (no secrets needed, ~45 s).
