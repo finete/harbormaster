@@ -319,7 +319,7 @@ with the full gate green and the acceptance checked.
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | merged (claude 2.1.322 starts with our flags and probes 7501; report/MCP/trust dialogs unproven without login) |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
-| E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | todo |
+| E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | merged |
 
 ## Follow-ups logged during merges
 
@@ -361,3 +361,12 @@ with the full gate green and the acceptance checked.
 - Inbox UI: "Retry" on a failed launch bypasses `launch.maxConcurrent`.
 - Inbox UI: board drag e2e helpers may share the dnd-kit 50 ms click-guard
   race the sidebar spec had (fixed there with a condition wait).
+- Wave E: "Enable GitHub" off disables only the rules `github` source; the
+  refresh's PR-status `gh` batch still runs.
+- Wave E: agent detection uses the app process PATH (same as launching);
+  agents only on the login shell's PATH show "not found".
+- Wave E: existing users see the wizard once after upgrading (pre-filled).
+- Worker briefs: with the worktree's root `node_modules` symlinked to the
+  main checkout, `@harbormaster/core` resolves to main's build; to test core
+  changes in the app, replace the symlink with a directory of symlinks that
+  points `@harbormaster/*` at the worktree packages.
