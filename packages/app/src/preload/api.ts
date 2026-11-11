@@ -502,8 +502,29 @@ export interface HarbormasterApi {
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
     exportDiagnostics(): Promise<string | null>;
+    /**
+     * The "Open in …" apps installed on this host (editors, terminals, the
+     * file manager), in menu order; probed once per app run (see
+     * main/open-in.ts).
+     */
+    openInApps(): Promise<OpenInAppInfo[]>;
+    /**
+     * Open the folder `path` (a task's worktree) in catalog app `appId`.
+     * Main allowlists `path` exactly like `shell.revealInFolder` and
+     * refuses unknown ids; never launches the OS default handler.
+     */
+    openIn(path: string, appId: string): Promise<OpenInResult>;
   };
 }
+
+/** One "Open in …" target (see main/open-in.ts's catalog). */
+export interface OpenInAppInfo {
+  id: string;
+  label: string;
+  kind: "file-manager" | "editor" | "terminal";
+}
+
+export type OpenInResult = { ok: true } | { ok: false; error: string };
 
 /** A newer Harbormaster release (see main/update-check.ts). */
 export interface UpdateInfo {

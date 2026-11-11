@@ -18,6 +18,8 @@ import type {
   MessageMode,
   MessagingChangedPayload,
   MoveTaskOptions,
+  OpenInAppInfo,
+  OpenInResult,
   OrphanWorktreeReport,
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -301,6 +303,10 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("app:copyText", text),
     exportDiagnostics: (): Promise<string | null> =>
       ipcRenderer.invoke("app:exportDiagnostics"),
+    openInApps: (): Promise<OpenInAppInfo[]> =>
+      ipcRenderer.invoke("app:openInApps"),
+    openIn: (path: string, appId: string): Promise<OpenInResult> =>
+      ipcRenderer.invoke("app:openIn", path, appId),
   },
   terminalHost: {
     resolveClipboardPaste: (): Promise<string | null> =>

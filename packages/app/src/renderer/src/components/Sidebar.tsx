@@ -49,6 +49,7 @@ import {
   usePresenceMap,
   useUnreadTaskIds,
 } from "../core-client";
+import { defaultOpenInApp } from "../lib/open-in";
 import { modKeyLabel } from "../lib/platform";
 import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
@@ -83,6 +84,11 @@ import { deriveMessagingChips } from "../lib/task-messaging-chips";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
+import {
+  openPathIn,
+  useLastOpenInAppId,
+  useOpenInApps,
+} from "../lib/use-open-in";
 import { cn } from "../lib/utils";
 import {
   type ContextMenuItem,
@@ -616,6 +622,11 @@ export function Sidebar({
     [],
   );
 
+  // "Open in <app>" for a row's worktree (see components/OpenInButton.tsx).
+  const openInApps = useOpenInApps();
+  const lastOpenInAppId = useLastOpenInAppId();
+  const openInDefault = defaultOpenInApp(openInApps, lastOpenInAppId);
+
   function contextMenuItems(task: Task): ContextMenuItem[] {
     const items: ContextMenuItem[] = [
       {
@@ -656,6 +667,23 @@ export function Sidebar({
           void window.harbormaster.shell.revealInFolder(worktreePath);
         },
       });
+      if (openInDefault) {
+        items.push({
+          key: "open-in-default",
+          label: `Open in ${openInDefault.label}`,
+          onSelect: () => void openPathIn(worktreePath, openInDefault),
+        });
+        items.push({
+          key: "open-in",
+          label: "Open in…",
+          onSelect: () => {},
+          submenu: openInApps.map((openInApp) => ({
+            key: `open-in-${openInApp.id}`,
+            label: openInApp.label,
+            onSelect: () => void openPathIn(worktreePath, openInApp),
+          })),
+        });
+      }
     }
     const prUrl = pullRequestUrl(task);
     if (prUrl) {
