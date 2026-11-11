@@ -222,6 +222,16 @@ const launchTask: ToolDefinition = {
         description:
           "Provider/model override for this task's first session; falls back to the configured default, then the harness default.",
       },
+      harness: {
+        type: "string",
+        description:
+          'Agent to run the task on ("pi", "claude-code", or a configured custom agent id). Omit to use the launching task\'s agent for a "child", else the repository/app default.',
+      },
+      bypassPermissions: {
+        type: "boolean",
+        description:
+          "Whether the launched agent skips its permission prompts (background tasks do by default; the repository or app setting decides when omitted). Pass false to keep the prompts.",
+      },
     },
     required: ["relation", "title", "prompt", "repository"],
     additionalProperties: false,
@@ -244,6 +254,8 @@ const launchTask: ToolDefinition = {
       false,
     );
     const model = readString(args, "model")?.trim() || undefined;
+    const harness = readString(args, "harness")?.trim() || undefined;
+    const bypassPermissions = readBoolean(args, "bypassPermissions");
     const fromTaskId = caller.taskId;
     if (relation === "child" && !fromTaskId) {
       throw new Error(
@@ -267,6 +279,8 @@ const launchTask: ToolDefinition = {
       repository,
       ...(baseBranch ? { baseBranch } : {}),
       ...(model ? { model } : {}),
+      ...(harness ? { harness } : {}),
+      ...(bypassPermissions !== undefined ? { bypassPermissions } : {}),
     };
     const task = await commands.launchTask(input);
     return {

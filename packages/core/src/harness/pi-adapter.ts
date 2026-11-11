@@ -210,6 +210,7 @@ export const PI_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
 export class PiHarnessAdapter implements HarnessAdapter {
   readonly id = "pi";
   readonly label = "Pi";
+  readonly command = "pi";
   readonly messaging: HarnessMessagingCapabilities = {
     ...PI_MESSAGING_CAPABILITIES,
   };

@@ -93,6 +93,48 @@ describe("resolvePrimaryLaunch worktree existence", () => {
     expect(claims.prompt).toBe(1);
   });
 
+  it("resolves the task's own agent and passes the launch's permissions through", async () => {
+    const live = mkdtempSync(join(tmpdir(), "harbormaster-live-"));
+    tempDirs.push(live);
+    const { core } = fakeCore(live);
+    const seen: Array<string | undefined> = [];
+    const resolved: string[] = [];
+    const claude: PrimaryLaunchHarness = {
+      command: "claude",
+      buildLaunchSpec: (input) => {
+        seen.push(input.permissions);
+        return {
+          command: "/bin/sh",
+          args: [],
+          cwd: input.workspacePath,
+          env: {},
+        };
+      },
+    };
+    const result = await resolvePrimaryLaunch(
+      "t1",
+      "/state",
+      core,
+      async (taskId) => {
+        resolved.push(taskId);
+        return claude;
+      },
+      { permissions: "bypass" },
+    );
+    expect(resolved).toEqual(["t1"]);
+    expect(result.agentCommand).toBe("claude");
+    // Probe spec and the real spec both see the launch's permissions.
+    expect(seen).toEqual(["bypass", "bypass"]);
+    const interactive = await resolvePrimaryLaunch(
+      "t1",
+      "/state",
+      core,
+      claude,
+    );
+    expect(interactive.spec).toBeDefined();
+    expect(seen.slice(2)).toEqual(["default", "default"]);
+  });
+
   it("reports no worktree when the task has no binding", async () => {
     const { core } = fakeCore(undefined);
 

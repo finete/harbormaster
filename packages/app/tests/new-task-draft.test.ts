@@ -218,6 +218,24 @@ describe("planSubmit", () => {
     expect(park.input).not.toHaveProperty("start");
   });
 
+  it("only a background run carries the permission switch, and only when set", () => {
+    const launched = planSubmit(
+      { ...ready, harness: "claude-code", bypassPermissions: false },
+      "background",
+      null,
+    );
+    expect(launched.input).toMatchObject({
+      harness: "claude-code",
+      bypassPermissions: false,
+    });
+    expect(
+      planSubmit({ ...ready, bypassPermissions: true }, "start", null).input,
+    ).not.toHaveProperty("bypassPermissions");
+    expect(planSubmit(ready, "background", null).input).not.toHaveProperty(
+      "bypassPermissions",
+    );
+  });
+
   it("a child in its parent's repository stacks on the parent's branch by default", () => {
     const created = planSubmit(ready, "start", parent);
     expect(created.input).toMatchObject({

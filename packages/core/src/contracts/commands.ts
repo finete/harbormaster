@@ -26,6 +26,7 @@ import type {
   AwaitingKind,
   AwaitingKindId,
   BoardColumn,
+  CustomAgentConfig,
   PullRequestRole,
   Task,
   TaskKind,
@@ -330,10 +331,29 @@ export interface LaunchTaskInput {
   inPlace?: boolean;
   /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default; passed to the harness only on the first launch. */
   model?: string;
+  /** Agent (harness id); absent = the launching task's agent for a child, else the repository/global default (decision R8). */
   harness?: string;
+  /**
+   * Skip the agent's permission prompts in the background session
+   * (decision R7); absent = `RepositoryConfig.bypassPermissions`, else
+   * `GlobalConfig.launch.bypassPermissions`, else `true`.
+   */
+  bypassPermissions?: boolean;
   thinking?: ThinkingLevel;
   /** See `TaskAgentInput.attachments`. */
   attachments?: string[];
+}
+
+/** Effective launch settings (`CoreCommands.getLaunchSettings`). */
+export interface LaunchSettings {
+  maxConcurrent: number;
+  defaultModel?: string;
+  /** The agent a new task gets when none is chosen (decision R8): the repository's override, else the global default, else Pi. */
+  defaultHarness: string;
+  /** Whether a launched task skips permission prompts unless the launch says otherwise (decision R7): repository override, else global, else `true`. */
+  bypassPermissions: boolean;
+  /** User-configured "any CLI" agents (`GlobalConfig.agents.custom`), for the app's launch-spec registry. */
+  customAgents: CustomAgentConfig[];
 }
 
 /** The typed command surface frontends call. No frontend touches state files. */
@@ -410,10 +430,7 @@ export interface CoreCommands {
   /** Every task with `parentTaskId === parentTaskId`, any state, oldest first. */
   listChildren(parentTaskId: string): Promise<Task[]>;
   /** Current effective launch settings (`GlobalConfig.launch`, defaulted), for a frontend to show/enforce the concurrency cap without touching config files. */
-  getLaunchSettings(): Promise<{
-    maxConcurrent: number;
-    defaultModel?: string;
-  }>;
+  getLaunchSettings(repositoryId?: string): Promise<LaunchSettings>;
   /**
    * Start a parked backlog task: for a repository-backed task without a
    * worktree binding, create its branch + worktree + binding now (same

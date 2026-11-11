@@ -18,6 +18,7 @@ import {
   Link2,
   MessageSquare,
   Plus,
+  ShieldOff,
 } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import type {
@@ -360,6 +361,113 @@ export function agentModelLabel(
   return parts.join(" · ");
 }
 
+/**
+ * The agent (harness) dropdown next to the model picker (decision R8):
+ * `Default (<agent>)` follows the repository / app default; any other entry
+ * pins the task to that agent. Choosing one resets the model to that
+ * agent's default.
+ */
+export function AgentPicker({
+  catalogs,
+  harness,
+  defaultHarness,
+  onChange,
+}: {
+  catalogs: readonly HarnessModelCatalog[];
+  /** The draft's explicit choice; "" = the default agent. */
+  harness: string;
+  /** The agent "" resolves to (repository override, else app default). */
+  defaultHarness: string;
+  onChange: (harness: string) => void;
+}): JSX.Element {
+  const effective = harness || defaultHarness;
+  const labelOf = (id: string): string =>
+    catalogs.find((entry) => entry.harness === id)?.label ?? id;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <InputGroupButton
+          data-testid="new-task-agent"
+          data-harness={effective}
+          aria-label="Agent"
+          title="Agent: which coding agent runs this task"
+          className="min-w-0 max-w-[160px] shrink text-muted-foreground hover:text-foreground"
+        >
+          <Bot />
+          <span className="truncate">{labelOf(effective)}</span>
+          <ChevronDown className="opacity-60" />
+        </InputGroupButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-56"
+        data-testid="new-task-agent-menu"
+      >
+        <DropdownMenuRadioGroup value={harness} onValueChange={onChange}>
+          <DropdownMenuRadioItem
+            value=""
+            data-testid="new-task-agent-option"
+            data-harness=""
+          >
+            Default
+            <span className="truncate text-muted-foreground">
+              {labelOf(defaultHarness)}
+            </span>
+          </DropdownMenuRadioItem>
+          <DropdownMenuSeparator />
+          {catalogs.map((entry) => (
+            <DropdownMenuRadioItem
+              key={entry.harness}
+              value={entry.harness}
+              data-testid="new-task-agent-option"
+              data-harness={entry.harness}
+            >
+              {entry.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The launch permission switch (decision R7): whether a background run
+ * skips the agent's permission prompts. Interactive starts never do; the
+ * default comes from the repository / app setting.
+ */
+export function BypassPermissionsSwitch({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}): JSX.Element {
+  return (
+    <InputGroupButton
+      data-testid="new-task-bypass"
+      data-bypass={value ? "true" : "false"}
+      aria-pressed={value}
+      aria-label="Skip permission prompts in background runs"
+      title={
+        value
+          ? "Background runs skip the agent's permission prompts (click to keep them). Start & open always uses your own settings."
+          : "Background runs keep the agent's permission prompts (click to skip them)."
+      }
+      onClick={() => onChange(!value)}
+      className={cn(
+        "shrink-0",
+        value
+          ? "text-amber-300/90 hover:text-amber-200"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <ShieldOff />
+      <span>{value ? "Bypass" : "Ask"}</span>
+    </InputGroupButton>
+  );
+}
+
 export function AgentModelPicker({
   catalogs,
   harness,
@@ -386,6 +494,8 @@ export function AgentModelPicker({
 }): JSX.Element {
   const catalog =
     catalogs.find((entry) => entry.harness === harness) ?? catalogs[0];
+  // The agent is chosen in its own dropdown; this one lists its models.
+  const shown = catalog ? [catalog] : [];
   const effective = model || catalog?.defaultModel;
   const effectiveModel = catalog?.models.find(
     (entry) => entry.id === effective,
@@ -436,7 +546,7 @@ export function AgentModelPicker({
             onChange({ harness: nextHarness, model: nextModel });
           }}
         >
-          {catalogs.map((entry, index) => {
+          {shown.map((entry, index) => {
             const providers = [
               ...new Set(entry.models.map((item) => item.provider)),
             ];

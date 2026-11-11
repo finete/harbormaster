@@ -11,6 +11,7 @@
 
 import type {
   BuildLaunchSpecInput,
+  LaunchPermissions,
   LaunchSpec,
   SessionLaunch,
   WorkspaceBinding,
@@ -27,6 +28,25 @@ export interface PrimaryLaunchCore {
 /** The slice of `HarnessAdapter` this module needs. */
 export interface PrimaryLaunchHarness {
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec;
+  /** The bare command it launches by default, for "<command> not found" messages. */
+  readonly command?: string;
+}
+
+/**
+ * The task's own agent (decision R8: each task runs on the harness it was
+ * created with), or a fixed one. A resolver is called once per launch.
+ */
+export type PrimaryLaunchHarnessSource =
+  | PrimaryLaunchHarness
+  | ((taskId: string) => Promise<PrimaryLaunchHarness>);
+
+export interface PrimaryLaunchOptions {
+  /**
+   * Permission prompts for this launch (decision R7): `"bypass"` only for
+   * a background launch of a task whose launch asked for it; an interactive
+   * pane never bypasses. Default `"default"`.
+   */
+  permissions?: LaunchPermissions;
 }
 
 export interface PrimaryLaunchResolution {
@@ -45,6 +65,8 @@ export interface PrimaryLaunchResolution {
   spec: LaunchSpec | undefined;
   /** `binding.worktreePath` existed but the harness command isn't on PATH. */
   commandMissing: boolean;
+  /** The bare command of the task's agent (`pi`, `claude`, ...), when known: names it in "not found" messages. */
+  agentCommand?: string;
   /**
    * The binding named a worktree, but that directory no longer exists on
    * disk (reaped, moved, or carried over from an old layout). Spawning pi
@@ -66,7 +88,8 @@ export async function resolvePrimaryLaunch(
   taskId: string,
   stateDir: string,
   core: PrimaryLaunchCore,
-  harness: PrimaryLaunchHarness,
+  harnessSource: PrimaryLaunchHarnessSource,
+  options: PrimaryLaunchOptions = {},
 ): Promise<PrimaryLaunchResolution> {
   const binding = await core.getTaskWorkspace(taskId);
   if (!binding?.worktreePath) {
@@ -90,10 +113,16 @@ export async function resolvePrimaryLaunch(
       worktreeMissing: true,
     };
   }
+  const harness =
+    typeof harnessSource === "function"
+      ? await harnessSource(taskId)
+      : harnessSource;
+  const agent = harness.command ? { agentCommand: harness.command } : {};
   const baseSpecInput: BuildLaunchSpecInput = {
     taskId,
     workspacePath: binding.worktreePath,
     stateDir,
+    permissions: options.permissions ?? "default",
   };
   const probeSpec = harness.buildLaunchSpec(baseSpecInput);
   if (!commandExists(probeSpec.command)) {
@@ -102,6 +131,7 @@ export async function resolvePrimaryLaunch(
       spec: probeSpec,
       commandMissing: true,
       worktreeMissing: false,
+      ...agent,
     };
   }
   // Only once pi is actually launchable (a shell fallback, or a dropped
@@ -117,5 +147,11 @@ export async function resolvePrimaryLaunch(
     ...(session ? { session } : {}),
     ...(initialPrompt ? { initialPrompt } : {}),
   });
-  return { binding, spec, commandMissing: false, worktreeMissing: false };
+  return {
+    binding,
+    spec,
+    commandMissing: false,
+    worktreeMissing: false,
+    ...agent,
+  };
 }
