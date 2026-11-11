@@ -1,0 +1,21 @@
+<!-- Harbormaster app icon: a lighthouse (the thing that watches the harbor
+     and signals when something needs you). Amber lamp = the app's "needs
+     you" color, mint wave = accent. Source of truth for build/icon.icns and
+     build/icon.png (regenerate with `npm run icon`). macOS grid: 824px
+     squircle inside a 1024 canvas. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1f2e"/><stop offset="1" stop-color="#0f5c5a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffc34d" stop-opacity="0.9"/><stop offset="1" stop-color="#ffc34d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="25" y="25" width="206" height="206" rx="46" fill="url(#bg)"/>
+  <circle cx="128" cy="80" r="56" fill="url(#glow)"/>
+  <path d="M113 86 L143 86 L155 188 L101 188 Z" fill="none" stroke="#eef4f8" stroke-width="12" stroke-linejoin="round"/>
+  <circle cx="128" cy="80" r="14" fill="#ffc34d"/>
+  <path d="M101 136 L155 136" stroke="#eef4f8" stroke-width="12" stroke-linecap="round"/>
+  <path d="M46 216 C64 207 82 207 100 216 S136 225 154 216 S190 207 210 216" fill="none" stroke="#6ef5d6" stroke-width="10" stroke-linecap="round"/>
+</svg>
