@@ -307,8 +307,8 @@ with the full gate green and the acceptance checked.
 | A | OSC 7501 parsing in the app pty layer → `reportPresence` | Fake CLI emitting 7501 drives spinner / your move / idle in e2e; probe answered; unit tests on raw bytes | merged 88b43c1 |
 | A | Extension shrunk to inbox delivery; presence reporter, commands, widget, tools removed; auto-install at first run | Steer/followUp messages still arrive in a Pi task session; `packages/extension/src` is one module plus tests | merged 88b43c1 (real-pi smoke only; no e2e inside Pi) |
 | A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | merged 88b43c1 (no /totask or TUI existed anymore) |
-| C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | todo |
-| C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | todo |
+| C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | merged 0f68416 (adds a built-in `harbormaster` board source so rules re-evaluate on column changes) |
+| C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | merged 0f68416 (deploy → done stays a core integration test: https-only version endpoint) |
 | C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | todo |
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | todo |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | todo |
@@ -331,3 +331,11 @@ with the full gate green and the acceptance checked.
   is down (a Stop hook exiting 2 would loop Claude); wave B to confirm.
 - Wave A: AGENTS.md still calls the TUI frozen and the extension a frontend.
 - Wave D: `brew audit` / local install blocked by this machine's Xcode 16.4.
+- Wave C: rule-sent messages (`MessageSender {kind: "rule"}`) take the
+  approval route; decide whether they should bypass approval.
+- Wave C: addon awaiting kinds are listed but not registered in the picker
+  (`AwaitingKind` is a closed union).
+- Wave C: `RulesRuntime.dispose()` is not called on quit.
+- Wave C: AGENTS.md / design-decisions "Three verbs" still say "movers".
+- Wave C: on first start after merge, a config's `movers` list becomes the
+  first `rules.yaml`; every task fires `.appeared` once.
