@@ -97,7 +97,7 @@ not a verb: it is an **awaiting kind**, a record in core's registry
 (`engines/awaiting-kinds.ts`: id, label, optional input fields, optional
 `onEnter` action) that the one toawait verb is parameterized with. Kinds
 are built-in data today and shaped so configured kinds can slot in later
-without new commands; movers already consume kinds purely as data.
+without new commands; rules already consume kinds purely as data.
 
 - **Review is a built-in default kind, not a verb.** Its `onEnter` pushes
   the branch and opens or reuses the PR (the former `toReview` body) for a
