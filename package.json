@@ -2,7 +2,7 @@
   "name": "harbormaster",
   "private": true,
   "version": "0.0.1",
-  "description": "A kanban harbor for coding-agent tasks \u2014 every task gets a berth: worktree, branch, session, pane.",
+  "description": "A kanban harbor for coding-agent tasks: every task gets a berth: worktree, branch, session, pane.",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -14,9 +14,7 @@
     "test": "vitest run",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "install-extension": "pi install \"$(pwd)/packages/extension\"",
-    "migrate-from-pihome": "tsx packages/core/src/migration/cli.ts",
-    "dist": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/app && npm run dist -w @harbormaster/app"
+    "dist": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli && npm run build -w @harbormaster/app && npm run dist -w @harbormaster/app"
   },
   "engines": {
     "node": ">=20"

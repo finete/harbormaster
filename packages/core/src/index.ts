@@ -39,7 +39,8 @@ export * from "./contracts/index.js";
 export * from "./engines/index.js";
 export * from "./harness/index.js";
 export * from "./manager/index.js";
-export * from "./migration/index.js";
+export * from "./tools/index.js";
+export * from "./transport/index.js";
 export * from "./utilities/index.js";
 
 export interface CoreOptions {
@@ -72,10 +73,9 @@ export function createCore(options: CoreOptions = {}): Core {
     paths.workspaceBindingsFile,
     paths.workspaceBindingsLockFile,
   );
-  // Presence is a phase-2 seam: constructed and ready to grow into, but
-  // nothing in the command surface reads or writes it yet.
+  // Written by the presence commands (`reportPresence` / `endPresence` /
+  // `reportTaskOutcome`); read through the harness adapter.
   const presence = new SessionPresenceAccess(paths.presenceDir);
-  void presence;
   const config = new JsonConfigAccess(paths.configFile);
   const repositories = new LocalGitRepositoryAccess();
   const worktrees = new LocalGitWorktreeAccess();
@@ -90,7 +90,8 @@ export function createCore(options: CoreOptions = {}): Core {
   const folders = new JsonFolderAccess(paths.locationsFile);
   const attachments = new LocalTaskAttachmentAccess(paths.taskAttachmentsDir);
   const harness =
-    options.harness ?? new PiHarnessAdapter({ stateDir: paths.root, clock });
+    options.harness ??
+    new PiHarnessAdapter({ stateDir: paths.root, clock, presence });
 
   const commands = new CoreManager({
     tasks: taskState,
@@ -109,6 +110,7 @@ export function createCore(options: CoreOptions = {}): Core {
     harness,
     folders,
     attachments,
+    presence,
   });
 
   return { commands, events };

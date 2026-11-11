@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "license": "MIT",
   "type": "module",
-  "description": "Pi extension: in-session command surface (/todev, /toawait, /todone, harbormaster_report_status) plus presence reporting for Harbormaster-hosted sessions. The temp write-guard and the frozen TUI board land in a later wave.",
+  "description": "Pi extension: inbox delivery for Harbormaster task sessions (messages other tasks send land via pi.sendMessage as steer/followUp), plus the per-session `harbormaster` MCP server registration. One self-contained file the app installs into Pi's extensions dir.",
   "pi": {
     "extensions": [
       "./src/index.ts"
@@ -15,17 +15,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@harbormaster/core": "0.0.1"
-  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.3",
     "@earendil-works/pi-tui": "1.0.3",
+    "@harbormaster/core": "0.0.1",
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
-  },
-  "peerDependencies": {
-    "typebox": "*"
   }
 }

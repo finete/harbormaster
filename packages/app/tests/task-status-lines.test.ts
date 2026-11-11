@@ -2,8 +2,58 @@ import { describe, expect, it } from "vitest";
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
+  derivePresenceActivity,
   deriveProvenanceLabel,
 } from "../src/renderer/src/lib/task-status-lines";
+
+describe("derivePresenceActivity (OSC 7501 states)", () => {
+  const live = { live: true, runningTurn: false } as const;
+  it("working is a spinner, blocked is your move, idle/done are idle, error is error", () => {
+    expect(
+      derivePresenceActivity({
+        live: true,
+        runningTurn: true,
+        status: { state: "working" },
+      }),
+    ).toBe("working");
+    expect(
+      derivePresenceActivity({ ...live, status: { state: "blocked" } }),
+    ).toBe("your-move");
+    expect(derivePresenceActivity({ ...live, status: { state: "idle" } })).toBe(
+      "idle",
+    );
+    expect(derivePresenceActivity({ ...live, status: { state: "done" } })).toBe(
+      "idle",
+    );
+    expect(
+      derivePresenceActivity({
+        ...live,
+        status: { state: "error", message: "boom" },
+      }),
+    ).toBe("error");
+  });
+
+  it("keeps the old meaning without a status, and a reported outcome is your move", () => {
+    expect(derivePresenceActivity(live)).toBe("your-move");
+    expect(
+      derivePresenceActivity({
+        ...live,
+        status: { state: "done" },
+        outcome: { status: "done" },
+      }),
+    ).toBe("your-move");
+  });
+
+  it("waiting on the parent is idle; no agent is undefined", () => {
+    expect(
+      derivePresenceActivity({ ...live, status: { state: "blocked" } }, true),
+    ).toBe("idle");
+    expect(
+      derivePresenceActivity({ live: false, runningTurn: false }),
+    ).toBeUndefined();
+    expect(derivePresenceActivity(undefined)).toBeUndefined();
+  });
+});
 
 describe("deriveOutcomeLine", () => {
   it("is undefined with no presence", () => {

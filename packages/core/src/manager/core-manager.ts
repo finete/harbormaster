@@ -18,6 +18,7 @@ import type {
   LaunchTaskInput,
   MoveTaskOptions,
   OrphanWorktreeReport,
+  PresenceReport,
   RecordTaskSessionInput,
   RefreshOptions,
   RefreshResult,
@@ -36,6 +37,7 @@ import type {
 import type {
   HarnessAdapter,
   HarnessModelCatalog,
+  PresenceStatus,
   SessionLaunch,
 } from "../contracts/harness.js";
 import type {
@@ -74,6 +76,7 @@ import type {
   FolderAccess,
   IdGenerator,
   MessageAccess,
+  PresenceAccess,
   ScratchWorkspaceAccess,
   SessionFileAccess,
   TaskAttachmentAccess,
@@ -128,6 +131,7 @@ import {
   assertMayReturnToDev,
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
+import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 
@@ -163,6 +167,8 @@ export interface CoreManagerDependencies {
   folders?: FolderAccess;
   /** Per-task copies of images pasted into a prompt; without it attachments keep their original paths. */
   attachments?: TaskAttachmentAccess;
+  /** Presence registry written by `reportPresence` / `endPresence` / `reportTaskOutcome` (`createCore` supplies it). */
+  presence?: PresenceAccess;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -2405,6 +2411,61 @@ export class CoreManager implements CoreCommands {
 
   subscribeInbox(taskId: string, listener: () => void): () => void {
     return this.requireMessaging().messages.watchDoorbell(taskId, listener);
+  }
+
+  async reportPresence(taskId: string, report: PresenceReport): Promise<void> {
+    const presence = this.requirePresence();
+    await presence.applyReport(taskId, (current) =>
+      applyProgramStatus(current, {
+        taskId,
+        pid: report.pid,
+        state: report.state,
+        ...(report.message ? { message: report.message } : {}),
+        at: report.at ?? this.deps.clock.now().toISOString(),
+      }),
+    );
+  }
+
+  async endPresence(
+    taskId: string,
+    input: { pid: number; at?: string },
+  ): Promise<void> {
+    await this.requirePresence().end(
+      taskId,
+      input.pid,
+      input.at ?? this.deps.clock.now().toISOString(),
+    );
+  }
+
+  async reportTaskOutcome(
+    taskId: string,
+    outcome: { status: "done" | "blocked"; note?: string },
+  ): Promise<void> {
+    const presence = this.requirePresence();
+    const status = await this.getPresence(taskId);
+    if (!status.live || !status.record) {
+      throw new Error(
+        "This session is not linked to a live Harbormaster task; status was not recorded.",
+      );
+    }
+    await presence.reportOutcome(
+      taskId,
+      status.record.pid,
+      outcome.status,
+      outcome.note?.trim() || undefined,
+      this.deps.clock.now().toISOString(),
+    );
+  }
+
+  async getPresence(taskId: string): Promise<PresenceStatus> {
+    const { harness } = this.deps;
+    if (!harness) throw new Error("presence is not configured");
+    return harness.presence(taskId);
+  }
+
+  private requirePresence(): PresenceAccess {
+    if (!this.deps.presence) throw new Error("presence is not configured");
+    return this.deps.presence;
   }
 
   async recordUserInput(taskId: string): Promise<void> {

@@ -150,6 +150,16 @@ export interface PresenceBadge {
     status: "done" | "blocked";
     note?: string;
   };
+  /**
+   * The agent's last OSC 7501 program status (decision #18), forwarded
+   * under the same trust rule as `outcome`: `blocked` is "your move",
+   * `idle` / `done` are at rest, `error` is at rest with a warning
+   * (`message`). See lib/task-status-lines.ts `derivePresenceActivity`.
+   */
+  status?: {
+    state: "idle" | "working" | "blocked" | "done" | "error";
+    message?: string;
+  };
 }
 
 /** Pushed every poll tick (~5s) for every non-done task; badge-sized only (see Sidebar/TaskCard). */

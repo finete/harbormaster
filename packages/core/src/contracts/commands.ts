@@ -2,7 +2,11 @@
 // events out". Kept separate from model.ts because these are call-shape
 // contracts, not persisted domain data.
 
-import type { HarnessModelCatalog, SessionLaunch } from "./harness.js";
+import type {
+  HarnessModelCatalog,
+  PresenceStatus,
+  SessionLaunch,
+} from "./harness.js";
 import type {
   ApproveMessageEdits,
   FindTasksOptions,
@@ -23,6 +27,16 @@ import type {
   WorkspaceBinding,
 } from "./model.js";
 import type { RepositoryInfo } from "./workspace.js";
+
+/** One program-status report for `CoreCommands.reportPresence`. */
+export interface PresenceReport {
+  state: "idle" | "working" | "blocked" | "done" | "error";
+  message?: string;
+  /** ISO time of the report; defaults to core's clock. */
+  at?: string;
+  /** The reporting process (the pty's child). */
+  pid: number;
+}
 
 export interface ReopenTaskInput {
   /**
@@ -538,6 +552,30 @@ export interface CoreCommands {
   subscribeInbox(taskId: string, listener: () => void): () => void;
   /** Called by the adapter when the user types into the task's session: resets the loop cap, ends "waiting on parent". */
   recordUserInput(taskId: string): Promise<void>;
+  /**
+   * Program status from the task's agent (OSC 7501, parsed by the pty owner;
+   * decision #18). `working` = a turn is running, `blocked` = "your move",
+   * `idle` / `done` = at rest, `error` = at rest with a warning. A report
+   * from a new `pid` starts a fresh attachment; pid liveness is the "ended"
+   * signal (see `endPresence`).
+   */
+  reportPresence(taskId: string, report: PresenceReport): Promise<void>;
+  /** The task's agent process exited: end its attachment (a reported outcome survives as `ended`). */
+  endPresence(
+    taskId: string,
+    input: { pid: number; at?: string },
+  ): Promise<void>;
+  /**
+   * The agent's own done/blocked verdict (`report_status`), recorded on its
+   * still-live attachment: the task shows "your move", not ended. Rejects
+   * when the task has no live agent attachment.
+   */
+  reportTaskOutcome(
+    taskId: string,
+    outcome: { status: "done" | "blocked"; note?: string },
+  ): Promise<void>;
+  /** Liveness / turn / outcome snapshot of the task's agent session. */
+  getPresence(taskId: string): Promise<PresenceStatus>;
   /** Messages awaiting the user's approval, oldest first. */
   listPendingApprovals(): Promise<TaskMessage[]>;
   /**

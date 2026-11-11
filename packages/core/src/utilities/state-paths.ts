@@ -1,7 +1,8 @@
 // Per-user state directory layout. Default `~/.harbormaster`; every access
 // service takes its path from here and nothing else resolves paths itself.
 
-import { homedir } from "node:os";
+import { createHash } from "node:crypto";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const DEFAULT_STATE_DIR = join(homedir(), ".harbormaster");
@@ -29,6 +30,28 @@ export interface StatePaths {
   readonly doorbellDir: string;
   /** `<stateDir>/messages/attachments/<messageId>/`: core's copies of message attachments. */
   readonly attachmentsDir: string;
+  /** The app's local tool socket (see `resolveSocketPath`). */
+  readonly socketFile: string;
+}
+
+/** Unix socket paths are capped (104 bytes on macOS); stay safely under it. */
+const MAX_SOCKET_PATH_BYTES = 100;
+
+/**
+ * Where the app's local tool socket lives for a state dir:
+ * `<stateDir>/harbormaster.sock`, or, when that path is too long for a unix
+ * socket (deep temp dirs), `<tmpdir>/harbormaster-<hash of stateDir>.sock`.
+ * Server and clients derive it the same way, so no lookup file is needed.
+ */
+export function resolveSocketPath(
+  stateDir: string = DEFAULT_STATE_DIR,
+): string {
+  const preferred = join(stateDir, "harbormaster.sock");
+  if (Buffer.byteLength(preferred) <= MAX_SOCKET_PATH_BYTES) return preferred;
+  const hash = createHash("sha256").update(stateDir).digest("hex").slice(0, 16);
+  const fallback = join(tmpdir(), `harbormaster-${hash}.sock`);
+  if (Buffer.byteLength(fallback) <= MAX_SOCKET_PATH_BYTES) return fallback;
+  return join("/tmp", `harbormaster-${hash}.sock`);
 }
 
 export function resolveStatePaths(
@@ -50,5 +73,6 @@ export function resolveStatePaths(
     messagesLockFile: join(stateDir, "messages", "messages.lock"),
     doorbellDir: join(stateDir, "messages", "doorbell"),
     attachmentsDir: join(stateDir, "messages", "attachments"),
+    socketFile: resolveSocketPath(stateDir),
   };
 }

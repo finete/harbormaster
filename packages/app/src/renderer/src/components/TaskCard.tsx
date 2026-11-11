@@ -10,6 +10,7 @@ import {
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
+  derivePresenceActivity,
 } from "../lib/task-status-lines";
 import {
   lastInteractionTimestamp,
@@ -118,7 +119,8 @@ function TaskCardFace({
   // Live but idle = pi-home's ● "your move": the agent is waiting on you,
   // unless it is waiting on its parent instead (neutral, not amber).
   const attention =
-    !!presence?.live && !running && !messaging.suppressAttention;
+    derivePresenceActivity(presence, messaging.suppressAttention) ===
+    "your-move";
   const outcome = deriveOutcomeLine(presence);
   const launchMarker = deriveLaunchMarker(task);
 

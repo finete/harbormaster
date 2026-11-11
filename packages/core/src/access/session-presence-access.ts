@@ -116,7 +116,7 @@ export class SessionPresenceAccess implements PresenceAccess {
     if (!record || record.pid !== pid) return; // a newer attachment took over
     if (record.mode === "interactive") {
       // A reported outcome (e.g. a launched child that called
-      // harbormaster_report_status) outlives the process: it becomes the
+      // report_status) outlives the process: it becomes the
       // ended marker so the parent's subtask status and the card still show
       // the verdict after the pty is gone (app quit, pane closed).
       if (record.outcome) {
@@ -136,6 +136,17 @@ export class SessionPresenceAccess implements PresenceAccess {
       ...record,
       ended: { status: "unreported", at },
     } satisfies PresenceRecord);
+  }
+
+  applyReport(
+    taskId: string,
+    next: (current: PresenceRecord | undefined) => PresenceRecord,
+  ): Promise<PresenceRecord> {
+    return this.serialize(async () => {
+      const record = next(await this.read(taskId));
+      await writeJsonAtomic(this.pathFor(taskId), record);
+      return record;
+    });
   }
 
   async read(taskId: string): Promise<PresenceRecord | undefined> {
