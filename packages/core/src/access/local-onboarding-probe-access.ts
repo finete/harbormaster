@@ -4,8 +4,10 @@
 // that hangs (a login prompt, a slow network check) never stalls the
 // wizard; the outcome is raw text, parsed by `engines/onboarding.ts`.
 
-import { mkdir, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, mkdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type {
   OnboardingProbeAccess,
   ProbeOutcome,
@@ -74,6 +76,37 @@ export class LocalOnboardingProbeAccess implements OnboardingProbeAccess {
         command: this.env.HARBORMASTER_CLAUDE_COMMAND || "claude",
       },
     ];
+  }
+
+  async resolveCommand(command: string): Promise<string | undefined> {
+    const trimmed = command.trim();
+    if (!trimmed) return undefined;
+    const home = this.homeDir();
+    const candidates = trimmed.includes("/")
+      ? [
+          trimmed.startsWith("~/")
+            ? join(home, trimmed.slice(2))
+            : isAbsolute(trimmed)
+              ? trimmed
+              : resolve(trimmed),
+        ]
+      : (this.env.PATH ?? "")
+          .split(delimiter)
+          .filter(Boolean)
+          .map((dir) => join(dir, trimmed));
+    for (const candidate of candidates) {
+      const executable = await stat(candidate).then(
+        (info) => info.isFile(),
+        () => false,
+      );
+      if (!executable) continue;
+      const runnable = await access(candidate, fsConstants.X_OK).then(
+        () => true,
+        () => false,
+      );
+      if (runnable) return candidate;
+    }
+    return undefined;
   }
 
   async cliVersion(command: string): Promise<ProbeOutcome> {

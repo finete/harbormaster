@@ -6,8 +6,11 @@
 // screen shows the account from a stubbed `gh auth status` and leaves the
 // source on with the default rules written; Start lands in the workspace
 // with the New task composer open on the picked repository, and the first
-// task is created on Claude Code. A relaunch goes straight to the app;
-// "Welcome / Setup…" reopens the wizard over it.
+// task is created on Claude Code. Along the way: the primary button sits
+// inside the card, Enter in the typed path advances, Esc goes back, the
+// stepper checks off done steps, and the agent step offers exactly Pi and
+// Claude Code (Pi missing, with its install command). A relaunch goes
+// straight to the app; "Welcome / Setup…" reopens the wizard over it.
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -38,6 +41,7 @@ let root: string;
 let home: string;
 let stateDir: string;
 let codeRoot: string;
+let fakeClaude: string;
 let env: Record<string, string>;
 const mainProcessErrors: string[] = [];
 
@@ -123,6 +127,7 @@ test.beforeAll(() => {
   mkdirSync(stateDir, { recursive: true });
   seedRepository("alpha");
   seedRepository("beta");
+  fakeClaude = writeFakeClaude(root);
   env = {
     ...(process.env as Record<string, string>),
     HOME: home,
@@ -130,7 +135,7 @@ test.beforeAll(() => {
     HARBORMASTER_STATE_DIR: stateDir,
     HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
     HARBORMASTER_WINDOW_OFFSCREEN: "1",
-    HARBORMASTER_CLAUDE_COMMAND: writeFakeClaude(root),
+    HARBORMASTER_CLAUDE_COMMAND: fakeClaude,
     // Pi is "not installed" here: detection must say so, not hang.
     HARBORMASTER_PI_COMMAND: path.join(root, "no-such-pi"),
     HARBORMASTER_GH_COMMAND: writeFakeGh(),
@@ -166,7 +171,27 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     ).toHaveCount(0);
     expect(existsSync(path.join(home, "Code"))).toBe(true);
 
-    // The real code root: both repositories are found; pick beta.
+    // The primary button sits in the card's own footer, not at the
+    // window's edge.
+    const card = window.getByTestId("onboarding-card");
+    const cardBox = await card.boundingBox();
+    const nextBox = await window.getByTestId("onboarding-next").boundingBox();
+    expect(cardBox && nextBox).toBeTruthy();
+    if (cardBox && nextBox) {
+      expect(nextBox.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(nextBox.y).toBeGreaterThanOrEqual(cardBox.y);
+      expect(nextBox.x + nextBox.width).toBeLessThanOrEqual(
+        cardBox.x + cardBox.width,
+      );
+      expect(nextBox.y + nextBox.height).toBeLessThanOrEqual(
+        cardBox.y + cardBox.height,
+      );
+    }
+    const stepper = window.getByTestId("onboarding-stepper-step");
+    await expect(stepper.nth(0)).toHaveAttribute("data-state", "current");
+
+    // The real code root: both repositories are found; pick beta, then
+    // Enter in the typed path advances (keyboard path, no click on Next).
     await rootInput.fill(codeRoot);
     const repos = window.getByTestId("onboarding-repo");
     await expect(repos).toHaveCount(2);
@@ -174,17 +199,38 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     await expect(repos.nth(1)).toContainText("beta");
     await repos.nth(1).click();
     await expect(repos.nth(1)).toHaveAttribute("data-checked", "true");
-    await window.getByTestId("onboarding-next").click();
+    await rootInput.press("Enter");
     await expect(wizard).toHaveAttribute("data-step", "agent");
     expect(readConfig().codeRoot).toBe(codeRoot);
+    // The stepper marks the first step done (with a check) and moves on.
+    await expect(stepper.nth(0)).toHaveAttribute("data-state", "done");
+    await expect(
+      stepper.nth(0).getByTestId("onboarding-step-check"),
+    ).toBeVisible();
+    await expect(stepper.nth(1)).toHaveAttribute("data-state", "current");
 
-    // Screen 2: Pi is missing, Claude Code is found with its version.
+    // Screen 2: exactly Pi and Claude Code (no "Other CLI"); Pi is
+    // missing and shows its install command, Claude Code is found with
+    // where and which version.
+    await expect(
+      window.getByTestId("onboarding-agent-options").getByRole("radio"),
+    ).toHaveCount(2);
+    await expect(window.getByText("Other CLI")).toHaveCount(0);
     await expect(
       window.getByTestId("onboarding-agent-claude-code-status"),
-    ).toContainText("v2.1.322");
+    ).toContainText(`found at ${fakeClaude} · v2.1.322`);
     await expect(
       window.getByTestId("onboarding-agent-pi-status"),
     ).toContainText("not found");
+    await expect(
+      window.getByTestId("onboarding-agent-pi-install"),
+    ).toContainText("npm install -g @earendil-works/pi-coding-agent");
+    // Esc goes back a step; Enter (focus lands on the path input) comes back.
+    await window.keyboard.press("Escape");
+    await expect(wizard).toHaveAttribute("data-step", "code");
+    await expect(rootInput).toBeFocused();
+    await window.keyboard.press("Enter");
+    await expect(wizard).toHaveAttribute("data-step", "agent");
     await window.getByTestId("onboarding-agent-claude-code").click();
     await expect(window.getByTestId("onboarding-bypass")).toHaveAttribute(
       "aria-checked",
@@ -212,6 +258,12 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     // Screen 4 → Start: the workspace with the composer open on beta.
     await expect(window.getByTestId("onboarding-concepts")).toContainText(
       "rules.yaml",
+    );
+    await expect(window.getByTestId("onboarding-start")).toContainText(
+      "Start Harbormaster",
+    );
+    await expect(window.getByTestId("onboarding-reopen-hint")).toContainText(
+      "Welcome / Setup…",
     );
     await window.getByTestId("onboarding-start").click();
     await expect(wizard).toHaveCount(0);

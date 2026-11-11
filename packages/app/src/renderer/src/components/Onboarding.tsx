@@ -1,20 +1,26 @@
 // The first-run wizard (docs/release-plan.md "Onboarding (four screens)",
-// R14): code root + repositories, default agent, GitHub, concepts. A
-// full-window view shown before the normal UI on first run, and over it
-// from the "Welcome / Setup…" menu item. Every read and write is a core
-// command through `window.harbormaster.onboarding` (main forwards; the
-// renderer never touches the filesystem or a CLI). Probes resolve
-// asynchronously with timeouts in core, so nothing here blocks on them.
+// R14): code root + repositories, default agent, GitHub, concepts. One
+// centered card (stepper on the left, the step on the right, Back and the
+// primary button in the card's own footer), shown as the whole window
+// before the normal UI on first run, and over it from the "Welcome /
+// Setup…" menu item. Keyboard: Enter = primary (unless the focused control
+// uses Enter), Cmd/Ctrl+Enter = primary always, Esc = Back (on the first
+// step it closes the menu-opened overlay; first run ignores it).
+//
+// Every read and write is a core command through
+// `window.harbormaster.onboarding` (main forwards; the renderer never
+// touches the filesystem or a CLI). Probes resolve asynchronously with
+// timeouts in core, so nothing here blocks on them.
 
 import {
   AlertTriangle,
-  ArrowRight,
+  Check,
   CheckCircle2,
   Columns3,
   FolderOpen,
-  GitBranch,
   Inbox,
   MessagesSquare,
+  RefreshCw,
   Scale,
   X,
 } from "lucide-react";
@@ -27,21 +33,23 @@ import type {
   OnboardingState,
 } from "../../../preload/api";
 import {
+  AGENT_INSTALL_HINTS,
   type AgentChoice,
-  type CustomAgentForm,
-  customAgentFormProblem,
-  customAgentFromForm,
-  emptyCustomAgentForm,
+  agentFoundLine,
+  BUILTIN_AGENT_IDS,
   initialAgentChoice,
-  suggestAgentId,
+  isBuiltinAgent,
+  ONBOARDING_STEPS,
+  wizardKeyAction,
 } from "../lib/onboarding";
 import { modKeyLabel } from "../lib/platform";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Kbd } from "./ui/kbd";
 import { Label } from "./ui/label";
 
-const STEPS = ["Code", "Agent", "GitHub", "Concepts"] as const;
+const STEP_COUNT = ONBOARDING_STEPS.length;
 
 /** What "Start" hands back: the Where the first task's composer preselects. */
 export interface OnboardingResult {
@@ -50,7 +58,7 @@ export interface OnboardingResult {
 }
 
 interface OnboardingProps {
-  /** Shown from the menu over a running app: offers a close button. */
+  /** Shown from the menu over a running app: offers a close button (and Esc on step 1). */
   closable: boolean;
   onFinish(result: OnboardingResult): void;
   onClose(): void;
@@ -109,7 +117,7 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border transition-colors disabled:opacity-50",
+        "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
         checked ? "bg-primary" : "bg-muted",
       )}
     >
@@ -123,46 +131,115 @@ function Toggle({
   );
 }
 
-function Radio({
-  name,
-  checked,
-  onSelect,
-  testId,
+/** Title (the stepper's label) and the one-sentence why under it. */
+function StepHeader({
+  title,
   children,
-  disabled,
-  extra,
 }: {
-  name: string;
-  checked: boolean;
-  onSelect(): void;
-  testId: string;
+  title: string;
   children: ReactNode;
-  disabled?: boolean;
-  extra?: Record<string, string>;
 }): JSX.Element {
   return (
-    <label
-      data-testid={testId}
-      data-checked={checked}
-      {...extra}
-      className={cn(
-        "flex w-full cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors",
-        checked
-          ? "border-primary bg-primary/10"
-          : "border-border hover:bg-accent",
-        disabled && "cursor-default opacity-60",
-      )}
-    >
-      <input
-        type="radio"
-        name={name}
-        checked={checked}
-        disabled={disabled}
-        onChange={onSelect}
-        className="h-4 w-4 shrink-0 accent-sky-500"
-      />
-      <span className="min-w-0 flex-1">{children}</span>
-    </label>
+    <div>
+      <h2
+        id="onboarding-title"
+        data-testid="onboarding-title"
+        className="text-lg font-semibold"
+      >
+        {title}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">{children}</p>
+    </div>
+  );
+}
+
+/** `~/…` for display when `path` is under the suggested root's home. */
+function tildePath(path: string, suggested: string): string {
+  const home = suggested.replace(/\/Code$/, "");
+  return home && path.startsWith(`${home}/`)
+    ? `~/${path.slice(home.length + 1)}`
+    : path;
+}
+
+// --- The stepper -------------------------------------------------------------
+
+function Stepper({
+  step,
+  disabled,
+  onGo,
+}: {
+  step: number;
+  disabled: boolean;
+  onGo(index: number): void;
+}): JSX.Element {
+  return (
+    <ol data-testid="onboarding-stepper" className="flex flex-col gap-1">
+      {ONBOARDING_STEPS.map((entry, index) => {
+        const state =
+          index < step ? "done" : index === step ? "current" : "future";
+        const marker = (
+          <span
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+              state === "done" &&
+                "border-emerald-500/60 bg-emerald-500/15 text-emerald-400",
+              state === "current" &&
+                "border-primary bg-primary text-primary-foreground",
+              state === "future" && "border-border text-muted-foreground",
+            )}
+          >
+            {state === "done" ? (
+              <Check
+                data-testid="onboarding-step-check"
+                className="h-3.5 w-3.5"
+                strokeWidth={3}
+              />
+            ) : (
+              index + 1
+            )}
+          </span>
+        );
+        const body = (
+          <>
+            {marker}
+            <span className="min-w-0 text-left leading-tight">
+              {entry.label}
+            </span>
+          </>
+        );
+        return (
+          <li
+            key={entry.id}
+            data-testid="onboarding-stepper-step"
+            data-state={state}
+            aria-current={state === "current" ? "step" : undefined}
+          >
+            {state === "done" ? (
+              <button
+                type="button"
+                disabled={disabled}
+                title={`Back to "${entry.label}"`}
+                onClick={() => onGo(index)}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {body}
+              </button>
+            ) : (
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 px-2 py-1.5 text-sm",
+                  state === "current"
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {body}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -185,7 +262,6 @@ function CodeStep({
   preselect,
   onPreselect,
   onUseSuggested,
-  error,
 }: {
   state: OnboardingState;
   root: string;
@@ -197,7 +273,6 @@ function CodeStep({
   preselect: string;
   onPreselect(where: string): void;
   onUseSuggested(): void;
-  error: string;
 }): JSX.Element {
   const rows = [
     ...(scan?.repositories ?? []).map((repo) => ({
@@ -213,21 +288,28 @@ function CodeStep({
       detail: folder.path,
     })),
   ];
+  // Keep the selected row in view (a long list scrolls).
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowCount = rows.length;
+  useEffect(() => {
+    if (!preselect || rowCount === 0) return;
+    listRef.current
+      ?.querySelector('[data-checked="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [preselect, rowCount]);
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Where is your code?</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Harbormaster finds every git repository directly under this folder.
-          Each task gets its own worktree inside it.
-        </p>
-      </div>
+      <StepHeader title={ONBOARDING_STEPS[0].label}>
+        Harbormaster finds every git repository directly under this folder. Each
+        task gets its own worktree inside it.
+      </StepHeader>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="onboarding-code-root">Code folder</Label>
         <div className="flex gap-2">
           <Input
             id="onboarding-code-root"
             data-testid="onboarding-code-root"
+            data-path-input="true"
             value={root}
             spellCheck={false}
             onChange={(event) => onRootChange(event.target.value)}
@@ -272,7 +354,7 @@ function CodeStep({
       )}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <Label>Repositories found</Label>
+          <Label id="onboarding-repos-label">Repositories found</Label>
           {scanning && (
             <span className="text-xs text-muted-foreground">Scanning…</span>
           )}
@@ -294,195 +376,230 @@ function CodeStep({
           </p>
         ) : (
           <div
+            ref={listRef}
+            role="radiogroup"
+            aria-labelledby="onboarding-repos-label"
             data-testid="onboarding-repo-list"
-            className="flex max-h-56 flex-col gap-1 overflow-y-auto"
+            // Six 2rem rows, then it scrolls.
+            className="flex max-h-[12.25rem] flex-col divide-y divide-border overflow-y-auto rounded-md border border-border"
           >
-            {rows.map((row) => (
-              <Radio
-                key={row.key}
-                name="onboarding-repo"
-                checked={preselect === row.key}
-                onSelect={() => onPreselect(row.key)}
-                testId="onboarding-repo"
-                extra={{ "data-where": row.key }}
-              >
-                <span className="flex items-baseline gap-2">
-                  <span className="font-medium">{row.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {row.detail}
+            {rows.map((row) => {
+              const checked = preselect === row.key;
+              return (
+                <label
+                  key={row.key}
+                  data-testid="onboarding-repo"
+                  data-checked={checked}
+                  data-where={row.key}
+                  className={cn(
+                    "flex h-8 shrink-0 cursor-pointer items-center gap-2.5 px-3 text-sm transition-colors",
+                    checked ? "bg-primary/10" : "hover:bg-accent",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="onboarding-repo"
+                    checked={checked}
+                    onChange={() => onPreselect(row.key)}
+                    className="h-3.5 w-3.5 shrink-0 accent-sky-500"
+                  />
+                  <span className="shrink-0 font-semibold">{row.name}</span>
+                  {/* rtl + an LRM pair truncates from the start, so the org/repo end stays visible. */}
+                  <span
+                    dir="rtl"
+                    title={row.detail}
+                    className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground"
+                  >
+                    {`\u200e${row.detail}\u200e`}
                   </span>
-                </span>
-              </Radio>
-            ))}
+                </label>
+              );
+            })}
           </div>
         )}
-        {rows.length > 0 && (
+        <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            The selected one is preselected for your first task.
+            {rows.length > 0
+              ? "The selected one is preselected for your first task."
+              : ""}
           </p>
-        )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            data-testid="onboarding-add-folder"
+            onClick={onAddFolder}
+          >
+            Add another folder…
+          </Button>
+        </div>
       </div>
-      <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          data-testid="onboarding-add-folder"
-          onClick={onAddFolder}
-        >
-          Add another folder…
-        </Button>
-      </div>
-      {error && (
-        <p data-testid="onboarding-error" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
 
-/** `~/…` for display when `path` is under the suggested root's home. */
-function tildePath(path: string, suggested: string): string {
-  const home = suggested.replace(/\/Code$/, "");
-  return home && path.startsWith(`${home}/`)
-    ? `~/${path.slice(home.length + 1)}`
-    : path;
-}
-
 // --- Screen 2: default agent -------------------------------------------------
 
+const AGENT_LABELS: Record<(typeof BUILTIN_AGENT_IDS)[number], string> = {
+  pi: "Pi",
+  "claude-code": "Claude Code",
+};
+
+function AgentCard({
+  id,
+  label,
+  checked,
+  onSelect,
+  children,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onSelect(): void;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <label
+      data-testid={`onboarding-agent-${id}`}
+      data-checked={checked}
+      className={cn(
+        "flex w-full cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 text-left text-sm transition-colors",
+        checked
+          ? "border-primary bg-primary/10"
+          : "border-border hover:bg-accent",
+      )}
+    >
+      <input
+        type="radio"
+        name="onboarding-agent"
+        value={id}
+        checked={checked}
+        onChange={onSelect}
+        className="mt-0.5 h-4 w-4 shrink-0 accent-sky-500"
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-medium">{label}</span>
+        {children}
+      </span>
+    </label>
+  );
+}
+
 function AgentStep({
+  state,
   detected,
+  detecting,
+  onRescan,
   choice,
   onChoice,
-  form,
-  onForm,
   bypass,
   onBypass,
-  error,
 }: {
+  state: OnboardingState;
   detected: DetectedAgent[] | null;
+  detecting: boolean;
+  onRescan(): void;
   choice: AgentChoice;
   onChoice(choice: AgentChoice): void;
-  form: CustomAgentForm;
-  onForm(form: CustomAgentForm): void;
   bypass: boolean;
   onBypass(bypass: boolean): void;
-  error: string;
 }): JSX.Element {
   const agent = (id: string) => detected?.find((entry) => entry.id === id);
-  const status = (id: string): ReactNode => {
-    if (!detected) return "Detecting…";
-    const found = agent(id);
-    if (!found) return "";
-    return found.available ? (
-      <span className="text-emerald-400">
-        {found.version ? `v${found.version}` : "installed"}
-      </span>
-    ) : (
-      <span title={`${found.command}: ${found.error ?? "not found"}`}>
-        {found.error ?? "not found"}
-      </span>
-    );
-  };
+  const display = (path: string) => tildePath(path, state.suggestedCodeRoot);
+  // A custom agent (config.json) that already is the default stays
+  // pickable, so reopening the wizard never silently replaces it.
+  const configuredCustom = isBuiltinAgent(state.defaultHarness)
+    ? undefined
+    : state.customAgents.find((entry) => entry.id === state.defaultHarness);
+  const chosen = isBuiltinAgent(choice) ? agent(choice) : undefined;
   const piInPlay = choice === "pi" || agent("pi")?.available;
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Which agent runs your tasks?</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          New tasks start on this agent. You can pick another per repository or
-          per task.
-        </p>
-      </div>
+      <StepHeader title={ONBOARDING_STEPS[1].label}>
+        Harbormaster runs the agent you already use; pick the one new tasks
+        start with.
+      </StepHeader>
       <div className="flex flex-col gap-1.5">
-        {(
-          [
-            ["pi", "Pi"],
-            ["claude-code", "Claude Code"],
-          ] as const
-        ).map(([id, label]) => (
-          <Radio
-            key={id}
-            name="onboarding-agent"
-            checked={choice === id}
-            onSelect={() => onChoice(id)}
-            testId={`onboarding-agent-${id}`}
+        <div className="flex items-center justify-between">
+          <Label id="onboarding-agents-label">Agents on this machine</Label>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            data-testid="onboarding-agent-rescan"
+            disabled={detecting}
+            onClick={onRescan}
           >
-            <span className="flex items-center justify-between gap-2">
-              <span className="font-medium">{label}</span>
-              <span
-                data-testid={`onboarding-agent-${id}-status`}
-                className="text-xs text-muted-foreground"
-              >
-                {status(id)}
-              </span>
-            </span>
-          </Radio>
-        ))}
-        <Radio
-          name="onboarding-agent"
-          checked={choice === "custom"}
-          onSelect={() => onChoice("custom")}
-          testId="onboarding-agent-custom"
-        >
-          <span className="font-medium">Other CLI</span>
-        </Radio>
-      </div>
-      {choice === "custom" && (
-        <div
-          data-testid="onboarding-custom-form"
-          className="grid grid-cols-[6rem_1fr] items-center gap-2 rounded-md border border-border p-3"
-        >
-          <Label htmlFor="onboarding-custom-label">Name</Label>
-          <Input
-            id="onboarding-custom-label"
-            data-testid="onboarding-custom-label"
-            value={form.label}
-            placeholder="Aider"
-            onChange={(event) => onForm({ ...form, label: event.target.value })}
-          />
-          <Label htmlFor="onboarding-custom-command">Command</Label>
-          <Input
-            id="onboarding-custom-command"
-            data-testid="onboarding-custom-command"
-            value={form.command}
-            spellCheck={false}
-            placeholder="aider"
-            onChange={(event) =>
-              onForm({ ...form, command: event.target.value })
-            }
-          />
-          <Label htmlFor="onboarding-custom-args">Arguments</Label>
-          <Input
-            id="onboarding-custom-args"
-            data-testid="onboarding-custom-args"
-            value={form.args}
-            spellCheck={false}
-            placeholder="--yes-always"
-            onChange={(event) => onForm({ ...form, args: event.target.value })}
-          />
-          <span />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              data-testid="onboarding-custom-positional"
-              checked={form.promptPositional}
-              onChange={(event) =>
-                onForm({ ...form, promptPositional: event.target.checked })
-              }
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", detecting && "animate-spin")}
             />
-            Pass the task prompt as the last argument
-          </label>
-          {form.label.trim() && (
-            <>
-              <span />
+            Rescan
+          </Button>
+        </div>
+        <div
+          role="radiogroup"
+          aria-labelledby="onboarding-agents-label"
+          data-testid="onboarding-agent-options"
+          className="flex flex-col gap-2"
+        >
+          {BUILTIN_AGENT_IDS.map((id) => {
+            const found = agent(id);
+            const line = found ? agentFoundLine(found, display) : undefined;
+            return (
+              <AgentCard
+                key={id}
+                id={id}
+                label={AGENT_LABELS[id]}
+                checked={choice === id}
+                onSelect={() => onChoice(id)}
+              >
+                <span
+                  data-testid={`onboarding-agent-${id}-status`}
+                  className={cn(
+                    "truncate text-xs",
+                    line ? "text-emerald-400" : "text-muted-foreground",
+                  )}
+                  title={found?.path ?? found?.command}
+                >
+                  {!found ? "Detecting…" : (line ?? found.error ?? "not found")}
+                </span>
+                {found && !found.available && (
+                  <span
+                    data-testid={`onboarding-agent-${id}-install`}
+                    className="text-xs text-muted-foreground"
+                  >
+                    Install:{" "}
+                    <code className="select-all rounded bg-muted px-1 py-0.5 text-[11px] text-foreground">
+                      {AGENT_INSTALL_HINTS[id]}
+                    </code>
+                  </span>
+                )}
+              </AgentCard>
+            );
+          })}
+          {configuredCustom && (
+            <AgentCard
+              id="configured"
+              label={`Keep ${configuredCustom.label}`}
+              checked={choice === configuredCustom.id}
+              onSelect={() => onChoice(configuredCustom.id)}
+            >
               <span className="text-xs text-muted-foreground">
-                Saved as agent id <code>{suggestAgentId(form.label)}</code>
+                Your current default, a custom agent from config.json.
               </span>
-            </>
+            </AgentCard>
           )}
         </div>
+      </div>
+      {chosen && !chosen.available && (
+        <p
+          data-testid="onboarding-agent-warning"
+          className="flex items-start gap-2 text-xs text-amber-400"
+        >
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+          {AGENT_LABELS[chosen.id as keyof typeof AGENT_LABELS] ?? chosen.label}{" "}
+          is not installed yet; install it before you start your first task.
+        </p>
       )}
       {piInPlay && (
         <p
@@ -505,17 +622,11 @@ function AgentStep({
             Launched tasks run with permissions bypassed
           </p>
           <p className="text-muted-foreground">
-            Background tasks work in disposable worktrees, and you still review
-            every change before it merges. Panes you open keep your own
-            settings.
+            Tasks run in disposable worktrees and you review every change before
+            it merges; panes you open keep your own settings.
           </p>
         </div>
       </div>
-      {error && (
-        <p data-testid="onboarding-error" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
@@ -527,22 +638,17 @@ function GithubStep({
   enabled,
   onEnabled,
   onRecheck,
-  error,
 }: {
   status: GithubAuthStatus | null;
   enabled: boolean;
   onEnabled(enabled: boolean): void;
   onRecheck(): void;
-  error: string;
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Connect GitHub</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Harbormaster uses the GitHub CLI (gh) you are already signed in to.
-        </p>
-      </div>
+      <StepHeader title={ONBOARDING_STEPS[2].label}>
+        Harbormaster uses the GitHub CLI (gh) you are already signed in to.
+      </StepHeader>
       {!status ? (
         <p
           data-testid="onboarding-gh-checking"
@@ -619,18 +725,13 @@ function GithubStep({
           </p>
         </div>
       </div>
-      {error && (
-        <p data-testid="onboarding-error" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
 
 // --- Screen 4: concepts ------------------------------------------------------
 
-function ConceptCard({
+function Concept({
   icon,
   title,
   children,
@@ -640,13 +741,15 @@ function ConceptCard({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
-      <p className="flex items-center gap-2 text-sm font-semibold">
+    <div className="flex gap-3">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-foreground">
         {icon}
-        {title}
-      </p>
-      <div className="text-xs leading-relaxed text-muted-foreground">
-        {children}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{title}</p>
+        <div className="text-xs leading-relaxed text-muted-foreground">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -655,20 +758,19 @@ function ConceptCard({
 function ConceptsStep(): JSX.Element {
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-concepts">
-      <div className="flex flex-col items-center gap-2 text-center">
-        <LogoGlyph className="h-14 w-14 text-foreground" />
-        <h2 className="text-lg font-semibold">How Harbormaster works</h2>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <ConceptCard
+      <StepHeader title={ONBOARDING_STEPS[3].label}>
+        Four things to know before your first task.
+      </StepHeader>
+      <div className="flex flex-col gap-3.5">
+        <Concept
           icon={<Columns3 className="h-4 w-4" />}
           title="Three columns, three verbs"
         >
           Dev, Awaiting, Done: move a task <em>to Dev</em>, <em>to Awaiting</em>{" "}
           or <em>Done</em>. Every task is a worktree, a branch, an agent session
           and a pane.
-        </ConceptCard>
-        <ConceptCard
+        </Concept>
+        <Concept
           icon={<Scale className="h-4 w-4" />}
           title="Rules move cards for you"
         >
@@ -677,24 +779,30 @@ function ConceptsStep(): JSX.Element {
             ~/.harbormaster/rules/rules.yaml
           </code>
           . Ask your agent to add a rule, e.g.
-          <code className="mt-1 block overflow-x-auto whitespace-nowrap rounded bg-muted px-1.5 py-1 text-[11px] text-foreground">
+          <code className="mt-1 block whitespace-pre-wrap break-words rounded bg-muted px-1.5 py-1 text-[11px] text-foreground">
             {
               "- { id: merged-done, on: github.pr.mergedChanged, do: [{ action: move, with: { to: done } }] }"
             }
           </code>
-        </ConceptCard>
-        <ConceptCard icon={<Inbox className="h-4 w-4" />} title="The inbox">
+        </Concept>
+        <Concept icon={<Inbox className="h-4 w-4" />} title="The inbox">
           Everything that needs you lands in the inbox, split into Priority and
           Other. Open it with {modKeyLabel()}I.
-        </ConceptCard>
-        <ConceptCard
+        </Concept>
+        <Concept
           icon={<MessagesSquare className="h-4 w-4" />}
           title="Tasks talk to each other"
         >
           An agent can launch child tasks and message them. A message to an
           unrelated task waits for your approval in the inbox.
-        </ConceptCard>
+        </Concept>
       </div>
+      <p
+        data-testid="onboarding-reopen-hint"
+        className="text-xs text-muted-foreground"
+      >
+        You can reopen this from the Harbormaster menu (Welcome / Setup…).
+      </p>
     </div>
   );
 }
@@ -711,6 +819,9 @@ export function Onboarding({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [state, setState] = useState<OnboardingState | null>(null);
+  const wizardRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   // Screen 1.
   const [root, setRoot] = useState("");
@@ -724,9 +835,9 @@ export function Onboarding({
 
   // Screen 2.
   const [detected, setDetected] = useState<DetectedAgent[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
   const [choice, setChoice] = useState<AgentChoice>("pi");
   const choiceTouched = useRef(false);
-  const [form, setForm] = useState<CustomAgentForm>(emptyCustomAgentForm);
   const [bypass, setBypass] = useState(true);
 
   // Screen 3.
@@ -790,6 +901,30 @@ export function Onboarding({
       );
   }, [api]);
 
+  const detectSeq = useRef(0);
+  const detectAgents = useCallback(
+    (configured: string) => {
+      const seq = ++detectSeq.current;
+      setDetecting(true);
+      api
+        .detectAgents()
+        .then((agents) => {
+          if (seq !== detectSeq.current) return;
+          setDetected(agents);
+          if (!choiceTouched.current) {
+            setChoice(initialAgentChoice(configured, agents));
+          }
+        })
+        .catch((cause: unknown) => {
+          if (seq === detectSeq.current) setError(errorText(cause));
+        })
+        .finally(() => {
+          if (seq === detectSeq.current) setDetecting(false);
+        });
+    },
+    [api],
+  );
+
   // Load the starting state, then kick off every probe in the background.
   useEffect(() => {
     let cancelled = false;
@@ -799,31 +934,20 @@ export function Onboarding({
       setRoot(loaded.codeRoot);
       runScan(loaded.codeRoot);
       setBypass(loaded.bypassPermissions);
-      const custom = loaded.customAgents.find(
-        (agent) => agent.id === loaded.defaultHarness,
-      );
-      if (custom) {
-        setForm({
-          label: custom.label,
-          command: custom.command,
-          args: (custom.args ?? []).join(" "),
-          promptPositional: custom.promptArg !== "none",
-        });
-      }
-      setChoice(initialAgentChoice(loaded.defaultHarness, []));
-      void api.detectAgents().then((agents) => {
-        if (cancelled) return;
-        setDetected(agents);
-        if (!choiceTouched.current) {
-          setChoice(initialAgentChoice(loaded.defaultHarness, agents));
-        }
-      });
+      // A stale custom default (no longer in config.json) falls back to Pi.
+      const configured =
+        isBuiltinAgent(loaded.defaultHarness) ||
+        loaded.customAgents.some((agent) => agent.id === loaded.defaultHarness)
+          ? loaded.defaultHarness
+          : "pi";
+      setChoice(initialAgentChoice(configured, []));
+      detectAgents(configured);
     });
     checkGithub();
     return () => {
       cancelled = true;
     };
-  }, [api, runScan, checkGithub]);
+  }, [api, runScan, checkGithub, detectAgents]);
 
   // Rescan as the root is typed (debounced).
   const scanTimer = useRef<number | undefined>(undefined);
@@ -831,8 +955,12 @@ export function Onboarding({
     setRoot(next);
     setError("");
     window.clearTimeout(scanTimer.current);
-    scanTimer.current = window.setTimeout(() => runScan(next), 250);
+    scanTimer.current = window.setTimeout(() => {
+      scanTimer.current = undefined;
+      runScan(next);
+    }, 250);
   };
+  useEffect(() => () => window.clearTimeout(scanTimer.current), []);
 
   const switchToSuggestedRoot = async (): Promise<void> => {
     if (!scan) return;
@@ -881,25 +1009,12 @@ export function Onboarding({
       return;
     }
     if (step === 1) {
-      if (choice === "custom") {
-        const problem = customAgentFormProblem(form);
-        if (problem) throw new Error(problem);
-        const customAgent = customAgentFromForm(form);
-        setState(
-          await api.setDefaultAgent({
-            harness: customAgent.id,
-            customAgent,
-            bypassPermissions: bypass,
-          }),
-        );
-      } else {
-        setState(
-          await api.setDefaultAgent({
-            harness: choice,
-            bypassPermissions: bypass,
-          }),
-        );
-      }
+      setState(
+        await api.setDefaultAgent({
+          harness: choice,
+          bypassPermissions: bypass,
+        }),
+      );
       return;
     }
     if (step === 2) {
@@ -910,11 +1025,11 @@ export function Onboarding({
   };
 
   const next = async (): Promise<void> => {
-    if (busy) return;
+    if (busy || !state) return;
     setBusy(true);
     try {
       await saveStep();
-      if (step < STEPS.length - 1) {
+      if (step < STEP_COUNT - 1) {
         setStep(step + 1);
         return;
       }
@@ -927,131 +1042,241 @@ export function Onboarding({
     }
   };
 
-  const last = step === STEPS.length - 1;
+  const goTo = (index: number): void => {
+    if (busy || index < 0 || index >= step) return;
+    setError("");
+    setStep(index);
+  };
+
+  // Keyboard: one window-level listener (capture, so it sees keys even
+  // when focus fell to <body>) reading the latest render through a ref.
+  const keys = useRef({
+    next,
+    goTo,
+    onClose,
+    step,
+    closable,
+    scanning: false,
+    flushScan: () => {},
+  });
+  keys.current = {
+    next,
+    goTo,
+    onClose,
+    step,
+    closable,
+    scanning,
+    flushScan: () => {
+      window.clearTimeout(scanTimer.current);
+      scanTimer.current = undefined;
+      runScan(root);
+    },
+  };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const target =
+        event.target instanceof HTMLElement ? event.target : undefined;
+      const inside = !!target && !!wizardRef.current?.contains(target);
+      const current = keys.current;
+      const action = wizardKeyAction(
+        event,
+        {
+          tag: inside && target ? target.tagName : "",
+          type: target instanceof HTMLInputElement ? target.type : undefined,
+          role: target?.getAttribute("role"),
+          contentEditable: target?.isContentEditable,
+          isPathInput: target?.dataset.pathInput === "true",
+        },
+        {
+          step: current.step,
+          closable: current.closable,
+          scanSettled: !current.scanning && scanTimer.current === undefined,
+        },
+      );
+      if (action !== "none") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (action === "primary") void current.next();
+        else if (action === "back") current.goTo(current.step - 1);
+        else if (action === "close") current.onClose();
+        else if (action === "flush-scan") current.flushScan();
+        return;
+      }
+      // The wizard is modal over a running app: no key reaches the app's
+      // own window shortcuts (stopping propagation keeps default actions
+      // like typing, Space on a switch or arrows in a radio group).
+      event.stopPropagation();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  // Focus the first meaningful control of each step.
+  const loaded = state !== null;
+  const githubToggleTarget = (): HTMLElement | null =>
+    contentRef.current?.querySelector<HTMLElement>(
+      '[data-testid="onboarding-github-enabled"]:not(:disabled)',
+    ) ?? primaryRef.current;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focus moves on step entry only.
+  useEffect(() => {
+    if (!loaded) return;
+    const content = contentRef.current;
+    let target: HTMLElement | null | undefined;
+    if (step === 0) {
+      target = content?.querySelector<HTMLElement>(
+        '[data-testid="onboarding-code-root"]',
+      );
+    } else if (step === 1) {
+      target =
+        content?.querySelector<HTMLElement>(
+          'input[name="onboarding-agent"]:checked',
+        ) ??
+        content?.querySelector<HTMLElement>('input[name="onboarding-agent"]');
+    } else if (step === 2) {
+      target = githubToggleTarget();
+    } else {
+      target = primaryRef.current;
+    }
+    target?.focus();
+  }, [step, loaded]);
+  // The gh status arrives later and enables the toggle: move focus there
+  // unless the user already put it somewhere in the step.
+  const ghReady = gh !== null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the status lands, not on every step change.
+  useEffect(() => {
+    if (step !== 2 || !ghReady) return;
+    const active = document.activeElement;
+    if (active && contentRef.current?.contains(active)) return;
+    githubToggleTarget()?.focus();
+  }, [ghReady]);
+
+  const last = step === STEP_COUNT - 1;
   return (
     <div
+      ref={wizardRef}
       data-testid="onboarding"
-      data-step={STEPS[step]?.toLowerCase()}
-      className="fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      data-step={ONBOARDING_STEPS[step]?.id}
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background p-6 text-foreground"
     >
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-        <LogoGlyph className="h-5 w-5" />
-        <span className="text-sm font-semibold">Welcome to Harbormaster</span>
-        <ol className="ml-4 flex items-center gap-1 text-xs text-muted-foreground">
-          {STEPS.map((label, index) => (
-            <li key={label} className="flex items-center gap-1">
-              {index > 0 && <ArrowRight className="h-3 w-3" />}
-              <span
-                className={cn(
-                  index === step && "font-semibold text-foreground",
-                  index < step && "text-foreground/80",
-                )}
+      <div
+        data-testid="onboarding-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
+        className="relative flex h-[38rem] max-h-full w-full max-w-[720px] overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+      >
+        <nav
+          aria-label="Setup steps"
+          className="flex w-[200px] shrink-0 flex-col gap-6 border-r border-border bg-muted/40 px-3 py-5"
+        >
+          <div className="flex items-center gap-2 px-2">
+            <LogoGlyph className="h-5 w-5 shrink-0" />
+            <span className="text-sm font-semibold leading-tight">
+              Welcome to Harbormaster
+            </span>
+          </div>
+          <Stepper step={step} disabled={busy} onGo={goTo} />
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div
+            ref={contentRef}
+            className="min-h-0 flex-1 overflow-y-auto px-7 pb-4 pt-6"
+          >
+            {!state ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : step === 0 ? (
+              <CodeStep
+                state={state}
+                root={root}
+                onRootChange={changeRoot}
+                scan={scan}
+                scanning={scanning}
+                extras={extras}
+                onAddFolder={() => void addFolder()}
+                preselect={preselect}
+                onPreselect={setPreselect}
+                onUseSuggested={() => void switchToSuggestedRoot()}
+              />
+            ) : step === 1 ? (
+              <AgentStep
+                state={state}
+                detected={detected}
+                detecting={detecting}
+                onRescan={() => detectAgents(choice)}
+                choice={choice}
+                onChoice={(value) => {
+                  choiceTouched.current = true;
+                  setChoice(value);
+                  setError("");
+                }}
+                bypass={bypass}
+                onBypass={setBypass}
+              />
+            ) : step === 2 ? (
+              <GithubStep
+                status={gh}
+                enabled={githubEnabled}
+                onEnabled={(value) => {
+                  githubTouched.current = true;
+                  setGithubEnabled(value);
+                }}
+                onRecheck={checkGithub}
+              />
+            ) : (
+              <ConceptsStep />
+            )}
+            {error && (
+              <p
+                data-testid="onboarding-error"
+                className="mt-4 text-sm text-red-400"
               >
-                {index + 1}. {label}
-              </span>
-            </li>
-          ))}
-        </ol>
+                {error}
+              </p>
+            )}
+          </div>
+          <footer
+            data-testid="onboarding-footer"
+            className="flex shrink-0 items-center gap-3 border-t border-border px-5 py-3"
+          >
+            {step > 0 && (
+              <Button
+                variant="ghost"
+                data-testid="onboarding-back"
+                disabled={busy}
+                title="Back (Esc)"
+                onClick={() => goTo(step - 1)}
+              >
+                Back
+              </Button>
+            )}
+            <Button
+              ref={primaryRef}
+              className="ml-auto"
+              data-testid={last ? "onboarding-start" : "onboarding-next"}
+              disabled={busy || !state}
+              title={`${last ? "Start Harbormaster" : "Next"} (Enter)`}
+              onClick={() => void next()}
+            >
+              {last ? "Start Harbormaster" : "Next"}
+              <Kbd className="border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground">
+                ↵
+              </Kbd>
+            </Button>
+          </footer>
+        </div>
         {closable && (
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto h-7 w-7 p-0"
+            className="absolute right-2 top-2 h-7 w-7 p-0"
             data-testid="onboarding-close"
-            title="Close"
+            title="Close (Esc)"
             onClick={onClose}
           >
             <X className="h-4 w-4" />
           </Button>
         )}
-      </header>
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-xl px-6 py-8">
-          {!state ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : step === 0 ? (
-            <CodeStep
-              state={state}
-              root={root}
-              onRootChange={changeRoot}
-              scan={scan}
-              scanning={scanning}
-              extras={extras}
-              onAddFolder={() => void addFolder()}
-              preselect={preselect}
-              onPreselect={setPreselect}
-              onUseSuggested={() => void switchToSuggestedRoot()}
-              error={error}
-            />
-          ) : step === 1 ? (
-            <AgentStep
-              detected={detected}
-              choice={choice}
-              onChoice={(value) => {
-                choiceTouched.current = true;
-                setChoice(value);
-                setError("");
-              }}
-              form={form}
-              onForm={setForm}
-              bypass={bypass}
-              onBypass={setBypass}
-              error={error}
-            />
-          ) : step === 2 ? (
-            <GithubStep
-              status={gh}
-              enabled={githubEnabled}
-              onEnabled={(value) => {
-                githubTouched.current = true;
-                setGithubEnabled(value);
-              }}
-              onRecheck={checkGithub}
-              error={error}
-            />
-          ) : (
-            <>
-              <ConceptsStep />
-              {error && (
-                <p
-                  data-testid="onboarding-error"
-                  className="mt-3 text-sm text-red-400"
-                >
-                  {error}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      </main>
-      <footer className="flex h-14 shrink-0 items-center justify-between border-t border-border px-4">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <GitBranch className="h-3.5 w-3.5" />
-          Step {step + 1} of {STEPS.length}
-        </span>
-        <div className="flex gap-2">
-          {step > 0 && (
-            <Button
-              variant="outline"
-              data-testid="onboarding-back"
-              disabled={busy}
-              onClick={() => {
-                setError("");
-                setStep(step - 1);
-              }}
-            >
-              Back
-            </Button>
-          )}
-          <Button
-            data-testid={last ? "onboarding-start" : "onboarding-next"}
-            disabled={busy || !state}
-            onClick={() => void next()}
-          >
-            {last ? "Start" : "Next"}
-          </Button>
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }

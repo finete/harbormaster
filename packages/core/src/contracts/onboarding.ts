@@ -56,6 +56,8 @@ export interface DetectedAgent {
   label: string;
   /** The command that was probed. */
   command: string;
+  /** Where `command` resolves (PATH lookup for a bare name, the path itself otherwise), when it does. */
+  path?: string;
   /** Whether `<command> --version` ran successfully within the timeout. */
   available: boolean;
   /** The version it printed (first version-looking token), when available. */
@@ -109,6 +111,8 @@ export interface OnboardingProbeAccess {
   createDirectory(path: string): Promise<void>;
   /** The built-in agents' CLI commands (e2e overrides included). */
   builtinAgentCommands(): Array<{ id: string; label: string; command: string }>;
+  /** The absolute file `command` runs (PATH lookup for a bare name); undefined when none is executable. */
+  resolveCommand(command: string): Promise<string | undefined>;
   /** `<command> --version`. */
   cliVersion(command: string): Promise<ProbeOutcome>;
   /** `gh auth status`. */
