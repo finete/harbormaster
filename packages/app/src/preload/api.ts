@@ -13,8 +13,11 @@ import type {
   AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
+  CodeRootScan,
   CreateTaskActionInput,
   CreateTaskInput,
+  DetectedAgent,
+  GithubAuthStatus,
   HarnessModelCatalog,
   InboxItem,
   InboxPriorityInput,
@@ -25,6 +28,7 @@ import type {
   ListInboxOptions,
   MessageMode,
   MoveTaskOptions,
+  OnboardingState,
   OrphanWorktreeReport,
   PresenceRecord,
   PullRequestReference,
@@ -36,6 +40,7 @@ import type {
   RulesCheckInput,
   RulesCheckResult,
   RulesListing,
+  SetDefaultAgentInput,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -64,8 +69,12 @@ export type {
   BoardChangedPayload,
   BoardColumn,
   BoardGroup,
+  CodeRootScan,
   CreateTaskActionInput,
   CreateTaskInput,
+  CustomAgentConfig,
+  DetectedAgent,
+  GithubAuthStatus,
   HarnessModel,
   HarnessModelCatalog,
   InboxButton,
@@ -80,6 +89,7 @@ export type {
   MessageSender,
   MessageStatus,
   MoveTaskOptions,
+  OnboardingState,
   OrphanWorktreeReport,
   PresenceRecord,
   PullRequestReference,
@@ -89,6 +99,8 @@ export type {
   RepositoryCheckout,
   RepositoryInfo,
   ResolveInboxItemResult,
+  ScannedRepository,
+  SetDefaultAgentInput,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -573,6 +585,28 @@ export interface HarbormasterApi {
      */
     openIn(path: string, appId: string): Promise<OpenInResult>;
   };
+  /** The first-run wizard (docs/release-plan.md "Onboarding"); every call is a core command. */
+  onboarding: OnboardingApi;
+}
+
+/** See `CoreCommands`' onboarding section; probes resolve asynchronously with short timeouts. */
+export interface OnboardingApi {
+  /** Whether the wizard shows at startup (never finished, not skipped by the e2e env). */
+  shouldShow(): Promise<boolean>;
+  getState(): Promise<OnboardingState>;
+  scanCodeRoot(path: string): Promise<CodeRootScan>;
+  setCodeRoot(
+    path: string,
+    options?: { create?: boolean },
+  ): Promise<CodeRootScan>;
+  detectAgents(): Promise<DetectedAgent[]>;
+  setDefaultAgent(input: SetDefaultAgentInput): Promise<OnboardingState>;
+  githubAuthStatus(): Promise<GithubAuthStatus>;
+  setSourceEnabled(sourceId: string, enabled: boolean): Promise<void>;
+  ensureDefaultRules(): Promise<{ created: boolean }>;
+  complete(): Promise<OnboardingState>;
+  /** The "Welcome / Setup…" menu item. */
+  onShow(listener: () => void): () => void;
 }
 
 /** One "Open in …" target (see main/open-in.ts's catalog). */

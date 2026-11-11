@@ -19,6 +19,7 @@ import {
   LocalAddonAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
+  LocalOnboardingProbeAccess,
   LocalRulesFileAccess,
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
@@ -29,6 +30,7 @@ import type { CoreCommands } from "./contracts/commands.js";
 import type { CoreEvents } from "./contracts/events.js";
 import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { HarnessAdapter } from "./contracts/harness.js";
+import type { OnboardingProbeAccess } from "./contracts/onboarding.js";
 import type { Clock, IdGenerator } from "./contracts/services.js";
 import { PiHarnessAdapter } from "./harness/pi-adapter.js";
 import { createHarnessRegistry, HarnessRegistry } from "./harness/registry.js";
@@ -67,6 +69,8 @@ export interface CoreOptions {
    * every task.
    */
   harnesses?: HarnessRegistry;
+  /** Overrides the onboarding wizard's machine probes (home folder, `--version`, `gh auth status`); tests inject fakes. */
+  onboarding?: OnboardingProbeAccess;
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -137,6 +141,7 @@ export function createCore(options: CoreOptions = {}): Core {
       addons: new LocalAddonAccess(paths.addonsDir),
     },
     inbox: new JsonInboxAccess(paths.inboxFile, paths.inboxLockFile),
+    onboarding: options.onboarding ?? new LocalOnboardingProbeAccess(),
   });
 
   return { commands, events };

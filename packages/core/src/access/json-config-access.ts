@@ -17,12 +17,17 @@ import type {
   SourceConfig,
 } from "../contracts/model.js";
 import { defaultGlobalConfig } from "../contracts/model.js";
-import type { ConfigAccess, LegacyMoverOrders } from "../contracts/services.js";
+import type {
+  ConfigAccess,
+  ConfigSettingsPatch,
+  LegacyMoverOrders,
+} from "../contracts/services.js";
 // Imported for its side-effecting declare-module augmentation of
 // GlobalConfig (codeRoot/branchPrefix) — contracts/workspace.ts owns those
 // fields' types.
 import "../contracts/workspace.js";
 import { writeJsonAtomic } from "../utilities/atomic-json.js";
+import { withFileLock } from "../utilities/file-lock.js";
 
 export class JsonConfigAccess implements ConfigAccess {
   constructor(private readonly path: string) {}
@@ -53,6 +58,11 @@ export class JsonConfigAccess implements ConfigAccess {
       }
       return config;
     }
+    return this.parse(raw);
+  }
+
+  /** Validate and normalize a raw config object (throws "Invalid Harbormaster config"). */
+  private parse(raw: unknown): GlobalConfig {
     if (!isRecord(raw)) throw this.invalid();
     try {
       const repositories = normalizeRepositories(raw.repositories);
@@ -61,6 +71,10 @@ export class JsonConfigAccess implements ConfigAccess {
       const sources = normalizeSources(raw.sources);
       const agents = normalizeAgents(raw.agents);
       const inbox = normalizeInbox(raw.inbox);
+      const onboardingCompletedAt = normalizeOptionalText(
+        "onboardingCompletedAt",
+        raw.onboardingCompletedAt,
+      );
       return {
         automation: normalizeAutomation(raw.automation),
         ...(sources ? { sources } : {}),
@@ -71,10 +85,29 @@ export class JsonConfigAccess implements ConfigAccess {
         ...(messaging ? { messaging } : {}),
         ...(agents ? { agents } : {}),
         ...(inbox ? { inbox } : {}),
+        ...(onboardingCompletedAt ? { onboardingCompletedAt } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
     }
+  }
+
+  async applySettings(patch: ConfigSettingsPatch): Promise<GlobalConfig> {
+    return withFileLock(`${this.path}.lock`, async () => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(await readFile(this.path, "utf8"));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+          throw this.invalid(error);
+        raw = { ...defaultGlobalConfig() };
+      }
+      if (!isRecord(raw)) throw this.invalid();
+      const next = applyPatch(structuredClone(raw), patch);
+      const config = this.parse(next);
+      await writeJsonAtomic(this.path, next);
+      return config;
+    });
   }
 
   async save(config: GlobalConfig): Promise<void> {
@@ -110,6 +143,52 @@ export class JsonConfigAccess implements ConfigAccess {
     const detail = cause instanceof Error ? `: ${cause.message}` : "";
     return new Error(`Invalid Harbormaster config at ${this.path}${detail}`);
   }
+}
+
+/** `patch` applied to a raw config object; every other key is kept verbatim. */
+function applyPatch(
+  raw: Record<string, unknown>,
+  patch: ConfigSettingsPatch,
+): Record<string, unknown> {
+  const child = (key: string): Record<string, unknown> => {
+    const value = raw[key];
+    if (isRecord(value)) return value;
+    const fresh: Record<string, unknown> = {};
+    raw[key] = fresh;
+    return fresh;
+  };
+  if (patch.codeRoot !== undefined) raw.codeRoot = patch.codeRoot;
+  if (patch.defaultHarness !== undefined) {
+    child("launch").defaultHarness = patch.defaultHarness;
+  }
+  if (patch.bypassPermissions !== undefined) {
+    child("launch").bypassPermissions = patch.bypassPermissions;
+  }
+  if (patch.customAgent) {
+    const agents = child("agents");
+    const id = patch.customAgent.id;
+    const custom = Array.isArray(agents.custom)
+      ? agents.custom.filter((entry) => !(isRecord(entry) && entry.id === id))
+      : [];
+    custom.push({ ...patch.customAgent });
+    agents.custom = custom;
+  }
+  if (patch.sourceEnabled) {
+    const sources = child("sources");
+    const { id, enabled } = patch.sourceEnabled;
+    const entry = isRecord(sources[id]) ? sources[id] : {};
+    sources[id] = { ...entry, enabled };
+  }
+  if (patch.onboardingCompletedAt !== undefined) {
+    raw.onboardingCompletedAt = patch.onboardingCompletedAt;
+  }
+  return raw;
+}
+
+function normalizeOptionalText(at: string, value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error(`${at} must be a string`);
+  return value.trim() || undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

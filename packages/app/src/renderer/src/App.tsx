@@ -68,7 +68,17 @@ type View = "board" | "workspace" | "inbox";
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-export function App(): JSX.Element {
+/** Open the New task composer once per `id` (onboarding's Start), on `where` when the draft is still empty. */
+export interface ComposerRequest {
+  id: number;
+  where?: string;
+}
+
+export function App({
+  composerRequest,
+}: {
+  composerRequest?: ComposerRequest | undefined;
+} = {}): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   // The view the inbox returns to (Esc / Cmd+I again).
   const viewBeforeInbox = useRef<Exclude<View, "inbox">>("workspace");
@@ -326,6 +336,22 @@ export function App(): JSX.Element {
     setDraftFocusSignal((count) => count + 1);
     setView("workspace");
   }, [focusedTaskId, boardTasks, newTaskPrefs]);
+
+  // Onboarding's Start (components/OnboardingGate.tsx): open the composer
+  // on the repository picked in the wizard.
+  const handledComposerRequest = useRef(0);
+  useEffect(() => {
+    if (!composerRequest) return;
+    if (composerRequest.id === handledComposerRequest.current) return;
+    handledComposerRequest.current = composerRequest.id;
+    openDraft();
+    const where = composerRequest.where;
+    if (where) {
+      setDraft((prev) =>
+        prev && isDraftEmpty(prev) ? { ...prev, where, baseRef: null } : prev,
+      );
+    }
+  }, [composerRequest, openDraft]);
 
   const discardDraft = useCallback(() => {
     setDraft(null);

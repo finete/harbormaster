@@ -13,6 +13,7 @@ export * from "./json-workspace-binding-access.js";
 export * from "./jsonl-audit-log-access.js";
 export * from "./local-addon-access.js";
 export * from "./local-folder-access.js";
+export * from "./local-onboarding-probe-access.js";
 export * from "./local-rules-file-access.js";
 export * from "./pi-model-catalog-access.js";
 export * from "./scratch-workspace-access.js";

@@ -23,6 +23,7 @@ import type {
   MessageMode,
   MessagingChangedPayload,
   MoveTaskOptions,
+  OnboardingApi,
   OpenInAppInfo,
   OpenInResult,
   OrphanWorktreeReport,
@@ -352,6 +353,27 @@ const api: HarbormasterApi = {
     openIn: (path: string, appId: string): Promise<OpenInResult> =>
       ipcRenderer.invoke("app:openIn", path, appId),
   },
+  onboarding: {
+    shouldShow: () => ipcRenderer.invoke("onboarding:shouldShow"),
+    getState: () => ipcRenderer.invoke("onboarding:getState"),
+    scanCodeRoot: (path) => ipcRenderer.invoke("onboarding:scanCodeRoot", path),
+    setCodeRoot: (path, options) =>
+      ipcRenderer.invoke("onboarding:setCodeRoot", path, options),
+    detectAgents: () => ipcRenderer.invoke("onboarding:detectAgents"),
+    setDefaultAgent: (input) =>
+      ipcRenderer.invoke("onboarding:setDefaultAgent", input),
+    githubAuthStatus: () => ipcRenderer.invoke("onboarding:githubAuthStatus"),
+    setSourceEnabled: (sourceId, enabled) =>
+      ipcRenderer.invoke("onboarding:setSourceEnabled", sourceId, enabled),
+    ensureDefaultRules: () =>
+      ipcRenderer.invoke("onboarding:ensureDefaultRules"),
+    complete: () => ipcRenderer.invoke("onboarding:complete"),
+    onShow: (listener) => {
+      const handler = (): void => listener();
+      ipcRenderer.on("onboarding:show", handler);
+      return () => ipcRenderer.removeListener("onboarding:show", handler);
+    },
+  } satisfies OnboardingApi,
   terminalHost: {
     resolveClipboardPaste: (): Promise<string | null> =>
       ipcRenderer.invoke("terminalHost:resolveClipboardPaste"),

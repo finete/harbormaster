@@ -165,3 +165,54 @@ function describeExecError(error: unknown, options?: RunOptions): string {
   }
   return String(error);
 }
+
+/** What {@link runOutcome} saw: never a throw, always both streams. */
+export interface RunOutcome {
+  /** Exit status 0 within the time limit. */
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  /** The command could not be found / executed (`ENOENT`, `EACCES`). */
+  notFound: boolean;
+  timedOut: boolean;
+}
+
+/**
+ * Like {@link tryRun}, but keeps both output streams and why it failed, for
+ * probes whose answer lives on stderr or in a nonzero exit (`gh auth
+ * status`, `<agent> --version`).
+ */
+export async function runOutcome(
+  command: string,
+  args: string[],
+  options?: RunOptions,
+): Promise<RunOutcome> {
+  try {
+    const result = await activeRunner(
+      request(command, args, undefined, options),
+    );
+    return {
+      ok: true,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      notFound: false,
+      timedOut: false,
+    };
+  } catch (error) {
+    const fields = (error ?? {}) as {
+      code?: unknown;
+      killed?: unknown;
+      stdout?: unknown;
+      stderr?: unknown;
+    };
+    return {
+      ok: false,
+      stdout: String(fields.stdout ?? ""),
+      stderr: String(fields.stderr ?? ""),
+      notFound: fields.code === "ENOENT" || fields.code === "EACCES",
+      timedOut:
+        fields.killed === true &&
+        fields.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+    };
+  }
+}

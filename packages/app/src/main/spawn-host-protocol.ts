@@ -20,6 +20,7 @@ export interface SerializedRunError {
   killed?: boolean;
   code?: string | number;
   signal?: string;
+  stdout?: string;
   stderr?: string;
 }
 
@@ -34,6 +35,7 @@ export function serializeRunError(error: unknown): SerializedRunError {
     killed?: unknown;
     code?: unknown;
     signal?: unknown;
+    stdout?: unknown;
     stderr?: unknown;
   };
   return {
@@ -44,6 +46,9 @@ export function serializeRunError(error: unknown): SerializedRunError {
       ? { code: fields.code }
       : {}),
     ...(typeof fields.signal === "string" ? { signal: fields.signal } : {}),
+    ...(fields.stdout !== undefined && fields.stdout !== null
+      ? { stdout: String(fields.stdout) }
+      : {}),
     ...(fields.stderr !== undefined && fields.stderr !== null
       ? { stderr: String(fields.stderr) }
       : {}),
