@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { JsonConfigAccess } from "../src/access/json-config-access.js";
@@ -283,6 +283,8 @@ describe("onboarding commands", () => {
         { id: "pi", label: "Pi", command: "pi" },
         { id: "claude-code", label: "Claude Code", command: "claude" },
       ],
+      resolveCommand: async (command) =>
+        command === "claude" ? "/opt/bin/claude" : undefined,
       cliVersion: async (command) =>
         command === "claude"
           ? outcome({ ok: true, output: "2.1.322 (Claude Code)" })
@@ -360,6 +362,7 @@ describe("onboarding commands", () => {
         id: "claude-code",
         label: "Claude Code",
         command: "claude",
+        path: "/opt/bin/claude",
         available: true,
         version: "2.1.322",
       },
@@ -505,6 +508,15 @@ describe("LocalOnboardingProbeAccess", () => {
       notFound: false,
       output: "You are not logged into any GitHub hosts.",
     });
+    // PATH lookup for a bare name; a path is checked as is.
+    const bin = dirname(claude);
+    const onPath = new LocalOnboardingProbeAccess({
+      env: { PATH: ["/nonexistent", bin].join(delimiter) },
+    });
+    expect(await onPath.resolveCommand("cli")).toBe(claude);
+    expect(await onPath.resolveCommand(claude)).toBe(claude);
+    expect(await onPath.resolveCommand("no-such-cli")).toBeUndefined();
+    expect(await onPath.resolveCommand("/nonexistent/pi")).toBeUndefined();
     const impatient = new LocalOnboardingProbeAccess({ timeoutMs: 300 });
     expect(await impatient.cliVersion(await script("sleep 5"))).toMatchObject({
       ok: false,

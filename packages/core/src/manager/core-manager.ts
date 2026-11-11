@@ -3161,13 +3161,23 @@ export class CoreManager implements CoreCommands {
     const probes = this.requireOnboarding();
     return Promise.all(
       probes.builtinAgentCommands().map(async (agent) => {
-        const outcome = await probes.cliVersion(agent.command);
+        const [outcome, path] = await Promise.all([
+          probes.cliVersion(agent.command),
+          probes.resolveCommand(agent.command).catch(() => undefined),
+        ]);
+        const located = path ? { path } : {};
         if (outcome.ok) {
           const version = parseCliVersion(outcome.output);
-          return { ...agent, available: true, ...(version ? { version } : {}) };
+          return {
+            ...agent,
+            ...located,
+            available: true,
+            ...(version ? { version } : {}),
+          };
         }
         return {
           ...agent,
+          ...located,
           available: false,
           error: probeError(outcome, "not found"),
         };
