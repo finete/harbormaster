@@ -1,7 +1,16 @@
 // Electron main process entry — see /AGENTS.md for the fixed UI stack.
 import { execFile } from "node:child_process";
-import { type FSWatcher, mkdirSync, watch, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  type FSWatcher,
+  mkdirSync,
+  statSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
   AwaitingKindId,
@@ -75,6 +84,16 @@ import {
   isMessagesLogChange,
   PRUNE_INTERVAL_MS,
 } from "./messaging-push";
+import {
+  availableOpenInApps,
+  buildOpenInArgv,
+  currentOpenInPlatform,
+  getOpenInApp,
+  OPEN_IN_APPS,
+  type OpenInAppSummary,
+  type OpenInResult,
+  runOpenInArgv,
+} from "./open-in";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
@@ -1395,23 +1414,98 @@ function registerShellIpc(): void {
   ipcMain.handle(
     "shell:revealInFolder",
     async (_event, targetPath: unknown): Promise<boolean> => {
-      // No direct `codeRoot` getter on the command API; derive the allowed
-      // roots from discovered repositories instead "-" each repo's own
-      // checkout, plus its parent (the code root worktrees live next to,
-      // at `<codeRoot>/.harbormaster-worktrees/`), plus this app's state
-      // dir (session files, etc).
-      const repositories = await core.commands
-        .listRepositories()
-        .catch(() => []);
-      const roots = [
-        activeStateDir,
-        ...repositories.flatMap((repo) => [repo.root, dirname(repo.root)]),
-      ];
+      const roots = await allowedLocalPathRoots();
       if (!isAllowedRevealPath(targetPath, roots)) return false;
       shell.showItemInFolder(targetPath);
       return true;
     },
   );
+
+  // "Open in …" (see open-in.ts): the apps on this host that can open a
+  // task's worktree folder, probed once per process (an app installed
+  // mid-session shows up after a restart).
+  ipcMain.handle("app:openInApps", (): OpenInAppSummary[] => {
+    openInAppsCache ??= openInStubFile()
+      ? // E2E stub: the whole catalog, so tests never depend on what the
+        // machine running them has installed.
+        OPEN_IN_APPS.map(({ id, label, kind }) => ({ id, label, kind }))
+      : availableOpenInApps({
+          platform: currentOpenInPlatform(),
+          homeDir: homedir(),
+          exists: existsSync,
+          which: whichSync,
+        });
+    return openInAppsCache;
+  });
+
+  // Same allowlist as reveal above, plus: the target must be an existing
+  // directory and the id a catalog entry (no fallback to the OS default
+  // handler). With HARBORMASTER_OPEN_IN_STUB=<file>, the argv that would
+  // run is appended to <file> (one JSON array per line) instead.
+  ipcMain.handle(
+    "app:openIn",
+    async (
+      _event,
+      targetPath: unknown,
+      appId: unknown,
+    ): Promise<OpenInResult> => {
+      const app = getOpenInApp(appId);
+      if (!app) return { ok: false, error: "Unknown app" };
+      const roots = await allowedLocalPathRoots();
+      if (!isAllowedRevealPath(targetPath, roots)) {
+        console.warn("[main] open-in refused a path outside the allowlist");
+        return { ok: false, error: "Path is outside the allowed folders" };
+      }
+      const dir = resolvePath(targetPath);
+      let isDirectory = false;
+      try {
+        isDirectory = statSync(dir).isDirectory();
+      } catch {
+        // missing: refused below
+      }
+      if (!isDirectory) return { ok: false, error: "Folder does not exist" };
+      const argv = buildOpenInArgv(app, dir, currentOpenInPlatform());
+      if (!argv.ok) return argv;
+      const stub = openInStubFile();
+      if (stub) {
+        appendFileSync(
+          stub,
+          `${JSON.stringify([argv.command, ...argv.args])}\n`,
+        );
+        return { ok: true };
+      }
+      return runOpenInArgv(argv.command, argv.args, app.label);
+    },
+  );
+}
+
+let openInAppsCache: OpenInAppSummary[] | undefined;
+
+function openInStubFile(): string | undefined {
+  return process.env.HARBORMASTER_OPEN_IN_STUB || undefined;
+}
+
+/** `which`-equivalent for the Linux open-in availability probe. */
+function whichSync(bin: string): boolean {
+  return (process.env.PATH ?? "")
+    .split(":")
+    .some((dir) => dir.length > 0 && existsSync(join(dir, bin)));
+}
+
+/**
+ * The local folders the renderer may ask main to reveal or open: this app's
+ * state dir, every discovered repository's checkout, and each checkout's
+ * parent (the code root task worktrees live under, at
+ * `<codeRoot>/.harbormaster-worktrees/`). See reveal-path.ts.
+ */
+async function allowedLocalPathRoots(): Promise<string[]> {
+  // No direct `codeRoot` getter on the command API; derive the allowed
+  // roots from discovered repositories instead.
+  const repositories = await core.commands.listRepositories().catch(() => []);
+  return [
+    activeStateDir,
+    ...repositories.flatMap((repo) => [repo.root, dirname(repo.root)]),
+  ];
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   withLivePrimaryCwd,
 } from "../lib/workspace-persistence";
 import { makeGroupHeaderActions } from "./GroupHeaderActions";
+import { OpenInButton } from "./OpenInButton";
 import { TaskActions } from "./TaskActions";
 import { TerminalPane } from "./TerminalPane";
 import { TerminalTab } from "./TerminalTab";
@@ -302,6 +303,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
           Terminals
         </span>
         <div className="flex items-center gap-2">
+          <OpenInButton path={cwd} />
           {task && <TaskActions task={task} />}
           <Button
             size="sm"

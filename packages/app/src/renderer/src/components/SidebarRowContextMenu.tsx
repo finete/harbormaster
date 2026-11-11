@@ -16,6 +16,11 @@ export interface ContextMenuItem {
   /** Visually separate this item from the one above it (e.g. before a destructive action). */
   separatorBefore?: boolean;
   danger?: boolean;
+  /**
+   * Nested items shown in a flyout to the right (hover, click, or
+   * ArrowRight/Enter); this item's own `onSelect` is not called.
+   */
+  submenu?: ContextMenuItem[];
 }
 
 export function SidebarRowContextMenu({
@@ -32,6 +37,10 @@ export function SidebarRowContextMenu({
   testId: string;
 }): JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0);
+  // The open flyout (key of its parent item) and the active row inside it
+  // (-1 while it was opened by hover, so arrows start from the top).
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
+  const [subIndex, setSubIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const enabledIndexes = items
     .map((item, index) => (item.disabled ? -1 : index))
@@ -58,7 +67,57 @@ export function SidebarRowContextMenu({
     setActiveIndex(enabledIndexes[nextPos] ?? 0);
   }
 
+  function select(item: ContextMenuItem): void {
+    if (item.disabled) return;
+    if (item.submenu) {
+      setOpenSubmenu(item.key);
+      setSubIndex(item.submenu.findIndex((sub) => !sub.disabled));
+      return;
+    }
+    item.onSelect();
+    onClose();
+  }
+
+  function onSubmenuKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+    submenu: ContextMenuItem[],
+  ): boolean {
+    const enabled = submenu
+      .map((item, index) => (item.disabled ? -1 : index))
+      .filter((index) => index !== -1);
+    if (event.key === "ArrowLeft" || event.key === "Escape") {
+      setOpenSubmenu(null);
+      return true;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (enabled.length === 0) return true;
+      const pos = enabled.indexOf(subIndex);
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next =
+        pos === -1 ? 0 : (pos + delta + enabled.length) % enabled.length;
+      setSubIndex(enabled[next] ?? -1);
+      return true;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      const item = submenu[subIndex];
+      if (item) select(item);
+      return true;
+    }
+    return false;
+  }
+
   function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    const flyout = items.find((item) => item.key === openSubmenu)?.submenu;
+    if (flyout && onSubmenuKeyDown(event, flyout)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      const item = items[activeIndex];
+      if (item?.submenu) select(item);
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -77,10 +136,7 @@ export function SidebarRowContextMenu({
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       const item = items[activeIndex];
-      if (item && !item.disabled) {
-        item.onSelect();
-        onClose();
-      }
+      if (item) select(item);
     }
   }
 
@@ -89,6 +145,9 @@ export function SidebarRowContextMenu({
     left: Math.min(x, window.innerWidth - 200),
     top: Math.min(y, window.innerHeight - items.length * 28 - 16),
   };
+
+  // Flyouts open to the left when there is no room on the right.
+  const flyoutLeft = style.left + 200 + 170 > window.innerWidth;
 
   return (
     <div
@@ -114,30 +173,76 @@ export function SidebarRowContextMenu({
             tabIndex={-1}
             aria-disabled={item.disabled || undefined}
             data-testid={`${testId}-item-${item.key}`}
-            onMouseEnter={() => !item.disabled && setActiveIndex(index)}
-            onClick={() => {
+            aria-haspopup={item.submenu ? "menu" : undefined}
+            aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
+            onMouseEnter={() => {
               if (item.disabled) return;
-              item.onSelect();
-              onClose();
+              setActiveIndex(index);
+              if (item.submenu) {
+                setOpenSubmenu(item.key);
+                setSubIndex(-1);
+              } else setOpenSubmenu(null);
             }}
+            onClick={() => select(item)}
             onKeyDown={(event) => {
-              if (
-                (event.key === "Enter" || event.key === " ") &&
-                !item.disabled
-              ) {
+              if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                item.onSelect();
-                onClose();
+                event.stopPropagation();
+                select(item);
               }
             }}
             className={cn(
-              "cursor-pointer rounded px-2 py-1.5 text-xs transition-colors",
+              "relative flex cursor-pointer items-center rounded px-2 py-1.5 text-xs transition-colors",
               item.disabled && "cursor-default opacity-40",
               !item.disabled && activeIndex === index && "bg-accent/70",
               item.danger && !item.disabled && "text-red-400",
             )}
           >
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {item.submenu && <span aria-hidden>›</span>}
+            {item.submenu && openSubmenu === item.key && (
+              <div
+                role="menu"
+                data-testid={`${testId}-submenu-${item.key}`}
+                className={cn(
+                  "absolute top-0 min-w-[160px] rounded-md border border-border bg-background p-1 shadow-lg",
+                  flyoutLeft ? "right-full mr-1" : "left-full ml-1",
+                )}
+              >
+                {item.submenu.map((sub, subPos) => (
+                  <div key={sub.key}>
+                    {sub.separatorBefore && (
+                      <div className="my-1 h-px bg-border" aria-hidden />
+                    )}
+                    <div
+                      role="menuitem"
+                      tabIndex={-1}
+                      aria-disabled={sub.disabled || undefined}
+                      data-testid={`${testId}-item-${sub.key}`}
+                      onMouseEnter={() => !sub.disabled && setSubIndex(subPos)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        select(sub);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          select(sub);
+                        }
+                      }}
+                      className={cn(
+                        "cursor-pointer rounded px-2 py-1.5 text-xs text-foreground transition-colors",
+                        sub.disabled && "cursor-default opacity-40",
+                        !sub.disabled && subIndex === subPos && "bg-accent/70",
+                      )}
+                    >
+                      {sub.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ))}

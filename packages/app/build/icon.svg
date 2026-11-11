@@ -4,6 +4,7 @@
      build/icon.png (regenerate with `npm run icon`). macOS grid: 824px
      squircle inside a 1024 canvas. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <title>Harbormaster</title>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0c1f2e"/><stop offset="1" stop-color="#0f5c5a"/>
