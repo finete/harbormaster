@@ -223,12 +223,51 @@ comes later (`harbormaster addons install <pkg>`).
 ## Inbox
 
 One list of everything that needs a human, in the app and via
-`harbormaster inbox`: message approvals (existing), rule-produced items,
-"your move" (presence `blocked` or ended turn), "deployed and ready to
-land", failed launches. Each item carries its own buttons: open task, create
-task (pre-filled; "review requested" → reviewer task), approve/reject/edit
-(messages), dismiss, snooze. Items are persisted (`~/.harbormaster/inbox/`),
-derived ones ("your move") are recomputed, not stored.
+`harbormaster inbox`. Design settled 2026-11-11 (grilled; inspiration:
+Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
+
+- **Placement.** The existing sidebar "Inbox" button (and `Cmd+I`) swaps
+  the main area for a full inbox view, exactly like Board does. Sidebar and
+  task list stay. The button carries a badge = Priority count. No dock
+  badge, no OS notifications, nothing pops up on its own.
+- **Two tabs: Priority / Other.** Every item has `priority: boolean`,
+  **default true**. Built-in producers: agent asked (OSC 7501 `blocked`
+  with its message; live, leaves when the state changes, not dismissable)
+  = priority; agent reported (`report_status` outcome + note) = priority;
+  message approval (not dismissable) = priority; ready to land = priority;
+  launch failed = priority; plain idle "your move" (turn ended, nothing
+  reported) = other; task done, wants a look = other. Rule `inbox` actions
+  are priority unless the rule sets `priority: false`. Optional CEL
+  override in settings (`item.kind`, `item.source`, `item.taskId`,
+  `item.repo`, `item.priority`).
+- **Layout: list + detail.** List ~380px left, selected item's detail
+  right. Row = glyph by kind (amber question = asked, green check =
+  reported, blue envelope = approval, purple bolt = rule item, red x =
+  launch failed, teal flag = ready to land), title (the item's own text),
+  muted context line (task · repo · branch), time since, ONE primary action
+  visible on hover/selection; everything else behind `…` and keys.
+- **Grouping.** By task, tasks ordered by their newest item; unbound items
+  (Slack mentions, review requests) in their own group.
+- **Detail pane.** Task items: task header (title, branch, PR), the
+  question/report text, the last ~30 terminal lines as static text (xterm
+  serialize), Open button. Approvals: sender, route, full text (editable),
+  attachments, Approve/Reject at the top. Rule items: the rule's `body`
+  (markdown) + source facts (PR title/author/description, Slack text) and
+  the rule's buttons. Launch failed: error, launch prompt, Retry. No live
+  terminal mirror in v1.
+- **Leaving.** Own action; dismiss where allowed (not approvals, not live
+  questions); snooze with presets 1 hour / this evening / tomorrow morning /
+  next week plus a date picker; "Clear Other" bulk action. Derived items
+  (asked, plain idle) are recomputed, not stored; the rest persist in
+  `~/.harbormaster/inbox/`.
+- **Keys** (inbox view focused): `Cmd+I` go to inbox, `J`/`K`/arrows move,
+  `Enter`/`O` open task, `A`/`R` approve/reject, `E` edit then approve,
+  `C` create task / review task, `D` mark done or dismiss, `H` snooze,
+  `Tab` switch tab, `Esc` back to the previous view. Key hints on hover.
+- **Buttons per kind.** Asked: Open. Reported: Open · To Done · Dismiss.
+  Approval: Approve · Edit · Reject. Rule item: its buttons (e.g. Create
+  review task) · Dismiss · Snooze. Ready to land: Mark Done · Dismiss.
+  Launch failed: Open · Retry · Dismiss.
 
 ## Build and distribution
 
@@ -270,7 +309,7 @@ with the full gate green and the acceptance checked.
 | A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | todo |
 | C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | todo |
 | C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | todo |
-| C | Inbox unification in app + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "open review task" creates a reviewer task; your-move items listed | todo |
+| C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | todo |
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | todo |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | todo |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | todo |
