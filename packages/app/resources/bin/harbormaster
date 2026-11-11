@@ -1,0 +1,23 @@
+#!/bin/sh
+# `harbormaster` CLI launcher inside Harbormaster.app
+# (Contents/Resources/bin/harbormaster). The Homebrew cask links it onto the
+# PATH. Runs the bundled CLI (Contents/Resources/cli/harbormaster.mjs) with
+# the app's own Electron binary in Node mode, so no separate Node install is
+# needed.
+set -e
+
+# Follow the brew symlink (/opt/homebrew/bin/harbormaster) back into the app.
+self="$0"
+while [ -L "$self" ]; do
+  target="$(readlink "$self")"
+  case "$target" in
+    /*) self="$target" ;;
+    *) self="$(dirname "$self")/$target" ;;
+  esac
+done
+
+resources="$(cd "$(dirname "$self")/.." && pwd)"
+contents="$(dirname "$resources")"
+
+ELECTRON_RUN_AS_NODE=1 exec "$contents/MacOS/Harbormaster" \
+  "$resources/cli/harbormaster.mjs" "$@"

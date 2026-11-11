@@ -2,6 +2,7 @@
   "name": "@harbormaster/extension",
   "private": true,
   "version": "0.0.1",
+  "license": "MIT",
   "type": "module",
   "description": "Pi extension: in-session command surface (/todev, /toawait, /todone, harbormaster_report_status) plus presence reporting for Harbormaster-hosted sessions. The temp write-guard and the frozen TUI board land in a later wave.",
   "pi": {

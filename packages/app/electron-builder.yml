@@ -1,0 +1,73 @@
+# electron-builder config (release plan R12, "Build and distribution").
+# Apple Silicon only, unsigned, zip on GitHub Releases, installed and upgraded
+# through the Homebrew cask (release/homebrew/Casks/harbormaster.rb).
+#
+# `publish: github` makes electron-builder write latest-mac.yml next to the
+# zip even with `--publish never` (release/release.sh uploads the assets with
+# gh), so turning on signing + electron-updater later is a config flip:
+# set `mac.identity`, `mac.notarize`, and add electron-updater.
+appId: dev.finete.harbormaster
+productName: Harbormaster
+copyright: Copyright © 2026 finete
+
+# Packaged package.json: `productName` makes app.name (and so userData,
+# ~/Library/Application Support/Harbormaster) the product name.
+extraMetadata:
+  productName: Harbormaster
+
+directories:
+  output: dist
+  buildResources: build
+
+# Only the electron-vite output; production node_modules are added by
+# electron-builder itself. @harbormaster/core is bundled into out/main by
+# electron-vite (see electron.vite.config.ts), so the workspace link is
+# left out of the asar.
+files:
+  - out/**/*
+  - "!out/cli/**"
+  - package.json
+  - "!**/node_modules/@harbormaster/**"
+  - "!**/*.map"
+
+# node-pty loads pty.node and execs spawn-helper from app.asar.unpacked.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+# Rebuild native modules (node-pty) against the packaged Electron's ABI.
+npmRebuild: true
+buildDependenciesFromSource: false
+
+# The `harbormaster` CLI: scripts/bundle-cli.mjs writes out/cli (a single-file
+# bundle of packages/cli, or a stub when that package does not exist yet);
+# resources/bin/harbormaster runs it with the app's own Electron in Node mode.
+# The cask's `binary` stanza links Contents/Resources/bin/harbormaster.
+extraResources:
+  - from: out/cli
+    to: cli
+  - from: resources/bin
+    to: bin
+
+mac:
+  target:
+    - target: zip
+      arch:
+        - arm64
+  artifactName: ${productName}-${version}-${arch}-mac.${ext}
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # Unsigned: no Developer ID, no notarization (see release/README.md).
+  identity: null
+  notarize: false
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+
+# Seals the unsigned bundle with an ad-hoc signature (see the script).
+afterPack: scripts/adhoc-sign.cjs
+
+publish:
+  provider: github
+  owner: finete
+  repo: harbormaster
+  releaseType: release
