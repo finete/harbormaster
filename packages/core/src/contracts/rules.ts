@@ -255,6 +255,8 @@ export interface MoveActionInput {
 export interface InboxActionInput {
   title: string;
   body?: string;
+  /** `false` files the item under Other instead of Priority (default true). */
+  priority?: boolean;
   buttons?: Array<{
     label: string;
     action: "openTask" | "createTask" | "dismiss" | "snooze";

@@ -21,6 +21,14 @@ export interface ToolCallRequest {
   caller: ToolCaller;
 }
 
+/** Run one user operation (see `tools/ops.ts`): the CLI's inbox / events / rules verbs. */
+export interface OpCallRequest {
+  id: RequestId;
+  method: "op";
+  op: string;
+  args?: Record<string, unknown>;
+}
+
 /** Ring the caller whenever its task's inbox changes; streams `inbox` events. */
 export interface WatchInboxRequest {
   id: RequestId;
@@ -34,7 +42,11 @@ export interface PingRequest {
   method: "ping";
 }
 
-export type SocketRequest = ToolCallRequest | WatchInboxRequest | PingRequest;
+export type SocketRequest =
+  | ToolCallRequest
+  | OpCallRequest
+  | WatchInboxRequest
+  | PingRequest;
 
 export type SocketResponse =
   | { id: RequestId; ok: true; result: ToolResult }

@@ -143,3 +143,19 @@ export async function callTool(
   if (!response.ok) throw new Error(response.error);
   return response.result;
 }
+
+/** Runs one user operation (`tools/ops.ts`) through the app; rejects with its error message. */
+export async function callOp(
+  socketPath: string,
+  op: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const response = await sendSocketRequest(socketPath, {
+    method: "op",
+    op,
+    args,
+  });
+  if ("event" in response) throw new Error("unexpected event");
+  if (!response.ok) throw new Error(response.error);
+  return response.result;
+}

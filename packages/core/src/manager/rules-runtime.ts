@@ -87,6 +87,8 @@ export interface ActionResult {
 export interface ActionProvenance {
   ruleId: string;
   eventId: string;
+  /** The event's source (`github`, an addon id). */
+  source?: string;
   taskId?: string;
 }
 
@@ -397,6 +399,25 @@ export class RulesRuntime {
     return entries.slice(Math.max(0, entries.length - limit));
   }
 
+  /** Pending `move: done` retries whose last outcome was `stayed` (landing refused). */
+  async listStayedLandings(): Promise<
+    Array<{ taskId: string; ruleId: string; detail?: string; at: string }>
+  > {
+    const pending = await this.deps.state.readPending();
+    return pending.flatMap((entry) =>
+      entry.lastOutcome === "stayed"
+        ? [
+            {
+              taskId: entry.taskId,
+              ruleId: entry.ruleId,
+              ...(entry.lastDetail ? { detail: entry.lastDetail } : {}),
+              at: entry.event.time,
+            },
+          ]
+        : [],
+    );
+  }
+
   async listRules(): Promise<RulesListing> {
     return { files: await this.loadRuleFiles([], true) };
   }
@@ -705,6 +726,7 @@ export class RulesRuntime {
     const provenance: ActionProvenance = {
       ruleId: action.candidate.rule.id,
       eventId: action.candidate.event.id,
+      source: action.candidate.event.source,
       ...(action.candidate.taskId ? { taskId: action.candidate.taskId } : {}),
     };
     try {

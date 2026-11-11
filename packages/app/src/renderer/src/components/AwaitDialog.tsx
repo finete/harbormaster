@@ -13,6 +13,12 @@ import { Label } from "./ui/label";
 
 /** The kind preselected on open: Enter right away is the review fast path. */
 const DEFAULT_KIND: AwaitingKindId = "review";
+/**
+ * A reviewer task (someone else's PR; docs/release-plan.md "Reviewer
+ * tasks") never pushes or opens a PR: its fast path is waiting on the
+ * author instead, and the review kind is not offered at all.
+ */
+const REVIEWER_DEFAULT_KIND: AwaitingKindId = "author-response";
 
 export interface AwaitChoice {
   kindId: AwaitingKindId;
@@ -31,16 +37,20 @@ export interface AwaitChoice {
  */
 export function AwaitDialog({
   taskId,
+  reviewer = false,
   onCancel,
   onConfirm,
 }: {
   /** Open for this task; `null` = closed. */
   taskId: string | null;
+  /** The task reviews someone else's PR (`task.pr.role === "reviewer"`). */
+  reviewer?: boolean;
   onCancel: () => void;
   onConfirm: (choice: AwaitChoice) => void;
 }): JSX.Element {
+  const defaultKind = reviewer ? REVIEWER_DEFAULT_KIND : DEFAULT_KIND;
   const [kinds, setKinds] = useState<AwaitingKindOption[] | null>(null);
-  const [selected, setSelected] = useState<AwaitingKindId>(DEFAULT_KIND);
+  const [selected, setSelected] = useState<AwaitingKindId>(defaultKind);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   // Dialog focuses the first focusable element on open: this wrapper
   // (tabIndex -1), so Enter confirms the preselected kind even before the
@@ -49,14 +59,17 @@ export function AwaitDialog({
 
   useEffect(() => {
     setKinds(null);
-    setSelected(DEFAULT_KIND);
+    setSelected(defaultKind);
     setInputs({});
     if (!taskId) return;
     let cancelled = false;
     void window.harbormaster.core
       .listAwaitingKinds(taskId)
-      .then((listed) => {
+      .then((all) => {
         if (cancelled) return;
+        const listed = reviewer
+          ? all.filter((kind) => kind.id !== "review")
+          : all;
         setKinds(listed);
         // Keep the user's pick if they already moved off the default while
         // loading; only fall back when the default doesn't apply.
@@ -72,7 +85,7 @@ export function AwaitDialog({
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [taskId, reviewer, defaultKind]);
 
   // Once the kinds render, hand focus to the selected radio (arrow keys
   // then switch kinds), unless the user already focused something else.
@@ -88,7 +101,7 @@ export function AwaitDialog({
   // confirm; core still validates and rejects with a toast if it can't.
   const canConfirm = selectedKind
     ? selectedKind.available
-    : kinds === null && selected === DEFAULT_KIND;
+    : kinds === null && selected === defaultKind;
 
   function handleConfirm(): void {
     if (!canConfirm) return;

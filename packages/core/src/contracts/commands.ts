@@ -9,7 +9,9 @@ import type {
 } from "./harness.js";
 import type {
   InboxItem,
+  InboxPriorityInput,
   ListInboxOptions,
+  ReadyToLandEntry,
   ResolveInboxItemOptions,
   ResolveInboxItemResult,
 } from "./inbox.js";
@@ -37,6 +39,7 @@ import type {
 import type {
   AddonInfo,
   AuditEntry,
+  CreateTaskActionInput,
   ListEventsFilter,
   RulesCheckInput,
   RulesCheckResult,
@@ -697,6 +700,25 @@ export interface CoreCommands {
     itemId: string,
     options?: ResolveInboxItemOptions,
   ): Promise<ResolveInboxItemResult>;
+  /**
+   * Priority / Other for each item (same order): `GlobalConfig.inbox
+   * .priorityFilter` (CEL over `item`) when set, else each item's own
+   * `priority`. A filter that fails or returns a non-boolean keeps the
+   * default for that item. Shared so the app and `harbormaster inbox` agree.
+   */
+  evaluateInboxPriority(items: InboxPriorityInput[]): Promise<boolean[]>;
+  /**
+   * Tasks a rule tried to land (`move: done`) but could not (dirty
+   * worktree, live pane): "deployed and ready to land, mark it Done".
+   */
+  listReadyToLand(): Promise<ReadyToLandEntry[]>;
+  /**
+   * The `createTask` rule action as a command (the inbox's "Create review
+   * task", the composer's PR URL): a PR URL (or number with `repository`)
+   * makes a PR-bound task (`role: reviewer` checks out the PR head and
+   * never pushes); otherwise a plain task in `repository`.
+   */
+  createTaskFromAction(input: CreateTaskActionInput): Promise<Task>;
 }
 
 export interface RefreshResult {

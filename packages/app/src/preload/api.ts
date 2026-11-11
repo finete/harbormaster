@@ -7,21 +7,35 @@
 // processes, ...) ever ends up in the renderer's web bundle "- only its
 // plain data shapes cross the bridge.
 import type {
+  AddonInfo,
+  AuditEntry,
   AwaitingKindId,
   AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
+  CreateTaskActionInput,
   CreateTaskInput,
   HarnessModelCatalog,
+  InboxItem,
+  InboxPriorityInput,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
+  ListEventsFilter,
+  ListInboxOptions,
   MessageMode,
   MoveTaskOptions,
   OrphanWorktreeReport,
   PresenceRecord,
+  PullRequestReference,
+  ReadyToLandEntry,
   ReopenTaskInput,
   RepositoryInfo,
+  ResolveInboxItemOptions,
+  ResolveInboxItemResult,
+  RulesCheckInput,
+  RulesCheckResult,
+  RulesListing,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -40,6 +54,9 @@ export type ConnectivityState =
   | "restored";
 
 export type {
+  AddonInfo,
+  AuditActionEntry,
+  AuditEntry,
   AwaitingKind,
   AwaitingKindField,
   AwaitingKindId,
@@ -47,9 +64,13 @@ export type {
   BoardChangedPayload,
   BoardColumn,
   BoardGroup,
+  CreateTaskActionInput,
   CreateTaskInput,
   HarnessModel,
   HarnessModelCatalog,
+  InboxButton,
+  InboxItem,
+  InboxPriorityInput,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
@@ -61,9 +82,13 @@ export type {
   MoveTaskOptions,
   OrphanWorktreeReport,
   PresenceRecord,
+  PullRequestReference,
+  PullRequestRole,
+  ReadyToLandEntry,
   ReopenTaskInput,
   RepositoryCheckout,
   RepositoryInfo,
+  ResolveInboxItemResult,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -151,6 +176,8 @@ export interface PresenceBadge {
   outcome?: {
     status: "done" | "blocked";
     note?: string;
+    /** When it was reported (ISO). */
+    at?: string;
   };
   /**
    * The agent's last OSC 7501 program status (decision #18), forwarded
@@ -161,6 +188,8 @@ export interface PresenceBadge {
   status?: {
     state: "idle" | "working" | "blocked" | "done" | "error";
     message?: string;
+    /** When the agent reported it (ISO). */
+    at?: string;
   };
 }
 
@@ -454,6 +483,35 @@ export interface HarbormasterApi {
     ): () => void;
     /** Cmd/Ctrl+Shift+ArrowUp/Down intercepted in main; renderer cycles sidebar focus. */
     onCycleTask(listener: (direction: "up" | "down") => void): () => void;
+    /** Persisted inbox items (rule items), unresolved and unsnoozed unless asked. See `CoreCommands.listInbox`. */
+    listInbox(options?: ListInboxOptions): Promise<InboxItem[]>;
+    /** Press an item's button, dismiss it (no options), or snooze it (`snoozeUntil`). See `CoreCommands.resolveInboxItem`. */
+    resolveInboxItem(
+      itemId: string,
+      options?: ResolveInboxItemOptions,
+    ): Promise<ResolveInboxItemResult>;
+    /** Priority / Other per item via the configured filter. See `CoreCommands.evaluateInboxPriority`. */
+    evaluateInboxPriority(items: InboxPriorityInput[]): Promise<boolean[]>;
+    /** Tasks a rule could not land ("deployed and ready to land"). See `CoreCommands.listReadyToLand`. */
+    listReadyToLand(): Promise<ReadyToLandEntry[]>;
+    /** The `createTask` action as a command (PR URL + role). See `CoreCommands.createTaskFromAction`. */
+    createTaskFromAction(input: CreateTaskActionInput): Promise<Task>;
+    /** Core's PR URL parser (`github.com/org/repo/pull/12`); `null` when it is not one. */
+    parsePullRequestUrl(url: string): Promise<PullRequestReference | null>;
+    /** The rules audit log. See `CoreCommands.listEvents`. */
+    listEvents(filter?: ListEventsFilter): Promise<AuditEntry[]>;
+    /** Dry run of the current rules. See `CoreCommands.rulesCheck`. */
+    rulesCheck(input?: RulesCheckInput): Promise<RulesCheckResult>;
+    /** Every rules file as loaded. See `CoreCommands.listRules`. */
+    listRules(): Promise<RulesListing>;
+    /** Built-in sources and addons. See `CoreCommands.listAddons`. */
+    listAddons(): Promise<AddonInfo[]>;
+    /** Last lines of a paneless task's screen (main's mirror); `null` when a pane shows it or nothing runs. */
+    terminalTail(taskId: string, count?: number): Promise<string | null>;
+    /** Start a failed / interrupted launch again in the background (clears its error); resolves whether it started. */
+    retryLaunch(taskId: string): Promise<boolean>;
+    /** The inbox changed (an item was added, resolved or snoozed); re-read it. */
+    onInboxChanged(listener: () => void): () => void;
   };
   terminalHost: TerminalHostApi;
   app: {

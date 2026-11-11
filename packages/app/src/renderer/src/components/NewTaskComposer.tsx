@@ -40,6 +40,7 @@ import {
   whereLabel,
   whereOptions,
 } from "./NewTaskPickers";
+import { PullRequestField, useParsedPullRequest } from "./PullRequestField";
 import {
   InputGroup,
   InputGroupAddon,
@@ -209,9 +210,11 @@ export function NewTaskComposer({
 
   const primary = defaultAction(draft);
   const alternate = alternateAction(draft);
+  // A PR URL (core parses it): the task binds to that PR in its repository.
+  const pullRequest = useParsedPullRequest(draft.prUrl);
   const blockerFor = useCallback(
-    (action: SubmitAction) => submitBlocker(draft, action),
-    [draft],
+    (action: SubmitAction) => submitBlocker(draft, action, pullRequest),
+    [draft, pullRequest],
   );
   const chat = draft.mode === "chat";
   // Only a task in a repository (or a clone) gets a branch + worktree.
@@ -229,11 +232,11 @@ export function NewTaskComposer({
   const primaryBlocker = blockerFor(primary);
 
   async function submit(action: SubmitAction): Promise<void> {
-    if (submitting || submitBlocker(draft, action)) return;
+    if (submitting || submitBlocker(draft, action, pullRequest)) return;
     setSubmitting(true);
     setError(null);
     try {
-      const plan = planSubmit(draft, action, parent);
+      const plan = planSubmit(draft, action, parent, pullRequest ?? null);
       const core = window.harbormaster.core;
       const task =
         plan.command === "launchTask"
@@ -537,7 +540,13 @@ export function NewTaskComposer({
           </InputGroupAddon>
         </InputGroup>
         <div className="flex min-h-5 items-center gap-2 px-1 text-[11px] text-muted-foreground">
-          {chat && selectedRepo ? (
+          {pullRequest && !chat ? (
+            <span data-testid="new-task-where-hint" className="truncate">
+              {draft.prRole === "reviewer"
+                ? `Reviews ${pullRequest.repositoryId} #${pullRequest.number} on its head branch: never pushes or opens a PR`
+                : `Works on ${pullRequest.repositoryId} #${pullRequest.number} on its head branch`}
+            </span>
+          ) : chat && selectedRepo ? (
             <span
               data-testid="new-task-where-hint"
               className="truncate"
@@ -612,6 +621,12 @@ export function NewTaskComposer({
             )
           )}
         </div>
+        <PullRequestField
+          url={draft.prUrl}
+          role={draft.prRole}
+          parsed={pullRequest}
+          onChange={(patch) => onChange(patch)}
+        />
       </div>
     </div>
   );

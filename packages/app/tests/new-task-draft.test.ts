@@ -385,3 +385,56 @@ describe("prependToOrder", () => {
     expect(prependToOrder(same, "a")).toBe(same);
   });
 });
+
+describe("PR URL + role (reviewer tasks)", () => {
+  const pr = { repositoryId: "github.com/acme/api", number: 12 };
+  const draft = {
+    ...emptyDraft(),
+    title: "Review the API change",
+    prUrl: "https://github.com/acme/api/pull/12",
+    prRole: "reviewer" as const,
+  };
+
+  it("needs a parsed PR URL, a Task (not a Chat), and Start or Park", () => {
+    expect(submitBlocker(draft, "start", undefined)).toBe(
+      "Checking the pull request URL",
+    );
+    expect(submitBlocker(draft, "start", null)).toMatch(
+      /^Enter a pull request URL/,
+    );
+    // The PR brings its own repository: no Where needed.
+    expect(submitBlocker(draft, "start", pr)).toBeNull();
+    expect(submitBlocker(draft, "park", pr)).toBeNull();
+    expect(submitBlocker(draft, "background", pr)).toMatch(/starts or parks/);
+    expect(submitBlocker({ ...draft, mode: "chat" }, "start", pr)).toMatch(
+      /Switch to Task/,
+    );
+  });
+
+  it("creates a task bound to the PR in its repository, with the role", () => {
+    expect(planSubmit(draft, "start", null, pr)).toEqual({
+      command: "createTask",
+      input: {
+        title: "Review the API change",
+        initialPrompt: "",
+        repositoryId: "github.com/acme/api",
+        pullRequest: 12,
+        role: "reviewer",
+        start: true,
+      },
+    });
+    // "From GitHub" sends no role; core asks GitHub.
+    expect(
+      planSubmit({ ...draft, prRole: "" }, "park", null, pr).input,
+    ).not.toHaveProperty("role");
+  });
+
+  it("round-trips through storage and counts as content", () => {
+    expect(parseDraft(serializeDraft(draft))).toMatchObject({
+      prUrl: draft.prUrl,
+      prRole: "reviewer",
+    });
+    expect(parseDraft(JSON.stringify({ prRole: "boss" }))?.prRole).toBe("");
+    expect(isDraftEmpty({ ...emptyDraft(), prUrl: "x" })).toBe(false);
+  });
+});

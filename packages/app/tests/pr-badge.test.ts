@@ -4,7 +4,10 @@
 // "closed"). Closed/merged always win over a retained review decision.
 import { describe, expect, it } from "vitest";
 import type { Task } from "../src/preload/api";
-import { prBadgeVariant } from "../src/renderer/src/components/pr-badge";
+import {
+  prBadgeLabel,
+  prBadgeVariant,
+} from "../src/renderer/src/components/pr-badge";
 
 type Pr = NonNullable<Task["pr"]>;
 
@@ -52,5 +55,19 @@ describe("prBadgeVariant", () => {
     expect(
       prBadgeVariant(pr({ state: "open", reviewDecision: "REVIEW_REQUIRED" })),
     ).toBe("success");
+  });
+});
+
+describe("prBadgeLabel", () => {
+  it("says when the task reviews someone else's PR", () => {
+    expect(prBadgeLabel({ number: 7, state: "open" })).toBe("PR #7 · open");
+    expect(
+      prBadgeLabel({
+        number: 7,
+        state: "open",
+        role: "reviewer",
+        reviewDecision: "APPROVED",
+      }),
+    ).toBe("PR #7 · open · reviewing · approved");
   });
 });

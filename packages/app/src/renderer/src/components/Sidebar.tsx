@@ -43,7 +43,6 @@ import { createPortal } from "react-dom";
 import type { Task } from "../../../preload/api";
 import {
   flattenBoard,
-  useApprovals,
   useBoard,
   useMessagingStates,
   usePresenceMap,
@@ -339,7 +338,9 @@ export function Sidebar({
   onSelectTask,
   onCloseTask,
   onShowBoard,
-  onOpenApprovals,
+  onOpenInbox,
+  inboxCount,
+  inboxActive,
   onNewTask,
   draftLabel,
   draftFocused,
@@ -357,8 +358,12 @@ export function Sidebar({
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
   onShowBoard: () => void;
-  /** Open the approval inbox sheet (App owns it); the footer button only shows while messages await approval. */
-  onOpenApprovals: () => void;
+  /** Toggle the inbox view (App owns it; same as Cmd+I). */
+  onOpenInbox: () => void;
+  /** Priority inbox items: the Inbox row's badge (docs/release-plan.md "Inbox"). */
+  inboxCount: number;
+  /** The inbox view is showing. */
+  inboxActive: boolean;
   /** Open/focus THE new-task draft (same path as Cmd/Ctrl+N). */
   onNewTask: () => void;
   /** Live label of the new-task draft row; `null` = no draft exists. */
@@ -368,11 +373,10 @@ export function Sidebar({
   onCloseDraft: () => void;
 }): JSX.Element {
   const columns = useBoard();
-  const approvalCount = useApprovals().length;
   const inboxTitle =
-    approvalCount > 0
-      ? `Inbox: ${approvalCount} message${approvalCount === 1 ? "" : "s"} awaiting approval`
-      : "Inbox: nothing awaiting approval";
+    inboxCount > 0
+      ? `Inbox: ${inboxCount} need${inboxCount === 1 ? "s" : ""} you (${modKeyLabel()}I)`
+      : `Inbox: nothing needs you (${modKeyLabel()}I)`;
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const messagingStates = useMessagingStates();
@@ -1103,10 +1107,11 @@ export function Sidebar({
             compact
             icon={<Inbox aria-hidden />}
             label="Inbox"
-            badge={approvalCount}
+            badge={inboxCount}
+            active={inboxActive}
             title={inboxTitle}
-            onClick={onOpenApprovals}
-            testId="sidebar-approval-inbox-button"
+            onClick={onOpenInbox}
+            testId="inbox-button-compact"
           />
         </nav>
         <div className="mt-1 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
@@ -1185,10 +1190,12 @@ export function Sidebar({
         <SidebarNavItem
           icon={<Inbox aria-hidden />}
           label="Inbox"
-          badge={approvalCount}
+          shortcut={`${modKeyLabel()}I`}
+          badge={inboxCount}
+          active={inboxActive}
           title={inboxTitle}
-          onClick={onOpenApprovals}
-          testId="workspace-approval-inbox-button"
+          onClick={onOpenInbox}
+          testId="inbox-button"
         />
       </nav>
       <div className="flex items-center gap-2 px-3 pb-2 pt-3">

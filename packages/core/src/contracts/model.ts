@@ -439,6 +439,13 @@ export interface GlobalConfig {
   agents?: { custom?: CustomAgentConfig[] };
   /** Task-messaging settings (see `/docs/task-messaging.md`); defaults apply at read time. */
   messaging?: { parentReplyTimeoutMinutes?: number; loopCap?: number };
+  /**
+   * Inbox settings (docs/release-plan.md "Inbox"). `priorityFilter` is an
+   * optional CEL expression over `item` (`kind`, `source`, `taskId`,
+   * `repo`, `priority`) that decides the Priority / Other tab; absent =
+   * each producer's default.
+   */
+  inbox?: { priorityFilter?: string };
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */

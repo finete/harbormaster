@@ -48,8 +48,10 @@ export function prBadgeVariant(pr: NonNullable<Task["pr"]>): PrBadgeVariant {
   return STATE_VARIANT[pr.state];
 }
 
+/** "PR #12 · open[ · reviewing][ · approved]": a reviewer task (someone else's PR) says so. */
 export function prBadgeLabel(pr: NonNullable<Task["pr"]>): string {
-  const base = `PR #${pr.number} \u00b7 ${pr.state}`;
+  const role = pr.role === "reviewer" ? " \u00b7 reviewing" : "";
+  const base = `PR #${pr.number} \u00b7 ${pr.state}${role}`;
   if (!pr.reviewDecision) return base;
   return `${base} \u00b7 ${REVIEW_DECISION_LABEL[pr.reviewDecision]}`;
 }

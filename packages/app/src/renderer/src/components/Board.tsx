@@ -524,6 +524,11 @@ export function Board({
       </DndContext>
       <AwaitDialog
         taskId={awaitTaskId}
+        reviewer={
+          awaitTaskId !== null &&
+          flattenBoard(columns).find((row) => row.task.id === awaitTaskId)?.task
+            .pr?.role === "reviewer"
+        }
         onCancel={() => setAwaitTaskId(null)}
         onConfirm={confirmAwait}
       />

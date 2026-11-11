@@ -15,11 +15,17 @@ import { is } from "@electron-toolkit/utils";
 import type {
   AwaitingKindId,
   BoardColumn,
+  CreateTaskActionInput,
   CreateTaskInput,
+  InboxPriorityInput,
   LaunchTaskInput,
+  ListEventsFilter,
+  ListInboxOptions,
   MessageMode,
   MoveTaskOptions,
   ReopenTaskInput,
+  ResolveInboxItemOptions,
+  RulesCheckInput,
   Task,
   TaskState,
   ToAwaitOptions,
@@ -33,6 +39,7 @@ import {
   type HarnessAdapter,
   HttpVersionAccess,
   isConnectivityError,
+  parsePullRequestUrl,
   resolveSocketPath,
   resolveStatePaths,
   setProcessRunner,
@@ -111,6 +118,7 @@ import {
   disposeSession,
   getSession,
   lookupPanePid,
+  primarySessionTail,
   resizeSession,
   setProgramStatusListener,
   writeToSession,
@@ -675,6 +683,74 @@ function registerCoreIpc(): void {
     core.commands.listMessages(filter),
   );
 
+  // The inbox view (docs/release-plan.md "Inbox"): persisted rule items,
+  // the priority filter, ready-to-land, and the rules audit log / listings.
+  ipcMain.handle("core:listInbox", (_event, options?: ListInboxOptions) =>
+    core.commands.listInbox(options),
+  );
+  ipcMain.handle(
+    "core:resolveInboxItem",
+    async (_event, itemId: string, options?: ResolveInboxItemOptions) => {
+      const result = await core.commands.resolveInboxItem(itemId, options);
+      // A created task may be a background launch to start.
+      void backgroundLauncher.runPass();
+      return result;
+    },
+  );
+  ipcMain.handle(
+    "core:evaluateInboxPriority",
+    (_event, items: InboxPriorityInput[]) =>
+      core.commands.evaluateInboxPriority(items),
+  );
+  ipcMain.handle("core:listReadyToLand", () => core.commands.listReadyToLand());
+  ipcMain.handle(
+    "core:createTaskFromAction",
+    (_event, input: CreateTaskActionInput) =>
+      core.commands.createTaskFromAction(input),
+  );
+  ipcMain.handle("core:parsePullRequestUrl", (_event, url: unknown) =>
+    typeof url === "string" ? (parsePullRequestUrl(url) ?? null) : null,
+  );
+  // The inbox's "Retry" on a failed / interrupted launch: the very same
+  // background start a launch uses (no pane, attach later), after clearing
+  // the failure so the item leaves. Resolves whether a pty started.
+  ipcMain.handle("core:retryLaunch", async (_event, taskId: string) => {
+    const task = await core.commands.getTask(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    if (lookupPanePid(taskId)) return true;
+    if (task.lastError) {
+      await core.commands.updateTaskState(taskId, { lastError: "" });
+    }
+    const started = await startBackgroundLaunch(taskId);
+    if (started) broadcastTaskLaunched(taskId);
+    return started;
+  });
+  ipcMain.handle("core:listEvents", (_event, filter?: ListEventsFilter) =>
+    core.commands.listEvents(filter),
+  );
+  ipcMain.handle("core:rulesCheck", (_event, input?: RulesCheckInput) =>
+    core.commands.rulesCheck(input),
+  );
+  ipcMain.handle("core:listRules", () => core.commands.listRules());
+  ipcMain.handle("core:listAddons", () => core.commands.listAddons());
+  // The last lines of a paneless task's screen (main's headless mirror);
+  // `null` when a pane shows it (the renderer reads its own xterm then).
+  ipcMain.handle(
+    "core:terminalTail",
+    (_event, taskId: unknown, count: unknown) =>
+      typeof taskId === "string"
+        ? (primarySessionTail(
+            taskId,
+            typeof count === "number" && count > 0 ? Math.min(count, 500) : 30,
+          ) ?? null)
+        : null,
+  );
+  core.events.on("inbox-changed", () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:inbox-changed", undefined);
+    }
+  });
+
   // Push channel: forward every core event to every live window. `safeSend`
   // guards against sending to a webContents destroyed mid-flight (window
   // closed, app quitting) — same guard the pty IPC uses above.
@@ -702,6 +778,33 @@ function registerCoreIpc(): void {
   // of on the next 30s refresh tick.
   watchStateFiles();
   watchMessagingFiles();
+  watchInboxFile();
+}
+
+let inboxWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Another core instance over the same state dir (a test, a future second
+ * client) writes inbox items without our `inbox-changed` event: watch
+ * `<stateDir>/inbox/items.json` and tell the windows to re-read.
+ */
+function watchInboxFile(): void {
+  let watcher: FSWatcher;
+  try {
+    const inboxDir = dirname(resolveStatePaths(activeStateDir).inboxFile);
+    mkdirSync(inboxDir, { recursive: true });
+    watcher = watch(inboxDir, (_event, filename) => {
+      if (filename !== "items.json") return;
+      clearTimeout(inboxWatchDebounce);
+      inboxWatchDebounce = setTimeout(() => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          safeSend(win.webContents, "core:inbox-changed", undefined);
+        }
+      }, 150);
+    });
+  } catch {
+    return;
+  }
+  app.on("before-quit", () => watcher.close());
 }
 
 // What the approval inbox and the task chips render: awaiting-approval

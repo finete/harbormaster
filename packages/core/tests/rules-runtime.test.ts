@@ -183,6 +183,62 @@ describe("rules runtime through createCore", () => {
     ).toHaveLength(1);
   });
 
+  it("files `priority: false` rule items under Other, records the source, snoozes to a time, and applies the priority filter", async () => {
+    const { core } = await setup(
+      {
+        "rules/rules.yaml": `rules:
+  - id: fyi
+    on: harbormaster.task.appeared
+    do:
+      - action: inbox
+        with: { title: "FYI \${task.title}", priority: false }
+      - action: inbox
+        with: { title: "Look at \${task.title}" }
+`,
+      },
+      {
+        inbox: {
+          priorityFilter: 'item.kind == "asked" ? false : item.priority',
+        },
+      },
+    );
+    await core.commands.createTask({
+      title: "T",
+      initialPrompt: "",
+      start: true,
+    });
+    await core.commands.refresh();
+    const items = await core.commands.listInbox();
+    expect(
+      items.map((item) => [item.title, item.priority, item.source]),
+    ).toEqual([
+      ["FYI T", false, "harbormaster"],
+      ["Look at T", undefined, "harbormaster"],
+    ]);
+
+    // Snooze without a button: hidden until the given time, not resolved.
+    const until = "2026-03-02T08:00:00.000Z";
+    const snoozed = await core.commands.resolveInboxItem(items[1]!.id, {
+      snoozeUntil: until,
+    });
+    expect(snoozed.item).toMatchObject({ snoozedUntil: until });
+    expect(snoozed.item.resolvedAt).toBeUndefined();
+    expect(await core.commands.listInbox()).toHaveLength(1);
+    await expect(
+      core.commands.resolveInboxItem(items[1]!.id, { snoozeUntil: "soon" }),
+    ).rejects.toThrow("Not a time: soon");
+
+    // The configured CEL filter decides; a non-boolean keeps the default.
+    expect(
+      await core.commands.evaluateInboxPriority([
+        { id: "a", kind: "asked", priority: true },
+        { id: "b", kind: "idle", priority: false },
+        { id: "c", kind: "rule", source: "github", priority: true },
+      ]),
+    ).toEqual([false, false, true]);
+    expect(await core.commands.listReadyToLand()).toEqual([]);
+  });
+
   it("rulesCheck replays recorded events through the current rules without executing anything", async () => {
     const { core, stateDir } = await setup({
       "rules/rules.yaml": "rules: []\n",

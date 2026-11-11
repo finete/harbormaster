@@ -175,7 +175,7 @@ describe("corroboratePresence", () => {
     };
     expect(
       corroboratePresence(status, { pid: 4242, alive: true }).status,
-    ).toEqual({ state: "error", message: "rate limited" });
+    ).toEqual({ state: "error", message: "rate limited", at: "t" });
     expect(
       corroboratePresence(status, { pid: 9999, alive: true }).status,
     ).toBeUndefined();

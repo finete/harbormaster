@@ -7,6 +7,8 @@
 import type {
   CreateTaskInput,
   LaunchTaskInput,
+  PullRequestReference,
+  PullRequestRole,
   Task,
   ThinkingLevel,
 } from "../../../preload/api";
@@ -101,6 +103,13 @@ export interface NewTaskDraft {
    * sticky: every draft starts on the default.
    */
   bypassPermissions: boolean | null;
+  /**
+   * A pull request to work on (`https://github.com/org/repo/pull/12`): the
+   * task binds to it and checks out its head branch. "" = none.
+   */
+  prUrl: string;
+  /** Whose PR it is; "" = from GitHub (the viewer authored it → author). A reviewer task never pushes or opens a PR. */
+  prRole: PullRequestRole | "";
 }
 
 /** Sticky composer choices, remembered across drafts. */
@@ -161,6 +170,8 @@ export function emptyDraft(
     baseRef: null,
     attachments: [],
     bypassPermissions: null,
+    prUrl: "",
+    prRole: "",
   };
 }
 
@@ -228,7 +239,8 @@ export function isDraftEmpty(draft: NewTaskDraft): boolean {
     draft.title.trim() === "" &&
     draft.prompt.trim() === "" &&
     draft.parentTaskId === null &&
-    draft.cloneUrl.trim() === ""
+    draft.cloneUrl.trim() === "" &&
+    draft.prUrl.trim() === ""
   );
 }
 
@@ -269,12 +281,27 @@ export function effectiveBaseRef(
   return undefined;
 }
 
-/** Why the draft can't be submitted with `action` yet, or `null` when it can. */
+/**
+ * Why the draft can't be submitted with `action` yet, or `null` when it can.
+ * `pr` is core's parse of `draft.prUrl` (`parsePullRequestUrl`): `null` =
+ * not a PR URL, `undefined` = not parsed yet. A PR brings its own
+ * repository, so Where is not needed then.
+ */
 export function submitBlocker(
   draft: NewTaskDraft,
   action: SubmitAction,
+  pr?: PullRequestReference | null,
 ): string | null {
   if (!effectiveTitle(draft)) return "Add a title or a prompt";
+  if (draft.prUrl.trim()) {
+    if (pr === undefined) return "Checking the pull request URL";
+    if (pr === null) return "Enter a pull request URL (…/org/repo/pull/12)";
+    if (draft.mode === "chat") return "Switch to Task to work on a PR";
+    if (action === "background") {
+      return "A PR task starts or parks (no background run)";
+    }
+    return null;
+  }
   const where = parseWhere(draft.where);
   if (where.kind === "unset") return "Choose where it runs";
   if (where.kind === "clone" && !draft.cloneUrl.trim()) {
@@ -300,7 +327,32 @@ export function planSubmit(
   draft: NewTaskDraft,
   action: SubmitAction,
   parent: Pick<Task, "id" | "repositoryId" | "branch"> | null,
+  pr: PullRequestReference | null = null,
 ): SubmitPlan {
+  // A PR task: bound to the PR in its own repository, on its head branch
+  // (core checks it out); a reviewer never pushes or opens a PR.
+  if (pr && draft.prUrl.trim() && action !== "background") {
+    const prompt = draft.prompt.trim();
+    const attachments = draft.attachments.filter((path) =>
+      draft.prompt.includes(path),
+    );
+    return {
+      command: "createTask",
+      input: {
+        title: effectiveTitle(draft),
+        initialPrompt: prompt ? draft.prompt : "",
+        repositoryId: pr.repositoryId,
+        pullRequest: pr.number,
+        ...(draft.prRole ? { role: draft.prRole } : {}),
+        ...(parent ? { parentTaskId: parent.id } : {}),
+        ...(action === "start" ? { start: true } : {}),
+        ...(draft.harness ? { harness: draft.harness } : {}),
+        ...(draft.model ? { model: draft.model } : {}),
+        ...(draft.thinking ? { thinking: draft.thinking } : {}),
+        ...(attachments.length ? { attachments } : {}),
+      },
+    };
+  }
   const where = parseWhere(draft.where);
   const title = effectiveTitle(draft);
   const prompt = draft.prompt.trim();
@@ -462,6 +514,8 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
       : [],
     bypassPermissions:
       typeof v.bypassPermissions === "boolean" ? v.bypassPermissions : null,
+    prUrl: stringField(v, "prUrl"),
+    prRole: v.prRole === "author" || v.prRole === "reviewer" ? v.prRole : "",
   };
 }
 

@@ -20,6 +20,7 @@ import {
 import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { OpenInButton } from "./OpenInButton";
 import { TaskActions } from "./TaskActions";
+import { TaskAudit } from "./TaskAudit";
 import { TerminalPane } from "./TerminalPane";
 import { TerminalTab } from "./TerminalTab";
 import { Button } from "./ui/button";
@@ -298,11 +299,14 @@ export const TaskWorkspace = memo(function TaskWorkspace({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border bg-muted/20 px-2 py-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Terminals
-        </span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Terminals
+          </span>
+          {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           <OpenInButton path={cwd} />
           {task && <TaskActions task={task} />}
           <Button

@@ -9,9 +9,18 @@
 //   harbormaster <tool> [--json '<args>'] [--<arg> <value>...] [--details]
 //   harbormaster hook inbox --mode steer|follow-up|catch-up
 //   harbormaster inbox claim --task <id> [--idle true|false]
+//   harbormaster inbox list [--priority|--other] [--json]
+//   harbormaster inbox resolve <id> [<button>]
+//   harbormaster events [--task <id>] [--since <time>] [--limit <n>] [--json]
+//   harbormaster rules list | rules check [--task <id>] [--replay <from>]
+//   harbormaster addons list
+//
+// The inbox / events / rules / addons verbs are the core's user operations
+// (`OPS_CATALOG`, tools/ops.ts) over the same socket, never hand-rolled here.
 
 import {
   callerFromEnv,
+  callOp,
   callTool,
   findTool,
   HarbormasterNotRunningError,
@@ -113,6 +122,12 @@ function usage(): string {
     "  mcp                                       MCP stdio server exposing every tool",
     "  hook inbox --mode steer|follow-up|catch-up   Claude Code hook: deliver inbox messages",
     "  inbox claim --task <id> [--idle true|false]  Claim a task's inbox messages as JSON",
+    "  inbox list [--priority|--other] [--json]  Items that need you (rule items, approvals)",
+    "  inbox resolve <id> [<button>]             Press an item's button (default: dismiss)",
+    "  events [--task <id>] [--since <t>] [--limit <n>] [--json]  The rules audit log",
+    "  rules list [--json]                       Rules files as loaded, with problems",
+    "  rules check [--task <id>] [--replay <from>] [--json]  Dry run over recorded events",
+    "  addons list [--json]                      Built-in sources and installed addons",
     "",
   ].join("\n");
 }
@@ -188,6 +203,37 @@ async function runInboxClaim(
   return 0;
 }
 
+/** The named flags as op arguments; any other flag (except --json) is a usage error. */
+function pick(
+  flags: Map<string, string>,
+  keys: readonly string[],
+): Record<string, string> {
+  const args: Record<string, string> = {};
+  for (const [key, value] of flags) {
+    if (key === "json") continue;
+    if (!keys.includes(key)) throw new UsageError(`unknown flag --${key}`);
+    args[key] = value;
+  }
+  return args;
+}
+
+/** Runs one user operation; `--json` prints its structured details. */
+async function runOp(
+  op: string,
+  args: Record<string, unknown>,
+  flags: Map<string, string>,
+  socketPath: string,
+  io: CliIo,
+): Promise<number> {
+  const result = await callOp(socketPath, op, args);
+  io.stdout(
+    flags.get("json") === "true"
+      ? `${JSON.stringify(result.details ?? {}, null, 2)}\n`
+      : `${result.text}\n`,
+  );
+  return 0;
+}
+
 /** Runs one CLI invocation; resolves the exit code. */
 export async function main(
   argv: readonly string[],
@@ -213,9 +259,86 @@ export async function main(
     }
     if (command === "inbox") {
       const [verb, ...flagArgs] = rest;
-      if (verb !== "claim")
-        throw new UsageError("usage: inbox claim --task <id>");
-      return await runInboxClaim(parseFlags(flagArgs), socketPath, caller, io);
+      if (verb === "claim") {
+        return await runInboxClaim(
+          parseFlags(flagArgs),
+          socketPath,
+          caller,
+          io,
+        );
+      }
+      if (verb === "list") {
+        const flags = parseFlags(flagArgs);
+        if (flags.has("priority") && flags.has("other")) {
+          throw new UsageError("pick one of --priority / --other");
+        }
+        const tab = flags.has("priority")
+          ? "priority"
+          : flags.has("other")
+            ? "other"
+            : undefined;
+        return await runOp(
+          "inbox_list",
+          tab ? { tab } : {},
+          flags,
+          socketPath,
+          io,
+        );
+      }
+      if (verb === "resolve") {
+        const [id, button, ...extra] = flagArgs;
+        if (!id || id.startsWith("--") || extra.length > 0) {
+          throw new UsageError("usage: inbox resolve <id> [<button>]");
+        }
+        return await runOp(
+          "inbox_resolve",
+          { id, ...(button ? { button } : {}) },
+          new Map(),
+          socketPath,
+          io,
+        );
+      }
+      throw new UsageError(
+        "usage: inbox claim|list|resolve (see harbormaster --help)",
+      );
+    }
+    if (command === "events") {
+      const flags = parseFlags(rest);
+      return await runOp(
+        "events",
+        pick(flags, ["task", "since", "limit"]),
+        flags,
+        socketPath,
+        io,
+      );
+    }
+    if (command === "rules") {
+      const [verb, ...flagArgs] = rest;
+      const flags = parseFlags(flagArgs);
+      if (verb === "list") {
+        return await runOp("rules_list", {}, flags, socketPath, io);
+      }
+      if (verb === "check") {
+        return await runOp(
+          "rules_check",
+          pick(flags, ["task", "replay"]),
+          flags,
+          socketPath,
+          io,
+        );
+      }
+      throw new UsageError("usage: rules list | rules check");
+    }
+    if (command === "addons") {
+      const [verb, ...flagArgs] = rest;
+      if (verb !== "list") throw new UsageError("usage: addons list");
+      return await runOp(
+        "addons_list",
+        {},
+        parseFlags(flagArgs),
+        socketPath,
+        io,
+      );
     }
     const tool = findTool(command);
     if (!tool) throw new UsageError(`unknown command "${command}"`);

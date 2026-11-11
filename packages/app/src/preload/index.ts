@@ -3,15 +3,20 @@
 // `require`, `process`, or any other Node global.
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AddonInfo,
   AttachPrimaryResult,
+  AuditEntry,
   AwaitingKindId,
   AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
   ConnectivityState,
+  CreateTaskActionInput,
   CreateTaskInput,
   HarbormasterApi,
   HarnessModelCatalog,
+  InboxItem,
+  InboxPriorityInput,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
@@ -23,8 +28,11 @@ import type {
   OrphanWorktreeReport,
   PresenceChangedPayload,
   PresenceSnapshot,
+  PullRequestReference,
+  ReadyToLandEntry,
   ReopenTaskInput,
   RepositoryInfo,
+  ResolveInboxItemResult,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -259,6 +267,42 @@ const api: HarbormasterApi = {
       ): void => listener(direction);
       ipcRenderer.on("app:cycle-task", handler);
       return () => ipcRenderer.removeListener("app:cycle-task", handler);
+    },
+    listInbox: (options?: {
+      includeResolved?: boolean;
+      includeSnoozed?: boolean;
+    }): Promise<InboxItem[]> => ipcRenderer.invoke("core:listInbox", options),
+    resolveInboxItem: (
+      itemId: string,
+      options?: { buttonId?: string; snoozeUntil?: string },
+    ): Promise<ResolveInboxItemResult> =>
+      ipcRenderer.invoke("core:resolveInboxItem", itemId, options),
+    evaluateInboxPriority: (items: InboxPriorityInput[]): Promise<boolean[]> =>
+      ipcRenderer.invoke("core:evaluateInboxPriority", items),
+    listReadyToLand: (): Promise<ReadyToLandEntry[]> =>
+      ipcRenderer.invoke("core:listReadyToLand"),
+    createTaskFromAction: (input: CreateTaskActionInput): Promise<Task> =>
+      ipcRenderer.invoke("core:createTaskFromAction", input),
+    parsePullRequestUrl: (url: string): Promise<PullRequestReference | null> =>
+      ipcRenderer.invoke("core:parsePullRequestUrl", url),
+    listEvents: (filter?: {
+      taskId?: string;
+      since?: string;
+      limit?: number;
+    }): Promise<AuditEntry[]> => ipcRenderer.invoke("core:listEvents", filter),
+    rulesCheck: (input?: { taskId?: string; replayFrom?: string }) =>
+      ipcRenderer.invoke("core:rulesCheck", input),
+    listRules: () => ipcRenderer.invoke("core:listRules"),
+    listAddons: (): Promise<AddonInfo[]> =>
+      ipcRenderer.invoke("core:listAddons"),
+    terminalTail: (taskId: string, count?: number): Promise<string | null> =>
+      ipcRenderer.invoke("core:terminalTail", taskId, count),
+    retryLaunch: (taskId: string): Promise<boolean> =>
+      ipcRenderer.invoke("core:retryLaunch", taskId),
+    onInboxChanged: (listener: () => void): (() => void) => {
+      const handler = (): void => listener();
+      ipcRenderer.on("core:inbox-changed", handler);
+      return () => ipcRenderer.removeListener("core:inbox-changed", handler);
     },
   },
   app: {

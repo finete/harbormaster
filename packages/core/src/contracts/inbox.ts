@@ -1,8 +1,9 @@
 // Inbox contracts (docs/release-plan.md "Inbox"): one persisted list of
-// things that need a human. This wave stores rule-produced items
-// (`inbox` action); message approvals, "your move" and failed launches join
-// the same list in the UI wave. Plain types; storage in
-// access/json-inbox-access.ts.
+// things that need a human. Core stores rule-produced items (`inbox`
+// action); the app's inbox view joins them with message approvals and the
+// items it derives from the board and presence (agent asked / reported,
+// your move, ready to land, launch failed), which are recomputed, never
+// stored. Plain types; storage in access/json-inbox-access.ts.
 
 /** One button on an inbox item; `resolveInboxItem(id, { buttonId })` runs it. */
 export interface InboxButton {
@@ -21,6 +22,8 @@ export interface InboxItem {
   id: string;
   /** Where it came from: `rule` today. */
   kind: string;
+  /** The event source that produced it (`github`, an addon id), when known. */
+  source?: string;
   title: string;
   body?: string;
   buttons: InboxButton[];
@@ -29,6 +32,8 @@ export interface InboxItem {
   ruleId?: string;
   eventId?: string;
   createdAt: string;
+  /** Priority tab (default true); a rule sets `priority: false` for Other. */
+  priority?: boolean;
   /** Hidden from `listInbox` until then. */
   snoozedUntil?: string;
   resolvedAt?: string;
@@ -46,6 +51,41 @@ export interface ListInboxOptions {
 export interface ResolveInboxItemOptions {
   /** The pressed button; absent = plain dismiss. */
   buttonId?: string;
+  /**
+   * Snooze without a button: hide the item until this ISO time (not
+   * resolved). Ignored when `buttonId` is set.
+   */
+  snoozeUntil?: string;
+}
+
+/**
+ * One inbox item as the optional priority filter sees it (`item` in CEL,
+ * `GlobalConfig.inbox.priorityFilter`). Derived items (agent asked, your
+ * move, approvals, …) and persisted rule items share this shape so the app
+ * and `harbormaster inbox` sort them the same way.
+ */
+export interface InboxPriorityInput {
+  id: string;
+  /** `asked` | `reported` | `approval` | `idle` | `done` | `ready-to-land` | `launch-failed` | `rule` | … */
+  kind: string;
+  /** `harbormaster` for derived items, the event source for rule items. */
+  source?: string;
+  taskId?: string;
+  /** Repository id of the item's task, when it has one. */
+  repo?: string;
+  /** The producer's default. */
+  priority: boolean;
+}
+
+/** A task a rule tried to land but could not (dirty worktree, live pane): "ready to land". */
+export interface ReadyToLandEntry {
+  taskId: string;
+  /** The rule whose `move: done` stayed. */
+  ruleId: string;
+  /** Why landing was refused. */
+  detail?: string;
+  /** Time of the event that triggered the landing. */
+  at: string;
 }
 
 export interface ResolveInboxItemResult {

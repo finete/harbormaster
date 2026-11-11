@@ -2,13 +2,10 @@ import { PanelLeft, RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot } from "../../preload/api";
-import {
-  ApprovalInboxButton,
-  ApprovalInboxSheet,
-} from "./components/ApprovalInbox";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
+import { InboxHeaderButton, InboxView } from "./components/InboxView";
 import {
   NewTaskComposer,
   type NewTaskOutcome,
@@ -42,6 +39,7 @@ import {
   storePrefs,
 } from "./lib/new-task-draft";
 import { modKeyLabel } from "./lib/platform";
+import { useInbox } from "./lib/use-inbox";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
 import {
@@ -53,25 +51,41 @@ import {
 } from "./lib/workspace-persistence";
 import { pushToast } from "./toast";
 
-type View = "board" | "workspace";
+type View = "board" | "workspace" | "inbox";
 
 /**
- * Two top-level views, switched instantly (no router, see AGENTS.md):
+ * Three top-level views, switched instantly (no router, see AGENTS.md):
  *
  * - "workspace" (default): sidebar listing every task + the focused task's
  *   per-task dockview terminal workspace (persists across switches).
  * - "board": the kanban board, full-width, reached via the sidebar's Board
  *   button, Cmd+B, or landing here from app start. Clicking a card jumps
  *   back into the workspace view focused on that task.
+ * - "inbox": everything that needs a human (docs/release-plan.md "Inbox"),
+ *   in place of the task workspace; the sidebar stays. Sidebar Inbox row or
+ *   Cmd+I; Esc goes back to the previous view.
  */
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("workspace");
-  // The approval inbox sheet (components/ApprovalInbox.tsx): one instance,
-  // opened from the header button of whichever view is showing.
-  const [inboxOpen, setInboxOpen] = useState(false);
+  // The view the inbox returns to (Esc / Cmd+I again).
+  const viewBeforeInbox = useRef<Exclude<View, "inbox">>("workspace");
+  const openInbox = useCallback(() => {
+    setView((current) => {
+      if (current === "inbox") return viewBeforeInbox.current;
+      viewBeforeInbox.current = current;
+      return "inbox";
+    });
+  }, []);
+  const leaveInbox = useCallback(() => {
+    setView((current) =>
+      current === "inbox" ? viewBeforeInbox.current : current,
+    );
+  }, []);
+  // The one inbox model (lib/use-inbox.ts): the sidebar badge and the view.
+  const inbox = useInbox();
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
   const [openedTaskIds, setOpenedTaskIds] = useState<Set<string>>(new Set());
   const sidebarOrder = useSidebarOrder();
@@ -383,6 +397,11 @@ export function App(): JSX.Element {
         setView((current) => (current === "board" ? "workspace" : "board"));
         return;
       }
+      if (key === "i" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        openInbox();
+        return;
+      }
       if (key === "n") {
         // No dialog already open, and not mid-typing in some unrelated field
         // (see lib/keyboard-guard.ts) — matches the board's single-key guard.
@@ -394,7 +413,7 @@ export function App(): JSX.Element {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [takeover, openDraft]);
+  }, [takeover, openDraft, openInbox]);
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
@@ -526,9 +545,9 @@ export function App(): JSX.Element {
                 Board
               </span>
               <div className="ml-auto flex items-center gap-2">
-                <ApprovalInboxButton
-                  testId="board-approval-inbox-button"
-                  onClick={() => setInboxOpen(true)}
+                <InboxHeaderButton
+                  count={inbox.priorityCount}
+                  onClick={openInbox}
                 />
                 <Button
                   size="sm"
@@ -555,7 +574,11 @@ export function App(): JSX.Element {
         {
           <div
             data-testid="workspace-view"
-            className={view === "workspace" ? "flex h-full w-full" : "hidden"}
+            className={
+              view === "workspace" || view === "inbox"
+                ? "flex h-full w-full"
+                : "hidden"
+            }
           >
             <Sidebar
               focusedTaskId={visibleTaskId}
@@ -567,7 +590,9 @@ export function App(): JSX.Element {
               onSelectTask={selectTask}
               onCloseTask={closeTask}
               onShowBoard={() => setView("board")}
-              onOpenApprovals={() => setInboxOpen(true)}
+              onOpenInbox={openInbox}
+              inboxCount={inbox.priorityCount}
+              inboxActive={view === "inbox"}
               onNewTask={openDraft}
               draftLabel={draft ? draftLabel(draft) : null}
               draftFocused={draftFocused}
@@ -577,26 +602,45 @@ export function App(): JSX.Element {
               }}
               onCloseDraft={closeDraft}
             />
-            <WorkspaceView
-              focusedTaskId={visibleTaskId}
-              openedTaskIds={openedTaskIds}
-              onCloseTask={closeTask}
-              composer={
-                draft && draftFocused ? (
-                  <NewTaskComposer
-                    draft={draft}
-                    onChange={(patch) =>
-                      setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
-                    }
-                    origin={draftOrigin}
-                    tasks={boardTasks}
-                    recents={newTaskPrefs.recents}
-                    focusSignal={draftFocusSignal}
-                    onSubmitted={onDraftSubmitted}
-                  />
-                ) : null
+            {view === "inbox" && (
+              <InboxView
+                model={inbox}
+                active={view === "inbox" && takeover === null}
+                onOpenTask={(taskId) => {
+                  selectTask(taskId);
+                  setView("workspace");
+                }}
+                onBack={leaveInbox}
+              />
+            )}
+            <div
+              className={
+                view === "inbox" ? "hidden" : "flex h-full min-w-0 flex-1"
               }
-            />
+            >
+              <WorkspaceView
+                focusedTaskId={visibleTaskId}
+                openedTaskIds={openedTaskIds}
+                onCloseTask={closeTask}
+                composer={
+                  draft && draftFocused ? (
+                    <NewTaskComposer
+                      draft={draft}
+                      onChange={(patch) =>
+                        setDraft((prev) =>
+                          prev ? { ...prev, ...patch } : prev,
+                        )
+                      }
+                      origin={draftOrigin}
+                      tasks={boardTasks}
+                      recents={newTaskPrefs.recents}
+                      focusSignal={draftFocusSignal}
+                      onSubmitted={onDraftSubmitted}
+                    />
+                  ) : null
+                }
+              />
+            </div>
           </div>
         }
         <TakeoverDialog
@@ -613,7 +657,6 @@ export function App(): JSX.Element {
             openTask(taskId);
           }}
         />
-        <ApprovalInboxSheet open={inboxOpen} onOpenChange={setInboxOpen} />
         <ToastHost />
         <ConfirmHost />
       </div>
