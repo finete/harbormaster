@@ -18,11 +18,12 @@ import type {
 } from "@harbormaster/core";
 import {
   createCore,
+  createHarnessRegistry,
   DEFAULT_STATE_DIR,
   execFileRunner,
+  type HarnessAdapter,
   HttpVersionAccess,
   isConnectivityError,
-  PiHarnessAdapter,
   resolveSocketPath,
   resolveStatePaths,
   setProcessRunner,
@@ -238,14 +239,27 @@ if (!cliPath) {
   );
 }
 
-// The Pi harness adapter: builds pane launch specs and reads presence. Core
-// never spawns processes itself (accessor separation) — this is the only
-// place main talks to it, and it only ever calls `buildLaunchSpec`/
-// `presence`, never the presence access layer directly.
-const harness = new PiHarnessAdapter({
+// The agent registry (decision R8): builds each task's pane launch spec with
+// the adapter of the agent the task runs on (Pi, Claude Code, or a
+// configured custom CLI), all pointed at the absolute CLI path. Core never
+// spawns processes itself (accessor separation) — main only ever calls
+// `buildLaunchSpec`/`presence`, never the presence access layer directly.
+const harnesses = createHarnessRegistry({
   stateDir: activeStateDir,
   ...(cliPath ? { cliPath } : {}),
 });
+// Presence is the same for every agent (OSC 7501 reports + pid liveness),
+// so one adapter reads it for all tasks.
+const harness = harnesses.resolve(undefined);
+
+/** The adapter a task's pane launches with: the task's own agent (custom agents come from the current config). */
+async function harnessForTask(taskId: string): Promise<HarnessAdapter> {
+  const [task, settings] = await Promise.all([
+    core.commands.getTask(taskId),
+    core.commands.getLaunchSettings(),
+  ]);
+  return harnesses.resolve(task?.harness, settings.customAgents);
+}
 
 // Program status (OSC 7501, decision #18): the pty layer parses it out of a
 // task primary's output; core records it. Each report also pushes fresh
@@ -337,11 +351,17 @@ function flattenTasks(columns: BoardColumn[]): Task[] {
  * here on attaches to it instead of spawning a second pi).
  */
 async function startBackgroundLaunch(taskId: string): Promise<boolean> {
+  // Decision R7: a launched task skips permission prompts when its launch
+  // recorded that (the default); a message wake of any other task does not.
+  const task = await core.commands.getTask(taskId);
   const resolution = await resolvePrimaryLaunch(
     taskId,
     activeStateDir,
     core.commands,
-    harness,
+    harnessForTask,
+    {
+      permissions: task?.launch?.bypassPermissions ? "bypass" : "default",
+    },
   );
   if (!resolution.binding?.worktreePath) {
     console.error(
@@ -372,7 +392,7 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
     );
     await core.commands
       .updateTaskState(taskId, {
-        lastError: "Launch failed: the pi command could not be found on PATH.",
+        lastError: `Launch failed: the ${resolution.agentCommand ?? "agent"} command could not be found on PATH.`,
       })
       .catch(() => {});
     return false;
@@ -550,8 +570,10 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:listChildren", (_event, parentTaskId: string) =>
     core.commands.listChildren(parentTaskId),
   );
-  ipcMain.handle("core:getLaunchSettings", () =>
-    core.commands.getLaunchSettings(),
+  ipcMain.handle("core:getLaunchSettings", (_event, repositoryId?: string) =>
+    core.commands.getLaunchSettings(
+      typeof repositoryId === "string" ? repositoryId : undefined,
+    ),
   );
   // Sidebar inline rename (Orca polish item 4): patches title (or any other
   // non-state field) and publishes the same `board-changed` event every
@@ -1061,7 +1083,9 @@ function registerPtyIpc(): void {
               options.taskId,
               activeStateDir,
               core.commands,
-              harness,
+              harnessForTask,
+              // An interactive pane never bypasses permissions (R7).
+              { permissions: "default" },
             )
           : undefined;
       const spec = resolution?.spec;
@@ -1110,7 +1134,14 @@ function registerPtyIpc(): void {
       // per spawn/attach piled up past MaxListeners across reloads).
       trackSession(sender.id, id);
 
-      return { id, fellBackToShell, worktreeMissing };
+      return {
+        id,
+        fellBackToShell,
+        worktreeMissing,
+        ...(fellBackToShell && resolution?.agentCommand
+          ? { missingCommand: resolution.agentCommand }
+          : {}),
+      };
     },
   );
 

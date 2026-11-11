@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   HarnessModelCatalog,
   KnownLocation,
+  LaunchSettings,
   RepositoryInfo,
   Task,
 } from "../../../preload/api";
@@ -28,8 +29,10 @@ import {
 import {
   ACTION_LABELS,
   AgentModelPicker,
+  AgentPicker,
   actionHint,
   BranchPicker,
+  BypassPermissionsSwitch,
   ModeSwitch,
   ParentPicker,
   SubmitSplitButton,
@@ -136,6 +139,37 @@ export function NewTaskComposer({
   }, [focusSignal]);
 
   const where = parseWhere(draft.where);
+  // Repository-aware defaults: the agent a task gets when none is chosen
+  // and whether a background run bypasses permission prompts.
+  const settingsRepo = where.kind === "repository" ? where.repositoryId : "";
+  const [launchSettings, setLaunchSettings] = useState<Pick<
+    LaunchSettings,
+    "defaultHarness" | "bypassPermissions"
+  > | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void window.harbormaster.core
+      .getLaunchSettings(settingsRepo || undefined)
+      .then((settings) => {
+        if (!cancelled) setLaunchSettings(settings);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsRepo]);
+  // A child inherits its parent's agent (R8); else the repository / app default.
+  const parentHarness = draft.parentTaskId
+    ? tasks.find((task) => task.id === draft.parentTaskId)?.harness
+    : undefined;
+  const defaultHarness =
+    parentHarness ??
+    launchSettings?.defaultHarness ??
+    catalogs[0]?.harness ??
+    "pi";
+  const effectiveHarness = draft.harness || defaultHarness;
+  const bypass =
+    draft.bypassPermissions ?? launchSettings?.bypassPermissions ?? true;
   const options = useMemo(
     () => whereOptions(repositories, locations),
     [repositories, locations],
@@ -445,9 +479,17 @@ export function NewTaskComposer({
               onSelect={selectWhere}
               onOpenFolder={() => void openFolder()}
             />
-            <AgentModelPicker
+            <AgentPicker
               catalogs={catalogs}
               harness={draft.harness}
+              defaultHarness={defaultHarness}
+              onChange={(harness) =>
+                onChange({ harness, model: "", thinking: "" })
+              }
+            />
+            <AgentModelPicker
+              catalogs={catalogs}
+              harness={effectiveHarness}
               model={draft.model}
               thinking={draft.thinking}
               loadError={modelsError}
@@ -457,7 +499,19 @@ export function NewTaskComposer({
                 if (open && catalogs.length === 0) loadModels();
                 pickerProps("model").onOpenChange(open);
               }}
-              onChange={(patch) => onChange(patch)}
+              onChange={(patch) => {
+                // The agent is the agent dropdown's call; the model picker
+                // only ever shows (and edits) the effective agent's models.
+                // A concrete model pins the agent it belongs to.
+                const { harness: _ignored, ...rest } = patch;
+                onChange(
+                  rest.model ? { ...rest, harness: effectiveHarness } : rest,
+                );
+              }}
+            />
+            <BypassPermissionsSwitch
+              value={bypass}
+              onChange={(next) => onChange({ bypassPermissions: next })}
             />
             {!parent && (
               <ParentPicker

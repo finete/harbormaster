@@ -18,6 +18,24 @@ describe("buildPtyEnv", () => {
     expect(env.ITERM_SESSION_ID).toBeUndefined();
   });
 
+  it("strips the identity of an agent session the app was started from", () => {
+    const env = buildPtyEnv(
+      {
+        PI_SESSION_ID: "outer",
+        PI_SUBAGENT_CHILD: "1",
+        CLAUDECODE: "1",
+        PATH: "/bin",
+      },
+      { HARBORMASTER_TASK_ID: "t1" },
+      { appVersion: "1" },
+    );
+    expect(env.PI_SESSION_ID).toBeUndefined();
+    expect(env.PI_SUBAGENT_CHILD).toBeUndefined();
+    expect(env.CLAUDECODE).toBeUndefined();
+    expect(env.PATH).toBe("/bin");
+    expect(env.HARBORMASTER_TASK_ID).toBe("t1");
+  });
+
   it("sets COLORTERM=truecolor", () => {
     const env = buildPtyEnv({}, undefined, { appVersion: "1.0.0" });
     expect(env.COLORTERM).toBe("truecolor");

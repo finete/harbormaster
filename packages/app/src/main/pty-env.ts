@@ -37,6 +37,25 @@ const EMULATOR_MARKERS = [
   "ZED_TERM",
 ] as const;
 
+/**
+ * Identity markers of an agent session the app itself was started from
+ * (e.g. `npm run`/e2e from inside a Pi or Claude Code session). A pane is
+ * never part of that outer session: an inherited `PI_SESSION_ID` would make
+ * the `harbormaster` CLI treat a task's own hooks as a nested session
+ * (see core's `callerFromEnv`), and `PI_SUBAGENT_*` would make Pi behave
+ * as someone's subagent.
+ */
+const AGENT_SESSION_MARKERS = [
+  "PI_SESSION_ID",
+  "PI_SESSION_FILE",
+  "PI_SUBAGENT_CHILD",
+  "PI_SUBAGENT_PARENT_SESSION",
+  "PI_SUBAGENT_RUNNER_PID",
+  "PI_ASYNC_NATIVE_RUNNER",
+  "CLAUDECODE",
+  "CLAUDE_CODE_ENTRYPOINT",
+] as const;
+
 export interface BuildPtyEnvOptions {
   appVersion: string;
   /** Whether OSC 8 hyperlinks are supported (set after chunk E). */
@@ -61,8 +80,8 @@ export function buildPtyEnv(
     if (v !== undefined) env[k] = v as string;
   }
 
-  // Strip inherited emulator markers.
-  for (const key of EMULATOR_MARKERS) {
+  // Strip inherited emulator and outer-agent-session markers.
+  for (const key of [...EMULATOR_MARKERS, ...AGENT_SESSION_MARKERS]) {
     delete env[key];
   }
 

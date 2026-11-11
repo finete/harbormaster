@@ -125,6 +125,28 @@ export interface RepositoryConfig {
    * discovery time, not here.
    */
   preferredCheckout?: string;
+  /** Agent (harness id) for new tasks in this repository; overrides `GlobalConfig.launch.defaultHarness` (decision R8). */
+  defaultHarness?: string;
+  /** Permission bypass for launched tasks in this repository; overrides `GlobalConfig.launch.bypassPermissions` (decision R7). */
+  bypassPermissions?: boolean;
+}
+
+/**
+ * A user-configured "any CLI" agent (`GlobalConfig.agents.custom[]`): run
+ * `command args... [prompt]` in the task's worktree. Status comes from OSC
+ * 7501 / pid liveness only; it has no inbox glue, so messages to it are
+ * refused up front (decision R3), and it has no model list.
+ */
+export interface CustomAgentConfig {
+  /** Stable harness id stored on tasks (`Task.harness`); must not shadow a built-in (`pi`, `claude-code`). */
+  id: string;
+  /** Display label. */
+  label: string;
+  /** Executable (bare name looked up on PATH, or an absolute path). */
+  command: string;
+  args?: string[];
+  /** How the task's first prompt is passed: appended as the last argument (default) or not at all. */
+  promptArg?: "positional" | "none";
 }
 
 /** Ordered list of board columns; the source of truth for board layout. */
@@ -239,6 +261,15 @@ export interface TaskLaunch {
   interruptedAt?: string;
   /** Legacy: launched tasks recorded their model here before `Task.model` existed; still honored as a fallback. */
   model?: string;
+  /**
+   * Whether the launched session skips the agent's permission prompts
+   * (decision R7), resolved when the launch was requested: the launch's own
+   * choice, else `RepositoryConfig.bypassPermissions`, else
+   * `GlobalConfig.launch.bypassPermissions` (default `true`). Applied only
+   * when the app starts the task in the background; a pane the user opens
+   * later on a cold task keeps the user's own permission settings.
+   */
+  bypassPermissions?: boolean;
 }
 
 /**
@@ -395,13 +426,26 @@ export interface GlobalConfig {
   /** Per-repository settings (deployment pipelines today), keyed by normalized repository id. */
   repositories?: Record<string, RepositoryConfig>;
   /** Background-task-launch settings (see `/docs/design-decisions.md "Launching tasks from an agent"`). */
-  launch?: { maxConcurrent?: number; defaultModel?: string };
+  launch?: {
+    maxConcurrent?: number;
+    /** Applies only to tasks on the default agent (`defaultHarness`); other agents start on their own default. */
+    defaultModel?: string;
+    /** Agent (harness id) for new tasks (decision R8); absent = `DEFAULT_HARNESS_ID`. */
+    defaultHarness?: string;
+    /** Launched (background) tasks skip permission prompts (decision R7); absent = `DEFAULT_LAUNCH_BYPASS_PERMISSIONS`. */
+    bypassPermissions?: boolean;
+  };
+  /** Agents beyond the built-in Pi and Claude Code. */
+  agents?: { custom?: CustomAgentConfig[] };
   /** Task-messaging settings (see `/docs/task-messaging.md`); defaults apply at read time. */
   messaging?: { parentReplyTimeoutMinutes?: number; loopCap?: number };
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */
 export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
+
+/** `launch.bypassPermissions` default (decision R7): launched tasks skip permission prompts. */
+export const DEFAULT_LAUNCH_BYPASS_PERMISSIONS = true;
 
 /** `messaging.parentReplyTimeoutMinutes` default: how long a child's question may wait on its parent (counted from delivery) before the child shows amber. */
 export const DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES = 30;

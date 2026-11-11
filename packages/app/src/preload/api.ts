@@ -14,6 +14,7 @@ import type {
   CreateTaskInput,
   HarnessModelCatalog,
   KnownLocation,
+  LaunchSettings,
   LaunchTaskInput,
   MessageMode,
   MoveTaskOptions,
@@ -50,6 +51,7 @@ export type {
   HarnessModel,
   HarnessModelCatalog,
   KnownLocation,
+  LaunchSettings,
   LaunchTaskInput,
   MessageAttachment,
   MessageMode,
@@ -182,8 +184,10 @@ export interface TerminalCreateOptions {
 
 export interface TerminalCreateResult {
   id: string;
-  /** True when a pi launch was attempted but its command could not be found, and this session fell back to `$SHELL`. */
+  /** True when an agent launch was attempted but its command could not be found, and this session fell back to `$SHELL`. */
   fellBackToShell: boolean;
+  /** The agent's bare command (`pi`, `claude`, ...) when `fellBackToShell`, for the warning strip. */
+  missingCommand?: string;
   /**
    * True when this primary pane's task has a worktree binding but that
    * directory no longer exists on disk, so pi was not launched (spawning
@@ -377,11 +381,8 @@ export interface HarbormasterApi {
     launchTask(input: LaunchTaskInput): Promise<Task>;
     /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
     listChildren(parentTaskId: string): Promise<Task[]>;
-    /** Current effective launch settings (concurrency cap, default model), for a launch dialog to show/enforce without touching config files. See `CoreCommands.getLaunchSettings`. */
-    getLaunchSettings(): Promise<{
-      maxConcurrent: number;
-      defaultModel?: string;
-    }>;
+    /** Current effective launch settings (concurrency cap, default model, default agent, permission bypass; repository-aware when given one), for the composer without touching config files. See `CoreCommands.getLaunchSettings`. */
+    getLaunchSettings(repositoryId?: string): Promise<LaunchSettings>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
     refresh(): Promise<{ warnings: string[] }>;
     /** Unbound directories under the worktrees root, sized, plus a warning past the threshold. Slow; see `CoreCommands.scanOrphanWorktrees`. */

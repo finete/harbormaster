@@ -95,6 +95,12 @@ export interface NewTaskDraft {
   baseRef: string | null;
   /** Temp image paths pasted into the prompt; core copies the ones still referenced at submit. */
   attachments: string[];
+  /**
+   * Run in background only (decision R7): whether the launched agent skips
+   * its permission prompts. `null` = the repository / app default. Never
+   * sticky: every draft starts on the default.
+   */
+  bypassPermissions: boolean | null;
 }
 
 /** Sticky composer choices, remembered across drafts. */
@@ -154,6 +160,7 @@ export function emptyDraft(
     thinking: prefs.thinking,
     baseRef: null,
     attachments: [],
+    bypassPermissions: null,
   };
 }
 
@@ -340,6 +347,9 @@ export function planSubmit(
             ? { baseRef }
             : {}),
         ...agent,
+        ...(draft.bypassPermissions !== null
+          ? { bypassPermissions: draft.bypassPermissions }
+          : {}),
       },
     };
   }
@@ -450,6 +460,8 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
     attachments: Array.isArray(v.attachments)
       ? v.attachments.filter((path): path is string => typeof path === "string")
       : [],
+    bypassPermissions:
+      typeof v.bypassPermissions === "boolean" ? v.bypassPermissions : null,
   };
 }
 

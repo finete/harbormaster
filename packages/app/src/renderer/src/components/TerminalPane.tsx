@@ -41,6 +41,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
   const [fellBackToShell, setFellBackToShell] = useState(false);
+  const [missingCommand, setMissingCommand] = useState("pi");
   const [worktreeMissing, setWorktreeMissing] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
 
@@ -228,11 +229,17 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
             ...(params?.primary ? { primary: true } : {}),
           })
           .then(
-            ({ id, fellBackToShell: fellBack, worktreeMissing: wtGone }) => {
+            ({
+              id,
+              fellBackToShell: fellBack,
+              worktreeMissing: wtGone,
+              missingCommand: missing,
+            }) => {
               if (disposed) {
                 void window.harbormaster.terminal.release(id);
                 return;
               }
+              if (missing) setMissingCommand(missing);
               if (fellBack) setFellBackToShell(true);
               if (wtGone) setWorktreeMissing(true);
               wireSession(id);
@@ -320,7 +327,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           data-testid="pi-fallback-warning"
           className="flex items-center justify-between gap-2 bg-amber-900/60 px-2 py-1 text-xs text-amber-200"
         >
-          <span>pi not found — opened a plain shell</span>
+          <span>{missingCommand} not found — opened a plain shell</span>
           <button
             type="button"
             data-testid="pi-fallback-warning-dismiss"

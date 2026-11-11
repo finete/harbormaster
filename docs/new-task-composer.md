@@ -49,9 +49,13 @@ directory, in either mode).
 
 ## Agent · Model
 
-- One picker grouped by agent (harness). Pi is the only harness today; the
-  picker structure is ready for Claude Code.
-- Top entry: `Default (<harness>: <resolved model> · <thinking>)`.
+- Two dropdowns (wave B, decision R8): **Agent** (`Default (<agent>)`, Pi,
+  Claude Code, configured custom CLIs) and **Model**, which lists only the
+  chosen agent's models. `Default` resolves to the parent's agent for a
+  child, else the repository's `defaultHarness`, else
+  `launch.defaultHarness`, else Pi; core stores the resolved id on the task.
+  Picking a concrete model pins its agent.
+- Model top entry: `Default (<resolved model>)`.
 - Thinking level sits inside the same menu, only for models that support it.
 - It applies to Start, Park and background launch alike, and is stored on
   the task (`Task.harness` / `model` / `thinking`). A parked task uses it when
@@ -59,6 +63,13 @@ directory, in either mode).
 - The agent is fixed per task: resumes and forks always use it. The data
   model must not rule out several sessions per task later.
 - Model and thinking are applied only to the task's first session launch.
+  `launch.defaultModel` belongs to the default agent only.
+- A **Bypass / Ask** switch (decision R7) decides whether a *Run in
+  background* launch skips the agent's permission prompts (Claude Code's
+  `--dangerously-skip-permissions`; Pi has none). It starts on the
+  repository / app default (`bypassPermissions`, default on) and is never
+  sticky. Start & open never bypasses: interactive panes keep the user's
+  own settings.
 
 ## Parent
 
@@ -123,5 +134,5 @@ thinking level is in the tooltip.
 
 ## Out of scope
 
-The Claude Code adapter (a follow-up), agent profiles, switching agents
+Agent profiles, switching agents
 mid-task, in-place *tasks* for git repositories (only chats run in place).

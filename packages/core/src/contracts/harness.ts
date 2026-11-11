@@ -98,7 +98,17 @@ export interface BuildLaunchSpecInput {
   initialPrompt?: string;
   /** Which conversation to open (see `CoreCommands.claimSessionLaunch`); omitted = harness default (a fresh, unbound session). */
   session?: SessionLaunch;
+  /**
+   * Permission prompts (decision R7): `"bypass"` only for a launched
+   * (background) task whose launch recorded `bypassPermissions`; interactive
+   * panes always get `"default"` (the user's own settings). Omitted =
+   * `"default"`. Adapters without a permission system ignore it.
+   */
+  permissions?: LaunchPermissions;
 }
+
+/** How a launched session treats the harness's permission prompts (decision R7). */
+export type LaunchPermissions = "bypass" | "default";
 
 /**
  * Everything a frontend needs to start an interactive harness session in a
@@ -133,6 +143,11 @@ export interface HarnessAdapter {
   readonly id: string;
   /** Display label, e.g. `"Pi"`. */
   readonly label: string;
+  /**
+   * The bare command the adapter launches by default (`"pi"`, `"claude"`),
+   * for "<command> not found" messages. Optional for test fakes.
+   */
+  readonly command?: string;
 
   /** The models this harness can run, for the composer's picker. Never throws: failures come back as `error`. */
   listModels(): Promise<HarnessModelCatalog>;

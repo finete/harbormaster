@@ -13,6 +13,7 @@ import type {
   HarbormasterApi,
   HarnessModelCatalog,
   KnownLocation,
+  LaunchSettings,
   LaunchTaskInput,
   MessageMode,
   MessagingChangedPayload,
@@ -169,10 +170,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:launchTask", input),
     listChildren: (parentTaskId: string): Promise<Task[]> =>
       ipcRenderer.invoke("core:listChildren", parentTaskId),
-    getLaunchSettings: (): Promise<{
-      maxConcurrent: number;
-      defaultModel?: string;
-    }> => ipcRenderer.invoke("core:getLaunchSettings"),
+    getLaunchSettings: (repositoryId?: string): Promise<LaunchSettings> =>
+      ipcRenderer.invoke("core:getLaunchSettings", repositoryId),
     onBoardChanged: (
       listener: (payload: BoardChangedPayload) => void,
     ): (() => void) => {

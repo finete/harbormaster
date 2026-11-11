@@ -443,6 +443,9 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
     const f = await fixture();
     expect(await f.core.commands.getLaunchSettings()).toEqual({
       maxConcurrent: 6,
+      defaultHarness: "pi",
+      bypassPermissions: true,
+      customAgents: [],
     });
   });
 
@@ -461,9 +464,133 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
     expect(await f.core.commands.getLaunchSettings()).toEqual({
       maxConcurrent: 2,
       defaultModel: "anthropic/claude",
+      defaultHarness: "pi",
+      bypassPermissions: true,
+      customAgents: [],
     });
   });
 });
+
+describe.skipIf(!gitAvailable)(
+  "agent choice (R8) and permission bypass (R7)",
+  () => {
+    async function configure(
+      f: Awaited<ReturnType<typeof fixture>>,
+      extra: Record<string, unknown>,
+    ): Promise<void> {
+      await writeFile(
+        join(f.stateDir, "config.json"),
+        JSON.stringify({
+          automation: false,
+          movers: [],
+          codeRoot: join(f.stateDir, "..", "Code"),
+          branchPrefix: "",
+          ...extra,
+        }),
+      );
+    }
+
+    it("resolves task > parent > repository > app default > pi, and refuses unknown agents", async () => {
+      const f = await fixture();
+      await configure(f, {
+        launch: { defaultHarness: "claude-code", bypassPermissions: false },
+        repositories: {
+          [f.repositoryId]: { defaultHarness: "pi", bypassPermissions: true },
+        },
+        agents: {
+          custom: [{ id: "codex", label: "Codex", command: "codex" }],
+        },
+      });
+      const c = f.core.commands;
+      expect(await c.getLaunchSettings()).toMatchObject({
+        defaultHarness: "claude-code",
+        bypassPermissions: false,
+        customAgents: [{ id: "codex", label: "Codex", command: "codex" }],
+      });
+      expect(await c.getLaunchSettings(f.repositoryId)).toMatchObject({
+        defaultHarness: "pi",
+        bypassPermissions: true,
+      });
+
+      // App default for a repository-less task; repo override for a repo task.
+      const scratch = await c.createTask({ title: "S", initialPrompt: "" });
+      expect(scratch.harness).toBe("claude-code");
+      const inRepo = await c.launchTask({
+        relation: "standalone",
+        title: "R",
+        prompt: "r",
+        repository: { repositoryId: f.repositoryId },
+      });
+      expect(inRepo.harness).toBe("pi");
+      expect(inRepo.launch?.bypassPermissions).toBe(true);
+
+      // Explicit choice wins; a child inherits its parent's agent.
+      const parent = await c.launchTask({
+        relation: "standalone",
+        title: "P",
+        prompt: "p",
+        repository: { none: true },
+        harness: "codex",
+        bypassPermissions: true,
+      });
+      expect(parent.harness).toBe("codex");
+      expect(parent.launch?.bypassPermissions).toBe(true);
+      const child = await c.launchTask({
+        relation: "child",
+        fromTaskId: parent.id,
+        title: "C",
+        prompt: "c",
+        repository: { repositoryId: f.repositoryId },
+      });
+      expect(child.harness).toBe("codex");
+      const other = await c.launchTask({
+        relation: "child",
+        fromTaskId: parent.id,
+        title: "C2",
+        prompt: "c",
+        repository: { none: true },
+        harness: "claude-code",
+      });
+      expect(other.harness).toBe("claude-code");
+      // App-level bypass false applies to a repository-less launch.
+      expect(other.launch?.bypassPermissions).toBe(false);
+
+      await expect(
+        c.createTask({ title: "X", initialPrompt: "", harness: "nope" }),
+      ).rejects.toThrow(/Unknown agent "nope"/);
+
+      // Model catalogs: one per agent, custom agents included.
+      const catalogs = await c.listModels();
+      expect(catalogs.map((catalog) => catalog.harness)).toEqual([
+        "pi",
+        "claude-code",
+        "codex",
+      ]);
+    });
+
+    it("refuses messages to an agent without inbox glue up front (R3)", async () => {
+      const f = await fixture();
+      await configure(f, {
+        agents: { custom: [{ id: "any", label: "Any CLI", command: "x" }] },
+      });
+      const c = f.core.commands;
+      const target = await c.launchTask({
+        relation: "standalone",
+        title: "Plain CLI",
+        prompt: "p",
+        repository: { none: true },
+        harness: "any",
+      });
+      await expect(
+        c.sendTaskMessage({
+          from: { kind: "session", cwd: "/tmp" },
+          targetTaskId: target.id,
+          text: "hi",
+        }),
+      ).rejects.toThrow(/Any CLI does not support messaging/);
+    });
+  },
+);
 
 describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
   it("asks for confirmation before completing a parent with active children; force.leaveChildren completes it, children untouched", async () => {

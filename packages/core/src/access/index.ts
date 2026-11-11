@@ -1,3 +1,4 @@
+export * from "./claude-code-access.js";
 export * from "./git-repository-access.js";
 export * from "./git-worktree-access.js";
 export * from "./github-pr-access.js";

@@ -9,6 +9,7 @@ import type {
   CreateTaskInput,
   DeleteTaskOptions,
   KnownLocation,
+  LaunchSettings,
   LaunchTaskInput,
   MoveTaskOptions,
   OrphanWorktreeReport,
@@ -141,6 +142,11 @@ import {
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
+import {
+  type HarnessRegistry,
+  resolveLaunchBypass,
+  resolveNewTaskHarness,
+} from "../harness/registry.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 import {
@@ -171,8 +177,17 @@ export interface CoreManagerDependencies {
    * always supplies it).
    */
   messages?: MessageAccess;
-  /** The harness adapter, for presence and messaging capabilities. Required alongside `messages`. */
+  /**
+   * The presence adapter (presence is the same for every agent: OSC 7501
+   * reports + pid liveness) and the fallback for a task whose agent is not
+   * in `harnesses`. Required alongside `messages`.
+   */
   harness?: HarnessAdapter;
+  /**
+   * Every agent a task can run on (decision R8), for per-task messaging
+   * capabilities, model catalogs and defaults. Absent = `harness` alone.
+   */
+  harnesses?: HarnessRegistry;
   /**
    * Folders registered outside `codeRoot` (composer "Open folder…").
    * Optional so hand-built managers keep compiling; folder commands throw
@@ -206,14 +221,16 @@ type TaskWhere =
   | { kind: "none" };
 
 /** Agent fields stored on a new task (see `/docs/new-task-composer.md`). */
-function agentFields(input: {
-  harness?: string;
-  model?: string;
-  thinking?: ThinkingLevel;
-}): Pick<Task, "harness" | "model" | "thinking"> {
+function agentFields(
+  input: {
+    model?: string;
+    thinking?: ThinkingLevel;
+  },
+  harness: string,
+): Pick<Task, "harness" | "model" | "thinking"> {
   const model = input.model?.trim();
   return {
-    harness: input.harness?.trim() || DEFAULT_HARNESS_ID,
+    harness,
     ...(model ? { model } : {}),
     ...(input.thinking ? { thinking: input.thinking } : {}),
   };
@@ -370,16 +387,74 @@ export class CoreManager implements CoreCommands {
   }
 
   async listModels(): Promise<HarnessModelCatalog[]> {
-    const harness = this.deps.harness;
-    if (!harness) return [];
-    const [catalog, config] = await Promise.all([
-      harness.listModels(),
-      this.deps.config.load(),
-    ]);
-    // The configured default wins over the harness's own, exactly as
-    // `claimSessionLaunch` resolves it.
-    const defaultModel = config.launch?.defaultModel ?? catalog.defaultModel;
-    return [{ ...catalog, ...(defaultModel ? { defaultModel } : {}) }];
+    if (!this.deps.harness && !this.deps.harnesses) return [];
+    const config = await this.deps.config.load();
+    const adapters = this.harnessList(config);
+    const defaultHarness = config.launch?.defaultHarness ?? DEFAULT_HARNESS_ID;
+    const catalogs = await Promise.all(
+      adapters.map((adapter) => adapter.listModels()),
+    );
+    // The configured default model wins over the default agent's own,
+    // exactly as `claimSessionLaunch` resolves it; it never applies to the
+    // other agents (a Pi `provider/model` id means nothing to Claude).
+    return catalogs.map((catalog) => {
+      const defaultModel =
+        (catalog.harness === defaultHarness
+          ? config.launch?.defaultModel
+          : undefined) ?? catalog.defaultModel;
+      return { ...catalog, ...(defaultModel ? { defaultModel } : {}) };
+    });
+  }
+
+  /** Every registered agent (built-ins, then the config's custom agents). */
+  private harnessList(config: GlobalConfig): HarnessAdapter[] {
+    if (this.deps.harnesses) {
+      return this.deps.harnesses.list(config.agents?.custom ?? []);
+    }
+    return this.deps.harness ? [this.deps.harness] : [];
+  }
+
+  /** The adapter a task runs on (its `harness`, else Pi, else the presence adapter). */
+  private async harnessFor(
+    task: Pick<Task, "harness"> | undefined,
+    config?: GlobalConfig,
+  ): Promise<HarnessAdapter> {
+    const fallback = this.deps.harness;
+    if (!this.deps.harnesses) {
+      if (!fallback) throw new Error("no agent harness is configured");
+      return fallback;
+    }
+    const custom = (config ?? (await this.deps.config.load())).agents?.custom;
+    return this.deps.harnesses.resolve(task?.harness, custom ?? []);
+  }
+
+  /**
+   * The agent a new task runs on (decision R8), validated: an explicitly
+   * requested agent must be registered.
+   */
+  private resolveTaskHarness(
+    requested: string | undefined,
+    parent: Task | undefined,
+    repositoryId: string | undefined,
+    config: GlobalConfig,
+  ): string {
+    const id = resolveNewTaskHarness({
+      requested,
+      parentHarness: parent?.harness,
+      repository: repositoryId
+        ? config.repositories?.[repositoryId]
+        : undefined,
+      config,
+    });
+    const known = this.harnessList(config).some((adapter) => adapter.id === id);
+    if (!known && id !== DEFAULT_HARNESS_ID && this.deps.harnesses) {
+      throw new Error(
+        `Unknown agent "${id}". Available: ${this.harnessList(config)
+          .map((adapter) => adapter.id)
+          .join(", ")}`,
+      );
+    }
+    return id;
   }
 
   /**
@@ -558,7 +633,10 @@ export class CoreManager implements CoreCommands {
       ...(baseRef ? { baseRef } : {}),
       ...(parent ? { parentTaskId: parent.id } : {}),
       ...(pr ? { pr } : {}),
-      ...agentFields(input),
+      ...agentFields(
+        input,
+        this.resolveTaskHarness(input.harness, parent, repo?.id, config),
+      ),
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
@@ -906,11 +984,20 @@ export class CoreManager implements CoreCommands {
     let model = task.model ?? task.launch?.model;
     if (!model) {
       const config = await this.deps.config.load();
-      model = config.launch?.defaultModel;
+      // The configured default model belongs to the default agent only.
+      if (
+        (task.harness ?? DEFAULT_HARNESS_ID) ===
+        (config.launch?.defaultHarness ?? DEFAULT_HARNESS_ID)
+      ) {
+        model = config.launch?.defaultModel;
+      }
       // Record what "default" meant for this session, for display; the
       // harness's own default is only recorded, never passed.
-      const sessionModel =
-        model ?? (await this.deps.harness?.defaults())?.defaultModel;
+      const adapter =
+        this.deps.harness || this.deps.harnesses
+          ? await this.harnessFor(task, config)
+          : undefined;
+      const sessionModel = model ?? (await adapter?.defaults())?.defaultModel;
       if (sessionModel) {
         const recorded = await this.deps.tasks.patchTask(taskId, (fresh) =>
           fresh.model || fresh.sessionModel
@@ -1423,6 +1510,11 @@ export class CoreManager implements CoreCommands {
     const launch: TaskLaunch = {
       status: "queued",
       requestedAt: now,
+      bypassPermissions: resolveLaunchBypass({
+        requested: input.bypassPermissions,
+        repository: repo ? config.repositories?.[repo.id] : undefined,
+        config,
+      }),
     };
 
     const task: Task = {
@@ -1434,7 +1526,10 @@ export class CoreManager implements CoreCommands {
       ...(repo ? { repositoryId: repo.id } : {}),
       ...(where.kind === "folder" ? { folderPath: where.path } : {}),
       ...(baseRef ? { baseRef } : {}),
-      ...agentFields(input),
+      ...agentFields(
+        input,
+        this.resolveTaskHarness(input.harness, parentTask, repo?.id, config),
+      ),
       ...(parentTaskId ? { parentTaskId } : {}),
       ...(launchedFromTaskId ? { launchedFromTaskId } : {}),
       launch,
@@ -1514,17 +1609,20 @@ export class CoreManager implements CoreCommands {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  async getLaunchSettings(): Promise<{
-    maxConcurrent: number;
-    defaultModel?: string;
-  }> {
+  async getLaunchSettings(repositoryId?: string): Promise<LaunchSettings> {
     const config = await this.deps.config.load();
+    const repository = repositoryId
+      ? config.repositories?.[repositoryId]
+      : undefined;
     return {
       maxConcurrent:
         config.launch?.maxConcurrent ?? DEFAULT_LAUNCH_MAX_CONCURRENT,
       ...(config.launch?.defaultModel
         ? { defaultModel: config.launch.defaultModel }
         : {}),
+      defaultHarness: resolveNewTaskHarness({ repository, config }),
+      bypassPermissions: resolveLaunchBypass({ repository, config }),
+      customAgents: config.agents?.custom ?? [],
     };
   }
 
@@ -2347,28 +2445,30 @@ export class CoreManager implements CoreCommands {
 
     // 4. Child → parent: the parent must be live (and not Done, above) and
     //    the child's own harness must be able to receive the answer.
+    const config = await this.deps.config.load();
     if (route === "child-to-parent") {
       if (!(await harness.presence(target.id)).live) {
         throw new Error(
           "Your parent task is not running; stop and ask the user instead.",
         );
       }
-      if (!harness.messaging.receive) {
+      if (!(await this.harnessFor(senderTask, config)).messaging.receive) {
         throw new Error(
           "Your harness can't receive replies, so your parent couldn't answer; stop and ask the user instead.",
         );
       }
     }
 
-    // 5. The target's harness must be able to receive.
-    if (!harness.messaging.receive) {
+    // 5. The target's harness must be able to receive (decision R3: an
+    //    agent without inbox glue refuses sends up front).
+    const targetHarness = await this.harnessFor(target, config);
+    if (!targetHarness.messaging.receive) {
       throw new Error(
-        `Task ${target.id}'s harness can't receive messages; tell the user instead.`,
+        `Task ${target.id}'s harness can't receive messages: ${targetHarness.label} does not support messaging; tell the user instead.`,
       );
     }
 
     // 6. Lineage routes check the loop cap.
-    const config = await this.deps.config.load();
     const cap = config.messaging?.loopCap ?? DEFAULT_MESSAGE_LOOP_CAP;
     const capCheck =
       senderTask && (route === "parent-to-child" || route === "child-to-parent")
@@ -2438,7 +2538,7 @@ export class CoreManager implements CoreCommands {
       };
     }
     if ((await harness.presence(target.id)).live) {
-      const delivered = resolveDeliveredMode(mode, harness.messaging);
+      const delivered = resolveDeliveredMode(mode, targetHarness.messaging);
       return {
         message,
         willWake: false,
@@ -2459,7 +2559,7 @@ export class CoreManager implements CoreCommands {
     taskId: string,
     options: { idle: boolean },
   ): Promise<TaskMessage[]> {
-    const { messages, harness } = this.requireMessaging();
+    const { messages } = this.requireMessaging();
     const now = this.deps.clock.now().toISOString();
     const task = await this.deps.tasks.getTask(taskId);
     const reason = task ? undeliverableReason(task) : undefined;
@@ -2473,11 +2573,11 @@ export class CoreManager implements CoreCommands {
       if (failed.length > 0) this.emitMessagesChanged(affectedTaskIds(failed));
       return [];
     }
+    const capabilities = (await this.harnessFor(task)).messaging;
     const claimed = await messages.claimDeliverable(taskId, {
       idle: options.idle,
       deliveredAt: now,
-      resolveMode: (requested) =>
-        resolveDeliveredMode(requested, harness.messaging),
+      resolveMode: (requested) => resolveDeliveredMode(requested, capabilities),
     });
     if (claimed.length > 0) this.emitMessagesChanged(affectedTaskIds(claimed));
     return claimed;
@@ -2751,11 +2851,12 @@ export class CoreManager implements CoreCommands {
     decided: TaskMessage,
     target: Task | undefined,
   ): Promise<void> {
-    const { messages, harness } = this.requireMessaging();
-    if (decided.sender.kind !== "task" || !harness.messaging.receive) return;
+    const { messages } = this.requireMessaging();
+    if (decided.sender.kind !== "task") return;
     const sender = await this.deps.tasks.getTask(decided.sender.taskId);
     if (!sender || sender.state === "done" || sender.state === "backlog")
       return;
+    if (!(await this.harnessFor(sender)).messaging.receive) return;
     const outcome =
       decided.status === "rejected"
         ? "rejected"

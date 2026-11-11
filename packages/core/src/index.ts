@@ -31,6 +31,7 @@ import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { HarnessAdapter } from "./contracts/harness.js";
 import type { Clock, IdGenerator } from "./contracts/services.js";
 import { PiHarnessAdapter } from "./harness/pi-adapter.js";
+import { createHarnessRegistry, HarnessRegistry } from "./harness/registry.js";
 import { CoreManager } from "./manager/core-manager.js";
 import { SystemClock, UuidGenerator } from "./utilities/defaults.js";
 import { CoreEventBus } from "./utilities/event-bus.js";
@@ -59,6 +60,13 @@ export interface CoreOptions {
   versions?: VersionAccess;
   /** Overrides the Pi harness adapter (presence + messaging capabilities); tests inject a fake presence/capabilities here. Defaults to a `PiHarnessAdapter` on the same state dir and clock. */
   harness?: HarnessAdapter;
+  /**
+   * Overrides the agent registry (per-task messaging capabilities, model
+   * catalogs). Defaults to the built-ins (Pi, Claude Code) on the same
+   * presence registry; with only `harness` set, that one adapter serves
+   * every task.
+   */
+  harnesses?: HarnessRegistry;
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -97,6 +105,11 @@ export function createCore(options: CoreOptions = {}): Core {
   const harness =
     options.harness ??
     new PiHarnessAdapter({ stateDir: paths.root, clock, presence });
+  const harnesses =
+    options.harnesses ??
+    (options.harness
+      ? new HarnessRegistry([options.harness], { fallback: options.harness })
+      : createHarnessRegistry({ stateDir: paths.root, clock, presence }));
 
   const commands = new CoreManager({
     tasks: taskState,
@@ -113,6 +126,7 @@ export function createCore(options: CoreOptions = {}): Core {
     versions,
     messages,
     harness,
+    harnesses,
     folders,
     attachments,
     presence,

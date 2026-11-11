@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
+  CustomAgentConfig,
   DeploymentPipeline,
   DeploymentStageConfig,
   GlobalConfig,
@@ -58,6 +59,7 @@ export class JsonConfigAccess implements ConfigAccess {
       const launch = normalizeLaunch(raw.launch);
       const messaging = normalizeMessaging(raw.messaging);
       const sources = normalizeSources(raw.sources);
+      const agents = normalizeAgents(raw.agents);
       return {
         automation: normalizeAutomation(raw.automation),
         ...(sources ? { sources } : {}),
@@ -66,6 +68,7 @@ export class JsonConfigAccess implements ConfigAccess {
         ...(repositories ? { repositories } : {}),
         ...(launch ? { launch } : {}),
         ...(messaging ? { messaging } : {}),
+        ...(agents ? { agents } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
@@ -145,6 +148,18 @@ function normalizeRepositories(
     );
     if (preferredCheckout) config.preferredCheckout = preferredCheckout;
     else delete config.preferredCheckout;
+    if (entry.defaultHarness !== undefined) {
+      config.defaultHarness = normalizeHarnessId(
+        `repositories.${repositoryId}.defaultHarness`,
+        entry.defaultHarness,
+      );
+    }
+    if (entry.bypassPermissions !== undefined) {
+      config.bypassPermissions = normalizeBoolean(
+        `repositories.${repositoryId}.bypassPermissions`,
+        entry.bypassPermissions,
+      );
+    }
     repositories[repositoryId] = config;
   }
   return repositories;
@@ -265,7 +280,78 @@ function normalizeLaunch(value: unknown): GlobalConfig["launch"] | undefined {
     }
     launch.defaultModel = value.defaultModel.trim();
   }
+  if (value.defaultHarness !== undefined) {
+    launch.defaultHarness = normalizeHarnessId(
+      "launch.defaultHarness",
+      value.defaultHarness,
+    );
+  }
+  if (value.bypassPermissions !== undefined) {
+    launch.bypassPermissions = normalizeBoolean(
+      "launch.bypassPermissions",
+      value.bypassPermissions,
+    );
+  }
   return launch;
+}
+
+function normalizeHarnessId(at: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${at} must be a non-empty agent id`);
+  }
+  return value.trim();
+}
+
+function normalizeBoolean(at: string, value: unknown): boolean {
+  if (typeof value !== "boolean") throw new Error(`${at} must be a boolean`);
+  return value;
+}
+
+/**
+ * `agents.custom[]`: user-configured "any CLI" agents. Each needs an `id`,
+ * a `label` and a `command`; `args` is a string array; `promptArg` is
+ * `"positional"` or `"none"`.
+ */
+function normalizeAgents(value: unknown): GlobalConfig["agents"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("agents must be an object");
+  if (value.custom === undefined) return {};
+  if (!Array.isArray(value.custom)) {
+    throw new Error("agents.custom must be an array");
+  }
+  const custom = value.custom.map((entry, index): CustomAgentConfig => {
+    const at = `agents.custom[${index}]`;
+    if (!isRecord(entry)) throw new Error(`${at} must be an object`);
+    const text = (key: string): string => {
+      const field = entry[key];
+      if (typeof field !== "string" || !field.trim()) {
+        throw new Error(`${at}.${key} must be a non-empty string`);
+      }
+      return field.trim();
+    };
+    const agent: CustomAgentConfig = {
+      id: text("id"),
+      label: text("label"),
+      command: text("command"),
+    };
+    if (entry.args !== undefined) {
+      if (
+        !Array.isArray(entry.args) ||
+        entry.args.some((arg) => typeof arg !== "string")
+      ) {
+        throw new Error(`${at}.args must be an array of strings`);
+      }
+      agent.args = [...(entry.args as string[])];
+    }
+    if (entry.promptArg !== undefined) {
+      if (entry.promptArg !== "positional" && entry.promptArg !== "none") {
+        throw new Error(`${at}.promptArg must be "positional" or "none"`);
+      }
+      agent.promptArg = entry.promptArg;
+    }
+    return agent;
+  });
+  return { custom };
 }
 
 /**
