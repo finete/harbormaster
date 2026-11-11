@@ -85,6 +85,7 @@ import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
+import { applyLoginShellPath } from "./login-shell-path";
 import {
   createDedupedPusher,
   createIntervalGate,
@@ -216,6 +217,17 @@ function safeSend(
 ): void {
   if (webContents.isDestroyed()) return;
   webContents.send(channel, payload);
+}
+
+// Adopt the login shell's PATH before anything resolves a command (agent
+// detection, launch specs, `gh`, the pty env): a Dock-launched app only has
+// macOS's minimal PATH. See login-shell-path.ts. e2e keeps the PATH it was
+// given so fake binaries stay first.
+if (!process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
+  const merged = applyLoginShellPath();
+  console.log(
+    `[main] PATH from login shell: ${merged.split(":").length} entries`,
+  );
 }
 
 // Headless core command API, hosted in the main process (see
