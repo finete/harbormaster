@@ -41,6 +41,7 @@ control the other:
 | 15 | Internal architecture | Volatility-based layering (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. See "Layering" below. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
 | 16 | Workflow verbs | Exactly three invariant verbs — **todev / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
 | 17 | Terminal renderer | xterm's DOM renderer only; no `@xterm/addon-webgl`. See "Terminal renderer: DOM" below. |
+| 18 | Release re-platforming (2026-11-11) | See `docs/release-plan.md`. Supersedes #13's "extension-driven presence" and the mover engine: agent status via OSC 7501 parsed by the pty owner; one core tool catalog exposed as MCP + `harbormaster` CLI over a local socket; per-agent glue is inbox delivery only; board automation is an event → condition → action rules engine (CloudEvents + CEL + YAML, addon sources); one inbox for everything needing a human; TUI board and pi-home migration deleted. |
 
 ## Layering
 
@@ -207,13 +208,13 @@ difference not listed here is a bug.
 - **Worktree layout.** Task worktrees live at
   `<codeRoot>/.harbormaster-worktrees/<branch-slug>`, and derived branch
   names end in a 6-character task-id suffix.
-- **Movers tick only in the app.** The Electron app is the single automation
-  host; the Pi extension never runs movers or refreshes.
-- **The in-session surface is the three verbs.** The extension's task widget
-  shows task/PR/awaiting context, and the extension registers exactly
-  `/todev`, `/toawait`, `/todone` plus the `harbormaster_report_status` tool
-  (decision #16: kinds are data, never commands). Board automation still
-  lives only in the app.
+- **Rules evaluate only in the app.** The Electron app is the single automation
+  host; the Pi extension never runs rules or refreshes. ("Movers" became the
+  rules engine in decision #18; the single-host rule is unchanged.)
+- **The in-session surface is the tool catalog.** Decision #18 removed the
+  extension's commands, widget and tools; agents reach core only through the
+  shared catalog (`harbormaster mcp` / CLI). The Pi extension delivers inbox
+  messages and nothing else. Board automation still lives only in the app.
 - **Launching replaces pi-home's subtasks and headless runner.** One
   `launchTask` command with an explicit `child` / `standalone` relation
   (`harbormaster_launch_task`, `harbormaster_subtask_status`; the launch tool
