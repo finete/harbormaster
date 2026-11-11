@@ -80,6 +80,9 @@ The e2e suite is slow (full run ~2.5 min); spend it deliberately.
   tests; merge small same-fixture tests rather than adding launches. Use
   condition waits, not fixed sleeps (a sleep only where "nothing happens"
   is the behavior, with a comment).
+- **Onboarding is skipped in e2e.** `playwright.config.ts` sets
+  `HARBORMASTER_SKIP_ONBOARDING=1`; a spec that needs the wizard passes `"0"`.
+  The packaged app never sets it.
 - **Leave no app instances behind.** Close every Electron app a test or
   scratch script launches; leaked instances slow every later run.
 - **Run headless: the user must never see a test app.** Every e2e or
