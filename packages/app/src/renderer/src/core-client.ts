@@ -14,8 +14,10 @@ import {
 } from "react";
 import type {
   BoardColumn,
+  InboxItem,
   MessagingChangedPayload,
   PresenceChangedPayload,
+  ReadyToLandEntry,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -103,6 +105,72 @@ const messagingStore = createSharedStore<MessagingChangedPayload>(
     });
   },
 );
+
+/** How often the inbox stores re-read core even without a push (snoozes expiring, rule retries). */
+const INBOX_POLL_MS = 60_000;
+
+/**
+ * Persisted inbox items (rule `inbox` actions; docs/release-plan.md
+ * "Inbox"): fetched on first use, re-read on every `core:inbox-changed`
+ * push and once a minute (core hides snoozed items until their time).
+ */
+const inboxItemsStore = createSharedStore<InboxItem[]>([], (set) => {
+  const { core } = window.harbormaster;
+  const load = (): void => {
+    void core
+      .listInbox()
+      .then(set)
+      .catch((error: unknown) => {
+        console.error("inbox fetch failed:", error);
+      });
+  };
+  load();
+  const unsubscribe = core.onInboxChanged(load);
+  const timer = setInterval(load, INBOX_POLL_MS);
+  return () => {
+    unsubscribe();
+    clearInterval(timer);
+  };
+});
+
+/**
+ * Tasks a rule could not land ("deployed and ready to land"): re-read when
+ * the board changes, after every refresh warning, and once a minute.
+ */
+const readyToLandStore = createSharedStore<ReadyToLandEntry[]>([], (set) => {
+  const { core } = window.harbormaster;
+  const load = (): void => {
+    void core
+      .listReadyToLand()
+      .then(set)
+      .catch(() => {});
+  };
+  load();
+  const offBoard = core.onBoardChanged(load);
+  const offWarning = core.onRefreshWarning(load);
+  const timer = setInterval(load, INBOX_POLL_MS);
+  return () => {
+    offBoard();
+    offWarning();
+    clearInterval(timer);
+  };
+});
+
+/** Persisted inbox items, newest pushes first (shared across every caller). */
+export function useInboxItems(): readonly InboxItem[] {
+  return useSyncExternalStore(
+    inboxItemsStore.subscribe,
+    inboxItemsStore.getSnapshot,
+  );
+}
+
+/** Tasks waiting to be marked Done after a refused auto-landing. */
+export function useReadyToLand(): readonly ReadyToLandEntry[] {
+  return useSyncExternalStore(
+    readyToLandStore.subscribe,
+    readyToLandStore.getSnapshot,
+  );
+}
 
 /** Subscribes to the live board (shared across every caller). */
 export function useBoard(): BoardColumn[] {

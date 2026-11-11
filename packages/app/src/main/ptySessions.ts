@@ -17,6 +17,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { app } from "electron";
 import * as pty from "node-pty";
+import { bufferTail } from "../shared/terminal-tail";
 import {
   createPtyDataBatcher,
   createPtyFlowControl,
@@ -695,6 +696,21 @@ export function detachPrimarySession(id: string, screen?: string): boolean {
   session.headless = { terminal: headlessTerminal, serialize };
   session.attached = false;
   return true;
+}
+
+/**
+ * The last `count` lines of a task primary's screen while it runs paneless
+ * (its headless mirror), for the inbox detail pane; `undefined` when the
+ * task has no paneless primary (a mounted pane answers in the renderer).
+ */
+export function primarySessionTail(
+  taskId: string,
+  count: number,
+): string | undefined {
+  const sessionId = primaryTaskSessions.get(taskId);
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session?.headless) return undefined;
+  return bufferTail(session.headless.terminal.buffer.active, count);
 }
 
 export function getSession(id: string): PtySessionRecord | undefined {

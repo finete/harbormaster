@@ -128,6 +128,32 @@ interface Drag {
 }
 
 /**
+ * dnd-kit's PointerSensor swallows every click for 50ms after a drop: on
+ * activation it adds a capture-phase `click` listener on the document that
+ * stops propagation, and on detach removes it only after
+ * `setTimeout(…, 50)` (AbstractPointerSensor.detach). A click inside that
+ * window never reaches React, so an automated click right after a drop
+ * (no human is that fast) silently does nothing. Wait until a probe click
+ * on <body> propagates again.
+ */
+async function clickGuardReleased(window: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      window.evaluate(() => {
+        let reached = false;
+        const probe = (): void => {
+          reached = true;
+        };
+        document.body.addEventListener("click", probe);
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        document.body.removeEventListener("click", probe);
+        return reached;
+      }),
+    )
+    .toBe(true);
+}
+
+/**
  * Presses on `source`, moves past the 4px activation distance, and waits for
  * the DragOverlay: proof a real drag started. Targets must be resolved *after*
  * this returns, since rows hide/collapse at drag start.
@@ -181,6 +207,7 @@ async function beginDrag(window: Page, source: Locator): Promise<Drag> {
       await window.mouse.up();
       await expect(overlay(window)).toHaveCount(0);
       await nextFrames(window);
+      await clickGuardReleased(window);
     },
   };
 }

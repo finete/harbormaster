@@ -8,6 +8,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { CoreCommands } from "../contracts/commands.js";
 import { dispatchToolCall } from "../tools/catalog.js";
+import { dispatchOpCall } from "../tools/ops.js";
 import {
   LineSplitter,
   type SocketRequest,
@@ -118,6 +119,15 @@ export async function startToolSocketServer(
             request.caller ?? {},
           );
           options.onCall?.(request.tool, { ok: true });
+          write(socket, { id, ok: true, result });
+          return;
+        }
+        case "op": {
+          const result = await dispatchOpCall(
+            commands,
+            request.op,
+            request.args ?? {},
+          );
           write(socket, { id, ok: true, result });
           return;
         }

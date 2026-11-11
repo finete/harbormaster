@@ -3,7 +3,7 @@
 // reachable both ways, identity comes from the env, and a missing app is
 // "Harbormaster is not running" (exit 2).
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -192,6 +192,132 @@ describe("harbormaster inbox / hook", () => {
       },
     });
     expect(inboxHookOutput("steer", "")).toEqual({});
+  });
+});
+
+describe("harbormaster inbox list / resolve, events, rules, addons", () => {
+  async function seedInbox(items: unknown[]): Promise<void> {
+    await mkdir(join(stateDir, "inbox"), { recursive: true });
+    await writeFile(
+      join(stateDir, "inbox", "items.json"),
+      JSON.stringify({ version: 1, items }),
+    );
+  }
+
+  it("lists rule items and approvals by tab and resolves them by button", async () => {
+    await seedInbox([
+      {
+        id: "i-review",
+        kind: "rule",
+        source: "github",
+        title: "Review requested: Fix it",
+        buttons: [
+          {
+            id: "b0",
+            label: "Create review task",
+            action: "createTask",
+            with: { title: "Review: Fix it", role: "reviewer" },
+          },
+          { id: "b1", label: "Dismiss", action: "dismiss" },
+        ],
+        createdAt: "2026-11-11T10:00:00.000Z",
+      },
+      {
+        id: "i-fyi",
+        kind: "rule",
+        title: "Deployed to staging",
+        priority: false,
+        buttons: [],
+        createdAt: "2026-11-11T09:00:00.000Z",
+      },
+    ]);
+    const sender = await launch("Sender");
+    const target = await launch("Target");
+    const sent = await core.commands.sendTaskMessage({
+      from: { kind: "task", taskId: sender },
+      targetTaskId: target,
+      text: "hello",
+    });
+
+    const priority = io();
+    expect(await main(["inbox", "list", "--priority"], priority)).toBe(0);
+    expect(priority.out()).toContain("i-review");
+    expect(priority.out()).toContain(`approval:${sent.message.id}`);
+    expect(priority.out()).not.toContain("i-fyi");
+    const other = io();
+    expect(await main(["inbox", "list", "--other", "--json"], other)).toBe(0);
+    expect(
+      (JSON.parse(other.out()) as { items: Array<{ id: string }> }).items.map(
+        (item) => item.id,
+      ),
+    ).toEqual(["i-fyi"]);
+
+    const press = io();
+    expect(
+      await main(["inbox", "resolve", "i-review", "Create review task"], press),
+    ).toBe(0);
+    expect(press.out()).toMatch(/^Create review task: task /);
+    const tasks = (await core.commands.listBoard()).flatMap((column) =>
+      column.groups.flatMap((group) => group.tasks),
+    );
+    expect(tasks.map((task) => task.title)).toContain("Review: Fix it");
+
+    const dismiss = io();
+    expect(await main(["inbox", "resolve", "i-fyi"], dismiss)).toBe(0);
+    const approve = io();
+    expect(
+      await main(
+        ["inbox", "resolve", `approval:${sent.message.id}`, "approve"],
+        approve,
+      ),
+    ).toBe(0);
+    const empty = io();
+    expect(await main(["inbox", "list"], empty)).toBe(0);
+    expect(empty.out()).toBe("Inbox is empty.\n");
+
+    const bad = io();
+    expect(await main(["inbox", "resolve", "nope"], bad)).toBe(1);
+    expect(bad.err()).toContain("Inbox item not found: nope");
+  });
+
+  it("applies the configured priority filter (the same one the app uses)", async () => {
+    await writeFile(
+      join(stateDir, "config.json"),
+      JSON.stringify({
+        automation: false,
+        inbox: { priorityFilter: 'item.source != "github"' },
+      }),
+    );
+    await seedInbox([
+      {
+        id: "i-gh",
+        kind: "rule",
+        source: "github",
+        title: "From GitHub",
+        buttons: [],
+        createdAt: "2026-11-11T10:00:00.000Z",
+      },
+    ]);
+    const other = io();
+    expect(await main(["inbox", "list", "--other"], other)).toBe(0);
+    expect(other.out()).toContain("i-gh");
+  });
+
+  it("prints the audit log, rules, a dry run and addons", async () => {
+    const events = io();
+    expect(await main(["events", "--task", "t1"], events)).toBe(0);
+    expect(events.out()).toBe("No events recorded.\n");
+    const check = io();
+    expect(await main(["rules", "check"], check)).toBe(0);
+    expect(check.out()).toMatch(/^Replayed 0 events; 0 actions would run\./);
+    const rules = io();
+    expect(await main(["rules", "list", "--json"], rules)).toBe(0);
+    expect(JSON.parse(rules.out())).toHaveProperty("files");
+    const addons = io();
+    expect(await main(["addons", "list"], addons)).toBe(0);
+    expect(addons.out()).toContain("built-in");
+    const usage = io();
+    expect(await main(["events", "--bogus", "x"], usage)).toBe(64);
   });
 });
 

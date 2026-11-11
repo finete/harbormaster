@@ -158,7 +158,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
           title: 'Review requested: \${event.data.title}'
           body: '\${event.data.repository}#\${event.data.number} by \${event.data.author}'
           buttons:
-            - label: Open review task
+            - label: Create review task
               action: createTask
               with:
                 title: 'Review: \${event.data.title}'

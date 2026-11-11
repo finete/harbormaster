@@ -184,6 +184,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
       </Button>
       <AwaitDialog
         taskId={awaitOpen ? task.id : null}
+        reviewer={task.pr?.role === "reviewer"}
         onCancel={() => setAwaitOpen(false)}
         onConfirm={(choice) => void handleAwaitConfirm(choice)}
       />

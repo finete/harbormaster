@@ -60,6 +60,7 @@ export class JsonConfigAccess implements ConfigAccess {
       const messaging = normalizeMessaging(raw.messaging);
       const sources = normalizeSources(raw.sources);
       const agents = normalizeAgents(raw.agents);
+      const inbox = normalizeInbox(raw.inbox);
       return {
         automation: normalizeAutomation(raw.automation),
         ...(sources ? { sources } : {}),
@@ -69,6 +70,7 @@ export class JsonConfigAccess implements ConfigAccess {
         ...(launch ? { launch } : {}),
         ...(messaging ? { messaging } : {}),
         ...(agents ? { agents } : {}),
+        ...(inbox ? { inbox } : {}),
       };
     } catch (error) {
       throw this.invalid(error);
@@ -388,6 +390,23 @@ function normalizeMessaging(
     messaging.loopCap = value.loopCap;
   }
   return messaging;
+}
+
+/** `inbox.priorityFilter`: an optional non-empty CEL string (compiled at use; a bad one is a no-op there). */
+function normalizeInbox(value: unknown): GlobalConfig["inbox"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("inbox must be an object");
+  const inbox: NonNullable<GlobalConfig["inbox"]> = {};
+  if (value.priorityFilter !== undefined) {
+    if (
+      typeof value.priorityFilter !== "string" ||
+      !value.priorityFilter.trim()
+    ) {
+      throw new Error("inbox.priorityFilter must be a non-empty string");
+    }
+    inbox.priorityFilter = value.priorityFilter.trim();
+  }
+  return inbox;
 }
 
 function normalizeAutomation(value: unknown): boolean {

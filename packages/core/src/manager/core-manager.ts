@@ -38,7 +38,9 @@ import type {
 import type {
   InboxAccess,
   InboxItem,
+  InboxPriorityInput,
   ListInboxOptions,
+  ReadyToLandEntry,
   ResolveInboxItemOptions,
   ResolveInboxItemResult,
 } from "../contracts/inbox.js";
@@ -121,6 +123,7 @@ import {
   shouldDeleteBranch,
 } from "../engines/cleanup.js";
 import { isConnectivityError } from "../engines/connectivity.js";
+import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
   buildReceiptText,
@@ -1951,6 +1954,10 @@ export class CoreManager implements CoreCommands {
       inbox: async (input, provenance) => {
         const item = await this.addInboxItem({
           kind: "rule",
+          ...(provenance.source ? { source: provenance.source } : {}),
+          ...(input.priority === false || String(input.priority) === "false"
+            ? { priority: false }
+            : {}),
           title: String(input.title),
           ...(input.body !== undefined ? { body: String(input.body) } : {}),
           buttons: (input.buttons ?? []).map((button, index) => ({
@@ -2956,6 +2963,18 @@ export class CoreManager implements CoreCommands {
     }
     const now = this.deps.clock.now();
     let taskId: string | undefined;
+    if (!button && options?.snoozeUntil) {
+      if (Number.isNaN(Date.parse(options.snoozeUntil))) {
+        throw new Error(`Not a time: ${options.snoozeUntil}`);
+      }
+      const until = new Date(options.snoozeUntil).toISOString();
+      const item = await inbox.update(itemId, (current) => ({
+        ...current,
+        snoozedUntil: until,
+      }));
+      this.deps.events.emit("inbox-changed", {});
+      return { item: item ?? existing };
+    }
     if (button?.action === "snooze") {
       const until =
         typeof button.with?.until === "string"
@@ -2988,6 +3007,25 @@ export class CoreManager implements CoreCommands {
     return { item: item ?? existing, ...(taskId ? { taskId } : {}) };
   }
 
+  async evaluateInboxPriority(items: InboxPriorityInput[]): Promise<boolean[]> {
+    const config = await this.deps.config.load();
+    return applyInboxPriorityFilter(items, config.inbox?.priorityFilter)
+      .priorities;
+  }
+
+  async listReadyToLand(): Promise<ReadyToLandEntry[]> {
+    if (!this.rules) return [];
+    const stayed = await this.rules.listStayedLandings();
+    const tasks = new Map(
+      (await this.deps.tasks.listTasks()).map((task) => [task.id, task]),
+    );
+    // Only while the task still sits where landing failed (not Done yet).
+    return stayed.filter((entry) => {
+      const task = tasks.get(entry.taskId);
+      return !!task && task.state !== "done";
+    });
+  }
+
   /** Append an inbox item (rules' `inbox` action). */
   private async addInboxItem(
     fields: Omit<InboxItem, "id" | "createdAt">,
@@ -3007,9 +3045,7 @@ export class CoreManager implements CoreCommands {
    * `repository`) makes a PR-bound task (`role: reviewer` checks out the
    * PR head and never pushes); otherwise a plain task in `repository`.
    */
-  private async createTaskFromAction(
-    input: CreateTaskActionInput,
-  ): Promise<Task> {
+  async createTaskFromAction(input: CreateTaskActionInput): Promise<Task> {
     if (typeof input.title !== "string" || !input.title.trim()) {
       throw new Error("createTask needs a title");
     }

@@ -141,6 +141,7 @@ export const RULES_SCHEMA = {
       properties: {
         title: { type: "string", minLength: 1 },
         body: { type: "string" },
+        priority: { anyOf: [{ type: "boolean" }, TEMPLATE] },
         buttons: {
           type: "array",
           items: {

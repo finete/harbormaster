@@ -4,6 +4,7 @@ export * from "./branch-adoption.js";
 export * from "./cleanup.js";
 export * from "./connectivity.js";
 export * from "./deployment.js";
+export * from "./inbox-priority.js";
 export * from "./launch-kickoff.js";
 export * from "./messaging.js";
 export * from "./pull-request-url.js";

@@ -204,6 +204,17 @@
         "body": {
           "type": "string"
         },
+        "priority": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{[\\s\\S]+\\}$"
+            }
+          ]
+        },
         "buttons": {
           "type": "array",
           "items": {

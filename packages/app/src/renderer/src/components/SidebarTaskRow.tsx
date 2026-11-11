@@ -211,6 +211,7 @@ function PrChip({ task }: { task: Task }): JSX.Element | null {
       type="button"
       data-testid="pr-chip"
       data-pr-url={url ?? ""}
+      data-role={pr.role ?? "author"}
       onClick={open}
       onPointerDown={stopPointerDown}
       onKeyDown={(event) => event.stopPropagation()}
@@ -222,7 +223,7 @@ function PrChip({ task }: { task: Task }): JSX.Element | null {
         PR_CHIP_CLASS[prBadgeVariant(pr)],
       )}
     >
-      #{pr.number}
+      {pr.role === "reviewer" ? `review #${pr.number}` : `#${pr.number}`}
     </button>
   );
 }

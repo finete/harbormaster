@@ -138,13 +138,9 @@ test.afterAll(async () => {
 });
 
 test("an approval-route message shows in the inbox; editing + approving delivers the edited text", async () => {
-  // The Inbox nav row is always there; its count badge only while something awaits approval.
-  await expect(
-    window.getByTestId("workspace-approval-inbox-button"),
-  ).toBeVisible();
-  await expect(
-    window.getByTestId("workspace-approval-inbox-button-count"),
-  ).toHaveCount(0);
+  // The Inbox nav row is always there; its count badge only while something needs you.
+  await expect(window.getByTestId("inbox-button")).toBeVisible();
+  await expect(window.getByTestId("inbox-button-count")).toHaveCount(0);
 
   const sent = await external.commands.sendTaskMessage({
     from: { kind: "task", taskId: senderId },
@@ -154,26 +150,24 @@ test("an approval-route message shows in the inbox; editing + approving delivers
   expect(sent.message.status).toBe("awaiting_approval");
 
   // Pushed by the state-dir watcher (the message was written by another core).
-  const workspaceBadge = window.getByTestId("workspace-approval-inbox-button");
-  await expect(workspaceBadge).toBeVisible({ timeout: 10_000 });
-  await expect(
-    window.getByTestId("workspace-approval-inbox-button-count"),
-  ).toHaveText("1");
+  await expect(window.getByTestId("inbox-button-count")).toHaveText("1", {
+    timeout: 10_000,
+  });
 
   // Same signal in the board view's header, plus the card chip.
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
-  await expect(
-    window.getByTestId("board-approval-inbox-button-count"),
-  ).toHaveText("1");
+  await expect(window.getByTestId("board-inbox-button-count")).toHaveText("1");
   await expect(
     window
       .getByTestId(`card-${targetId}`)
       .getByTestId("badge-approval-waiting"),
   ).toBeVisible();
 
-  // Open the inbox: the card names sender -> target and prefills the text.
-  await window.getByTestId("board-approval-inbox-button").click();
+  // Open the inbox: the approval is selected; its detail names sender ->
+  // target and prefills the text.
+  await window.getByTestId("board-inbox-button").click();
+  await expect(window.getByTestId("inbox-view")).toBeVisible();
   const card = window.getByTestId(`approval-card-${sent.message.id}`);
   await expect(card.getByTestId("approval-route")).toHaveText(
     "Sender Task → Target Task",
@@ -185,11 +179,9 @@ test("an approval-route message shows in the inbox; editing + approving delivers
   await card.getByTestId("approval-text").fill("please rebase onto develop");
   await card.getByTestId("approval-approve").click();
 
-  // The badge (and the sheet, with nothing left to review) go away.
-  await expect(window.getByTestId("board-approval-inbox-button")).toHaveCount(
-    0,
-  );
-  await expect(window.getByTestId("approval-inbox")).toHaveCount(0);
+  // The item and the badge go away; the chip on the card too.
+  await expect(window.getByTestId("inbox-empty")).toBeVisible();
+  await expect(window.getByTestId("inbox-button-count")).toHaveCount(0);
   await expect(
     window
       .getByTestId(`card-${targetId}`)

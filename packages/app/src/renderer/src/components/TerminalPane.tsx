@@ -13,6 +13,7 @@ import {
   isContainerVisible,
   type SearchHandle,
 } from "../lib/terminal-host";
+import { registerTaskTerminal } from "../lib/terminal-tail";
 import {
   createTitleThrottle,
   defaultTerminalTitle,
@@ -271,8 +272,16 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     });
     resizeObserver.observe(container);
 
+    // The inbox detail pane reads a task's last lines from its mounted pane
+    // (lib/terminal-tail.ts); main's headless mirror covers paneless tasks.
+    const unregisterTail =
+      isPrimary && params?.taskId
+        ? registerTaskTerminal(params.taskId, () => terminal.buffer.active)
+        : undefined;
+
     return () => {
       disposed = true;
+      unregisterTail?.();
       window.clearTimeout(createTimer);
       titleDisposable.dispose();
       titleThrottle.dispose();

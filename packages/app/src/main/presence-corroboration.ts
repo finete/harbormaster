@@ -59,11 +59,12 @@ export interface CorroboratedPresence {
    * as `ended`: forwarded only when the record itself is trusted, never
    * for a `"pane-only"` verdict.
    */
-  outcome?: { status: "done" | "blocked"; note?: string };
-  /** The live agent's last OSC 7501 status (state + message), under the same trust rule as `outcome`. */
+  outcome?: { status: "done" | "blocked"; note?: string; at?: string };
+  /** The live agent's last OSC 7501 status (state + message + report time), under the same trust rule as `outcome`. */
   status?: {
     state: NonNullable<PresenceRecord["status"]>["state"];
     message?: string;
+    at?: string;
   };
 }
 
@@ -73,6 +74,7 @@ function statusFrom(
   return {
     state: status.state,
     ...(status.message ? { message: status.message } : {}),
+    ...(status.at ? { at: status.at } : {}),
   };
 }
 
@@ -83,10 +85,12 @@ function endedFrom(ended: PresenceOutcome): PresenceOutcome {
 function outcomeFrom(outcome: NonNullable<PresenceRecord["outcome"]>): {
   status: "done" | "blocked";
   note?: string;
+  at?: string;
 } {
   return {
     status: outcome.status,
     ...(outcome.note ? { note: outcome.note } : {}),
+    ...(outcome.at ? { at: outcome.at } : {}),
   };
 }
 

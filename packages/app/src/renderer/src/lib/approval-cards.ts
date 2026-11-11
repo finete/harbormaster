@@ -1,5 +1,5 @@
 // Pure rules behind the approval inbox's cards (see
-// components/ApprovalInbox.tsx and /docs/task-messaging.md decision 8),
+// components/ApprovalDetail.tsx and /docs/task-messaging.md decision 8),
 // free of React so they are unit-testable without a DOM
 // (tests/approval-cards.test.ts).
 import type { MessageAttachment, MessageMode } from "../../../preload/api";
