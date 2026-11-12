@@ -375,3 +375,6 @@ with the full gate green and the acceptance checked.
   points `@harbormaster/*` at the worktree packages.
 - Done tasks from before "done is final" (no `task.cleanup`) keep the old
   unforced sweep and its toasts; only confirmed Dones from now on are silent.
+- e2e flakes seen once each in full runs, pass alone: `open-in.spec.ts`
+  (composer close "target closed"), `smoke.spec.ts` (firstWindow 30 s),
+  `terminal-keys.spec.ts` Cmd+K, `terminal-context-menu.spec.ts`.
