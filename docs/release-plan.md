@@ -373,3 +373,5 @@ with the full gate green and the acceptance checked.
   main checkout, `@harbormaster/core` resolves to main's build; to test core
   changes in the app, replace the symlink with a directory of symlinks that
   points `@harbormaster/*` at the worktree packages.
+- Done tasks from before "done is final" (no `task.cleanup`) keep the old
+  unforced sweep and its toasts; only confirmed Dones from now on are silent.
