@@ -3,9 +3,11 @@
 // `bg-background` with a hairline; the selected segment = `bg-muted` with a
 // hairline, `font-semibold text-foreground`; the others muted. A radiogroup
 // with roving arrow-key selection, our own component (shadcn has no
-// segmented control; it follows the ToggleGroup look).
+// segmented control; it follows the ToggleGroup look). Extra attributes
+// (`data-*`) land on the track; each segment carries `data-state` and
+// `data-selected`.
 
-import type { JSX, KeyboardEvent, ReactNode } from "react";
+import type { HTMLAttributes, JSX, KeyboardEvent, ReactNode } from "react";
 import { useRef } from "react";
 import { cn } from "../../lib/utils";
 
@@ -27,7 +29,11 @@ export function Segmented<T extends string>({
   className,
   ariaLabel,
   testId,
-}: {
+  ...props
+}: Omit<
+  HTMLAttributes<HTMLDivElement>,
+  "role" | "onKeyDown" | "defaultValue" | "onChange"
+> & {
   value: T;
   onValueChange: (value: T) => void;
   options: readonly SegmentedOption<T>[];
@@ -53,6 +59,7 @@ export function Segmented<T extends string>({
 
   return (
     <div
+      {...props}
       role="radiogroup"
       aria-label={ariaLabel}
       data-testid={testId}
@@ -75,6 +82,7 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={selected}
             data-state={selected ? "on" : "off"}
+            data-selected={selected ? "true" : "false"}
             data-testid={option.testId}
             title={option.title}
             disabled={option.disabled}

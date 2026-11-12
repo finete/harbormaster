@@ -12,6 +12,8 @@ import { useEffect, useState } from "react";
 import type { PullRequestPreview, PullRequestRole } from "../../../preload/api";
 import type { PrLookup } from "../lib/new-task-draft";
 import { cn } from "../lib/utils";
+import { Input } from "./ui/input";
+import { Segmented } from "./ui/segmented";
 
 /** Pause after the last keystroke before asking GitHub. */
 const LOOKUP_DEBOUNCE_MS = 250;
@@ -112,7 +114,7 @@ export function PullRequestField({
 }): JSX.Element {
   const resolved = lookup?.status === "resolved" ? lookup.pr : null;
   return (
-    <div className="flex flex-col gap-1.5 px-1" data-testid="new-task-pr">
+    <div className="flex flex-col gap-1.5" data-testid="new-task-pr">
       {resolved ? (
         <div
           data-testid="new-task-pr-card"
@@ -131,33 +133,22 @@ export function PullRequestField({
             {pullRequestSummary(resolved)}
           </span>
           {mode === "review" ? (
-            <fieldset
-              className="m-0 flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
-              aria-label="Role"
-              data-testid="new-task-pr-role"
+            <Segmented
+              ariaLabel="Role"
+              testId="new-task-pr-role"
               data-role={role}
-            >
-              {(["author", "reviewer"] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  aria-pressed={role === option}
-                  data-testid={`new-task-pr-role-${option}`}
-                  title={`${ROLE_HINTS[option]}${
-                    role === option && !roleOverridden ? " (from the PR)" : ""
-                  }`}
-                  onClick={() => onChange({ prRole: option })}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] transition-colors",
-                    role === option
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/50",
-                  )}
-                >
-                  {option === "author" ? "Author" : "Reviewer"}
-                </button>
-              ))}
-            </fieldset>
+              size="sm"
+              value={role}
+              onValueChange={(next) => onChange({ prRole: next })}
+              options={(["author", "reviewer"] as const).map((option) => ({
+                value: option,
+                label: option === "author" ? "Author" : "Reviewer",
+                title: `${ROLE_HINTS[option]}${
+                  role === option && !roleOverridden ? " (from the PR)" : ""
+                }`,
+                testId: `new-task-pr-role-${option}`,
+              }))}
+            />
           ) : (
             <span
               className="shrink-0 text-[11px] text-muted-foreground"
@@ -184,9 +175,8 @@ export function PullRequestField({
               className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground"
               aria-hidden
             />
-            <input
+            <Input
               ref={inputRef}
-              // biome-ignore lint/a11y/noAutofocus: Review mode's first control
               autoFocus={autoFocus}
               data-testid="new-task-pr-url-input"
               aria-label="Pull request URL"
@@ -199,7 +189,7 @@ export function PullRequestField({
                   : "Pull request URL: continue your own PR"
               }
               className={cn(
-                "h-8 w-full rounded-lg border border-border bg-transparent pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "pl-8 pr-8 text-[13px]",
                 lookup?.status === "error" && "border-status-error/60",
               )}
             />

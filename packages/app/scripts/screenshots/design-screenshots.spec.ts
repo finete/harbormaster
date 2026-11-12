@@ -250,6 +250,68 @@ test("workspace, board, inbox", async () => {
   await window.screenshot({ path: path.join(OUT, "inbox.png") });
 });
 
+test("new-task composer at 1200px and 800px", async () => {
+  test.setTimeout(120_000);
+  const stateDir = path.join(root, "state-composer");
+  const codeRoot = path.join(root, "Code-composer");
+  mkdirSync(stateDir, { recursive: true });
+  seedRepository(codeRoot, "arnac");
+  writeFileSync(
+    path.join(stateDir, "config.json"),
+    JSON.stringify({ automation: false, codeRoot, branchPrefix: "moshe/" }),
+  );
+  const fakeGh = writeFakeGh();
+  const window = await launch({
+    HARBORMASTER_STATE_DIR: stateDir,
+    HARBORMASTER_USER_DATA_DIR: path.join(root, "profile-composer"),
+    HARBORMASTER_PI_COMMAND: writeShellPi(root),
+    HARBORMASTER_GH_COMMAND: fakeGh,
+  });
+  await window.getByTestId("sidebar").waitFor();
+  await window.keyboard.press(`${MOD}+n`);
+  const composer = window.getByTestId("new-task-composer");
+  await expect(composer).toBeVisible();
+  await window.getByTestId("new-task-where").click();
+  await window
+    .locator(
+      `[data-testid="new-task-where-option"][data-where="repo:${REPO_ID}"]`,
+    )
+    .first()
+    .click();
+  await expect(window.getByTestId("new-task-base")).toBeVisible();
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("Show the Jito tip in the mined swap fee breakdown");
+  for (const width of [1200, 800]) {
+    await window.setViewportSize({ width, height: 800 });
+    await window.screenshot({
+      path: path.join(OUT, `composer-task-${width}.png`),
+    });
+  }
+  await window.setViewportSize({ width: 1200, height: 800 });
+  await window.getByTestId("new-task-options").click();
+  await expect(window.getByTestId("new-task-options-menu")).toBeVisible();
+  await window.screenshot({ path: path.join(OUT, "composer-options.png") });
+  await window.keyboard.press("Escape");
+  await window.getByTestId("new-task-attach-pr").click();
+  await expect(window.getByTestId("new-task-pr-url-input")).toBeVisible();
+  await window.screenshot({ path: path.join(OUT, "composer-attach-pr.png") });
+  await window.getByTestId("new-task-mode-review").click();
+  await window
+    .getByTestId("new-task-pr-url-input")
+    .fill("https://github.com/acme/arnac/pull/26873");
+  await window
+    .getByTestId("new-task-pr-card")
+    .waitFor({ timeout: 10_000 })
+    .catch(() => {});
+  for (const width of [1200, 800]) {
+    await window.setViewportSize({ width, height: 800 });
+    await window.screenshot({
+      path: path.join(OUT, `composer-review-${width}.png`),
+    });
+  }
+});
+
 test("wizard agent step", async () => {
   const home = path.join(root, "home");
   const stateDir = path.join(root, "state-wizard");
