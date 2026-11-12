@@ -12,21 +12,56 @@ It is local-first and has no telemetry.
 
 ## Install
 
-Apple Silicon Macs, via Homebrew:
+Requirements: an Apple Silicon Mac, [Homebrew](https://brew.sh), and at least
+one coding agent installed: [Pi](https://pi.dev) or
+[Claude Code](https://code.claude.com/docs/en/setup).
 
 ```sh
 brew tap finete/tap
-brew trust finete/tap        # recent Homebrew refuses third-party taps until trusted once
+brew trust finete/tap        # Homebrew asks this once for third-party taps
 brew install --cask harbormaster
 ```
 
-This installs `Harbormaster.app` and the `harbormaster` command-line tool.
-Upgrade with `brew upgrade --cask harbormaster`; the app shows a banner with
-that command when a new release is out. Builds are not notarized (the cask
-clears the quarantine flag for you).
+This puts `Harbormaster.app` in `/Applications` and the `harbormaster`
+command on your PATH (agents use it to reach the app). Open the app; a
+four-screen setup walks you through:
 
-GitHub integration uses the [`gh`](https://cli.github.com) CLI; run
-`gh auth login` once if you want PR-driven card moves and review tasks.
+1. **Your code folder** (default `~/Code`). Every git repository directly
+   under it is picked up. Keep code out of `~/Documents`, `~/Desktop` and
+   `~/Downloads` (see "Known limitations").
+2. **Your agent**: Pi or Claude Code, whichever is installed. Pi users get a
+   one-file extension installed into `~/.pi/agent/extensions` automatically;
+   Claude Code needs nothing global.
+3. **GitHub**: if `gh auth status` is logged in, card moves for your PRs and
+   review tasks for other people's PRs are switched on. Otherwise run
+   `gh auth login` and re-run the setup from the Harbormaster menu
+   (Welcome / Setup…).
+4. **How it works**: the four concepts below, one screen.
+
+### Upgrade
+
+```sh
+brew upgrade --cask harbormaster
+```
+
+The app shows a banner with that command when a new release is out.
+
+### Uninstall
+
+```sh
+brew uninstall --cask harbormaster
+```
+
+Your tasks, rules and inbox stay in `~/.harbormaster`; delete that folder
+too for a clean slate. Task worktrees live under
+`<code folder>/.harbormaster-worktrees`.
+
+### If the app won't open
+
+The build is not signed by Apple. Homebrew clears the quarantine flag during
+install, so it should open normally. If macOS still says the app is from an
+unidentified developer, right-click `Harbormaster.app` → Open once, or run
+`xattr -dr com.apple.quarantine /Applications/Harbormaster.app`.
 
 ## Concepts
 
