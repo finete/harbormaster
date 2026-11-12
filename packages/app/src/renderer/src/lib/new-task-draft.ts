@@ -7,7 +7,7 @@
 import type {
   CreateTaskInput,
   LaunchTaskInput,
-  PullRequestReference,
+  PullRequestPreview,
   PullRequestRole,
   Task,
   ThinkingLevel,
@@ -66,12 +66,29 @@ export function parseWhere(token: WhereToken): ParsedWhere {
 }
 
 /**
- * The composer's Task / Chat switch: `task` gets its own branch + worktree
- * (for a repository); `chat` never creates a worktree. A chat with a
- * repository runs in that repository's checkout, for questions with the
- * repo as context.
+ * The composer's Task / Review / Chat switch: `task` gets its own branch +
+ * worktree (for a repository); `review` binds the task to a pull request
+ * (pasted URL) and checks out its head; `chat` never creates a worktree. A
+ * chat with a repository runs in that repository's checkout, for questions
+ * with the repo as context.
  */
-export type DraftMode = "task" | "chat";
+export type DraftMode = "task" | "review" | "chat";
+
+const MODES: readonly DraftMode[] = ["task", "review", "chat"];
+
+function modeField(value: unknown): DraftMode {
+  return MODES.includes(value as DraftMode) ? (value as DraftMode) : "task";
+}
+
+/**
+ * The composer's lookup of `draft.prUrl` (`previewPullRequest`): still
+ * resolving, failed (bad URL, unknown repository, GitHub unreachable), or
+ * the PR's card facts. `null` = no URL to look up.
+ */
+export type PrLookup =
+  | { status: "resolving" }
+  | { status: "error"; message: string }
+  | { status: "resolved"; pr: PullRequestPreview };
 
 /** What the split submit button does (see /docs/new-task-composer.md "Submit"). */
 export type SubmitAction = "start" | "background" | "park";
@@ -105,10 +122,15 @@ export interface NewTaskDraft {
   bypassPermissions: boolean | null;
   /**
    * A pull request to work on (`https://github.com/org/repo/pull/12`): the
-   * task binds to it and checks out its head branch. "" = none.
+   * task binds to it and checks out its head branch. Used in Review mode,
+   * and in Task mode once "Attach a PR…" is used. "" = none.
    */
   prUrl: string;
-  /** Whose PR it is; "" = from GitHub (the viewer authored it → author). A reviewer task never pushes or opens a PR. */
+  /**
+   * Review mode's `Author | Reviewer` override; "" = from GitHub (the viewer
+   * authored it → author, else reviewer). Task mode is always author. A
+   * reviewer task never pushes or opens a PR.
+   */
   prRole: PullRequestRole | "";
 }
 
@@ -244,6 +266,52 @@ export function isDraftEmpty(draft: NewTaskDraft): boolean {
   );
 }
 
+/**
+ * Whether a submit binds the task to `draft.prUrl`: always in Review mode
+ * (the URL is required), in Task mode only once a URL was attached, never
+ * in Chat mode.
+ */
+export function usesPullRequest(
+  draft: Pick<NewTaskDraft, "mode" | "prUrl">,
+): boolean {
+  return (
+    draft.mode === "review" ||
+    (draft.mode === "task" && draft.prUrl.trim() !== "")
+  );
+}
+
+/**
+ * The role a PR-bound submit sends: Review mode's explicit pick, else from
+ * the PR (`viewerIsAuthor` → author, anything else → reviewer); Task mode's
+ * "Attach a PR…" is always the author continuing their own PR.
+ */
+export function effectivePrRole(
+  draft: Pick<NewTaskDraft, "mode" | "prRole">,
+  pr: Pick<PullRequestPreview, "viewerIsAuthor"> | null | undefined,
+): PullRequestRole {
+  if (draft.mode !== "review") return "author";
+  if (draft.prRole) return draft.prRole;
+  return pr?.viewerIsAuthor ? "author" : "reviewer";
+}
+
+/**
+ * The title a submit uses: the typed one, else (Review mode) the PR's own
+ * title (`Review: <title>` for a reviewer; the prompt there is review
+ * focus, not a name), else the prompt's first line, else (an attached PR)
+ * the PR's title.
+ */
+export function submitTitle(
+  draft: NewTaskDraft,
+  pr?: PullRequestPreview | null,
+): string {
+  if (!pr || !usesPullRequest(draft)) return effectiveTitle(draft);
+  const name = pr.title ?? `#${pr.number}`;
+  const prTitle =
+    effectivePrRole(draft, pr) === "reviewer" ? `Review: ${name}` : name;
+  if (draft.mode === "review") return draft.title.trim() || prTitle;
+  return effectiveTitle(draft) || prTitle;
+}
+
 /** The default submit action: a draft with a parent runs in the background, anything else starts and opens. */
 export function defaultAction(
   draft: Pick<NewTaskDraft, "parentTaskId">,
@@ -283,25 +351,26 @@ export function effectiveBaseRef(
 
 /**
  * Why the draft can't be submitted with `action` yet, or `null` when it can.
- * `pr` is core's parse of `draft.prUrl` (`parsePullRequestUrl`): `null` =
- * not a PR URL, `undefined` = not parsed yet. A PR brings its own
- * repository, so Where is not needed then.
+ * `pr` is the composer's lookup of `draft.prUrl` (see `PrLookup`). A PR
+ * brings its own repository, base and branch, so Where is not needed then,
+ * and its title stands in for an empty one.
  */
 export function submitBlocker(
   draft: NewTaskDraft,
   action: SubmitAction,
-  pr?: PullRequestReference | null,
+  pr: PrLookup | null = null,
 ): string | null {
-  if (!effectiveTitle(draft)) return "Add a title or a prompt";
-  if (draft.prUrl.trim()) {
-    if (pr === undefined) return "Checking the pull request URL";
-    if (pr === null) return "Enter a pull request URL (…/org/repo/pull/12)";
-    if (draft.mode === "chat") return "Switch to Task to work on a PR";
+  if (usesPullRequest(draft)) {
+    if (!draft.prUrl.trim()) return "Paste a pull request URL";
+    if (!pr || pr.status === "resolving") return "Checking the pull request";
+    if (pr.status === "error") return "Fix the pull request URL";
+    if (!submitTitle(draft, pr.pr)) return "Add a title or a prompt";
     if (action === "background") {
       return "A PR task starts or parks (no background run)";
     }
     return null;
   }
+  if (!effectiveTitle(draft)) return "Add a title or a prompt";
   const where = parseWhere(draft.where);
   if (where.kind === "unset") return "Choose where it runs";
   if (where.kind === "clone" && !draft.cloneUrl.trim()) {
@@ -327,11 +396,13 @@ export function planSubmit(
   draft: NewTaskDraft,
   action: SubmitAction,
   parent: Pick<Task, "id" | "repositoryId" | "branch"> | null,
-  pr: PullRequestReference | null = null,
+  pr: PullRequestPreview | null = null,
 ): SubmitPlan {
-  // A PR task: bound to the PR in its own repository, on its head branch
+  // A PR task (Review mode, or Task mode's "Attach a PR…"): the same
+  // `createTask` + `pullRequest` + `role` the inbox's "Create review task"
+  // ends in. Bound to the PR in its own repository, on its head branch
   // (core checks it out); a reviewer never pushes or opens a PR.
-  if (pr && draft.prUrl.trim() && action !== "background") {
+  if (pr && usesPullRequest(draft) && action !== "background") {
     const prompt = draft.prompt.trim();
     const attachments = draft.attachments.filter((path) =>
       draft.prompt.includes(path),
@@ -339,11 +410,11 @@ export function planSubmit(
     return {
       command: "createTask",
       input: {
-        title: effectiveTitle(draft),
+        title: submitTitle(draft, pr),
         initialPrompt: prompt ? draft.prompt : "",
         repositoryId: pr.repositoryId,
         pullRequest: pr.number,
-        ...(draft.prRole ? { role: draft.prRole } : {}),
+        role: effectivePrRole(draft, pr),
         ...(parent ? { parentTaskId: parent.id } : {}),
         ...(action === "start" ? { start: true } : {}),
         ...(draft.harness ? { harness: draft.harness } : {}),
@@ -500,7 +571,7 @@ export function parseDraft(raw: string | null): NewTaskDraft | null {
   return {
     title: stringField(v, "title"),
     prompt: stringField(v, "prompt"),
-    mode: v.mode === "chat" ? "chat" : "task",
+    mode: modeField(v.mode),
     where,
     cloneUrl: stringField(v, "cloneUrl"),
     parentTaskId: id("parentTaskId"),
@@ -549,7 +620,7 @@ export function readPrefs(storage: StorageLike): NewTaskPrefs {
   }
   if (!v) return emptyPrefs();
   return {
-    mode: v.mode === "chat" ? "chat" : "task",
+    mode: modeField(v.mode),
     where: stringField(v, "where"),
     harness: stringField(v, "harness"),
     model: stringField(v, "model"),

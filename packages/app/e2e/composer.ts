@@ -1,7 +1,8 @@
 // Shared e2e helpers for the new-task composer (see
-// /docs/new-task-composer.md): the Where picker replaced the old repository
-// <select> + Task / Chat toggle, and Park in backlog moved into the split
-// submit button's menu.
+// /docs/new-task-composer.md): the Repository chip (Where picker) sits in
+// the "Where / How" row under the prompt box, Park in backlog in the split
+// submit button's menu, and Parent + the permission switch behind the
+// Options chip.
 import { expect, type Page } from "@playwright/test";
 
 /**
@@ -64,4 +65,22 @@ export async function submitAs(
         : `new-task-submit-${action}`,
     )
     .click();
+}
+
+/** Open the Options chip's popover (permission prompts, parent task). */
+export async function openOptions(page: Page): Promise<void> {
+  await page.getByTestId("new-task-options").click();
+  await expect(page.getByTestId("new-task-options-menu")).toBeVisible();
+}
+
+/** Make the draft a subtask: Options → Parent task → the first task matching `title` (else the first offered). */
+export async function chooseParent(page: Page, title?: string): Promise<void> {
+  await openOptions(page);
+  await page.getByTestId("new-task-parent-add").click();
+  const options = page
+    .getByTestId("new-task-parent-menu")
+    .getByTestId("new-task-parent-option");
+  await (title ? options.filter({ hasText: title }) : options).first().click();
+  await expect(page.getByTestId("new-task-options-menu")).toHaveCount(0);
+  await expect(page.getByTestId("new-task-parent")).toBeVisible();
 }

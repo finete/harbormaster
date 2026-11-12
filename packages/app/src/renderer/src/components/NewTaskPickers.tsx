@@ -1,13 +1,14 @@
-// The new-task composer's toolbar pickers (see /docs/new-task-composer.md):
-// Where (Popover + Command, shadcn's Combobox pattern), Agent · Model
-// (Dropdown Menu, after the AI Elements Model Selector), Parent and base
-// branch (Popover + Command), and the split submit button. Each picker is
-// controlled (`open`/`onOpenChange`) so the composer can open it from a
-// keyboard shortcut and hand focus back to the prompt when it closes.
+// The new-task composer's pickers (see /docs/new-task-composer.md): the
+// "Where / How" row of labelled chips under the prompt box (Repository
+// (Popover + Command, shadcn's Combobox pattern), Base, Agent, Model,
+// Thinking (Dropdown Menus, after the AI Elements Model Selector) and
+// Options (permission switch + Parent picker)), the Task / Review / Chat
+// switch, and the split submit button. Each picker is controlled
+// (`open`/`onOpenChange`) where the composer opens it from a keyboard
+// shortcut and hands focus back to the prompt when it closes.
 
 import {
   Ban,
-  Bot,
   Check,
   ChevronDown,
   CornerDownRight,
@@ -15,12 +16,13 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   Link2,
   MessageSquare,
-  Plus,
-  ShieldOff,
+  X,
 } from "lucide-react";
-import type { JSX, ReactNode } from "react";
+import type { ComponentPropsWithoutRef, JSX, ReactNode } from "react";
+import { forwardRef } from "react";
 import type {
   HarnessModelCatalog,
   KnownLocation,
@@ -59,12 +61,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { InputGroupButton } from "./ui/input-group";
 import { Kbd } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
@@ -81,6 +79,88 @@ function Check4({ on }: { on: boolean }): JSX.Element {
     />
   );
 }
+
+// --- Detail chips ----------------------------------------------------------
+
+/**
+ * One labelled chip of the "Where / How" row: a muted label and the full
+ * value (`data-chip-value`), never ellipsized. The row wraps instead; only a
+ * value wider than the whole row is clipped, with the tooltip as the last
+ * resort. Read-only chips (values derived from a PR) render as a span.
+ */
+export const DetailChip = forwardRef<
+  HTMLButtonElement,
+  ComponentPropsWithoutRef<"button"> & {
+    label: string;
+    value: ReactNode;
+    /** Plain-text value for the tooltip. */
+    valueText: string;
+    readOnly?: boolean;
+    attention?: boolean;
+    valueTestId?: string;
+  }
+>(function DetailChip(
+  {
+    label,
+    value,
+    valueText,
+    readOnly,
+    attention,
+    valueTestId,
+    className,
+    title,
+    ...props
+  },
+  ref,
+) {
+  const classes = cn(
+    "inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-lg border border-border/70 px-2 text-xs transition-colors",
+    readOnly
+      ? "bg-muted/30 text-muted-foreground"
+      : "bg-transparent text-foreground hover:bg-accent/60 data-[state=open]:bg-accent/60",
+    className,
+  );
+  const body = (
+    <>
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span
+        data-chip-value=""
+        data-testid={valueTestId}
+        className={cn(
+          "shrink-0 whitespace-nowrap",
+          attention && "text-amber-300/90",
+        )}
+      >
+        {value}
+      </span>
+    </>
+  );
+  if (readOnly) {
+    const { onClick: _onClick, type: _type, ...rest } = props;
+    return (
+      <span
+        {...(rest as ComponentPropsWithoutRef<"span">)}
+        data-readonly="true"
+        title={title ?? `${label}: ${valueText} (from the pull request)`}
+        className={classes}
+      >
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      ref={ref}
+      type="button"
+      title={title ?? `${label}: ${valueText}`}
+      className={classes}
+      {...props}
+    >
+      {body}
+      <ChevronDown className="size-3 shrink-0 opacity-50" />
+    </button>
+  );
+});
 
 // --- Where -----------------------------------------------------------------
 
@@ -143,12 +223,13 @@ export function whereLabel(
   }
 }
 
-function whereIcon(token: WhereToken): JSX.Element {
+/** The Where chip's label: what kind of place the value names. */
+export function whereChipLabel(token: WhereToken): string {
   const where = parseWhere(token);
-  if (where.kind === "none") return <Ban />;
-  if (where.kind === "clone") return <Link2 />;
-  if (where.kind === "folder") return <Folder />;
-  return <FolderGit2 />;
+  if (where.kind === "folder") return "Folder";
+  if (where.kind === "none") return "Where";
+  if (where.kind === "clone") return "Clone";
+  return "Repository";
 }
 
 export function WherePicker({
@@ -194,22 +275,22 @@ export function WherePicker({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <InputGroupButton
+        <DetailChip
           data-testid="new-task-where"
           data-where={value}
           aria-label="Where"
+          label={whereChipLabel(value)}
+          value={whereLabel(value, options)}
+          valueText={whereLabel(value, options)}
+          attention={!value}
           title={`Where it runs (${modKeyLabel()}P)`}
-          className={cn(
-            "min-w-0 max-w-[200px] shrink text-muted-foreground hover:text-foreground",
-            !value && "text-amber-300/90",
-          )}
-        >
-          {whereIcon(value)}
-          <span className="truncate">{whereLabel(value, options)}</span>
-          <ChevronDown className="opacity-60" />
-        </InputGroupButton>
+        />
       </PopoverTrigger>
-      <PopoverContent className="w-80" data-testid="new-task-where-menu">
+      <PopoverContent
+        align="start"
+        className="w-80"
+        data-testid="new-task-where-menu"
+      >
         <Command>
           <CommandInput placeholder="Search repositories and folders…" />
           <CommandList>
@@ -268,12 +349,26 @@ export function WherePicker({
   );
 }
 
-// --- Task / Chat ---------------------------------------------------------
+// --- Task / Review / Chat ------------------------------------------------
 
 const MODE_HINTS: Record<DraftMode, string> = {
   task: "Task: its own branch + worktree, tracked on the board through review and merge",
+  review:
+    "Review: paste a pull request; the task checks out its head branch (a reviewer never pushes or opens a PR)",
   chat: "Chat: no branch or worktree. With a repository, the agent runs in its checkout, so you can ask questions with the code as context",
 };
+
+const MODE_LABELS: Record<DraftMode, string> = {
+  task: "Task",
+  review: "Review",
+  chat: "Chat",
+};
+
+function ModeIcon({ mode }: { mode: DraftMode }): JSX.Element {
+  if (mode === "review") return <GitPullRequest className="size-3.5" />;
+  if (mode === "chat") return <MessageSquare className="size-3.5" />;
+  return <GitBranch className="size-3.5" />;
+}
 
 export function ModeSwitch({
   value,
@@ -285,12 +380,12 @@ export function ModeSwitch({
   return (
     <div
       role="radiogroup"
-      aria-label="Task or chat"
+      aria-label="Task, review or chat"
       data-testid="new-task-mode"
-      className="mr-1 flex h-7 shrink-0 items-center rounded-lg bg-muted/60 p-0.5"
+      className="flex h-7 shrink-0 items-center rounded-lg bg-muted/60 p-0.5"
     >
-      {(["task", "chat"] as const).map((mode) => (
-        // biome-ignore lint/a11y/useSemanticElements: a two-option segmented control
+      {(["task", "review", "chat"] as const).map((mode) => (
+        // biome-ignore lint/a11y/useSemanticElements: a three-option segmented control
         <button
           key={mode}
           type="button"
@@ -307,12 +402,8 @@ export function ModeSwitch({
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {mode === "task" ? (
-            <GitBranch className="size-3.5" />
-          ) : (
-            <MessageSquare className="size-3.5" />
-          )}
-          {mode === "task" ? "Task" : "Chat"}
+          <ModeIcon mode={mode} />
+          {MODE_LABELS[mode]}
         </button>
       ))}
     </div>
@@ -346,19 +437,32 @@ export function modelName(id: string): string {
   return id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
 }
 
-/** The chip label: agent, effective model, and thinking only when it differs from the default. */
-export function agentModelLabel(
+/** The Model chip's value: the effective model's name, else "Default". */
+export function modelChipValue(
   catalog: HarnessModelCatalog | undefined,
   model: string,
+): string {
+  const effective = model || catalog?.defaultModel;
+  return effective ? modelName(effective) : "Default";
+}
+
+/** The Thinking chip's value: the pick, else the agent's default level, else "Default". */
+export function thinkingChipValue(
+  catalog: HarnessModelCatalog | undefined,
   thinking: ThinkingLevel | "",
 ): string {
-  const parts = [catalog?.label ?? "Pi"];
+  const effective = thinking || catalog?.defaultThinking;
+  return effective ? THINKING_LABELS[effective] : "Default";
+}
+
+/** Whether the effective model takes a thinking level (unknown model: offer it). */
+export function supportsThinking(
+  catalog: HarnessModelCatalog | undefined,
+  model: string,
+): boolean {
   const effective = model || catalog?.defaultModel;
-  if (effective) parts.push(modelName(effective));
-  if (thinking && thinking !== catalog?.defaultThinking) {
-    parts.push(THINKING_LABELS[thinking].toLowerCase());
-  }
-  return parts.join(" · ");
+  const entry = catalog?.models.find((item) => item.id === effective);
+  return entry ? entry.thinking : true;
 }
 
 /**
@@ -386,17 +490,15 @@ export function AgentPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <InputGroupButton
+        <DetailChip
           data-testid="new-task-agent"
           data-harness={effective}
           aria-label="Agent"
+          label="Agent"
+          value={labelOf(effective)}
+          valueText={labelOf(effective)}
           title="Agent: which coding agent runs this task"
-          className="min-w-0 max-w-[160px] shrink text-muted-foreground hover:text-foreground"
-        >
-          <Bot />
-          <span className="truncate">{labelOf(effective)}</span>
-          <ChevronDown className="opacity-60" />
-        </InputGroupButton>
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -431,48 +533,10 @@ export function AgentPicker({
   );
 }
 
-/**
- * The launch permission switch (decision R7): whether a background run
- * skips the agent's permission prompts. Interactive starts never do; the
- * default comes from the repository / app setting.
- */
-export function BypassPermissionsSwitch({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (next: boolean) => void;
-}): JSX.Element {
-  return (
-    <InputGroupButton
-      data-testid="new-task-bypass"
-      data-bypass={value ? "true" : "false"}
-      aria-pressed={value}
-      aria-label="Skip permission prompts in background runs"
-      title={
-        value
-          ? "Background runs skip the agent's permission prompts (click to keep them). Start & open always uses your own settings."
-          : "Background runs keep the agent's permission prompts (click to skip them)."
-      }
-      onClick={() => onChange(!value)}
-      className={cn(
-        "shrink-0",
-        value
-          ? "text-amber-300/90 hover:text-amber-200"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <ShieldOff />
-      <span>{value ? "Bypass" : "Ask"}</span>
-    </InputGroupButton>
-  );
-}
-
 export function AgentModelPicker({
   catalogs,
   harness,
   model,
-  thinking,
   loadError,
   open,
   onOpenChange,
@@ -483,41 +547,27 @@ export function AgentModelPicker({
   catalogs: readonly HarnessModelCatalog[];
   harness: string;
   model: string;
-  thinking: ThinkingLevel | "";
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onChange: (patch: {
-    harness?: string;
-    model?: string;
-    thinking?: ThinkingLevel | "";
-  }) => void;
+  onChange: (patch: { harness?: string; model?: string }) => void;
 }): JSX.Element {
   const catalog =
     catalogs.find((entry) => entry.harness === harness) ?? catalogs[0];
   // The agent is chosen in its own dropdown; this one lists its models.
   const shown = catalog ? [catalog] : [];
-  const effective = model || catalog?.defaultModel;
-  const effectiveModel = catalog?.models.find(
-    (entry) => entry.id === effective,
-  );
-  // Unknown model (no catalog yet / CLI missing): still offer thinking.
-  const supportsThinking = effectiveModel ? effectiveModel.thinking : true;
   const value = `${catalog?.harness ?? harness}\u0000${model}`;
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <InputGroupButton
+        <DetailChip
           data-testid="new-task-model"
-          aria-label="Agent and model"
-          title={`Agent and model (${modKeyLabel()}\u21E7M)`}
-          className="min-w-0 max-w-[240px] shrink text-muted-foreground hover:text-foreground"
-        >
-          <Bot />
-          <span className="truncate">
-            {agentModelLabel(catalog, model, thinking)}
-          </span>
-          <ChevronDown className="opacity-60" />
-        </InputGroupButton>
+          data-model={model}
+          aria-label="Model"
+          label="Model"
+          value={modelChipValue(catalog, model)}
+          valueText={modelChipValue(catalog, model)}
+          title={`Model (${modKeyLabel()}\u21E7M)`}
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -594,71 +644,82 @@ export function AgentModelPicker({
             );
           })}
         </DropdownMenuRadioGroup>
-        {supportsThinking && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger data-testid="new-task-thinking">
-                Thinking
-                <span className="ml-auto text-muted-foreground">
-                  {thinking
-                    ? THINKING_LABELS[thinking]
-                    : `Default${catalog?.defaultThinking ? ` (${THINKING_LABELS[catalog.defaultThinking]})` : ""}`}
-                </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-44">
-                <DropdownMenuRadioGroup
-                  value={thinking}
-                  onValueChange={(next) =>
-                    onChange({ thinking: next as ThinkingLevel | "" })
-                  }
-                >
-                  <DropdownMenuRadioItem
-                    value=""
-                    data-testid="new-task-thinking-option"
-                    data-thinking=""
-                  >
-                    Default
-                    {catalog?.defaultThinking && (
-                      <span className="text-muted-foreground">
-                        {THINKING_LABELS[catalog.defaultThinking]}
-                      </span>
-                    )}
-                  </DropdownMenuRadioItem>
-                  {THINKING_ORDER.map((level) => (
-                    <DropdownMenuRadioItem
-                      key={level}
-                      value={level}
-                      data-testid="new-task-thinking-option"
-                      data-thinking={level}
-                    >
-                      {THINKING_LABELS[level]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-// --- Parent ----------------------------------------------------------------
+/** The Thinking chip: the effective model's reasoning level (only shown when it takes one). */
+export function ThinkingPicker({
+  catalog,
+  thinking,
+  onChange,
+}: {
+  catalog: HarnessModelCatalog | undefined;
+  thinking: ThinkingLevel | "";
+  onChange: (thinking: ThinkingLevel | "") => void;
+}): JSX.Element {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <DetailChip
+          data-testid="new-task-thinking"
+          data-thinking={thinking}
+          aria-label="Thinking"
+          label="Thinking"
+          value={thinkingChipValue(catalog, thinking)}
+          valueText={thinkingChipValue(catalog, thinking)}
+          title="Thinking: how hard the model reasons"
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-44"
+        data-testid="new-task-thinking-menu"
+      >
+        <DropdownMenuRadioGroup
+          value={thinking}
+          onValueChange={(next) => onChange(next as ThinkingLevel | "")}
+        >
+          <DropdownMenuRadioItem
+            value=""
+            data-testid="new-task-thinking-option"
+            data-thinking=""
+          >
+            Default
+            {catalog?.defaultThinking && (
+              <span className="text-muted-foreground">
+                {THINKING_LABELS[catalog.defaultThinking]}
+              </span>
+            )}
+          </DropdownMenuRadioItem>
+          {THINKING_ORDER.map((level) => (
+            <DropdownMenuRadioItem
+              key={level}
+              value={level}
+              data-testid="new-task-thinking-option"
+              data-thinking={level}
+            >
+              {THINKING_LABELS[level]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-export function ParentPicker({
+// --- Options (permission prompts, parent) ---------------------------------
+
+/** The Parent picker's searchable task list (inside the Options popover). */
+function ParentCommand({
   tasks,
   suggested,
-  open,
-  onOpenChange,
   onSelect,
 }: {
   /** Candidate parents: active tasks that are not themselves children. */
   tasks: readonly Task[];
   suggested: Task | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   onSelect: (taskId: string) => void;
 }): JSX.Element {
   const rest = tasks.filter((task) => task.id !== suggested?.id);
@@ -680,31 +741,189 @@ export function ParentPicker({
     </CommandItem>
   );
   return (
+    <Command data-testid="new-task-parent-menu">
+      <CommandInput autoFocus placeholder="Search tasks…" />
+      <CommandList>
+        <CommandEmpty>No task found.</CommandEmpty>
+        {suggested && (
+          <CommandGroup heading="Suggested">{item(suggested)}</CommandGroup>
+        )}
+        {rest.length > 0 && (
+          <CommandGroup heading="Tasks">{rest.map(item)}</CommandGroup>
+        )}
+      </CommandList>
+    </Command>
+  );
+}
+
+/** What the Options chip says after its label: only what differs from the default. */
+export function optionsSummary(options: {
+  parent: Pick<Task, "title"> | null;
+  bypass: boolean;
+  defaultBypass: boolean;
+}): string[] {
+  return [
+    ...(options.parent ? [`parent: ${options.parent.title}`] : []),
+    ...(options.bypass !== options.defaultBypass
+      ? [`skip prompts: ${options.bypass ? "on" : "off"}`]
+      : []),
+  ];
+}
+
+export type OptionsView = "main" | "parent";
+
+/**
+ * The Options chip (advanced, rarely changed): "Skip permission prompts"
+ * (decision R7: whether a *Run in background* launch skips the agent's
+ * permission prompts; starts on the repository / app default, never
+ * sticky; Start & open never bypasses) and "Parent task" (the searchable
+ * task picker, one level only). The chip's label lists the values that
+ * differ from the default, e.g. `Options · parent: Fix MEV`.
+ */
+export function OptionsPicker({
+  open,
+  view,
+  onOpenChange,
+  onViewChange,
+  bypass,
+  defaultBypass,
+  onBypassChange,
+  parent,
+  parentCandidates,
+  suggestedParent,
+  onParentChange,
+}: {
+  open: boolean;
+  view: OptionsView;
+  onOpenChange: (open: boolean) => void;
+  onViewChange: (view: OptionsView) => void;
+  bypass: boolean;
+  /** The repository / app default (`bypassPermissions`). */
+  defaultBypass: boolean;
+  onBypassChange: (next: boolean) => void;
+  parent: Task | null;
+  parentCandidates: readonly Task[];
+  suggestedParent: Task | null;
+  /** `null` = standalone again. */
+  onParentChange: (taskId: string | null) => void;
+}): JSX.Element {
+  const summary = optionsSummary({ parent, bypass, defaultBypass });
+  const mod = modKeyLabel();
+  return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <InputGroupButton
-          data-testid="new-task-parent-add"
-          aria-label="Add parent"
-          title={`Make it a subtask of… (${modKeyLabel()}\u21E7P)`}
-          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+        <button
+          type="button"
+          data-testid="new-task-options"
+          data-bypass={bypass ? "true" : "false"}
+          aria-label="Options"
+          title={
+            summary.length
+              ? `Options: ${summary.join(", ")}`
+              : `Options: permission prompts, parent task (${mod}\u21E7P)`
+          }
+          className="inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-lg border border-dashed border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60"
         >
-          <Plus />
-          Parent
-        </InputGroupButton>
+          <span className="shrink-0">Options</span>
+          {parent && (
+            <span
+              data-chip-value=""
+              data-testid="new-task-parent"
+              data-value={parent.id}
+              className="shrink-0 whitespace-nowrap text-foreground"
+            >
+              {`\u00B7 parent: ${parent.title}`}
+            </span>
+          )}
+          {bypass !== defaultBypass && (
+            <span
+              data-chip-value=""
+              data-testid="new-task-options-bypass"
+              className="shrink-0 whitespace-nowrap text-foreground"
+            >
+              {`\u00B7 skip prompts: ${bypass ? "on" : "off"}`}
+            </span>
+          )}
+          <ChevronDown className="size-3 shrink-0 opacity-50" />
+        </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80" data-testid="new-task-parent-menu">
-        <Command>
-          <CommandInput placeholder="Search tasks…" />
-          <CommandList>
-            <CommandEmpty>No task found.</CommandEmpty>
-            {suggested && (
-              <CommandGroup heading="Suggested">{item(suggested)}</CommandGroup>
-            )}
-            {rest.length > 0 && (
-              <CommandGroup heading="Tasks">{rest.map(item)}</CommandGroup>
-            )}
-          </CommandList>
-        </Command>
+      <PopoverContent
+        align="start"
+        className={cn("p-0", view === "parent" ? "w-80" : "w-72")}
+        data-testid="new-task-options-menu"
+      >
+        {view === "parent" ? (
+          <ParentCommand
+            tasks={parentCandidates}
+            suggested={suggestedParent}
+            onSelect={(taskId) => onParentChange(taskId)}
+          />
+        ) : (
+          <div className="flex flex-col gap-1 p-1.5 text-xs">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md p-1.5 hover:bg-accent/40">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bypass}
+                data-testid="new-task-bypass"
+                data-bypass={bypass ? "true" : "false"}
+                aria-label="Skip permission prompts"
+                onClick={() => onBypassChange(!bypass)}
+                className={cn(
+                  "relative mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors",
+                  bypass ? "bg-primary" : "bg-muted-foreground/40",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-block size-3 rounded-full bg-background shadow transition-transform",
+                    bypass ? "translate-x-3.5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+              <span className="flex flex-col gap-0.5">
+                <span className="text-foreground">Skip permission prompts</span>
+                <span className="text-[11px] leading-snug text-muted-foreground">
+                  Run in background only (Claude Code's
+                  --dangerously-skip-permissions). Start &amp; open keeps your
+                  own settings.
+                  {bypass === defaultBypass ? " Default from settings." : ""}
+                </span>
+              </span>
+            </label>
+            <div className="flex items-center gap-2 rounded-md p-1.5">
+              <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="shrink-0 text-foreground">Parent task</span>
+              {parent ? (
+                <>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {parent.title}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="new-task-parent-remove"
+                    aria-label="Remove parent"
+                    title="Remove parent"
+                    onClick={() => onParentChange(null)}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="new-task-parent-add"
+                  title={`Make it a subtask of… (${mod}\u21E7P)`}
+                  onClick={() => onViewChange("parent")}
+                  className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Choose…
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -837,8 +1056,11 @@ export function SubmitSplitButton({
   submitting,
   blockerFor,
   hintFor,
+  describedBy,
   onSubmit,
 }: {
+  /** Id of the inline note naming what the primary action still needs. */
+  describedBy?: string;
   primary: SubmitAction;
   alternate: SubmitAction;
   submitting: boolean;
@@ -863,7 +1085,12 @@ export function SubmitSplitButton({
         data-testid="new-task-submit"
         data-action={primary}
         disabled={submitting || primaryBlocker !== null}
-        title={primaryBlocker ?? hintFor(primary)}
+        title={
+          primaryBlocker
+            ? `${primaryBlocker} to ${ACTION_LABELS[primary].toLowerCase()}`
+            : hintFor(primary)
+        }
+        aria-describedby={primaryBlocker ? describedBy : undefined}
         onClick={() => onSubmit(primary)}
         className="h-8 rounded-l-lg rounded-r-none pr-2.5"
       >

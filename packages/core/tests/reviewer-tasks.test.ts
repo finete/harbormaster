@@ -216,4 +216,42 @@ describe("reviewer tasks", () => {
       ?.worktreePath as string;
     expect(await git(["rev-parse", "HEAD"], worktree)).toBe(f.head);
   });
+
+  it("previewPullRequest: a pasted PR URL resolves to its card facts; bad URLs and unknown repositories reject readably", async () => {
+    const f = await fixture();
+    // A GitHub-hosted origin, so the PR URL maps onto the local checkout.
+    await git(
+      ["remote", "set-url", "origin", "https://github.com/acme/widgets.git"],
+      f.checkout,
+    );
+    f.pullRequests.pr = {
+      ...f.pullRequests.pr,
+      title: "Bob's change",
+      author: "bob",
+      baseRefName: "release",
+    };
+    await expect(
+      f.core.commands.previewPullRequest(
+        "https://github.com/acme/widgets/pull/7",
+      ),
+    ).resolves.toEqual({
+      repositoryId: "github.com/acme/widgets",
+      number: 7,
+      url: "https://github.com/acme/widgets/pull/7",
+      state: "OPEN",
+      title: "Bob's change",
+      author: "bob",
+      headRefName: "bob/feature",
+      baseRefName: "release",
+      viewerIsAuthor: false,
+    });
+    await expect(
+      f.core.commands.previewPullRequest("https://github.com/acme/widgets"),
+    ).rejects.toThrow(/Not a pull request URL/);
+    await expect(
+      f.core.commands.previewPullRequest(
+        "https://github.com/acme/other/pull/7",
+      ),
+    ).rejects.toThrow(/No local checkout of github.com\/acme\/other/);
+  });
 });

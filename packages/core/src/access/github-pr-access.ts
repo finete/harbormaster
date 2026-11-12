@@ -55,6 +55,8 @@ interface GhPr {
 
 /** A PR node from the batched GraphQL lookup (connections instead of gh's flattened lists). */
 interface GqlPr extends Omit<GhPr, "reviewRequests" | "reviews" | "derived"> {
+  /** Asked for by `view` only. */
+  title?: string;
   reviewRequests?: { totalCount?: number } | null;
   reviews?: { nodes?: GhReview[] | null } | null;
   reviewThreads?: { nodes?: Array<{ isResolved?: boolean }> | null } | null;
@@ -393,7 +395,7 @@ export class GithubPrAccess implements PullRequestAccess {
       "query($owner: String!, $name: String!, $number: Int!) {",
       "  repository(owner: $owner, name: $name) { pullRequest(number: $number) { ...pr } }",
       "}",
-      `fragment pr on PullRequest { ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
+      `fragment pr on PullRequest { title ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
     ].join("\n");
     const output = await this.execute("gh", [
       "api",
@@ -418,7 +420,11 @@ export class GithubPrAccess implements PullRequestAccess {
         `Pull request #${pullRequestNumber} not found in ${repositoryId}`,
       );
     }
-    return this.fromGraphql(repositoryId, node);
+    return {
+      ...this.fromGraphql(repositoryId, node),
+      ...(node.title ? { title: node.title } : {}),
+      ...(node.baseRefName ? { baseRefName: node.baseRefName } : {}),
+    };
   }
 
   async searchPullRequests(query: string): Promise<PullRequestSearchHit[]> {

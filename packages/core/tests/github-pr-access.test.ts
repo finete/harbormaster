@@ -603,6 +603,8 @@ describe("GithubPrAccess rules-engine facts", () => {
     author: { login: "alice" },
     headRefOid: "head",
     headRefName: "alice/feature",
+    title: "Add the widget",
+    baseRefName: "main",
     mergedAt: null,
     closed: false,
     viewerDidAuthor: false,
@@ -655,8 +657,12 @@ describe("GithubPrAccess rules-engine facts", () => {
     expect(execute.mock.calls[0]?.[1]).toEqual(
       expect.arrayContaining(["api", "graphql", "number=9", "owner=acme"]),
     );
+    // The composer's PR card: title and base are asked for by view() only.
+    expect(String(execute.mock.calls[0]?.[1])).toContain("{ title number");
     expect(status).toMatchObject({
       number: 9,
+      title: "Add the widget",
+      baseRefName: "main",
       headRefName: "alice/feature",
       viewerIsAuthor: false,
       author: "alice",

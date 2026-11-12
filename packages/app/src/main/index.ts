@@ -727,6 +727,9 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:parsePullRequestUrl", (_event, url: unknown) =>
     typeof url === "string" ? (parsePullRequestUrl(url) ?? null) : null,
   );
+  ipcMain.handle("core:previewPullRequest", (_event, url: unknown) =>
+    core.commands.previewPullRequest(typeof url === "string" ? url : ""),
+  );
   // The inbox's "Retry" on a failed / interrupted launch: the very same
   // background start a launch uses (no pane, attach later), after clearing
   // the failure so the item leaves. Resolves whether a pty started.
