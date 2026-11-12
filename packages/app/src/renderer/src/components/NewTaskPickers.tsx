@@ -21,8 +21,7 @@ import {
   MessageSquare,
   X,
 } from "lucide-react";
-import type { ComponentPropsWithoutRef, JSX, ReactNode } from "react";
-import { forwardRef } from "react";
+import type { JSX, ReactNode } from "react";
 import type {
   HarnessModelCatalog,
   KnownLocation,
@@ -42,7 +41,7 @@ import {
 } from "../lib/new-task-draft";
 import { modKeyLabel } from "../lib/platform";
 import { cn } from "../lib/utils";
-import { Button } from "./ui/button";
+import { Chip, ChipValue } from "./ui/chip";
 import {
   Command,
   CommandEmpty,
@@ -65,6 +64,12 @@ import {
 } from "./ui/dropdown-menu";
 import { Kbd } from "./ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Segmented } from "./ui/segmented";
+import {
+  SplitButton,
+  SplitButtonMain,
+  SplitButtonTrigger,
+} from "./ui/split-button";
 
 /** Last path segment of a repository id or folder path. */
 export function shortName(idOrPath: string): string {
@@ -79,88 +84,6 @@ function Check4({ on }: { on: boolean }): JSX.Element {
     />
   );
 }
-
-// --- Detail chips ----------------------------------------------------------
-
-/**
- * One labelled chip of the "Where / How" row: a muted label and the full
- * value (`data-chip-value`), never ellipsized. The row wraps instead; only a
- * value wider than the whole row is clipped, with the tooltip as the last
- * resort. Read-only chips (values derived from a PR) render as a span.
- */
-export const DetailChip = forwardRef<
-  HTMLButtonElement,
-  ComponentPropsWithoutRef<"button"> & {
-    label: string;
-    value: ReactNode;
-    /** Plain-text value for the tooltip. */
-    valueText: string;
-    readOnly?: boolean;
-    attention?: boolean;
-    valueTestId?: string;
-  }
->(function DetailChip(
-  {
-    label,
-    value,
-    valueText,
-    readOnly,
-    attention,
-    valueTestId,
-    className,
-    title,
-    ...props
-  },
-  ref,
-) {
-  const classes = cn(
-    "inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-lg border border-border/70 px-2 text-xs transition-colors",
-    readOnly
-      ? "bg-muted/30 text-muted-foreground"
-      : "bg-transparent text-foreground hover:bg-accent/60 data-[state=open]:bg-accent/60",
-    className,
-  );
-  const body = (
-    <>
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span
-        data-chip-value=""
-        data-testid={valueTestId}
-        className={cn(
-          "shrink-0 whitespace-nowrap",
-          attention && "text-status-needsYou/90",
-        )}
-      >
-        {value}
-      </span>
-    </>
-  );
-  if (readOnly) {
-    const { onClick: _onClick, type: _type, ...rest } = props;
-    return (
-      <span
-        {...(rest as ComponentPropsWithoutRef<"span">)}
-        data-readonly="true"
-        title={title ?? `${label}: ${valueText} (from the pull request)`}
-        className={classes}
-      >
-        {body}
-      </span>
-    );
-  }
-  return (
-    <button
-      ref={ref}
-      type="button"
-      title={title ?? `${label}: ${valueText}`}
-      className={classes}
-      {...props}
-    >
-      {body}
-      <ChevronDown className="size-3 shrink-0 opacity-50" />
-    </button>
-  );
-});
 
 // --- Where -----------------------------------------------------------------
 
@@ -275,16 +198,18 @@ export function WherePicker({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <DetailChip
+        <Chip
           data-testid="new-task-where"
           data-where={value}
           aria-label="Where"
           label={whereChipLabel(value)}
           value={whereLabel(value, options)}
-          valueText={whereLabel(value, options)}
-          attention={!value}
+          overflowTitle={`${whereChipLabel(value)}: ${whereLabel(value, options)}`}
+          valueClassName={value ? undefined : "text-status-needsYou/90"}
           title={`Where it runs (${modKeyLabel()}P)`}
-        />
+        >
+          <ChevronDown />
+        </Chip>
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -370,6 +295,7 @@ function ModeIcon({ mode }: { mode: DraftMode }): JSX.Element {
   return <GitBranch className="size-3.5" />;
 }
 
+/** Task · Review · Chat: the design system's segmented control. */
 export function ModeSwitch({
   value,
   onChange,
@@ -378,35 +304,24 @@ export function ModeSwitch({
   onChange: (mode: DraftMode) => void;
 }): JSX.Element {
   return (
-    <div
-      role="radiogroup"
-      aria-label="Task, review or chat"
-      data-testid="new-task-mode"
-      className="flex h-7 shrink-0 items-center rounded-lg bg-muted/60 p-0.5"
-    >
-      {(["task", "review", "chat"] as const).map((mode) => (
-        // biome-ignore lint/a11y/useSemanticElements: a three-option segmented control
-        <button
-          key={mode}
-          type="button"
-          role="radio"
-          aria-checked={value === mode}
-          data-testid={`new-task-mode-${mode}`}
-          data-selected={value === mode}
-          title={MODE_HINTS[mode]}
-          onClick={() => onChange(mode)}
-          className={cn(
-            "flex h-6 items-center gap-1 rounded-md px-2 text-xs transition-colors",
-            value === mode
-              ? "bg-primary/20 text-primary shadow-sm ring-1 ring-primary/40"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <ModeIcon mode={mode} />
-          {MODE_LABELS[mode]}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      ariaLabel="Task, review or chat"
+      testId="new-task-mode"
+      size="sm"
+      value={value}
+      onValueChange={onChange}
+      options={(["task", "review", "chat"] as const).map((mode) => ({
+        value: mode,
+        label: (
+          <>
+            <ModeIcon mode={mode} />
+            {MODE_LABELS[mode]}
+          </>
+        ),
+        title: MODE_HINTS[mode],
+        testId: `new-task-mode-${mode}`,
+      }))}
+    />
   );
 }
 
@@ -490,15 +405,17 @@ export function AgentPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <DetailChip
+        <Chip
           data-testid="new-task-agent"
           data-harness={effective}
           aria-label="Agent"
           label="Agent"
           value={labelOf(effective)}
-          valueText={labelOf(effective)}
+          overflowTitle={`Agent: ${labelOf(effective)}`}
           title="Agent: which coding agent runs this task"
-        />
+        >
+          <ChevronDown />
+        </Chip>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -559,15 +476,17 @@ export function AgentModelPicker({
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <DetailChip
+        <Chip
           data-testid="new-task-model"
           data-model={model}
           aria-label="Model"
           label="Model"
           value={modelChipValue(catalog, model)}
-          valueText={modelChipValue(catalog, model)}
+          overflowTitle={`Model: ${modelChipValue(catalog, model)}`}
           title={`Model (${modKeyLabel()}\u21E7M)`}
-        />
+        >
+          <ChevronDown />
+        </Chip>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -662,15 +581,17 @@ export function ThinkingPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <DetailChip
+        <Chip
           data-testid="new-task-thinking"
           data-thinking={thinking}
           aria-label="Thinking"
           label="Thinking"
           value={thinkingChipValue(catalog, thinking)}
-          valueText={thinkingChipValue(catalog, thinking)}
+          overflowTitle={`Thinking: ${thinkingChipValue(catalog, thinking)}`}
           title="Thinking: how hard the model reasons"
-        />
+        >
+          <ChevronDown />
+        </Chip>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -812,40 +733,30 @@ export function OptionsPicker({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <Chip
           data-testid="new-task-options"
           data-bypass={bypass ? "true" : "false"}
           aria-label="Options"
+          label="Options"
           title={
             summary.length
               ? `Options: ${summary.join(", ")}`
               : `Options: permission prompts, parent task (${mod}\u21E7P)`
           }
-          className="inline-flex h-7 max-w-full shrink-0 items-center gap-1.5 overflow-hidden rounded-lg border border-dashed border-border/70 px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[state=open]:bg-accent/60"
+          className="border-dashed"
         >
-          <span className="shrink-0">Options</span>
           {parent && (
-            <span
-              data-chip-value=""
-              data-testid="new-task-parent"
-              data-value={parent.id}
-              className="shrink-0 whitespace-nowrap text-foreground"
-            >
+            <ChipValue data-testid="new-task-parent" data-value={parent.id}>
               {`\u00B7 parent: ${parent.title}`}
-            </span>
+            </ChipValue>
           )}
           {bypass !== defaultBypass && (
-            <span
-              data-chip-value=""
-              data-testid="new-task-options-bypass"
-              className="shrink-0 whitespace-nowrap text-foreground"
-            >
+            <ChipValue data-testid="new-task-options-bypass">
               {`\u00B7 skip prompts: ${bypass ? "on" : "off"}`}
-            </span>
+            </ChipValue>
           )}
-          <ChevronDown className="size-3 shrink-0 opacity-50" />
-        </button>
+          <ChevronDown />
+        </Chip>
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -1079,9 +990,8 @@ export function SubmitSplitButton({
         : undefined;
   const primaryBlocker = blockerFor(primary);
   return (
-    <div className="flex items-center">
-      <Button
-        size="sm"
+    <SplitButton variant="default" size="sm">
+      <SplitButtonMain
         data-testid="new-task-submit"
         data-action={primary}
         disabled={submitting || primaryBlocker !== null}
@@ -1092,24 +1002,17 @@ export function SubmitSplitButton({
         }
         aria-describedby={primaryBlocker ? describedBy : undefined}
         onClick={() => onSubmit(primary)}
-        className="h-8 rounded-l-lg rounded-r-none pr-2.5"
       >
         {submitting ? "Working…" : ACTION_LABELS[primary]}
-        <Kbd className="border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground/80">
-          {`${mod}\u21B5`}
-        </Kbd>
-      </Button>
+        <Kbd>{`${mod}\u21B5`}</Kbd>
+      </SplitButtonMain>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            size="sm"
+          <SplitButtonTrigger
             data-testid="new-task-submit-menu"
             aria-label="More submit options"
             disabled={submitting}
-            className="h-8 rounded-l-none rounded-r-lg border-l border-primary-foreground/20 px-1.5"
-          >
-            <ChevronDown className="size-3.5" />
-          </Button>
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-72">
           {(["start", "background", "park"] as const).map((action) => {
@@ -1156,6 +1059,6 @@ export function SubmitSplitButton({
           })}
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </SplitButton>
   );
 }

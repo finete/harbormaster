@@ -1,4 +1,4 @@
-import { GitBranch, GitPullRequest } from "lucide-react";
+import { ChevronDown, GitBranch, GitPullRequest } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -33,7 +33,6 @@ import {
   AgentPicker,
   actionHint,
   BranchPicker,
-  DetailChip,
   ModeSwitch,
   OptionsPicker,
   type OptionsView,
@@ -46,6 +45,9 @@ import {
   whereOptions,
 } from "./NewTaskPickers";
 import { PullRequestField, usePullRequestLookup } from "./PullRequestField";
+import { Button } from "./ui/button";
+import { Chip } from "./ui/chip";
+import { Input } from "./ui/input";
 import {
   InputGroup,
   InputGroupAddon,
@@ -510,17 +512,15 @@ export function NewTaskComposer({
                   {blockerNote}
                 </span>
               )}
-              <div className="shrink-0">
-                <SubmitSplitButton
-                  primary={primary}
-                  alternate={alternate}
-                  submitting={submitting}
-                  blockerFor={blockerFor}
-                  hintFor={hintFor}
-                  describedBy="new-task-blocker"
-                  onSubmit={(action) => void submit(action)}
-                />
-              </div>
+              <SubmitSplitButton
+                primary={primary}
+                alternate={alternate}
+                submitting={submitting}
+                blockerFor={blockerFor}
+                hintFor={hintFor}
+                describedBy="new-task-blocker"
+                onSubmit={(action) => void submit(action)}
+              />
             </div>
           </InputGroupAddon>
         </InputGroup>
@@ -530,7 +530,7 @@ export function NewTaskComposer({
         >
           {prBound ? (
             <>
-              <DetailChip
+              <Chip
                 readOnly
                 data-testid="new-task-where"
                 data-where={
@@ -542,15 +542,16 @@ export function NewTaskComposer({
                     ? shortName(pullRequest.repositoryId)
                     : "from the PR"
                 }
-                valueText={pullRequest?.repositoryId ?? "from the PR"}
+                title={`Repository: ${pullRequest?.repositoryId ?? "from the PR"} (from the pull request)`}
               />
-              <DetailChip
+              <Chip
                 readOnly
                 data-testid="new-task-base"
                 valueTestId="new-task-base-ref"
                 label="Base"
                 value={pullRequest?.baseRefName ?? "from the PR"}
-                valueText={pullRequest?.baseRefName ?? "from the PR"}
+                title="Base: from the pull request"
+                overflowTitle={`Base: ${pullRequest?.baseRefName ?? "from the PR"}`}
               />
             </>
           ) : (
@@ -579,14 +580,16 @@ export function NewTaskComposer({
                     closePicker();
                   }}
                 >
-                  <DetailChip
+                  <Chip
                     data-testid="new-task-base"
                     valueTestId="new-task-base-ref"
                     label="Base"
                     value={base}
-                    valueText={base}
+                    overflowTitle={`Base: ${base}`}
                     title="Change the base branch"
-                  />
+                  >
+                    <ChevronDown />
+                  </Chip>
                 </BranchPicker>
               )}
             </>
@@ -651,27 +654,28 @@ export function NewTaskComposer({
             }}
           />
           {draft.mode === "task" && !showPrField && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               data-testid="new-task-attach-pr"
               title="Continue your own pull request: the task works on its head branch"
               onClick={() => setAttachPr(true)}
-              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              className="px-2"
             >
-              <GitPullRequest className="size-3.5" />
+              <GitPullRequest />
               Attach a PR…
-            </button>
+            </Button>
           )}
         </div>
         {where.kind === "clone" && !prBound && (
-          <input
+          <Input
             ref={cloneRef}
             data-testid="new-task-clone-url-input"
             aria-label="Clone URL"
             value={draft.cloneUrl}
             onChange={(event) => onChange({ cloneUrl: event.target.value })}
             placeholder="https://github.com/org/repo.git"
-            className="mx-0.5 h-7 rounded-lg border border-border bg-transparent px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="text-[13px]"
           />
         )}
         <div className="flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
