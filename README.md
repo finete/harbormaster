@@ -15,7 +15,9 @@ It is local-first and has no telemetry.
 Apple Silicon Macs, via Homebrew:
 
 ```sh
-brew install --cask finete/tap/harbormaster
+brew tap finete/tap
+brew trust finete/tap        # recent Homebrew refuses third-party taps until trusted once
+brew install --cask harbormaster
 ```
 
 This installs `Harbormaster.app` and the `harbormaster` command-line tool.

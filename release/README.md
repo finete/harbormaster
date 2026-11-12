@@ -37,6 +37,11 @@ to a signed + auto-updating build later is a config flip: set
 `afterPack` hook, and add electron-updater (the `publish: github` config
 already produces `latest-mac.yml`).
 
+## Note
+
+Recent Homebrew refuses to load casks from an untrusted third-party tap;
+users run `brew trust finete/tap` once (documented in the root README).
+
 ## One-time setup
 
 1. Create the tap repository (once):
