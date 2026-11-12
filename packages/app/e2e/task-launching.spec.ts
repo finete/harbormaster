@@ -31,7 +31,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { chooseWhere, submitAs } from "./composer";
+import { chooseParent, chooseWhere, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -94,17 +94,11 @@ function invocationsFor(needle: string): string[] {
 async function openLaunchComposer(relation: "subtask" | "task"): Promise<void> {
   // Launching lives inside the new-task draft composer (one entry point):
   // the draft captures the focused task as its origin, offered first by the
-  // `+ Parent` picker; a parent makes "Run in background" the default.
+  // Options chip's Parent picker; a parent makes "Run in background" the default.
   await window.getByTestId("sidebar-new-task-button").click();
   await expect(window.getByTestId("new-task-composer")).toBeVisible();
   if (relation === "subtask") {
-    await window.getByTestId("new-task-parent-add").click();
-    await window
-      .getByTestId("new-task-parent-menu")
-      .getByTestId("new-task-parent-option")
-      .first()
-      .click();
-    await expect(window.getByTestId("new-task-parent")).toBeVisible();
+    await chooseParent(window);
   }
 }
 

@@ -2,6 +2,7 @@
 // events out". Kept separate from model.ts because these are call-shape
 // contracts, not persisted domain data.
 
+import type { PullRequestPreview } from "./github.js";
 import type {
   HarnessModelCatalog,
   PresenceStatus,
@@ -54,6 +55,7 @@ import type {
 } from "./rules.js";
 import type { RepositoryInfo } from "./workspace.js";
 
+export type { PullRequestPreview } from "./github.js";
 /** One program-status report for `CoreCommands.reportPresence`. */
 export interface PresenceReport {
   state: "idle" | "working" | "blocked" | "done" | "error";
@@ -726,6 +728,13 @@ export interface CoreCommands {
    * never pushes); otherwise a plain task in `repository`.
    */
   createTaskFromAction(input: CreateTaskActionInput): Promise<Task>;
+  /**
+   * Look up a pasted PR URL for the new-task composer's PR card (number,
+   * title, author, head → base, whether the viewer authored it) through
+   * GitHub access. Rejects with a readable message when the URL is not a PR,
+   * the repository has no local checkout, or GitHub cannot be reached.
+   */
+  previewPullRequest(url: string): Promise<PullRequestPreview>;
 
   // --- Onboarding (docs/release-plan.md "Onboarding (four screens)") ----
 

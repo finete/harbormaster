@@ -4,6 +4,7 @@ import {
   defaultAction,
   deriveTitle,
   draftLabel,
+  effectivePrRole,
   effectiveTitle,
   emptyDraft,
   emptyPrefs,
@@ -22,6 +23,8 @@ import {
   storeDraft,
   storePrefs,
   submitBlocker,
+  submitTitle,
+  usesPullRequest,
   WHERE_CLONE,
   WHERE_NONE,
 } from "../src/renderer/src/lib/new-task-draft";
@@ -386,32 +389,81 @@ describe("prependToOrder", () => {
   });
 });
 
-describe("PR URL + role (reviewer tasks)", () => {
-  const pr = { repositoryId: "github.com/acme/api", number: 12 };
+describe("PR URL + role (Review mode, Attach a PR)", () => {
+  const pr = {
+    repositoryId: "github.com/acme/api",
+    number: 12,
+    url: "https://github.com/acme/api/pull/12",
+    state: "OPEN" as const,
+    title: "Speed up the API",
+    author: "octo",
+    headRefName: "octo/speed",
+    baseRefName: "main",
+    viewerIsAuthor: false,
+  };
+  const resolved = { status: "resolved" as const, pr };
   const draft = {
     ...emptyDraft(),
+    mode: "review" as const,
     title: "Review the API change",
     prUrl: "https://github.com/acme/api/pull/12",
-    prRole: "reviewer" as const,
   };
 
-  it("needs a parsed PR URL, a Task (not a Chat), and Start or Park", () => {
-    expect(submitBlocker(draft, "start", undefined)).toBe(
-      "Checking the pull request URL",
+  it("Review mode needs a resolved PR and Start or Park; no Where, and the PR title stands in for an empty title", () => {
+    expect(usesPullRequest(draft)).toBe(true);
+    expect(submitBlocker({ ...draft, prUrl: " " }, "start", null)).toBe(
+      "Paste a pull request URL",
     );
-    expect(submitBlocker(draft, "start", null)).toMatch(
-      /^Enter a pull request URL/,
+    expect(submitBlocker(draft, "start", { status: "resolving" })).toBe(
+      "Checking the pull request",
     );
+    expect(
+      submitBlocker(draft, "start", { status: "error", message: "nope" }),
+    ).toBe("Fix the pull request URL");
     // The PR brings its own repository: no Where needed.
-    expect(submitBlocker(draft, "start", pr)).toBeNull();
-    expect(submitBlocker(draft, "park", pr)).toBeNull();
-    expect(submitBlocker(draft, "background", pr)).toMatch(/starts or parks/);
-    expect(submitBlocker({ ...draft, mode: "chat" }, "start", pr)).toMatch(
-      /Switch to Task/,
+    expect(submitBlocker(draft, "start", resolved)).toBeNull();
+    expect(submitBlocker(draft, "park", resolved)).toBeNull();
+    expect(submitBlocker(draft, "background", resolved)).toMatch(
+      /starts or parks/,
     );
+    const untitled = { ...draft, title: "" };
+    expect(submitBlocker(untitled, "start", resolved)).toBeNull();
+    expect(submitTitle(untitled, pr)).toBe("Review: Speed up the API");
+    expect(submitTitle({ ...untitled, prRole: "author" }, pr)).toBe(
+      "Speed up the API",
+    );
+    // In Review mode the prompt is the review's focus, not its name.
+    expect(submitTitle({ ...untitled, prompt: "Check the cache" }, pr)).toBe(
+      "Review: Speed up the API",
+    );
+    expect(
+      submitTitle({ ...untitled, mode: "task", prompt: "Check the cache" }, pr),
+    ).toBe("Check the cache");
   });
 
-  it("creates a task bound to the PR in its repository, with the role", () => {
+  it("Task mode binds a PR only once one is attached (always as author); Chat ignores it", () => {
+    const task = { ...draft, mode: "task" as const };
+    expect(usesPullRequest({ ...task, prUrl: "" })).toBe(false);
+    expect(usesPullRequest(task)).toBe(true);
+    expect(effectivePrRole({ ...task, prRole: "reviewer" }, pr)).toBe("author");
+    const chat = { ...draft, mode: "chat" as const, where: WHERE_NONE };
+    expect(usesPullRequest(chat)).toBe(false);
+    expect(submitBlocker(chat, "start", null)).toBeNull();
+  });
+
+  it("the role defaults from the PR (viewerIsAuthor → author, else reviewer) unless overridden", () => {
+    expect(effectivePrRole(draft, pr)).toBe("reviewer");
+    expect(effectivePrRole(draft, { viewerIsAuthor: true })).toBe("author");
+    expect(effectivePrRole(draft, null)).toBe("reviewer");
+    expect(
+      effectivePrRole(
+        { ...draft, prRole: "author" },
+        { viewerIsAuthor: false },
+      ),
+    ).toBe("author");
+  });
+
+  it("creates a task bound to the PR in its repository, with the role (the Create review task path)", () => {
     expect(planSubmit(draft, "start", null, pr)).toEqual({
       command: "createTask",
       input: {
@@ -423,18 +475,24 @@ describe("PR URL + role (reviewer tasks)", () => {
         start: true,
       },
     });
-    // "From GitHub" sends no role; core asks GitHub.
     expect(
-      planSubmit({ ...draft, prRole: "" }, "park", null, pr).input,
-    ).not.toHaveProperty("role");
+      planSubmit({ ...draft, mode: "task" }, "park", null, pr).input,
+    ).toMatchObject({ pullRequest: 12, role: "author" });
+    expect(
+      planSubmit({ ...draft, mode: "task" }, "park", null, pr).input,
+    ).not.toHaveProperty("start");
   });
 
-  it("round-trips through storage and counts as content", () => {
-    expect(parseDraft(serializeDraft(draft))).toMatchObject({
+  it("round-trips through storage (Review mode included) and counts as content", () => {
+    expect(
+      parseDraft(serializeDraft({ ...draft, prRole: "reviewer" })),
+    ).toMatchObject({
+      mode: "review",
       prUrl: draft.prUrl,
       prRole: "reviewer",
     });
     expect(parseDraft(JSON.stringify({ prRole: "boss" }))?.prRole).toBe("");
+    expect(parseDraft(JSON.stringify({ mode: "boss" }))?.mode).toBe("task");
     expect(isDraftEmpty({ ...emptyDraft(), prUrl: "x" })).toBe(false);
   });
 });

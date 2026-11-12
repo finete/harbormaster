@@ -1,4 +1,4 @@
-import { CornerDownRight, GitBranch, X } from "lucide-react";
+import { GitBranch, GitPullRequest } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -12,9 +12,8 @@ import { shellEscapePaths } from "../../../shared/shell-escape";
 import {
   alternateAction,
   defaultAction,
-  deriveTitle,
   effectiveBaseRef,
-  effectiveTitle,
+  effectivePrRole,
   folderWhere,
   type NewTaskDraft,
   parseWhere,
@@ -23,6 +22,8 @@ import {
   repoWhere,
   type SubmitAction,
   submitBlocker,
+  submitTitle,
+  usesPullRequest,
   WHERE_CLONE,
   type WhereToken,
 } from "../lib/new-task-draft";
@@ -32,15 +33,19 @@ import {
   AgentPicker,
   actionHint,
   BranchPicker,
-  BypassPermissionsSwitch,
+  DetailChip,
   ModeSwitch,
-  ParentPicker,
+  OptionsPicker,
+  type OptionsView,
   SubmitSplitButton,
+  shortName,
+  supportsThinking,
+  ThinkingPicker,
   WherePicker,
   whereLabel,
   whereOptions,
 } from "./NewTaskPickers";
-import { PullRequestField, useParsedPullRequest } from "./PullRequestField";
+import { PullRequestField, usePullRequestLookup } from "./PullRequestField";
 import {
   InputGroup,
   InputGroupAddon,
@@ -57,15 +62,17 @@ export interface NewTaskOutcome {
 const PASTED_IMAGE =
   /(^|\/)clipboard-\d{4}-\d{2}-\d{2}-\d{6}-[0-9A-F]{8}\.png$/;
 
-type PickerId = "where" | "model" | "parent" | "branch";
+type PickerId = "where" | "model" | "options" | "branch";
 
 /**
  * The new-task DRAFT page (see /docs/new-task-composer.md): a centered
- * column with the big `Untitled task` title, then one composer card (the
- * shadcn Input Group the AI Elements Prompt Input is built on): an
- * optional context tray (parent pill, clone URL), the prompt, and a
- * toolbar with Where · Agent·Model · + Parent and the split submit button.
- * The muted line under the card previews the branch and its base.
+ * column with the big `Untitled task` title, the PR block (Review mode, or
+ * Task mode's "Attach a PR…"), then the prompt box (the shadcn Input Group
+ * the AI Elements Prompt Input is built on) whose footer holds only the
+ * Task / Review / Chat switch and the split submit button. Under the box,
+ * the "Where / How" row of labelled chips (Repository · Base · Agent ·
+ * Model · Thinking · Options), then the full branch line (`<branch> ←
+ * <base>`) or what the Where implies.
  *
  * The draft is renderer-only state owned by App.tsx (persisted to
  * localStorage, lib/new-task-draft.ts): core never sees an unsubmitted task.
@@ -124,8 +131,12 @@ export function NewTaskComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openPicker, setOpenPicker] = useState<PickerId | null>(null);
+  const [optionsView, setOptionsView] = useState<OptionsView>("main");
+  /** Task mode's "Attach a PR…" was used (the field shows even while empty). */
+  const [attachPr, setAttachPr] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const cloneRef = useRef<HTMLInputElement>(null);
+  const prRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const core = window.harbormaster.core;
@@ -210,16 +221,24 @@ export function NewTaskComposer({
 
   const primary = defaultAction(draft);
   const alternate = alternateAction(draft);
-  // A PR URL (core parses it): the task binds to that PR in its repository.
-  const pullRequest = useParsedPullRequest(draft.prUrl);
-  const blockerFor = useCallback(
-    (action: SubmitAction) => submitBlocker(draft, action, pullRequest),
-    [draft, pullRequest],
-  );
   const chat = draft.mode === "chat";
-  // Only a task in a repository (or a clone) gets a branch + worktree.
+  const review = draft.mode === "review";
+  // A PR (Review mode, or Task mode's "Attach a PR…"): core looks the URL
+  // up; the task binds to that PR in its repository, on its head branch.
+  const prBound = usesPullRequest(draft);
+  const showPrField =
+    review || (draft.mode === "task" && (attachPr || prBound));
+  const prLookup = usePullRequestLookup(draft.prUrl, prBound);
+  const pullRequest = prLookup?.status === "resolved" ? prLookup.pr : null;
+  const prRole = effectivePrRole(draft, pullRequest);
+  const blockerFor = useCallback(
+    (action: SubmitAction) => submitBlocker(draft, action, prLookup),
+    [draft, prLookup],
+  );
+  // Only a task in a repository (or a clone, or on a PR) gets a branch + worktree.
   const hasWorktree =
-    !chat && (where.kind === "repository" || where.kind === "clone");
+    prBound ||
+    (!chat && (where.kind === "repository" || where.kind === "clone"));
   const hintFor = useCallback(
     (action: SubmitAction) =>
       actionHint(action, {
@@ -232,11 +251,11 @@ export function NewTaskComposer({
   const primaryBlocker = blockerFor(primary);
 
   async function submit(action: SubmitAction): Promise<void> {
-    if (submitting || submitBlocker(draft, action, pullRequest)) return;
+    if (submitting || submitBlocker(draft, action, prLookup)) return;
     setSubmitting(true);
     setError(null);
     try {
-      const plan = planSubmit(draft, action, parent, pullRequest ?? null);
+      const plan = planSubmit(draft, action, parent, pullRequest);
       const core = window.harbormaster.core;
       const task =
         plan.command === "launchTask"
@@ -264,6 +283,29 @@ export function NewTaskComposer({
         else if (openPicker === id) closePicker();
       },
     };
+  }
+
+  function openOptions(view: OptionsView): void {
+    setOptionsView(view);
+    setOpenPicker("options");
+  }
+
+  function changeMode(mode: NewTaskDraft["mode"]): void {
+    onChange({ mode });
+    // Review mode starts at its PR field (until a PR is resolved).
+    if (mode === "review" && !pullRequest) {
+      requestAnimationFrame(() => prRef.current?.focus());
+    } else {
+      promptRef.current?.focus();
+    }
+  }
+
+  function removePullRequest(): void {
+    onChange({ prUrl: "", prRole: "" });
+    setAttachPr(false);
+    requestAnimationFrame(() =>
+      (review ? prRef.current : promptRef.current)?.focus(),
+    );
   }
 
   function selectWhere(token: WhereToken): void {
@@ -373,22 +415,30 @@ export function NewTaskComposer({
       setOpenPicker("model");
     } else if (key === "p" && event.shiftKey) {
       event.preventDefault();
-      setOpenPicker("parent");
+      openOptions("parent");
     }
   }
 
-  const title = effectiveTitle(draft);
-  const derived = deriveTitle(draft.prompt);
-  const showTray = !!parent || where.kind === "clone";
+  const title = submitTitle(draft, pullRequest);
+  // The title input's placeholder: what an empty title falls back to.
+  const derived = submitTitle({ ...draft, title: "" }, pullRequest);
+  const catalog =
+    catalogs.find((entry) => entry.harness === effectiveHarness) ?? catalogs[0];
+  const defaultBypass = launchSettings?.bypassPermissions ?? true;
+  const blockerNote = error
+    ? null
+    : primaryBlocker &&
+      `${primaryBlocker} to ${ACTION_LABELS[primary].toLowerCase()}`;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: composer-wide shortcuts (see onKeyDown)
     <div
       data-testid="new-task-composer"
+      data-mode={draft.mode}
       className="h-full flex-1 overflow-y-auto bg-background"
       onKeyDown={onKeyDown}
     >
-      <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4 px-6 pb-12 pt-[16vh]">
+      <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3 px-6 pb-12 pt-[16vh]">
         <input
           data-testid="new-task-title-input"
           aria-label="Title"
@@ -400,56 +450,28 @@ export function NewTaskComposer({
               promptRef.current?.focus();
             }
           }}
-          placeholder={derived || "Untitled task"}
-          className="w-full border-0 bg-transparent px-1 text-3xl font-semibold tracking-tight text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none"
+          placeholder={
+            derived || (review ? "Untitled review" : "Untitled task")
+          }
+          className="mb-1 w-full border-0 bg-transparent px-1 text-3xl font-semibold tracking-tight text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none"
         />
-        <InputGroup>
-          {showTray && (
-            <InputGroupAddon
-              align="block-start"
-              className="flex-wrap gap-2 border-b border-border/60 pb-2.5 pt-2.5"
-            >
-              {parent && (
-                <span
-                  data-testid="new-task-parent"
-                  data-value={parent.id}
-                  className="flex h-6 max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/60 pl-2 pr-1 text-xs text-foreground"
-                >
-                  <CornerDownRight className="size-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">subtask of</span>
-                  <span className="max-w-[260px] truncate">{parent.title}</span>
-                  <button
-                    type="button"
-                    data-testid="new-task-parent-remove"
-                    aria-label="Remove parent"
-                    title="Remove parent"
-                    onClick={() =>
-                      onChange({ parentTaskId: null, baseRef: null })
-                    }
-                    className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              )}
-              {where.kind === "clone" && (
-                <input
-                  ref={cloneRef}
-                  data-testid="new-task-clone-url-input"
-                  aria-label="Clone URL"
-                  value={draft.cloneUrl}
-                  onChange={(event) =>
-                    onChange({ cloneUrl: event.target.value })
-                  }
-                  placeholder="https://github.com/org/repo.git"
-                  className="h-6 min-w-[260px] flex-1 rounded-md border border-border bg-transparent px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              )}
-            </InputGroupAddon>
-          )}
+        {showPrField && (
+          <PullRequestField
+            url={draft.prUrl}
+            lookup={prLookup}
+            mode={review ? "review" : "task"}
+            role={prRole}
+            roleOverridden={!!draft.prRole}
+            inputRef={prRef}
+            autoFocus={review || attachPr}
+            onChange={(patch) => onChange(patch)}
+            onRemove={removePullRequest}
+          />
+        )}
+        <InputGroup data-testid="new-task-prompt-box">
           <InputGroupTextarea
             ref={promptRef}
-            autoFocus
+            autoFocus={!review}
             data-testid="new-task-prompt-input"
             aria-label="Prompt"
             rows={5}
@@ -458,137 +480,243 @@ export function NewTaskComposer({
             onPaste={(event) => void onPaste(event)}
             onDrop={onDrop}
             placeholder={
-              chat
-                ? selectedRepo || where.kind === "folder"
-                  ? `Ask anything about ${whereLabel(draft.where, options)}\u2026`
-                  : "Ask anything\u2026"
-                : "What should the agent do? Paste screenshots or drop files."
+              review
+                ? "What should the review focus on?"
+                : chat
+                  ? selectedRepo || where.kind === "folder"
+                    ? `Ask anything about ${whereLabel(draft.where, options)}\u2026`
+                    : "Ask anything\u2026"
+                  : "What should the agent do? Paste screenshots or drop files."
             }
             className="min-h-[132px] text-[13px] leading-relaxed"
           />
-          <InputGroupAddon align="block-end" className="gap-0.5">
-            <ModeSwitch
-              value={draft.mode}
-              onChange={(mode) => {
-                onChange({ mode });
-                promptRef.current?.focus();
-              }}
-            />
-            <WherePicker
-              value={draft.where}
-              options={options}
-              recents={recents}
-              {...pickerProps("where")}
-              onSelect={selectWhere}
-              onOpenFolder={() => void openFolder()}
-            />
-            <AgentPicker
-              catalogs={catalogs}
-              harness={draft.harness}
-              defaultHarness={defaultHarness}
-              onChange={(harness) =>
-                onChange({ harness, model: "", thinking: "" })
-              }
-            />
-            <AgentModelPicker
-              catalogs={catalogs}
-              harness={effectiveHarness}
-              model={draft.model}
-              thinking={draft.thinking}
-              loadError={modelsError}
-              open={openPicker === "model"}
-              onOpenChange={(open) => {
-                // Retry a failed/empty load whenever the picker opens.
-                if (open && catalogs.length === 0) loadModels();
-                pickerProps("model").onOpenChange(open);
-              }}
-              onChange={(patch) => {
-                // The agent is the agent dropdown's call; the model picker
-                // only ever shows (and edits) the effective agent's models.
-                // A concrete model pins the agent it belongs to.
-                const { harness: _ignored, ...rest } = patch;
-                onChange(
-                  rest.model ? { ...rest, harness: effectiveHarness } : rest,
-                );
-              }}
-            />
-            <BypassPermissionsSwitch
-              value={bypass}
-              onChange={(next) => onChange({ bypassPermissions: next })}
-            />
-            {!parent && (
-              <ParentPicker
-                tasks={parentCandidates}
-                suggested={suggestedParent}
-                {...pickerProps("parent")}
-                onSelect={(taskId) => {
-                  onChange({ parentTaskId: taskId, baseRef: null });
-                  closePicker();
-                }}
-              />
-            )}
-            <div className="ml-auto shrink-0 pl-2">
-              <SubmitSplitButton
-                primary={primary}
-                alternate={alternate}
-                submitting={submitting}
-                blockerFor={blockerFor}
-                hintFor={hintFor}
-                onSubmit={(action) => void submit(action)}
-              />
+          <InputGroupAddon
+            align="block-end"
+            data-testid="new-task-prompt-footer"
+            className="gap-2"
+          >
+            <ModeSwitch value={draft.mode} onChange={changeMode} />
+            <div
+              data-testid="new-task-submit-group"
+              className="ml-auto flex min-w-0 items-center gap-2.5"
+            >
+              {blockerNote && (
+                <span
+                  id="new-task-blocker"
+                  data-testid="new-task-blocker"
+                  className="min-w-0 truncate text-[11px] text-muted-foreground"
+                  title={blockerNote}
+                >
+                  {blockerNote}
+                </span>
+              )}
+              <div className="shrink-0">
+                <SubmitSplitButton
+                  primary={primary}
+                  alternate={alternate}
+                  submitting={submitting}
+                  blockerFor={blockerFor}
+                  hintFor={hintFor}
+                  describedBy="new-task-blocker"
+                  onSubmit={(action) => void submit(action)}
+                />
+              </div>
             </div>
           </InputGroupAddon>
         </InputGroup>
-        <div className="flex min-h-5 items-center gap-2 px-1 text-[11px] text-muted-foreground">
-          {pullRequest && !chat ? (
-            <span data-testid="new-task-where-hint" className="truncate">
-              {draft.prRole === "reviewer"
-                ? `Reviews ${pullRequest.repositoryId} #${pullRequest.number} on its head branch: never pushes or opens a PR`
-                : `Works on ${pullRequest.repositoryId} #${pullRequest.number} on its head branch`}
-            </span>
-          ) : chat && selectedRepo ? (
-            <span
-              data-testid="new-task-where-hint"
-              className="truncate"
-              title={selectedRepo.root}
+        <div
+          data-testid="new-task-details"
+          className="flex flex-wrap items-center gap-1.5 px-0.5"
+        >
+          {prBound ? (
+            <>
+              <DetailChip
+                readOnly
+                data-testid="new-task-where"
+                data-where={
+                  pullRequest ? `repo:${pullRequest.repositoryId}` : ""
+                }
+                label="Repository"
+                value={
+                  pullRequest
+                    ? shortName(pullRequest.repositoryId)
+                    : "from the PR"
+                }
+                valueText={pullRequest?.repositoryId ?? "from the PR"}
+              />
+              <DetailChip
+                readOnly
+                data-testid="new-task-base"
+                valueTestId="new-task-base-ref"
+                label="Base"
+                value={pullRequest?.baseRefName ?? "from the PR"}
+                valueText={pullRequest?.baseRefName ?? "from the PR"}
+              />
+            </>
+          ) : (
+            <>
+              <WherePicker
+                value={draft.where}
+                options={options}
+                recents={recents}
+                {...pickerProps("where")}
+                onSelect={selectWhere}
+                onOpenFolder={() => void openFolder()}
+              />
+              {!chat && selectedRepo && base && (
+                <BranchPicker
+                  branches={
+                    branches?.repositoryId === selectedRepo.id
+                      ? branches.list
+                      : null
+                  }
+                  defaultBranch={selectedRepo.defaultBranch}
+                  {...(parentBranch ? { parentBranch } : {})}
+                  value={base}
+                  {...pickerProps("branch")}
+                  onSelect={(ref) => {
+                    onChange({ baseRef: ref });
+                    closePicker();
+                  }}
+                >
+                  <DetailChip
+                    data-testid="new-task-base"
+                    valueTestId="new-task-base-ref"
+                    label="Base"
+                    value={base}
+                    valueText={base}
+                    title="Change the base branch"
+                  />
+                </BranchPicker>
+              )}
+            </>
+          )}
+          <AgentPicker
+            catalogs={catalogs}
+            harness={draft.harness}
+            defaultHarness={defaultHarness}
+            onChange={(harness) =>
+              onChange({ harness, model: "", thinking: "" })
+            }
+          />
+          <AgentModelPicker
+            catalogs={catalogs}
+            harness={effectiveHarness}
+            model={draft.model}
+            loadError={modelsError}
+            open={openPicker === "model"}
+            onOpenChange={(open) => {
+              // Retry a failed/empty load whenever the picker opens.
+              if (open && catalogs.length === 0) loadModels();
+              pickerProps("model").onOpenChange(open);
+            }}
+            onChange={(patch) => {
+              // The agent is the agent dropdown's call; the model picker
+              // only ever shows (and edits) the effective agent's models.
+              // A concrete model pins the agent it belongs to.
+              const { harness: _ignored, ...rest } = patch;
+              onChange(
+                rest.model ? { ...rest, harness: effectiveHarness } : rest,
+              );
+            }}
+          />
+          {supportsThinking(catalog, draft.model) && (
+            <ThinkingPicker
+              catalog={catalog}
+              thinking={draft.thinking}
+              onChange={(thinking) => onChange({ thinking })}
+            />
+          )}
+          <OptionsPicker
+            open={openPicker === "options"}
+            view={optionsView}
+            onOpenChange={(open) => {
+              if (open) setOptionsView("main");
+              pickerProps("options").onOpenChange(open);
+            }}
+            onViewChange={setOptionsView}
+            bypass={bypass}
+            defaultBypass={defaultBypass}
+            onBypassChange={(next) =>
+              onChange({
+                bypassPermissions: next === defaultBypass ? null : next,
+              })
+            }
+            parent={parent}
+            parentCandidates={parentCandidates}
+            suggestedParent={suggestedParent}
+            onParentChange={(taskId) => {
+              onChange({ parentTaskId: taskId, baseRef: null });
+              if (taskId) closePicker();
+            }}
+          />
+          {draft.mode === "task" && !showPrField && (
+            <button
+              type="button"
+              data-testid="new-task-attach-pr"
+              title="Continue your own pull request: the task works on its head branch"
+              onClick={() => setAttachPr(true)}
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
             >
+              <GitPullRequest className="size-3.5" />
+              Attach a PR…
+            </button>
+          )}
+        </div>
+        {where.kind === "clone" && !prBound && (
+          <input
+            ref={cloneRef}
+            data-testid="new-task-clone-url-input"
+            aria-label="Clone URL"
+            value={draft.cloneUrl}
+            onChange={(event) => onChange({ cloneUrl: event.target.value })}
+            placeholder="https://github.com/org/repo.git"
+            className="mx-0.5 h-7 rounded-lg border border-border bg-transparent px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        )}
+        <div className="flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
+          {prBound ? (
+            pullRequest?.headRefName ? (
+              <span
+                data-testid="new-task-branch-preview"
+                data-readonly="true"
+                className="flex items-center gap-1.5 break-all font-mono"
+                title={
+                  prRole === "reviewer"
+                    ? "Checks out the PR head to review it: never pushes or opens a PR"
+                    : "Continues the PR on its head branch"
+                }
+              >
+                <GitBranch className="size-3 shrink-0" />
+                <span>{pullRequest.headRefName}</span>
+                <span className="opacity-60">{"\u2190"}</span>
+                <span>{pullRequest.baseRefName}</span>
+              </span>
+            ) : (
+              <span data-testid="new-task-where-hint">
+                Repository, base and branch come from the pull request
+              </span>
+            )
+          ) : chat && selectedRepo ? (
+            <span data-testid="new-task-where-hint" title={selectedRepo.root}>
               Chats in your {whereLabel(draft.where, options)} checkout: no
               branch or worktree, and any edits land directly in it
             </span>
           ) : selectedRepo && base ? (
-            <BranchPicker
-              branches={
-                branches?.repositoryId === selectedRepo.id
-                  ? branches.list
-                  : null
-              }
-              defaultBranch={selectedRepo.defaultBranch}
-              {...(parentBranch ? { parentBranch } : {})}
-              value={base}
-              {...pickerProps("branch")}
-              onSelect={(ref) => {
-                onChange({ baseRef: ref });
-                closePicker();
-              }}
+            <button
+              type="button"
+              data-testid="new-task-branch-preview"
+              title="Change the base branch"
+              onClick={() => setOpenPicker("branch")}
+              className="flex items-center gap-1.5 break-all rounded px-1 py-0.5 text-left font-mono hover:bg-accent/60 hover:text-foreground"
             >
-              <button
-                type="button"
-                data-testid="new-task-branch-preview"
-                title="Change the base branch"
-                className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 font-mono hover:bg-accent/60 hover:text-foreground"
-              >
-                <GitBranch className="size-3 shrink-0" />
-                <span className="truncate">
-                  {`${previewSlug(title || "task")}-\u2026`}
-                </span>
-                <span className="shrink-0 opacity-60">{"\u2190"}</span>
-                <span data-testid="new-task-base-ref" className="truncate">
-                  {base}
-                </span>
-              </button>
-            </BranchPicker>
+              <GitBranch className="size-3 shrink-0" />
+              <span>{`${previewSlug(title || "task")}-\u2026`}</span>
+              <span className="opacity-60">{"\u2190"}</span>
+              <span>{base}</span>
+            </button>
           ) : where.kind === "folder" ? (
-            <span data-testid="new-task-where-hint" className="truncate">
+            <span data-testid="new-task-where-hint">
               Runs in place in {where.path}: no branch or worktree
             </span>
           ) : where.kind === "none" ? (
@@ -602,7 +730,7 @@ export function NewTaskComposer({
                 : "Cloned under your code root, then a new branch + worktree"}
             </span>
           ) : null}
-          {error ? (
+          {error && (
             <span
               className="ml-auto text-red-400"
               data-testid="new-task-error"
@@ -610,23 +738,8 @@ export function NewTaskComposer({
             >
               {error}
             </span>
-          ) : (
-            primaryBlocker && (
-              <span
-                data-testid="new-task-blocker"
-                className="ml-auto shrink-0 text-amber-300/80"
-              >
-                {primaryBlocker} to {ACTION_LABELS[primary].toLowerCase()}
-              </span>
-            )
           )}
         </div>
-        <PullRequestField
-          url={draft.prUrl}
-          role={draft.prRole}
-          parsed={pullRequest}
-          onChange={(patch) => onChange(patch)}
-        />
       </div>
     </div>
   );

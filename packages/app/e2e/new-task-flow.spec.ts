@@ -26,11 +26,16 @@ import {
   test,
 } from "@playwright/test";
 import { selectCard } from "./board-gestures";
-import { chooseWhere, submitAs } from "./composer";
+import { chooseParent, chooseWhere, openOptions, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
+// Review mode's repository: its origin is a relative local path shaped like
+// a GitHub URL (a bare repo inside the checkout), so its identity is
+// `github.com/test/review` and `git fetch origin pull/7/head` stays offline.
+const REVIEW_REPO_ID = "github.com/test/review";
+const REVIEW_PR_URL = "https://github.com/test/review/pull/7";
 
 function git(args: string[], cwd: string): string {
   return execFileSync("git", args, { cwd }).toString();
@@ -42,6 +47,8 @@ let root: string;
 let repoCheckout: string;
 let piAgentDir: string;
 let notesFolder: string;
+let reviewCheckout: string;
+let reviewHead: string;
 
 // 1x1 PNG for seeding the clipboard (same fixture as terminal-paste.spec.ts).
 const TINY_PNG_BASE64 =
@@ -183,6 +190,53 @@ test.beforeAll(async () => {
     repoCheckout,
   );
 
+  // The Review-mode repository, with someone else's PR #7 published only as
+  // GitHub's `refs/pull/7/head`.
+  reviewCheckout = path.join(codeRoot, "review-repo");
+  const commitIn = (cwd: string, message: string): void => {
+    git(
+      [
+        "-c",
+        "user.name=Harbormaster E2E",
+        "-c",
+        "user.email=harbormaster-e2e@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        message,
+      ],
+      cwd,
+    );
+  };
+  git(["init", "-q", "-b", "main", reviewCheckout], root);
+  commitIn(reviewCheckout, "init");
+  const upstream = path.join(
+    reviewCheckout,
+    "github.com",
+    "test",
+    "review.git",
+  );
+  mkdirSync(upstream, { recursive: true });
+  git(["init", "-q", "--bare", "-b", "main", upstream], root);
+  writeFileSync(
+    path.join(reviewCheckout, ".git", "info", "exclude"),
+    "github.com/\n",
+  );
+  git(
+    ["remote", "add", "origin", "github.com/test/review.git"],
+    reviewCheckout,
+  );
+  git(["push", "-q", "origin", "main"], reviewCheckout);
+  git(["checkout", "-q", "-b", "scratch"], reviewCheckout);
+  commitIn(reviewCheckout, "octo's change");
+  reviewHead = git(["rev-parse", "HEAD"], reviewCheckout).trim();
+  git(["push", "-q", "origin", "HEAD:refs/pull/7/head"], reviewCheckout);
+  git(["checkout", "-q", "main"], reviewCheckout);
+  git(["branch", "-q", "-D", "scratch"], reviewCheckout);
+
   writeFileSync(
     path.join(stateDir, "config.json"),
     JSON.stringify({
@@ -208,12 +262,36 @@ test.beforeAll(async () => {
   );
   chmodSync(fakePi, 0o755);
 
-  // Fake gh: `pr list` echoes pr.json when present (see writePr), else [].
+  // Fake gh: the PR lookup by number (`api graphql ... number=7`, Review
+  // mode's card and the reviewer task) answers review-pr.json; `pr list`
+  // echoes pr.json when present (see writePr), else [].
+  writeFileSync(
+    path.join(root, "review-pr.json"),
+    JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            number: 7,
+            url: REVIEW_PR_URL,
+            title: "Tighten the parser",
+            state: "OPEN",
+            isDraft: false,
+            author: { login: "octo" },
+            headRefName: "octo/parser",
+            headRefOid: reviewHead,
+            baseRefName: "main",
+            viewerDidAuthor: false,
+          },
+        },
+      },
+    }),
+  );
   const fakeGh = path.join(root, "fake-gh");
   writeFileSync(
     fakeGh,
     [
       "#!/bin/sh",
+      'case "$*" in *number=7*) cat "$(dirname "$0")/review-pr.json"; exit 0 ;; esac',
       ghGraphqlShimLine(root),
       'pr_file="$(dirname "$0")/pr.json"',
       'if [ "$1 $2" = "pr list" ] && [ -f "$pr_file" ]; then',
@@ -368,6 +446,119 @@ test("parking a repo task lands in Backlog and creates no branch or worktree", a
   expect(
     git(["branch", "--format=%(refname:short)"], repoCheckout).trim(),
   ).toBe("main");
+});
+
+test("the composer layout at 1200px: the prompt box footer holds only the mode switch and Start, the Where / How chips show full values, Options toggles bypass and sets a parent in its label, and Attach a PR\u2026 reveals the PR field", async () => {
+  const originalSize = await app.evaluate(
+    ({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.getSize() ?? [1280, 800],
+  );
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(1200, 800);
+  });
+  await expect.poll(() => window.evaluate(() => window.outerWidth)).toBe(1200);
+  await openNewTaskComposer();
+  await chooseWhere(window, REPO_ID);
+
+  // Inside the prompt box: the mode switch and the Start group, nothing else.
+  const footer = window.getByTestId("new-task-prompt-footer");
+  expect(
+    await footer.evaluate((el) =>
+      Array.from(el.children).map((child) => child.getAttribute("data-testid")),
+    ),
+  ).toEqual(["new-task-mode", "new-task-submit-group"]);
+  await expect(
+    footer.getByTestId("new-task-mode").getByRole("radio"),
+  ).toHaveText(["Task", "Review", "Chat"]);
+  const group = footer.getByTestId("new-task-submit-group");
+  await expect(group.locator("button")).toHaveCount(2);
+  await expect(group.getByTestId("new-task-submit")).toBeVisible();
+  await expect(group.getByTestId("new-task-submit-menu")).toBeVisible();
+  // What Start still needs: its tooltip, its description, a muted note.
+  const start = window.getByTestId("new-task-submit");
+  await expect(group.getByTestId("new-task-blocker")).toHaveText(
+    "Add a title or a prompt to start",
+  );
+  await expect(start).toHaveAttribute(
+    "title",
+    "Add a title or a prompt to start",
+  );
+  await expect(start).toHaveAttribute("aria-describedby", "new-task-blocker");
+
+  // The Where / How row: labelled chips with full values, never clipped.
+  const details = window.getByTestId("new-task-details");
+  await expect(details.getByTestId("new-task-where")).toHaveText(
+    /Repository\s*fixture/,
+  );
+  await expect(details.getByTestId("new-task-base")).toHaveText(/Base\s*main/);
+  await expect(details.getByTestId("new-task-agent")).toHaveText(/Agent\s*Pi/);
+  await expect(details.getByTestId("new-task-model")).toHaveText(
+    /Model\s*claude-opus-4-8/,
+  );
+  await expect(details.getByTestId("new-task-thinking")).toHaveText(
+    /Thinking\s*Medium/,
+  );
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("A fairly long prompt so the derived branch name gets long too");
+  const clipped = () =>
+    window.evaluate(() => {
+      const nodes = [
+        ...document.querySelectorAll(
+          '[data-testid="new-task-details"] [data-chip-value]',
+        ),
+        ...document.querySelectorAll('[data-testid="new-task-details"] > *'),
+        ...document.querySelectorAll('[data-testid="new-task-branch-preview"]'),
+      ];
+      return {
+        values: document.querySelectorAll(
+          '[data-testid="new-task-details"] [data-chip-value]',
+        ).length,
+        clipped: nodes
+          .filter((node) => node.scrollWidth > node.clientWidth)
+          .map((node) => node.textContent),
+      };
+    });
+  expect(await clipped()).toEqual({ values: 5, clipped: [] });
+  await expect(window.getByTestId("new-task-branch-preview")).toContainText(
+    "a-fairly-long-prompt-so-the-derived-branch-name-",
+  );
+
+  // Options: a plain switch for permission prompts (default on, from
+  // config); the chip names what differs from the default.
+  const optionsChip = window.getByTestId("new-task-options");
+  await expect(optionsChip).toHaveText("Options");
+  await openOptions(window);
+  const bypass = window.getByTestId("new-task-bypass");
+  await expect(bypass).toHaveAttribute("aria-checked", "true");
+  await bypass.click();
+  await expect(bypass).toHaveAttribute("aria-checked", "false");
+  await expect(optionsChip).toHaveText(/Options\s*· skip prompts: off/);
+  await expect(optionsChip).toHaveAttribute("data-bypass", "false");
+  await window.keyboard.press("Escape");
+  await expect(window.getByTestId("new-task-options-menu")).toHaveCount(0);
+  await chooseParent(window, "Parked Work");
+  await expect(optionsChip).toContainText("parent: Parked Work");
+  // A parent makes Run in background the default.
+  await expect(start).toHaveAttribute("data-action", "background");
+  expect((await clipped()).clipped).toEqual([]);
+
+  // Task mode hides the PR field until "Attach a PR…".
+  await expect(window.getByTestId("new-task-pr-url-input")).toHaveCount(0);
+  await window.getByTestId("new-task-attach-pr").click();
+  await expect(window.getByTestId("new-task-pr-url-input")).toBeFocused();
+  await expect(window.getByTestId("new-task-attach-pr")).toHaveCount(0);
+  await window.getByTestId("new-task-pr-remove").click();
+  await expect(window.getByTestId("new-task-pr-url-input")).toHaveCount(0);
+
+  await window.getByTestId("sidebar-draft-close").click();
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+  await app.evaluate(({ BrowserWindow }, [width, height]) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(width ?? 1280, height ?? 800);
+  }, originalSize);
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
 test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Dev", async () => {
@@ -533,9 +724,10 @@ test("Open folder runs a task in place, and the picked model, thinking level and
     "Runs in place",
   );
 
-  // Agent · Model: a non-default model plus a thinking level from the submenu.
+  // Agent · Model · Thinking chips: a non-default model and thinking level.
+  await expect(window.getByTestId("new-task-agent")).toHaveText(/Agent\s*Pi/);
   await expect(window.getByTestId("new-task-model")).toHaveText(
-    "Pi · claude-opus-4-8",
+    /Model\s*claude-opus-4-8/,
   );
   await window.getByTestId("new-task-model").click();
   await window
@@ -543,13 +735,18 @@ test("Open folder runs a task in place, and the picked model, thinking level and
       '[data-testid="new-task-model-option"][data-model="anthropic/claude-haiku-4-5"]',
     )
     .click();
-  await window.getByTestId("new-task-model").click();
+  await expect(window.getByTestId("new-task-thinking")).toHaveText(
+    /Thinking\s*Medium/,
+  );
   await window.getByTestId("new-task-thinking").click();
   await window
     .locator('[data-testid="new-task-thinking-option"][data-thinking="high"]')
     .click();
   await expect(window.getByTestId("new-task-model")).toHaveText(
-    "Pi · claude-haiku-4-5 · high",
+    /Model\s*claude-haiku-4-5/,
+  );
+  await expect(window.getByTestId("new-task-thinking")).toHaveText(
+    /Thinking\s*High/,
   );
 
   // Paste a screenshot into the prompt: the saved temp path lands inline.
@@ -587,6 +784,95 @@ test("Open folder runs a task in place, and the picked model, thinking level and
   // Ran in the folder itself, and the prompt points at the task's own copy.
   await expect(panel).toContainText(/PI-CWD:\S*\/notes/);
   await expect(panel).toContainText(/PI-ARG:Compare \S*task-attachments/);
+});
+
+test("Review mode: a pasted PR URL resolves into a PR card, Repository / Base / branch follow the PR, and Start creates a reviewer task on the PR head", async () => {
+  await window.keyboard.press("ControlOrMeta+N");
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
+  await window.getByTestId("new-task-mode-review").click();
+  const url = window.getByTestId("new-task-pr-url-input");
+  await expect(url).toBeFocused();
+  await expect(window.getByTestId("new-task-prompt-input")).toHaveAttribute(
+    "placeholder",
+    "What should the review focus on?",
+  );
+  await expect(window.getByTestId("new-task-blocker")).toHaveText(
+    "Paste a pull request URL to start",
+  );
+
+  // Not a PR: the error shows inline and the field stays editable.
+  await url.fill("https://github.com/test/review/issues/7");
+  await expect(window.getByTestId("new-task-pr-error")).toContainText(
+    "Not a pull request URL",
+  );
+  await expect(url).toBeEditable();
+  await url.fill(REVIEW_PR_URL);
+  const card = window.getByTestId("new-task-pr-card");
+  await expect(card).toContainText(
+    "#7 \u00B7 Tighten the parser \u00B7 by octo \u00B7 octo/parser \u2192 main",
+  );
+  await expect(window.getByTestId("new-task-pr-error")).toHaveCount(0);
+  // Someone else's PR: the role defaults to Reviewer.
+  await expect(window.getByTestId("new-task-pr-role")).toHaveAttribute(
+    "data-role",
+    "reviewer",
+  );
+  // Repository, Base and the branch are the PR's, read-only.
+  const where = window.getByTestId("new-task-where");
+  await expect(where).toHaveAttribute("data-readonly", "true");
+  await expect(where).toHaveAttribute("data-where", `repo:${REVIEW_REPO_ID}`);
+  await expect(where).toHaveText(/Repository\s*review/);
+  await expect(window.getByTestId("new-task-base")).toHaveText(/Base\s*main/);
+  await expect(window.getByTestId("new-task-branch-preview")).toHaveText(
+    /octo\/parser\s*\u2190\s*main/,
+  );
+  await expect(window.getByTestId("new-task-title-input")).toHaveAttribute(
+    "placeholder",
+    "Review: Tighten the parser",
+  );
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("Focus on the error paths");
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+
+  let taskId = "";
+  await expect
+    .poll(async () => {
+      const columns = await window.evaluate(() =>
+        window.harbormaster.core.listBoard(),
+      );
+      const task = columns
+        .flatMap((column) => column.groups.flatMap((g) => g.tasks))
+        .find((candidate) => candidate.title === "Review: Tighten the parser");
+      taskId = task?.id ?? "";
+      return task
+        ? {
+            repositoryId: task.repositoryId,
+            branch: task.branch,
+            number: task.pr?.number,
+            role: task.pr?.role,
+            state: task.state,
+          }
+        : null;
+    })
+    .toEqual({
+      repositoryId: REVIEW_REPO_ID,
+      branch: "octo/parser",
+      number: 7,
+      role: "reviewer",
+      state: "dev",
+    });
+  // Started: its worktree is on the PR head.
+  const binding = await window.evaluate(
+    (id) => window.harbormaster.core.getTaskWorkspace(id),
+    taskId,
+  );
+  const worktree = binding?.worktreePath ?? "";
+  expect(git(["rev-parse", "HEAD"], worktree).trim()).toBe(reviewHead);
+  expect(git(["branch", "--show-current"], worktree).trim()).toBe(
+    "octo/parser",
+  );
 });
 
 // Last in this file on purpose: it walks "Started Work" through the board.

@@ -29,6 +29,7 @@ import type {
   OrphanWorktreeReport,
   PresenceChangedPayload,
   PresenceSnapshot,
+  PullRequestPreview,
   PullRequestReference,
   ReadyToLandEntry,
   ReopenTaskInput,
@@ -286,6 +287,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:createTaskFromAction", input),
     parsePullRequestUrl: (url: string): Promise<PullRequestReference | null> =>
       ipcRenderer.invoke("core:parsePullRequestUrl", url),
+    previewPullRequest: (url: string): Promise<PullRequestPreview> =>
+      ipcRenderer.invoke("core:previewPullRequest", url),
     listEvents: (filter?: {
       taskId?: string;
       since?: string;

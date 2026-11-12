@@ -31,6 +31,7 @@ import type {
   OnboardingState,
   OrphanWorktreeReport,
   PresenceRecord,
+  PullRequestPreview,
   PullRequestReference,
   ReadyToLandEntry,
   ReopenTaskInput,
@@ -92,6 +93,7 @@ export type {
   OnboardingState,
   OrphanWorktreeReport,
   PresenceRecord,
+  PullRequestPreview,
   PullRequestReference,
   PullRequestRole,
   ReadyToLandEntry,
@@ -510,6 +512,8 @@ export interface HarbormasterApi {
     createTaskFromAction(input: CreateTaskActionInput): Promise<Task>;
     /** Core's PR URL parser (`github.com/org/repo/pull/12`); `null` when it is not one. */
     parsePullRequestUrl(url: string): Promise<PullRequestReference | null>;
+    /** The composer's PR card: number, title, author, head → base. See `CoreCommands.previewPullRequest`. */
+    previewPullRequest(url: string): Promise<PullRequestPreview>;
     /** The rules audit log. See `CoreCommands.listEvents`. */
     listEvents(filter?: ListEventsFilter): Promise<AuditEntry[]>;
     /** Dry run of the current rules. See `CoreCommands.rulesCheck`. */

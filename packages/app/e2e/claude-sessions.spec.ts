@@ -19,7 +19,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { chooseWhere, submitAs } from "./composer";
+import { chooseParent, chooseWhere, submitAs } from "./composer";
 import {
   controlFakeClaude,
   readFakeClaude,
@@ -116,7 +116,7 @@ test("an interactive Claude Code pane: agent dropdown, probe answered, 7501 driv
   await window.getByTestId("new-task-title-input").fill("Claude chat");
   await chooseWhere(window, "none");
   await chooseAgent("claude-code");
-  await expect(window.getByTestId("new-task-model")).toContainText(
+  await expect(window.getByTestId("new-task-agent")).toContainText(
     "Claude Code",
   );
   await submitAs(window, "start");
@@ -160,20 +160,16 @@ test("a launched Claude Code child: bypass, hooks + MCP on argv, a parent's mess
   await window.getByTestId("new-task-title-input").fill("Claude child");
   await window.getByTestId("new-task-prompt-input").fill("-do the child work");
   await chooseWhere(window, "none");
-  await window.getByTestId("new-task-parent-add").click();
-  await window
-    .getByTestId("new-task-parent-menu")
-    .getByTestId("new-task-parent-option")
-    .filter({ hasText: "Claude parent" })
-    .click();
+  await chooseParent(window, "Claude parent");
   // A child defaults to its parent's agent (Pi); pick Claude Code instead.
   await expect(window.getByTestId("new-task-agent")).toHaveAttribute(
     "data-harness",
     "pi",
   );
   await chooseAgent("claude-code");
-  // Background runs bypass permission prompts by default, visibly (R7).
-  await expect(window.getByTestId("new-task-bypass")).toHaveAttribute(
+  // Background runs bypass permission prompts by default (R7), shown
+  // behind the Options chip.
+  await expect(window.getByTestId("new-task-options")).toHaveAttribute(
     "data-bypass",
     "true",
   );

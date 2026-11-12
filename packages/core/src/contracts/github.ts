@@ -49,6 +49,30 @@ export interface PullRequestStatus {
   lastAuthorActivityAt?: string;
   /** Latest human non-author review or comment (ISO). */
   lastReviewerActivityAt?: string;
+  /** The PR's title. Reported by `view` only (not by the refresh lookups). */
+  title?: string;
+  /** The PR's base branch. Reported by `view` only (not by the refresh lookups). */
+  baseRefName?: string;
+}
+
+/**
+ * What the new-task composer shows for a pasted PR URL before the task is
+ * created (`CoreCommands.previewPullRequest`): enough for a one-line card
+ * and the role default. `viewerIsAuthor` drives Author vs Reviewer.
+ */
+export interface PullRequestPreview {
+  /** Normalized `host/owner/repo`, a repository core knows locally. */
+  repositoryId: string;
+  number: number;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  title?: string;
+  author?: string;
+  /** The branch a PR-bound task checks out. */
+  headRefName?: string;
+  /** The PR's base branch (the repository's default branch when GitHub did not say). */
+  baseRefName: string;
+  viewerIsAuthor?: boolean;
 }
 
 /** One open PR found by a GitHub search (`searchPullRequests`). */

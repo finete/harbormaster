@@ -26,6 +26,7 @@ import type {
 } from "../contracts/commands.js";
 import type {
   PullRequestAccess,
+  PullRequestPreview,
   PullRequestStatus,
   VersionAccess,
 } from "../contracts/github.js";
@@ -3098,6 +3099,40 @@ export class CoreManager implements CoreCommands {
       ...(role ? { role } : {}),
       start: input.start === true || String(input.start) === "true",
     });
+  }
+
+  async previewPullRequest(url: string): Promise<PullRequestPreview> {
+    const reference =
+      typeof url === "string" ? parsePullRequestUrl(url) : undefined;
+    if (!reference) {
+      throw new Error("Not a pull request URL (…/org/repo/pull/12)");
+    }
+    const repositories = await this.listRepositories();
+    const repo = repositories.find(
+      (candidate) => candidate.id === reference.repositoryId,
+    );
+    if (!repo) {
+      throw new Error(
+        `No local checkout of ${reference.repositoryId}: clone it under your code root or open its folder first`,
+      );
+    }
+    if (!this.deps.pullRequests.view) {
+      throw new Error("Pull-request tasks need GitHub access");
+    }
+    const status = await this.deps.pullRequests.view(repo.id, reference.number);
+    return {
+      repositoryId: repo.id,
+      number: status.number,
+      url: status.url,
+      state: status.state,
+      ...(status.title ? { title: status.title } : {}),
+      ...(status.author ? { author: status.author } : {}),
+      ...(status.headRefName ? { headRefName: status.headRefName } : {}),
+      baseRefName: status.baseRefName ?? repo.defaultBranch,
+      ...(status.viewerIsAuthor !== undefined
+        ? { viewerIsAuthor: status.viewerIsAuthor }
+        : {}),
+    };
   }
 
   // --- Onboarding (docs/release-plan.md "Onboarding (four screens)") ----

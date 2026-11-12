@@ -1,128 +1,237 @@
-// The new-task composer's "PR URL" row (docs/release-plan.md "Reviewer
-// tasks"): bind the task to an existing pull request and say whose it is.
-// The URL is parsed by core (`parsePullRequestUrl`); the role label is
-// Author (your PR: continue on its head branch) or Reviewer (someone
-// else's: check out the head, never push or open a PR); "From GitHub" lets
-// core decide from `viewerDidAuthor`. Its own component so the composer's
-// toolbar (Where · Agent · Model) stays untouched.
-import { GitPullRequest } from "lucide-react";
-import type { JSX } from "react";
+// The new-task composer's pull-request block (docs/new-task-composer.md
+// "Review mode"): the first control under the title in Review mode, or what
+// Task mode's "Attach a PR…" reveals. A pasted URL is looked up through core
+// (`previewPullRequest`, GitHub access in core; never gh from the
+// renderer): a spinner while resolving, the error inline (the field stays
+// editable), and once resolved a compact card
+// `#<n> · <title> · by <author> · <head> → <base>` with a remove (×).
+// Review mode adds the `Author | Reviewer` segment (default from the PR).
+import { GitPullRequest, Loader2, X } from "lucide-react";
+import type { JSX, Ref } from "react";
 import { useEffect, useState } from "react";
-import type {
-  PullRequestReference,
-  PullRequestRole,
-} from "../../../preload/api";
+import type { PullRequestPreview, PullRequestRole } from "../../../preload/api";
+import type { PrLookup } from "../lib/new-task-draft";
 import { cn } from "../lib/utils";
 
-const ROLES: Array<{ id: PullRequestRole | ""; label: string; hint: string }> =
-  [
-    {
-      id: "",
-      label: "From GitHub",
-      hint: "Your own PR continues as its author; anyone else's is a review",
-    },
-    {
-      id: "author",
-      label: "Author",
-      hint: "Continues the PR on its head branch; Await review pushes to it",
-    },
-    {
-      id: "reviewer",
-      label: "Reviewer",
-      hint: "Checks out the PR head to review it; never pushes or opens a PR",
-    },
-  ];
+/** Pause after the last keystroke before asking GitHub. */
+const LOOKUP_DEBOUNCE_MS = 250;
 
-/** Core's parse of `url`: `undefined` while parsing, `null` when it is not a PR URL. */
-export function useParsedPullRequest(
+/** Resolved lookups by trimmed URL: switching modes or re-opening a draft never refetches. */
+const resolvedCache = new Map<string, PullRequestPreview>();
+
+function ipcErrorText(thrown: unknown): string {
+  const text = thrown instanceof Error ? thrown.message : String(thrown);
+  // Electron prefixes rejected IPC handlers with "Error invoking remote method '…': Error: ".
+  return text.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+}
+
+/** Core's lookup of `url` while `enabled`; `null` when there is nothing to look up. */
+export function usePullRequestLookup(
   url: string,
-): PullRequestReference | null | undefined {
-  const [parsed, setParsed] = useState<{
+  enabled: boolean,
+): PrLookup | null {
+  const trimmed = enabled ? url.trim() : "";
+  const [result, setResult] = useState<{
     url: string;
-    value: PullRequestReference | null;
+    lookup: PrLookup;
   } | null>(null);
   useEffect(() => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
+    if (!trimmed || resolvedCache.has(trimmed)) return;
     let cancelled = false;
-    void window.harbormaster.core
-      .parsePullRequestUrl(trimmed)
-      .then((value) => {
-        if (!cancelled) setParsed({ url: trimmed, value });
-      })
-      .catch(() => {
-        if (!cancelled) setParsed({ url: trimmed, value: null });
-      });
+    const timer = setTimeout(() => {
+      void window.harbormaster.core
+        .previewPullRequest(trimmed)
+        .then((pr) => {
+          resolvedCache.set(trimmed, pr);
+          if (!cancelled) {
+            setResult({ url: trimmed, lookup: { status: "resolved", pr } });
+          }
+        })
+        .catch((thrown: unknown) => {
+          if (!cancelled) {
+            setResult({
+              url: trimmed,
+              lookup: { status: "error", message: ipcErrorText(thrown) },
+            });
+          }
+        });
+    }, LOOKUP_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [url]);
-  const trimmed = url.trim();
+  }, [trimmed]);
   if (!trimmed) return null;
-  return parsed?.url === trimmed ? parsed.value : undefined;
+  const cached = resolvedCache.get(trimmed);
+  if (cached) return { status: "resolved", pr: cached };
+  return result?.url === trimmed ? result.lookup : { status: "resolving" };
+}
+
+const ROLE_HINTS: Record<PullRequestRole, string> = {
+  author: "Your PR: continues on its head branch; Await review pushes to it",
+  reviewer:
+    "Someone else's PR: checks out its head; never pushes or opens a PR",
+};
+
+/** `#7 · Fix login · by octo · feature-login → main`, leaving out what GitHub did not say. */
+export function pullRequestSummary(pr: PullRequestPreview): string {
+  return [
+    `#${pr.number}`,
+    pr.title,
+    pr.author ? `by ${pr.author}` : undefined,
+    pr.headRefName ? `${pr.headRefName} \u2192 ${pr.baseRefName}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" \u00B7 ");
 }
 
 export function PullRequestField({
   url,
+  lookup,
+  mode,
   role,
-  parsed,
+  roleOverridden,
+  inputRef,
+  autoFocus,
   onChange,
+  onRemove,
 }: {
   url: string;
-  role: PullRequestRole | "";
-  parsed: PullRequestReference | null | undefined;
+  lookup: PrLookup | null;
+  /** Review mode shows the role segment; Task mode's attached PR is always author. */
+  mode: "review" | "task";
+  /** The effective role (see `effectivePrRole`). */
+  role: PullRequestRole;
+  /** Whether the user picked the role (vs. the PR's default). */
+  roleOverridden: boolean;
+  inputRef?: Ref<HTMLInputElement>;
+  autoFocus?: boolean;
   onChange: (patch: { prUrl?: string; prRole?: PullRequestRole | "" }) => void;
+  /** × on the card (and on Task mode's bare field): drop the PR. */
+  onRemove: () => void;
 }): JSX.Element {
-  const active = ROLES.find((option) => option.id === role) ?? ROLES[0];
+  const resolved = lookup?.status === "resolved" ? lookup.pr : null;
   return (
-    <div
-      className="flex flex-col gap-1.5 px-1 text-[11px] text-muted-foreground"
-      data-testid="new-task-pr"
-    >
-      <div className="flex items-center gap-2">
-        <GitPullRequest className="size-3.5 shrink-0" aria-hidden />
-        <input
-          data-testid="new-task-pr-url-input"
-          aria-label="Pull request URL"
-          value={url}
-          onChange={(event) => onChange({ prUrl: event.target.value })}
-          placeholder="PR URL (optional): work on an existing pull request"
-          className="h-6 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        />
-        {url.trim() && (
-          <fieldset
-            className="m-0 flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
-            aria-label="Role"
-            data-testid="new-task-pr-role"
+    <div className="flex flex-col gap-1.5 px-1" data-testid="new-task-pr">
+      {resolved ? (
+        <div
+          data-testid="new-task-pr-card"
+          data-number={resolved.number}
+          className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-muted/40 py-1 pl-2.5 pr-1 text-xs text-foreground"
+        >
+          <GitPullRequest
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+          <span
+            data-testid="new-task-pr-summary"
+            className="min-w-0 flex-1 break-words"
+            title={resolved.url}
           >
-            {ROLES.map((option) => (
-              <button
-                key={option.id || "github"}
-                type="button"
-                aria-pressed={role === option.id}
-                data-testid={`new-task-pr-role-${option.id || "github"}`}
-                title={option.hint}
-                onClick={() => onChange({ prRole: option.id })}
-                className={cn(
-                  "rounded px-1.5 py-0.5 text-[11px] transition-colors",
-                  role === option.id
-                    ? "bg-accent text-foreground"
-                    : "hover:bg-accent/50",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </fieldset>
-        )}
-      </div>
-      {url.trim() && (
-        <span className="pl-5" data-testid="new-task-pr-hint">
-          {parsed === undefined
-            ? "Checking…"
-            : parsed === null
-              ? "Not a pull request URL (…/org/repo/pull/12)"
-              : `${parsed.repositoryId} #${parsed.number}: ${active?.hint ?? ""}`}
+            {pullRequestSummary(resolved)}
+          </span>
+          {mode === "review" ? (
+            <fieldset
+              className="m-0 flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+              aria-label="Role"
+              data-testid="new-task-pr-role"
+              data-role={role}
+            >
+              {(["author", "reviewer"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={role === option}
+                  data-testid={`new-task-pr-role-${option}`}
+                  title={`${ROLE_HINTS[option]}${
+                    role === option && !roleOverridden ? " (from the PR)" : ""
+                  }`}
+                  onClick={() => onChange({ prRole: option })}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[11px] transition-colors",
+                    role === option
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/50",
+                  )}
+                >
+                  {option === "author" ? "Author" : "Reviewer"}
+                </button>
+              ))}
+            </fieldset>
+          ) : (
+            <span
+              className="shrink-0 text-[11px] text-muted-foreground"
+              title={ROLE_HINTS.author}
+            >
+              as author
+            </span>
+          )}
+          <button
+            type="button"
+            data-testid="new-task-pr-remove"
+            aria-label="Remove pull request"
+            title="Remove pull request"
+            onClick={onRemove}
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <GitPullRequest
+              className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground"
+              aria-hidden
+            />
+            <input
+              ref={inputRef}
+              // biome-ignore lint/a11y/noAutofocus: Review mode's first control
+              autoFocus={autoFocus}
+              data-testid="new-task-pr-url-input"
+              aria-label="Pull request URL"
+              aria-invalid={lookup?.status === "error"}
+              value={url}
+              onChange={(event) => onChange({ prUrl: event.target.value })}
+              placeholder={
+                mode === "review"
+                  ? "Pull request URL to review (https://github.com/org/repo/pull/12)"
+                  : "Pull request URL: continue your own PR"
+              }
+              className={cn(
+                "h-8 w-full rounded-lg border border-border bg-transparent pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                lookup?.status === "error" && "border-red-400/60",
+              )}
+            />
+            {lookup?.status === "resolving" && (
+              <Loader2
+                data-testid="new-task-pr-spinner"
+                aria-label="Looking up the pull request"
+                className="absolute right-2.5 size-3.5 animate-spin text-muted-foreground"
+              />
+            )}
+          </div>
+          {mode === "task" && (
+            <button
+              type="button"
+              data-testid="new-task-pr-remove"
+              aria-label="Remove pull request"
+              title="Don't attach a pull request"
+              onClick={onRemove}
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      )}
+      {lookup?.status === "error" && (
+        <span
+          data-testid="new-task-pr-error"
+          role="alert"
+          className="pl-1 text-[11px] text-red-400"
+        >
+          {lookup.message}
         </span>
       )}
     </div>
