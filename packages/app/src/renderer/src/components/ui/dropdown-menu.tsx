@@ -15,7 +15,7 @@ export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 export const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 
 const CONTENT =
-  "z-50 min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg";
+  "z-50 min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground";
 
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
@@ -37,7 +37,7 @@ export const DropdownMenuContent = React.forwardRef<
 DropdownMenuContent.displayName = "DropdownMenuContent";
 
 const ITEM =
-  "relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5";
+  "relative flex cursor-default select-none items-center gap-2 rounded px-2 py-1.5 text-sm outline-none transition-colors duration-[120ms] ease-out focus:bg-accent focus:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5";
 
 export const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
@@ -79,7 +79,7 @@ export function DropdownMenuLabel({
   return (
     <DropdownMenuPrimitive.Label
       className={cn(
-        "px-2 py-1 text-[11px] font-medium text-muted-foreground",
+        "px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
         className,
       )}
       {...props}
@@ -108,7 +108,7 @@ export function DropdownMenuShortcut({
   return (
     <span
       className={cn(
-        "ml-auto pl-4 text-[11px] tracking-widest text-muted-foreground",
+        "ml-auto inline-flex h-5 items-center rounded border border-border bg-foreground/[0.08] px-1 font-mono text-[11px] text-muted-foreground",
         className,
       )}
       {...props}

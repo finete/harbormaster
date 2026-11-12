@@ -62,14 +62,14 @@ export function UpdateBanner(): JSX.Element | null {
     <div
       data-testid="update-banner"
       data-version={update.version}
-      className="flex shrink-0 items-center justify-center gap-2 border-b border-emerald-900/60 bg-emerald-950/50 px-3 py-1.5 text-xs text-emerald-100"
+      className="flex shrink-0 items-center justify-center gap-2 border-b border-border bg-card px-3 py-1.5 text-xs text-foreground"
     >
-      <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
+      <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-primary" />
       <span>
         Harbormaster v{update.version} is available:{" "}
         <code
           data-testid="update-banner-command"
-          className="rounded bg-black/30 px-1.5 py-0.5 font-mono"
+          className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono"
         >
           {update.command}
         </code>
@@ -79,7 +79,7 @@ export function UpdateBanner(): JSX.Element | null {
         data-testid="update-banner-copy"
         onClick={copy}
         title="Copy the upgrade command"
-        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/10"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
       >
         {copied ? (
           <Check className="h-3.5 w-3.5" />
@@ -94,7 +94,7 @@ export function UpdateBanner(): JSX.Element | null {
         onClick={dismiss}
         title="Dismiss"
         aria-label="Dismiss"
-        className="rounded p-0.5 hover:bg-white/10"
+        className="rounded p-0.5 text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
       >
         <X className="h-3.5 w-3.5" />
       </button>

@@ -284,7 +284,10 @@ test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc) and Create re
   await expect(row("asked")).toBeVisible();
 
   // C on the review request: a reviewer task bound to the PR's head branch.
-  await row("rule", "Review requested").click();
+  // Click the row's leading edge, not its center: the hover-revealed
+  // actions overlay the row's right side and a wide primary ("Create review
+  // task") can reach the center.
+  await row("rule", "Review requested").click({ position: { x: 12, y: 12 } });
   await expect(window.getByTestId("inbox-detail-body")).toContainText("octo");
   await window.keyboard.press("c");
   await expect(row("rule", "Review requested")).toHaveCount(0);

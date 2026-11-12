@@ -61,11 +61,11 @@ export function TaskAudit({
           <Button
             size="sm"
             variant="ghost"
-            className="h-6 shrink-0 gap-1 px-1.5 text-[11px]"
+            className="shrink-0 px-2"
             data-testid="task-audit-history-button"
             title="Rule history for this task"
           >
-            <History className="h-3 w-3" />
+            <History className="h-3.5 w-3.5" />
             History
           </Button>
         </PopoverTrigger>
@@ -90,7 +90,7 @@ export function TaskAudit({
                     line.kind === "action"
                       ? "text-foreground"
                       : line.kind === "warning"
-                        ? "text-amber-300"
+                        ? "text-status-needsYou"
                         : "text-muted-foreground"
                   }
                 >

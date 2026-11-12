@@ -200,7 +200,7 @@ export function PullRequestField({
               }
               className={cn(
                 "h-8 w-full rounded-lg border border-border bg-transparent pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                lookup?.status === "error" && "border-red-400/60",
+                lookup?.status === "error" && "border-status-error/60",
               )}
             />
             {lookup?.status === "resolving" && (
@@ -229,7 +229,7 @@ export function PullRequestField({
         <span
           data-testid="new-task-pr-error"
           role="alert"
-          className="pl-1 text-[11px] text-red-400"
+          className="pl-1 text-[11px] text-status-error"
         >
           {lookup.message}
         </span>

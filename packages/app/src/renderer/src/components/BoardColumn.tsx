@@ -168,7 +168,7 @@ export function BoardColumn({
         aria-label={`Expand ${column.title}`}
         onClick={onToggleCollapse}
         className={cn(
-          "flex w-11 shrink-0 flex-none flex-col items-center gap-2 rounded-lg border border-border bg-muted/30 py-2 text-muted-foreground transition-[flex-basis,width] duration-200 ease-in-out hover:bg-muted/50 hover:text-foreground",
+          "flex w-11 shrink-0 flex-none flex-col items-center gap-2 rounded-lg border border-border bg-muted/30 py-2 text-muted-foreground transition-[flex-basis,width] duration-200 ease-in-out hover:bg-accent hover:text-foreground",
           isOver && "bg-primary/10 ring-1 ring-primary",
         )}
       >
@@ -201,7 +201,7 @@ export function BoardColumn({
       )}
     >
       <div className="flex items-center justify-between px-1 pb-1">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {column.title}
         </h2>
         <div className="flex items-center gap-2">

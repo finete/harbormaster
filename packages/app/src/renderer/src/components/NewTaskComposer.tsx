@@ -732,7 +732,7 @@ export function NewTaskComposer({
           ) : null}
           {error && (
             <span
-              className="ml-auto text-red-400"
+              className="ml-auto text-status-error"
               data-testid="new-task-error"
               role="alert"
             >

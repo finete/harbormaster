@@ -128,7 +128,7 @@ export const DetailChip = forwardRef<
         data-testid={valueTestId}
         className={cn(
           "shrink-0 whitespace-nowrap",
-          attention && "text-amber-300/90",
+          attention && "text-status-needsYou/90",
         )}
       >
         {value}
@@ -580,7 +580,7 @@ export function AgentModelPicker({
             className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground"
           >
             {loadError ? (
-              <span className="text-amber-300/90">
+              <span className="text-status-needsYou/90">
                 Couldn't load models: {loadError}. If the app was just updated,
                 restart it.
               </span>
@@ -636,7 +636,7 @@ export function AgentModelPicker({
                   </div>
                 ))}
                 {entry.error && (
-                  <p className="px-2 py-1 text-[11px] text-amber-300/90">
+                  <p className="px-2 py-1 text-[11px] text-status-needsYou/90">
                     {entry.error}
                   </p>
                 )}
@@ -1146,7 +1146,7 @@ export function SubmitSplitButton({
                 {blocker && (
                   <span
                     data-testid="new-task-submit-blocker"
-                    className="text-[11px] leading-snug text-amber-300/90"
+                    className="text-[11px] leading-snug text-status-needsYou/90"
                   >
                     {blocker}
                   </span>

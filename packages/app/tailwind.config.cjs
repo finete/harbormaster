@@ -26,10 +26,44 @@ module.exports = {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        // Semantic status (docs/design-system.md): amber only ever means
+        // "needs you"; mint doubles as ok; error covers failures/destructive.
+        status: {
+          needsYou: "hsl(var(--status-needs-you))",
+          ok: "hsl(var(--status-ok))",
+          error: "hsl(var(--status-error))",
+        },
+      },
+      fontFamily: {
+        sans: [
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Inter",
+          '"Segoe UI"',
+          "system-ui",
+          "sans-serif",
+        ],
+        mono: [
+          "ui-monospace",
+          '"JetBrains Mono"',
+          "Menlo",
+          "SFMono-Regular",
+          "monospace",
+        ],
+      },
+      transitionDuration: {
+        DEFAULT: "120ms",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "cubic-bezier(0, 0, 0.2, 1)",
       },
       borderRadius: {
         lg: "var(--radius)",

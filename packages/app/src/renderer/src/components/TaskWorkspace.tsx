@@ -299,9 +299,12 @@ export const TaskWorkspace = memo(function TaskWorkspace({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/20 px-2 py-1">
+      <div
+        className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3"
+        data-testid="workspace-header"
+      >
         <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Terminals
           </span>
           {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
@@ -312,7 +315,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 w-7 p-0"
+            className="w-7 p-0"
             onClick={manualRefresh.refresh}
             disabled={manualRefresh.busy}
             aria-busy={manualRefresh.busy}
@@ -329,7 +332,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             onClick={addTerminal}
             data-testid="add-terminal-button"
           >
@@ -353,7 +356,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
       </div>
       <div className="min-h-0 flex-1" data-testid="dockview-host">
         <DockviewReact
-          className="dockview-theme-dark h-full w-full"
+          className="dockview-theme-harbormaster h-full w-full"
           onReady={onReady}
           components={components}
           tabComponents={tabComponents}

@@ -32,6 +32,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import {
+  SplitButton,
+  SplitButtonMain,
+  SplitButtonTrigger,
+} from "./ui/split-button";
 
 export function OpenInKindIcon({
   kind,
@@ -66,13 +71,13 @@ export function OpenInButton({
   const groups = groupOpenInApps(apps);
 
   return (
-    <div
-      className="inline-flex h-8 items-stretch rounded-md border border-border text-xs"
+    <SplitButton
+      variant="secondary"
+      size="sm"
       data-testid={testId}
       title={path ? undefined : NO_WORKTREE}
     >
-      <button
-        type="button"
+      <SplitButtonMain
         disabled={disabled}
         data-testid={`${testId}-main`}
         data-app-id={current?.id}
@@ -86,22 +91,19 @@ export function OpenInButton({
               : undefined
             : NO_WORKTREE
         }
-        className="inline-flex items-center gap-1.5 rounded-l-md px-2 font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
       >
         {current && <OpenInKindIcon kind={current.kind} />}
         {current ? `Open in ${current.label}` : "Open in…"}
-      </button>
+      </SplitButtonMain>
       <DropdownMenu>
         <DropdownMenuTrigger asChild disabled={!path || apps.length === 0}>
-          <button
-            type="button"
+          <SplitButtonTrigger
             aria-label="Open in…"
             title={path ? "Open in…" : NO_WORKTREE}
             data-testid={`${testId}-menu-trigger`}
-            className="inline-flex items-center rounded-r-md border-l border-border px-1.5 transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             <ChevronDown className="h-3.5 w-3.5" />
-          </button>
+          </SplitButtonTrigger>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
@@ -145,6 +147,6 @@ export function OpenInButton({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </SplitButton>
   );
 }

@@ -28,11 +28,11 @@ export function ConnectivityBanner(): JSX.Element | null {
       data-state={state}
       className={cn(
         "flex shrink-0 items-center justify-center gap-2 border-b px-3 py-1.5 text-xs font-medium",
-        // Muted slate/blue, deliberately not amber/red: this is an
-        // environmental state, not an error.
+        // Neutral grey ramp, deliberately not amber/red: this is an
+        // environmental state, not an error; "restored" reads as status ok.
         state === "restored"
-          ? "border-sky-900/60 bg-sky-950/60 text-sky-200"
-          : "border-slate-700/60 bg-slate-900/60 text-slate-300",
+          ? "border-status-ok/30 bg-status-ok/10 text-status-ok"
+          : "border-border bg-muted text-muted-foreground",
       )}
     >
       {state === "reconnecting" ? (

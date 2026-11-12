@@ -48,8 +48,9 @@ export function SidebarNavItem({
         title={tooltip}
         onClick={onClick}
         className={cn(
-          "relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-1 focus-visible:ring-primary/60 [&>svg]:size-4",
-          active && "bg-accent/70 text-foreground",
+          "relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&>svg]:size-4",
+          active &&
+            "bg-accent text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary",
         )}
       >
         {icon}
@@ -73,8 +74,9 @@ export function SidebarNavItem({
       title={tooltip}
       onClick={onClick}
       className={cn(
-        "group/nav flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm text-muted-foreground outline-none transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:ring-1 focus-visible:ring-primary/60 [&>svg]:size-4 [&>svg]:shrink-0",
-        active && "bg-accent/70 font-medium text-foreground",
+        "group/nav relative flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [&>svg]:size-4 [&>svg]:shrink-0",
+        active &&
+          "bg-accent font-medium text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary",
       )}
     >
       {icon}
@@ -82,7 +84,7 @@ export function SidebarNavItem({
       {hasBadge ? (
         <span
           data-testid={testId ? `${testId}-count` : undefined}
-          className="flex h-5 min-w-5 items-center justify-center rounded-md bg-primary/90 px-1.5 text-xs font-medium tabular-nums text-primary-foreground"
+          className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-semibold tabular-nums text-primary-foreground"
         >
           {badge}
         </span>

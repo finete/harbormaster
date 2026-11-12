@@ -108,16 +108,16 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           disabled={busy !== null}
           onClick={handleReopenClick}
           data-testid={`reopen-task-button-${task.id}`}
           title="Reopen: a new Dev cycle (fresh branch + worktree) that continues the previous conversation"
         >
           {busy === "reopen" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <RotateCcw className="h-3 w-3" />
+            <RotateCcw className="h-3.5 w-3.5" />
           )}
           Reopen
         </Button>
@@ -150,9 +150,9 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           title="Start: create the branch + worktree and move to Dev (s)"
         >
           {busy === "start" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Play className="h-3 w-3" />
+            <Play className="h-3.5 w-3.5" />
           )}
           Start
           <Kbd>s</Kbd>
@@ -160,25 +160,25 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
       )}
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         disabled={!awaitAllowed || busy !== null}
         onClick={handleAwaitClick}
         data-testid={`await-button-${task.id}`}
         title="Move to Awaiting: pick why (r on the board)"
       >
-        {busy === "await" && <Loader2 className="h-3 w-3 animate-spin" />}
+        {busy === "await" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         Await…
         <Kbd>r</Kbd>
       </Button>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         disabled={!doneAllowed || busy !== null}
         onClick={handleToDone}
         data-testid={`to-done-button-${task.id}`}
         title="Move to Done (x)"
       >
-        {busy === "done" && <Loader2 className="h-3 w-3 animate-spin" />}
+        {busy === "done" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
         Done
         <Kbd>x</Kbd>
       </Button>

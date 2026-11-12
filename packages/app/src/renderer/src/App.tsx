@@ -537,22 +537,23 @@ export function App({
               view === "board" ? "flex h-full w-full flex-col" : "hidden"
             }
           >
-            <header className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+            <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-card px-3">
+              <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Board
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2"
                 data-testid="workspace-button"
                 onClick={() => setView("workspace")}
                 title={`Back to workspace (${modKeyLabel()}B)`}
               >
-                <PanelLeft className="mr-1.5 h-3.5 w-3.5" />
+                <PanelLeft className="h-3.5 w-3.5" />
                 Workspace
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2"
                 data-testid="board-refresh-button"
                 aria-busy={manualRefresh.busy}
                 disabled={manualRefresh.busy}
@@ -561,15 +562,12 @@ export function App({
               >
                 <RefreshCw
                   className={cn(
-                    "mr-1.5 h-3.5 w-3.5",
+                    "h-3.5 w-3.5",
                     manualRefresh.busy && "animate-spin",
                   )}
                 />
                 Refresh
               </Button>
-              <span className="px-1 text-sm font-medium text-muted-foreground">
-                Board
-              </span>
               <div className="ml-auto flex items-center gap-2">
                 <InboxHeaderButton
                   count={inbox.priorityCount}
@@ -577,7 +575,6 @@ export function App({
                 />
                 <Button
                   size="sm"
-                  className="h-7 px-2"
                   data-testid="board-new-task-button"
                   onClick={openDraft}
                 >

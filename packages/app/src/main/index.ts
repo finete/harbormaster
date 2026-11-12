@@ -1399,7 +1399,8 @@ function createWindow(): void {
     ...(offscreen
       ? { x: -4200, y: -4200, skipTaskbar: true, focusable: false }
       : {}),
-    backgroundColor: "#0b0f14",
+    // The --background design token (#0a0b0c): no flash before first paint.
+    backgroundColor: "#0a0b0c",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,

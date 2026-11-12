@@ -47,12 +47,14 @@ export function ToastHost(): JSX.Element {
           key={toast.id}
           data-testid={`toast-${toast.tone}`}
           className={cn(
-            "pointer-events-auto flex max-w-sm items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-lg",
+            // Surface card + a status-tinted hairline and text: error =
+            // status-error, success = status-ok, warning = needs-you.
+            "pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border bg-card px-3 py-2 text-sm",
             toast.tone === "error"
-              ? "border-red-900 bg-red-950 text-red-200"
+              ? "border-status-error/50 text-status-error"
               : toast.tone === "success"
-                ? "border-emerald-900 bg-emerald-950 text-emerald-200"
-                : "border-yellow-900 bg-yellow-950 text-yellow-200",
+                ? "border-status-ok/50 text-status-ok"
+                : "border-status-needsYou/50 text-status-needsYou",
           )}
         >
           <span className="flex-1">{toast.text}</span>
@@ -64,7 +66,7 @@ export function ToastHost(): JSX.Element {
                 toast.action?.run();
                 dismissToast(toast.id);
               }}
-              className="shrink-0 font-medium underline underline-offset-2 opacity-90 hover:opacity-100"
+              className="shrink-0 font-medium text-foreground underline underline-offset-2 hover:text-primary"
             >
               {toast.action.label}
             </button>
@@ -74,7 +76,7 @@ export function ToastHost(): JSX.Element {
             aria-label="Dismiss"
             data-testid="toast-dismiss"
             onClick={() => dismissToast(toast.id)}
-            className="shrink-0 opacity-70 hover:opacity-100"
+            className="shrink-0 rounded text-muted-foreground transition-colors duration-[120ms] ease-out hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -85,7 +87,7 @@ export function ToastHost(): JSX.Element {
           type="button"
           data-testid="toast-overflow"
           onClick={() => setExpanded((value) => !value)}
-          className="pointer-events-auto flex items-center justify-center gap-1 rounded-md border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-lg hover:text-foreground"
+          className="pointer-events-auto flex items-center justify-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         >
           {expanded ? (
             <>

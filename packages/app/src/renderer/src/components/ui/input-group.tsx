@@ -16,9 +16,9 @@ export function InputGroup({
     <fieldset
       data-slot="input-group"
       className={cn(
-        "group/input-group relative m-0 flex w-full min-w-0 p-0 items-center rounded-2xl border border-input bg-card/60 shadow-sm transition-[color,box-shadow]",
+        "group/input-group relative m-0 flex w-full min-w-0 p-0 items-center rounded-lg border border-input bg-card transition-colors duration-[120ms] ease-out",
         "has-[>[data-align=block-start]]:flex-col has-[>[data-align=block-end]]:flex-col",
-        "has-[[data-slot=input-group-control]:focus-visible]:border-ring/60 has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-ring/20",
+        "has-[[data-slot=input-group-control]:focus-visible]:border-primary has-[[data-slot=input-group-control]:focus-visible]:ring-1 has-[[data-slot=input-group-control]:focus-visible]:ring-ring",
         className,
       )}
       {...props}
@@ -100,7 +100,7 @@ export const InputGroupTextarea = React.forwardRef<
     ref={ref}
     data-slot="input-group-control"
     className={cn(
-      "w-full flex-1 resize-none border-0 bg-transparent px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+      "w-full flex-1 resize-none border-0 bg-transparent px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
       className,
     )}
     {...props}

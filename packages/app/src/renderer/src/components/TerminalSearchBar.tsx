@@ -77,7 +77,7 @@ export function TerminalSearchBar({
   return (
     <div
       data-testid="terminal-search"
-      className="absolute right-2 top-2 z-50 flex items-center gap-1 rounded border border-border bg-background px-2 py-1 shadow-lg"
+      className="absolute right-2 top-2 z-50 flex h-8 items-center gap-1 rounded-lg border border-border bg-popover px-2 focus-within:border-primary"
     >
       <input
         ref={inputRef}
@@ -87,7 +87,7 @@ export function TerminalSearchBar({
         onChange={(e) => handleChange(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Search…"
-        className="w-40 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        className="w-40 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
       />
       {noResults && term && (
         <span
@@ -100,7 +100,7 @@ export function TerminalSearchBar({
       <button
         type="button"
         onClick={() => findPrevious(term)}
-        className="rounded px-1 text-xs text-foreground hover:bg-muted"
+        className="flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         aria-label="Previous result"
         title="Previous (Shift+Enter)"
       >
@@ -109,7 +109,7 @@ export function TerminalSearchBar({
       <button
         type="button"
         onClick={() => findNext(term)}
-        className="rounded px-1 text-xs text-foreground hover:bg-muted"
+        className="flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         aria-label="Next result"
         title="Next (Enter)"
       >
@@ -118,7 +118,7 @@ export function TerminalSearchBar({
       <button
         type="button"
         onClick={onClose}
-        className="rounded px-1 text-xs text-foreground hover:bg-muted"
+        className="flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         aria-label="Close search"
       >
         ✕

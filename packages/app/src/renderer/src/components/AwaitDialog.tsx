@@ -141,15 +141,18 @@ export function AwaitDialog({
             <label
               key={kind.id}
               className={cn(
-                "flex items-start gap-2 text-sm",
-                !kind.available && "opacity-50",
+                // Radio card (design system "Cards"): hairline, selected =
+                // border-primary, hover = border-foreground/20.
+                "flex cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors duration-[120ms] ease-out hover:border-foreground/20",
+                selected === kind.id && "border-primary hover:border-primary",
+                !kind.available && "cursor-not-allowed opacity-50",
               )}
               title={kind.unavailableReason}
             >
               <input
                 type="radio"
                 name="await-kind"
-                className="mt-1"
+                className="mt-1 accent-primary"
                 value={kind.id}
                 checked={selected === kind.id}
                 disabled={!kind.available}
@@ -158,7 +161,7 @@ export function AwaitDialog({
               />
               <span className="flex flex-col">
                 <span>{kind.label}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[13px] text-muted-foreground">
                   {kind.available
                     ? kind.description
                     : `Unavailable: ${kind.unavailableReason ?? "not for this task"}`}
@@ -173,7 +176,7 @@ export function AwaitDialog({
 
         {selectedKind?.notice && (
           <p
-            className="mt-3 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs"
+            className="mt-3 rounded-lg border border-border bg-muted px-3 py-2 text-[13px] text-muted-foreground"
             data-testid="await-picker-notice"
           >
             {selectedKind.notice}
