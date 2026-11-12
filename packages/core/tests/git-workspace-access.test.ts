@@ -4,7 +4,14 @@
 // fixed <codeRoot>/.harbormaster-worktrees/ task-worktree layout.
 
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -413,6 +420,51 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
 
     await worktrees.deleteBranch(repo, "task/unmerged", true);
     expect(await worktrees.branchExists(repo, "task/unmerged")).toBe(false);
+  });
+
+  it("counts uncommitted changes; a missing folder is already removed (metadata pruned); an orphan folder surfaces 'not a git repository' and can be deleted", async () => {
+    const f = await fixture();
+    const repoAccess = new LocalGitRepositoryAccess();
+    const repo = await repoAccess.resolveRepository(f.checkout);
+    const worktrees = new LocalGitWorktreeAccess();
+
+    const gone = await worktrees.createTaskWorktree(repo, "task/gone", "main");
+    await writeFile(join(gone.path, "a.txt"), "a\n");
+    await writeFile(join(gone.path, "b.txt"), "b\n");
+    expect(await worktrees.uncommittedChangeCount(gone.path)).toBe(2);
+    // Folder deleted out-of-band: metadata without a folder.
+    await rm(gone.path, { recursive: true, force: true });
+    await worktrees.removeWorktree(repo, gone.path, false);
+    expect(
+      (await worktrees.listWorktrees(repo)).map((w) => w.path),
+    ).not.toContain(gone.path);
+
+    const orphan = await worktrees.createTaskWorktree(
+      repo,
+      "task/orphan",
+      "main",
+    );
+    // Metadata deleted: the folder's .git file points nowhere.
+    await rm(join(f.checkout, ".git", "worktrees", "task-orphan"), {
+      recursive: true,
+      force: true,
+    });
+    await expect(
+      worktrees.removeWorktree(repo, orphan.path, true),
+    ).rejects.toThrow(/not a git repository/);
+    await worktrees.deleteWorktreeDir(orphan.path);
+    await worktrees.pruneWorktrees(repo);
+    await expect(
+      readFile(join(orphan.path, "README.md"), "utf8"),
+    ).rejects.toThrow();
+
+    // Never a full repository.
+    await expect(worktrees.deleteWorktreeDir(f.checkout)).rejects.toThrow(
+      /git repository/,
+    );
+    expect(await readFile(join(f.checkout, "README.md"), "utf8")).toBe(
+      "fixture\n",
+    );
   });
 });
 

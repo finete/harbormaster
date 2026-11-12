@@ -396,9 +396,9 @@ describe.skipIf(!gitAvailable)("toDone keeps the session identity", () => {
       sessionPath: file,
     });
 
-    // No PR ever merged: the user confirmed deleting the unmerged workspace.
+    // No PR ever merged: the user confirmed the one "Mark done?" question.
     const result = await f.manager.toDone(task.id, {
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
     });
     expect(result).not.toHaveProperty("requiresConfirmation");
     expect(result).not.toHaveProperty("warning");
@@ -425,7 +425,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     });
     await f.manager.claimInitialPrompt(task.id);
     const result = await f.manager.toDone(task.id, {
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
     });
     if (isToDoneConfirmation(result)) throw new Error("unexpected question");
     const done = result.task;
@@ -502,13 +502,13 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     if (!before?.worktreePath || launch?.mode !== "new")
       throw new Error("expected a bound task");
     await writeFile(join(before.worktreePath, "dirty.txt"), "wip\n");
-    // A live pane keeps the worktree in place (no question asked).
+    // A pane still live after the confirm keeps the worktree for the sweep
+    // (no warning); reopening first takes it over and stops the cleanup.
     const done = await f.manager.toDone(task.id, {
+      force: { confirmed: true },
       protectedPaths: [before.worktreePath],
     });
-    expect(done).toMatchObject({
-      warning: expect.stringMatching(/worktree left in place/),
-    });
+    expect(done).not.toHaveProperty("warning");
 
     const result = await f.manager.reopenTask(task.id);
     expect(result.task.state).toBe("dev");
@@ -568,7 +568,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
       initialPrompt: "",
       start: true,
     });
-    await f.manager.toDone(scratch.id);
+    await f.manager.toDone(scratch.id, { force: { confirmed: true } });
     const result = await f.manager.reopenTask(scratch.id, {
       objective: "Again",
     });

@@ -12,6 +12,7 @@ import {
   CircleHelp,
   ExternalLink,
   Flag,
+  FolderX,
   Inbox as InboxIcon,
   Mail,
   MoreHorizontal,
@@ -107,6 +108,10 @@ const KIND_GLYPH: Record<InboxKind, { icon: ReactNode; label: string }> = {
   "ready-to-land": {
     icon: <Flag className="text-status-ok" />,
     label: "Ready to land",
+  },
+  "cleanup-failed": {
+    icon: <FolderX className="text-status-error" />,
+    label: "Cleanup failed",
   },
   idle: {
     icon: <CircleDot className="text-muted-foreground" />,
@@ -220,6 +225,31 @@ export function InboxView({
           setSelectedId(entry.id);
           setEditSignal((count) => count + 1);
           return;
+        case "retry-cleanup":
+          if (!taskId) return;
+          try {
+            const task =
+              await window.harbormaster.core.retryDoneCleanup(taskId);
+            if (task.cleanup?.completedAt) {
+              pushToast("Worktree cleaned up", "success");
+            }
+          } catch (error) {
+            pushToast(error instanceof Error ? error.message : String(error));
+          }
+          return;
+        case "reveal-worktree":
+          if (entry.path) {
+            await window.harbormaster.shell.revealInFolder(entry.path);
+          }
+          return;
+        case "abandon-cleanup":
+          if (!taskId) return;
+          try {
+            await window.harbormaster.core.abandonDoneCleanup(taskId);
+          } catch (error) {
+            pushToast(error instanceof Error ? error.message : String(error));
+          }
+          return;
         case "retry":
           if (!taskId) return;
           try {
@@ -325,7 +355,7 @@ export function InboxView({
         );
         return;
       }
-      if (["A", "R", "E", "C", "D"].includes(key)) {
+      if (["A", "R", "E", "C", "D", "F"].includes(key)) {
         const action = actionByKey(selected, key);
         if (!action) return;
         event.preventDefault();
@@ -1102,7 +1132,8 @@ function DetailPane({
           )}
           {entry.taskId &&
             entry.kind !== "rule" &&
-            entry.kind !== "launch-failed" && (
+            entry.kind !== "launch-failed" &&
+            entry.kind !== "cleanup-failed" && (
               <TerminalTail taskId={entry.taskId} />
             )}
         </>

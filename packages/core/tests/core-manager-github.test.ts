@@ -568,7 +568,7 @@ describe.skipIf(!gitAvailable)("CoreManager listAwaitingKinds", () => {
 });
 
 describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
-  it("asks before deleting an unmerged workspace; cancel leaves everything, confirming removes the worktree and -D's the branch", async () => {
+  it("asks once with the lines computed up front; cancel leaves everything, confirming removes the worktree and -D's the unmerged branch", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -588,8 +588,12 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     const question = await f.core.commands.toDone(task.id);
 
     expect(question).toEqual({
-      requiresConfirmation: "unmerged",
-      detail: expect.stringContaining("isn't merged"),
+      requiresConfirmation: "done",
+      detail: "Add widget",
+      lines: [
+        `The worktree ${worktree} will be removed.`,
+        `Branch ${task.branch} is not merged; the local branch will be deleted.`,
+      ],
     });
     // Not moved, nothing removed (a cancelled dialog = this state).
     expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
@@ -601,12 +605,20 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     );
 
     const result = await f.core.commands.toDone(task.id, {
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
     });
 
     expect(isToDoneConfirmation(result)).toBe(false);
-    expect(result).toMatchObject({ task: { state: "done" } });
+    expect(result).toMatchObject({
+      task: {
+        state: "done",
+        cleanup: { mode: "forced", attempts: 1, deleteBranch: true },
+      },
+    });
     expect(result).not.toHaveProperty("warning");
+    if (isToDoneConfirmation(result)) throw new Error("unreachable");
+    expect(result.task.cleanup?.completedAt).toBeDefined();
+    expect(result.task.cleanup?.lastError).toBeUndefined();
     // The binding is parked (worktree cleared), not deleted: its session
     // identity survives for a later reopen.
     const parked = await f.core.commands.getTaskWorkspace(task.id);
@@ -618,7 +630,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     expect(await git(["branch", "--list", task.branch!], f.checkout)).toBe("");
   });
 
-  it("asks about uncommitted changes first, then the unmerged branch; with both answers it force-removes and lands", async () => {
+  it("lists uncommitted changes in the one question and force-removes a dirty worktree once confirmed", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -631,25 +643,28 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
       .worktreePath!;
     await writeFile(join(worktree, "scratch.txt"), "dirty\n");
+    await writeFile(join(worktree, "other.txt"), "dirty\n");
 
-    expect(await f.core.commands.toDone(task.id)).toEqual({
-      requiresConfirmation: "dirty",
-      detail: expect.stringContaining("uncommitted changes"),
+    expect(await f.core.commands.toDone(task.id)).toMatchObject({
+      requiresConfirmation: "done",
+      lines: [
+        `The worktree ${worktree} will be removed.`,
+        "2 uncommitted changes will be discarded.",
+        `Branch ${task.branch} is not merged; the local branch will be deleted.`,
+      ],
     });
-    expect(
-      await f.core.commands.toDone(task.id, { force: { removeDirty: true } }),
-    ).toMatchObject({ requiresConfirmation: "unmerged" });
-    // Still untouched after two questions.
+    // Untouched after the question.
     expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
     expect(await git(["status", "--porcelain"], worktree)).toContain(
       "scratch.txt",
     );
 
     const result = await f.core.commands.toDone(task.id, {
-      force: { removeDirty: true, deleteUnmerged: true },
+      force: { confirmed: true },
     });
 
     expect(result).toMatchObject({ task: { state: "done" } });
+    expect(result).not.toHaveProperty("warning");
     expect(
       (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
     ).toBeUndefined();
@@ -658,7 +673,42 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     ).not.toContain(task.branch!);
   });
 
-  it("never asks about a worktree open in a live pane: it lands with a warning and keeps the worktree", async () => {
+  it("says the live pane will be closed; once confirmed (the app closed the pane) it removes the worktree, never warning", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const task = await f.core.commands.createTask({
+      title: "Add widget",
+      initialPrompt: "do it",
+      repositoryId: repo.id,
+      start: true,
+    });
+    const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
+      .worktreePath!;
+
+    const question = await f.core.commands.toDone(task.id, {
+      protectedPaths: [worktree],
+    });
+    expect(question).toMatchObject({
+      requiresConfirmation: "done",
+      closesPane: true,
+    });
+    expect(isToDoneConfirmation(question) && question.lines).toContain(
+      "Its terminal pane will be closed.",
+    );
+
+    const result = await f.core.commands.toDone(task.id, {
+      force: { confirmed: true },
+      protectedPaths: [],
+    });
+    expect(result).toMatchObject({ task: { state: "done" } });
+    expect(result).not.toHaveProperty("warning");
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBeUndefined();
+  });
+
+  it("a worktree still live after the confirm lands Done without a warning and is cleaned by the sweep once the pane is gone", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -673,19 +723,34 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     await writeFile(join(worktree, "scratch.txt"), "dirty\n");
 
     const result = await f.core.commands.toDone(task.id, {
+      force: { confirmed: true },
       protectedPaths: [worktree],
     });
-
     expect(result).toMatchObject({
-      task: { state: "done" },
-      warning: expect.stringMatching(/live session/),
+      task: { state: "done", cleanup: { mode: "forced", attempts: 0 } },
     });
+    expect(result).not.toHaveProperty("warning");
     expect(
       (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
     ).toBe(worktree);
+
+    // Still live: skipped silently, nothing counted.
+    expect(
+      (await f.core.commands.refresh({ protectedPaths: [worktree] })).warnings,
+    ).toEqual([]);
+    expect((await f.core.commands.getTask(task.id))?.cleanup?.attempts).toBe(0);
+
+    // Pane gone: the sweep force-removes the dirty worktree, silently.
+    expect((await f.core.commands.refresh()).warnings).toEqual([]);
+    expect(
+      (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
+    ).toBeUndefined();
+    expect(
+      (await f.core.commands.getTask(task.id))?.cleanup?.completedAt,
+    ).toBeDefined();
   });
 
-  it("force-deletes (-D) a merged branch even though a squash merge left it unmerged locally", async () => {
+  it("force-deletes (-D) a merged branch even though a squash merge left it unmerged locally (no unmerged line)", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -706,8 +771,15 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
     f.pullRequests.statusByBranch.set(task.branch!, pr({ state: "MERGED" }));
     await f.core.commands.refresh();
 
-    const result = await f.core.commands.toDone(task.id);
+    expect(await f.core.commands.toDone(task.id)).toMatchObject({
+      requiresConfirmation: "done",
+      lines: [`The worktree ${binding!.worktreePath} will be removed.`],
+    });
+    const result = await f.core.commands.toDone(task.id, {
+      force: { confirmed: true },
+    });
 
+    if (isToDoneConfirmation(result)) throw new Error("unexpected question");
     expect(result.task.state).toBe("done");
     expect(result.warning).toBeUndefined();
     // The worktree itself was removed cleanly (it had no uncommitted changes).

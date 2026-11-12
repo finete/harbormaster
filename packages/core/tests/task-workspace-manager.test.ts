@@ -326,14 +326,14 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     await writeFile(join(dirty, "notes.txt"), "keep me\n");
 
     const result = await f.core.commands.toDone(task.id, {
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
       protectedPaths: [live],
     });
 
     expect("task" in result && result.task.state).toBe("done");
-    expect("warning" in result && result.warning).toMatch(
-      /review checkout left in place/,
-    );
+    // The leftover is the app's business (audit log + orphan scan), never a
+    // warning back to the user.
+    expect(result).not.toHaveProperty("warning");
     const worktrees = await listedWorktrees(f);
     expect(worktrees).not.toContain(worktreePath);
     expect(worktrees).not.toContain(review);

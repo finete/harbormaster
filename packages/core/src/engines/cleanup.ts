@@ -8,7 +8,7 @@
 // Engines are pure, Managers orchestrate).
 
 import type { OrphanWorktree } from "../contracts/commands.js";
-import type { Task, TaskPullRequest } from "../contracts/model.js";
+import type { Task, TaskCleanup, TaskPullRequest } from "../contracts/model.js";
 
 /** Done tasks older than this many days (default) are flagged archived. */
 export const DEFAULT_ARCHIVE_RETENTION_DAYS = 7;
@@ -88,4 +88,102 @@ export function orphanWorktreeWarning(
   if (orphans.length < limits.count && total < limits.bytes) return undefined;
   const gb = (total / 1024 ** 3).toFixed(1);
   return `${orphans.length} worktree${orphans.length === 1 ? "" : "s"} (${gb} GB) in ${root} belong to no task`;
+}
+
+/** What the single "Mark done?" dialog says, gathered by the manager up front. */
+export interface DoneConfirmationFacts {
+  /** The task's worktree, when it has one on record. */
+  worktreePath?: string;
+  /** Uncommitted (staged, unstaged, untracked) changes in it. */
+  uncommittedChanges?: number;
+  /** The local branch that is not merged (and will be deleted). */
+  unmergedBranch?: string;
+  /** The worktree is open in a live pane the app will close. */
+  closesPane?: boolean;
+}
+
+/**
+ * The body lines of the single "Mark done?" confirmation: what confirming
+ * will do, only the lines that are true. Empty for a task without a
+ * worktree (the dialog then just asks "Mark done?").
+ */
+export function doneConfirmationLines(facts: DoneConfirmationFacts): string[] {
+  const lines: string[] = [];
+  if (facts.worktreePath) {
+    lines.push(`The worktree ${facts.worktreePath} will be removed.`);
+  }
+  const changes = facts.uncommittedChanges ?? 0;
+  if (facts.worktreePath && changes > 0) {
+    lines.push(
+      `${changes} uncommitted change${changes === 1 ? "" : "s"} will be discarded.`,
+    );
+  }
+  if (facts.unmergedBranch) {
+    lines.push(
+      `Branch ${facts.unmergedBranch} is not merged; the local branch will be deleted.`,
+    );
+  }
+  if (facts.worktreePath && facts.closesPane) {
+    lines.push("Its terminal pane will be closed.");
+  }
+  return lines;
+}
+
+/** Forced-cleanup retry delays after the 1st, 2nd, 3rd attempt; hourly after that. */
+export const CLEANUP_BACKOFF_MS: readonly number[] = [
+  60_000,
+  5 * 60_000,
+  30 * 60_000,
+];
+const CLEANUP_BACKOFF_MAX_MS = 60 * 60_000;
+
+/** After this many failed attempts a forced cleanup shows up in the inbox. */
+export const CLEANUP_INBOX_AFTER_ATTEMPTS = 3;
+
+/** When the next forced retry is due after `attempts` failed attempts (ISO). */
+export function nextCleanupAttemptAt(attempts: number, now: Date): string {
+  const delay =
+    CLEANUP_BACKOFF_MS[Math.max(0, attempts - 1)] ?? CLEANUP_BACKOFF_MAX_MS;
+  return new Date(now.getTime() + delay).toISOString();
+}
+
+/** Whether the refresh sweep should run a forced cleanup attempt now. */
+export function isForcedCleanupDue(cleanup: TaskCleanup, now: Date): boolean {
+  if (cleanup.mode !== "forced" || cleanup.completedAt) return false;
+  return (
+    !cleanup.nextAttemptAt || Date.parse(cleanup.nextAttemptAt) <= now.getTime()
+  );
+}
+
+/** Whether a forced cleanup failed often enough to ask the user (one inbox item per task). */
+export function cleanupNeedsAttention(
+  task: Pick<Task, "state" | "cleanup">,
+): boolean {
+  const cleanup = task.cleanup;
+  return (
+    task.state === "done" &&
+    cleanup?.mode === "forced" &&
+    !cleanup.completedAt &&
+    Boolean(cleanup.lastError) &&
+    cleanup.attempts >= CLEANUP_INBOX_AFTER_ATTEMPTS
+  );
+}
+
+/**
+ * How a forced `removeWorktree` failure is handled: `missing` (the folder
+ * is already gone, ENOENT: counts as cleaned, git's bookkeeping is pruned),
+ * `orphan` (the folder's git metadata is gone, "not a git repository": the
+ * folder is deleted and pruned), anything else is a real failure.
+ */
+export function classifyWorktreeRemovalError(
+  error: unknown,
+): "missing" | "orphan" | "other" {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  if (code === "ENOENT" || /\bENOENT\b/.test(message)) return "missing";
+  if (/not a git repository/i.test(message)) return "orphan";
+  return "other";
 }

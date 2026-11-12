@@ -11,6 +11,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
@@ -105,6 +106,12 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     path: string,
     force = false,
   ): Promise<void> {
+    if (!(await pathExists(path))) {
+      // Already gone (removed out-of-band): nothing left but git's
+      // bookkeeping, which a prune drops. Counts as removed.
+      await this.pruneWorktrees(repo);
+      return;
+    }
     if (!force && (await this.isWorktreeDirty(path))) {
       throw new Error(
         `Refusing to remove dirty worktree: ${path} (pass force to override)`,
@@ -114,9 +121,16 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     // repos with several checkouts (or pi-home-era migrations) need not be
     // this RepositoryInfo's primary root. Resolve the owner from the worktree
     // itself; fall back to the primary when the worktree is too broken to ask.
-    const ownerRoot = await this.owningCheckoutRoot(path).catch(
-      () => repo.root,
-    );
+    let ownerRoot: string;
+    try {
+      ownerRoot = await this.owningCheckoutRoot(path);
+    } catch (error) {
+      // A folder whose git metadata is gone ("not a git repository") is no
+      // worktree git can remove: surface that, so a forced cleanup deletes
+      // the folder itself (`deleteWorktreeDir`) and prunes.
+      if (force && /not a git repository/i.test(errorText(error))) throw error;
+      ownerRoot = repo.root;
+    }
     try {
       await run(
         "git",
@@ -136,6 +150,30 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       // prune git's bookkeeping instead of surfacing a stale error.
       await run("git", ["worktree", "prune"], ownerRoot);
     }
+  }
+
+  async pruneWorktrees(repo: RepositoryInfo): Promise<void> {
+    const roots = new Set([
+      repo.root,
+      ...(repo.checkouts ?? []).map((checkout) => checkout.root),
+    ]);
+    for (const root of roots) {
+      await run("git", ["worktree", "prune"], root).catch(() => {});
+    }
+  }
+
+  async deleteWorktreeDir(path: string): Promise<void> {
+    const absolute = resolve(path);
+    if (!isAbsolute(path) || absolute.split("/").filter(Boolean).length < 3) {
+      throw new Error(`Refusing to delete ${path}: not a task worktree path`);
+    }
+    // A `.git` *directory* means a full repository, never a task worktree
+    // (those carry a `.git` file, or nothing once their metadata is gone).
+    const gitDir = await stat(join(absolute, ".git")).catch(() => undefined);
+    if (gitDir?.isDirectory()) {
+      throw new Error(`Refusing to delete ${path}: it is a git repository`);
+    }
+    await rm(absolute, { recursive: true, force: true });
   }
 
   /** The checkout a worktree belongs to: parent of its git common dir. */
@@ -221,13 +259,28 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
   }
 
   async isWorktreeDirty(path: string): Promise<boolean> {
+    return (await this.uncommittedChangeCount(path)) > 0;
+  }
+
+  async uncommittedChangeCount(path: string): Promise<number> {
     const status = await run(
       "git",
       ["status", "--porcelain=v1", "--untracked-files=all"],
       path,
     );
-    return status.length > 0;
+    return status.split("\n").filter((line) => line.trim().length > 0).length;
   }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  return fsAccess(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function taskWorktreePath(repo: RepositoryInfo, branch: string): string {

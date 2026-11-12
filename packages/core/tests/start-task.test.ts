@@ -27,6 +27,7 @@ import {
   CoreEventBus,
   CoreManager,
   createCore,
+  isToDoneConfirmation,
   JsonConfigAccess,
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
@@ -370,7 +371,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
 });
 
 describe.skipIf(!gitAvailable)("toDone protectedPaths", () => {
-  it("refuses to remove a worktree that is a live pane's cwd, warning instead of failing", async () => {
+  it("a live pane's cwd adds the pane line; confirmed while still live, the task lands without a warning and the worktree waits for the sweep", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const task = await commands.createTask({
@@ -382,19 +383,28 @@ describe.skipIf(!gitAvailable)("toDone protectedPaths", () => {
     const worktreePath = (await commands.getTaskWorkspace(task.id))
       ?.worktreePath;
     if (!worktreePath) throw new Error("expected a worktree");
+    const protectedPaths = ["/somewhere/else", `${worktreePath}/`];
 
-    const result = await commands.toDone(task.id, {
-      protectedPaths: ["/somewhere/else", `${worktreePath}/`],
+    const question = await commands.toDone(task.id, { protectedPaths });
+    expect(question).toMatchObject({
+      requiresConfirmation: "done",
+      closesPane: true,
+      lines: expect.arrayContaining(["Its terminal pane will be closed."]),
     });
 
+    const result = await commands.toDone(task.id, {
+      protectedPaths,
+      force: { confirmed: true },
+    });
+    if (isToDoneConfirmation(result)) throw new Error("unexpected question");
     expect(result.task.state).toBe("done");
-    expect(result.warning).toMatch(/worktree left in place/);
-    expect(result.warning).toMatch(/live session/);
+    expect(result.warning).toBeUndefined();
+    expect(result.task.cleanup).toMatchObject({ mode: "forced", attempts: 0 });
     expect(await exists(worktreePath)).toBe(true);
     expect(await commands.getTaskWorkspace(task.id)).toBeDefined();
   });
 
-  it("also protects a worktree when a live cwd sits inside it", async () => {
+  it("also counts a live cwd inside the worktree", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const task = await commands.createTask({
@@ -406,14 +416,13 @@ describe.skipIf(!gitAvailable)("toDone protectedPaths", () => {
     const worktreePath = (await commands.getTaskWorkspace(task.id))
       ?.worktreePath;
     if (!worktreePath) throw new Error("expected a worktree");
-    const result = await commands.toDone(task.id, {
+    const question = await commands.toDone(task.id, {
       protectedPaths: [join(worktreePath, "src")],
     });
-    expect(result.warning).toMatch(/live session/);
-    expect(await exists(worktreePath)).toBe(true);
+    expect(question).toMatchObject({ closesPane: true });
   });
 
-  it("still removes the worktree when it is not protected (prefix-only lookalikes don't count)", async () => {
+  it("removes the worktree when it is not protected (prefix-only lookalikes don't count)", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const task = await commands.createTask({
@@ -425,11 +434,15 @@ describe.skipIf(!gitAvailable)("toDone protectedPaths", () => {
     const worktreePath = (await commands.getTaskWorkspace(task.id))
       ?.worktreePath;
     if (!worktreePath) throw new Error("expected a worktree");
+    const question = await commands.toDone(task.id, {
+      protectedPaths: [`${worktreePath}-other`],
+    });
+    expect(question).not.toHaveProperty("closesPane");
     const result = await commands.toDone(task.id, {
       protectedPaths: [`${worktreePath}-other`],
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
     });
-    expect(result.warning).toBeUndefined();
+    expect(result).not.toHaveProperty("warning");
     expect(await exists(worktreePath)).toBe(false);
   });
 });

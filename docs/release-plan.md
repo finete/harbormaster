@@ -240,7 +240,9 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   = priority; agent reported (`report_status` outcome + note) = priority;
   message approval (not dismissable) = priority; ready to land = priority;
   launch failed = priority; plain idle "your move" (turn ended, nothing
-  reported) = other; task done, wants a look = other. Rule `inbox` actions
+  reported) = other; task done, wants a look = other; couldn't clean up a
+  Done task's worktree (its app-owned cleanup failed 3 times; Retry / Open
+  folder / Dismiss) = other. Rule `inbox` actions
   are priority unless the rule sets `priority: false`. Optional CEL
   override in settings (`item.kind`, `item.source`, `item.taskId`,
   `item.repo`, `item.priority`).

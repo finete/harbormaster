@@ -618,7 +618,7 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
     expect((await f.core.commands.getTask(parent.id))?.state).toBe("dev");
 
     const forced = await f.core.commands.toDone(parent.id, {
-      force: { leaveChildren: true, deleteUnmerged: true },
+      force: { leaveChildren: true, confirmed: true },
     });
     expect(isToDoneConfirmation(forced)).toBe(false);
     if (!isToDoneConfirmation(forced)) {
@@ -644,9 +644,13 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
       prompt: "child work",
       repository: { repositoryId: f.repositoryId },
     });
-    await f.core.commands.toDone(child.id, { force: { deleteUnmerged: true } });
+    await f.core.commands.toDone(child.id, { force: { confirmed: true } });
+    // Only the one "Mark done?" question, never the children one.
+    expect(await f.core.commands.toDone(parent.id)).toMatchObject({
+      requiresConfirmation: "done",
+    });
     const result = await f.core.commands.toDone(parent.id, {
-      force: { deleteUnmerged: true },
+      force: { confirmed: true },
     });
     expect(isToDoneConfirmation(result)).toBe(false);
   });
@@ -666,7 +670,15 @@ describe.skipIf(!gitAvailable)(
       const workspace = await f.core.commands.getTaskWorkspace(task.id);
       const scratchPath = workspace!.worktreePath!;
 
-      const result = await f.core.commands.toDone(task.id);
+      // Still the small "are you sure", with nothing to list.
+      expect(await f.core.commands.toDone(task.id)).toEqual({
+        requiresConfirmation: "done",
+        detail: "Scratch",
+        lines: [],
+      });
+      const result = await f.core.commands.toDone(task.id, {
+        force: { confirmed: true },
+      });
       expect(isToDoneConfirmation(result)).toBe(false);
       if (!isToDoneConfirmation(result)) {
         expect(result.task.state).toBe("done");

@@ -166,36 +166,45 @@ export interface UpdateTaskInput {
 export interface ToDoneOptions {
   /**
    * Absolute paths a frontend still has live processes in (e.g. the cwds of
-   * its open pty panes). When the task's worktree path is in this list the
-   * worktree is left in place (surfaced as `warning`, never a failure) so a
-   * running shell/agent never has its cwd deleted out from under it.
+   * its open pty panes). On the question call they decide the "Its terminal
+   * pane will be closed." line; once confirmed, the frontend is expected to
+   * have closed those processes (it owns them). A worktree still listed
+   * here is never removed out from under a live process: the forced
+   * cleanup waits for the refresh sweep instead.
    */
   protectedPaths?: string[];
   /**
-   * The user's answers to a previous `ToDoneConfirmation` (pi-home's
-   * "Discard uncommitted changes?" / "Delete unmerged task workspace?"):
-   * `removeDirty` force-removes a worktree with uncommitted changes,
-   * `deleteUnmerged` removes the worktree and force-deletes (`-D`) a branch
-   * whose PR never merged. Never overrides `protectedPaths`.
+   * The user's answers to a previous `ToDoneConfirmation`: `confirmed`
+   * answers the single "Mark done?" question (everything its lines listed
+   * is accepted: the worktree is force-removed, the local branch deleted);
+   * `leaveChildren` answers the `activeChildren` question.
    */
   force?: {
-    removeDirty?: boolean;
-    deleteUnmerged?: boolean;
+    /** Answers the "Mark done?" confirmation (`requiresConfirmation: "done"`). */
+    confirmed?: boolean;
     /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
     leaveChildren?: boolean;
   };
 }
 
 /**
- * A manual Done that needs the user's say-so before destroying work; the
- * task was NOT moved. Ask, then call `toDone` again with the matching
- * `force` flag (answers accumulate: a confirmed `dirty` may be followed by
- * `unmerged`).
+ * A manual Done that needs the user's say-so; the task was NOT moved. Ask,
+ * then call `toDone` again with the matching `force` flag (answers
+ * accumulate: a confirmed `activeChildren` is followed by `done`).
  */
 export interface ToDoneConfirmation {
-  requiresConfirmation: "dirty" | "unmerged" | "activeChildren";
-  /** Human-readable context for the question (task title, worktree path, or active-child titles/count). */
+  requiresConfirmation: "done" | "activeChildren";
+  /** Human-readable context for the question (task title, or active-child titles/count). */
   detail: string;
+  /**
+   * `done` only: the dialog's body, computed up front ("The worktree <path>
+   * will be removed.", "N uncommitted changes will be discarded.", "Branch
+   * <name> is not merged; the local branch will be deleted.", "Its terminal
+   * pane will be closed."); empty for a task without a worktree.
+   */
+  lines?: string[];
+  /** `done` only: the task's worktree is open in a live pane the frontend must close on confirm. */
+  closesPane?: boolean;
 }
 
 export type ToDoneResult =
@@ -531,22 +540,35 @@ export interface CoreCommands {
     options?: ToAwaitOptions,
   ): Promise<Task>;
   /**
-   * Move a task to `done`, cleaning up its workspace (pi-home's `complete`):
-   * remove the worktree and delete the branch. A parent task
-   * (`listChildren` non-empty) with any non-done child asks first too
-   * (`requiresConfirmation: "activeChildren"`, checked before the dirty/
-   * unmerged questions below) unless `options.force.leaveChildren` is set;
-   * children are never touched either way. Destroying work needs the
-   * user's confirmation first: a worktree with uncommitted changes, or a
-   * branch whose PR never merged, returns a `ToDoneConfirmation` WITHOUT
-   * moving the task (answer via `options.force` on the next call). A
-   * merged PR's branch is deleted with `-D` without asking. A worktree in
-   * `options.protectedPaths` (a live pane's cwd) is never touched and never
-   * asked about: the task lands with a `warning` and refresh retries the
-   * cleanup once the pane is gone. Other failures (missing repository, git
-   * errors) never block the move either; they surface as `warning`.
+   * Move a task to `done`; "Done" is final and the worktree housekeeping
+   * is the app's. A parent task (`listChildren` non-empty) with any
+   * non-done child asks first (`requiresConfirmation: "activeChildren"`)
+   * unless `options.force.leaveChildren` is set; children are never touched
+   * either way. Then every manual Done asks ONE question
+   * (`requiresConfirmation: "done"`, its `lines` computed up front: the
+   * worktree that will be removed, uncommitted changes that will be
+   * discarded, an unmerged branch that will be deleted, a live pane that
+   * will be closed) WITHOUT moving the task. With `force.confirmed` the task
+   * moves to Done immediately and records `task.cleanup` (`mode: "forced"`):
+   * the worktree is force-removed, the binding parked, review checkouts
+   * removed and the local branch deleted. A failed cleanup never blocks the
+   * move and never comes back as a `warning`: it is recorded on
+   * `task.cleanup` (`attempts`, `lastError`) and the refresh sweep retries
+   * it with backoff.
    */
   toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
+  /**
+   * Run a Done task's forced cleanup (`task.cleanup.mode === "forced"`)
+   * right now, ignoring the sweep's backoff (the inbox item's Retry).
+   * Resolves with the task as persisted afterwards; a failure is recorded on
+   * `task.cleanup`, never thrown.
+   */
+  retryDoneCleanup(taskId: string, options?: RefreshOptions): Promise<Task>;
+  /**
+   * Give up on a Done task's cleanup (the inbox item's Dismiss): marks
+   * `task.cleanup.mode = "abandoned"` so the sweep stops retrying.
+   */
+  abandonDoneCleanup(taskId: string): Promise<Task>;
   /**
    * Re-fetch PR status for every repository-backed task with an open PR
    * (a few tasks concurrently), patch `task.pr` onto the task as currently
@@ -555,8 +577,11 @@ export interface CoreCommands {
    * engine tick: poll the event sources, diff their snapshots into events,
    * and execute the matching rules (`<stateDir>/rules/`; at most one move
    * per task per tick). Repositories
-   * without an `origin` remote are skipped silently. Also retries the safe
-   * worktree cleanup for done tasks whose worktree is still on disk, and
+   * without an `origin` remote are skipped silently. Also retries the
+   * forced cleanup of confirmed Done tasks (`task.cleanup`, backoff 1 min,
+   * 5 min, 30 min, then hourly; silent, failures recorded on the task, never
+   * a warning), retries the safe (unforced) cleanup for older done tasks
+   * whose worktree is still on disk, and
    * flags `archivedAt` on tasks that have sat in `done` for 7+ days. Emits
    * `board-changed` when anything changed. This is what the app polls; a
    * call made while another refresh is still running joins that run

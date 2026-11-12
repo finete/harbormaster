@@ -126,7 +126,10 @@ export interface GitWorktreeAccess {
   ): Promise<{ worktree: WorktreeInfo; createdBranch: boolean }>;
   /**
    * Remove a worktree. Refuses when the worktree has uncommitted changes
-   * (staged, unstaged, or untracked) unless `force` is true.
+   * (staged, unstaged, or untracked) unless `force` is true. A folder that
+   * is already gone counts as removed (git's bookkeeping is pruned). With
+   * `force`, a folder whose git metadata is missing rejects with git's "not
+   * a git repository" error (the caller decides to `deleteWorktreeDir`).
    */
   removeWorktree(
     repo: RepositoryInfo,
@@ -135,6 +138,15 @@ export interface GitWorktreeAccess {
   ): Promise<void>;
   /** Whether the worktree at `path` has uncommitted changes (staged, unstaged, or untracked). */
   isWorktreeDirty(path: string): Promise<boolean>;
+  /** How many uncommitted changes (staged, unstaged, untracked paths) the worktree at `path` has. */
+  uncommittedChangeCount(path: string): Promise<number>;
+  /** `git worktree prune` in every checkout of the repository: drops metadata whose folder is gone. */
+  pruneWorktrees(repo: RepositoryInfo): Promise<void>;
+  /**
+   * Delete a task worktree folder git no longer knows (its metadata is
+   * gone). Refuses a full repository (a `.git` directory) and shallow paths.
+   */
+  deleteWorktreeDir(path: string): Promise<void>;
   branchExists(repo: RepositoryInfo, branch: string): Promise<boolean>;
   /**
    * Branch currently checked out in the worktree at `path`; `undefined` when

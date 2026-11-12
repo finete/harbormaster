@@ -121,6 +121,7 @@ import {
   detachPrimarySession,
   disposeAllSessions,
   disposeSession,
+  disposeSessionsUnder,
   getSession,
   lookupPanePid,
   primarySessionTail,
@@ -578,22 +579,54 @@ function registerCoreIpc(): void {
   // cwds core must never remove a worktree out from under.
   ipcMain.handle(
     "core:toDone",
-    (_event, taskId: string, options: { force?: ToDoneForce } | undefined) => {
-      // A closed tab's warm pi still runs in the worktree; end it so its cwd
-      // doesn't land in protectedPaths and block the cleanup below.
+    async (
+      _event,
+      taskId: string,
+      options: { force?: ToDoneForce } | undefined,
+    ) => {
+      const force = {
+        confirmed: options?.force?.confirmed === true,
+        leaveChildren: options?.force?.leaveChildren === true,
+      };
+      if (!force.confirmed) {
+        // The question only. A closed tab's warm pi is no pane the user can
+        // see, so it never adds the "pane will be closed" line (it ends on
+        // confirm like every other process in the worktree).
+        const warm = new Set(
+          warmSessions.ids().filter((id) => getSession(id)?.taskId === taskId),
+        );
+        return core.commands.toDone(taskId, {
+          protectedPaths: activeSessionCwds({ excludeIds: warm }),
+          force,
+        });
+      }
+      // Confirmed: Done is final and the housekeeping is the app's. End the
+      // task's warm pi and every pty still running in its worktree (the
+      // renderer closes the task's panes too) so nothing keeps the worktree
+      // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
+      const [task, binding] = await Promise.all([
+        core.commands.getTask(taskId).catch(() => undefined),
+        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
+      ]);
+      // Only a repository worktree is removed: a scratch dir or a folder
+      // task's own folder stays, and so do the panes running in it.
+      if (task?.repositoryId && binding?.worktreePath) {
+        disposeSessionsUnder(binding.worktreePath);
+      }
       return core.commands.toDone(taskId, {
         protectedPaths: activeSessionCwds(),
-        ...(options?.force
-          ? {
-              force: {
-                removeDirty: options.force.removeDirty === true,
-                deleteUnmerged: options.force.deleteUnmerged === true,
-              },
-            }
-          : {}),
+        force,
       });
     },
+  );
+  ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>
+    core.commands.retryDoneCleanup(taskId, {
+      protectedPaths: activeSessionCwds(),
+    }),
+  );
+  ipcMain.handle("core:abandonDoneCleanup", (_event, taskId: string) =>
+    core.commands.abandonDoneCleanup(taskId),
   );
   ipcMain.handle(
     "core:reopenTask",

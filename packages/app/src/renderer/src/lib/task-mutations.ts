@@ -11,7 +11,6 @@ import type {
   Task,
   TaskState,
   ToAwaitOptions,
-  ToDoneConfirmation,
   ToDoneForce,
 } from "../../../preload/api";
 import { requestConfirm } from "../confirm";
@@ -69,68 +68,78 @@ export async function toAwaitMutation(
   }
 }
 
-/** pi-home's completion questions (presentation/flows.ts `completeWork`). */
-const DONE_QUESTIONS: Record<
-  ToDoneConfirmation["requiresConfirmation"],
-  { title: string; confirmLabel: string; flag: keyof ToDoneForce }
-> = {
-  dirty: {
-    title: "Discard uncommitted changes?",
-    confirmLabel: "Remove anyway",
-    flag: "removeDirty",
-  },
-  unmerged: {
-    title: "Delete unmerged task workspace?",
-    confirmLabel: "Delete anyway",
-    flag: "deleteUnmerged",
-  },
-  activeChildren: {
-    title: "Complete with active children?",
-    confirmLabel: "Complete anyway",
-    flag: "leaveChildren",
-  },
-};
-
-const DONE_MESSAGES: Record<
-  ToDoneConfirmation["requiresConfirmation"],
-  string
-> = {
-  dirty: "The worktree has uncommitted changes — remove it anyway?",
-  unmerged:
-    "The branch isn't merged — delete the worktree and local branch anyway?",
-  activeChildren: "They keep running and stay nested under it once it's Done.",
-};
+type TaskPanesClosingListener = (taskId: string) => void;
+const panesClosingListeners = new Set<TaskPanesClosingListener>();
 
 /**
- * Move a task to Done (button, `x`, or a drop on Done). Destroying work is
- * confirmed first, exactly like pi-home: core answers with a question
- * (uncommitted changes, then an unmerged branch) without moving the task;
- * each confirm re-asks with the accumulated answers, any cancel leaves the
- * task untouched. The landed result's warning surfaces as a toast.
+ * A confirmed Done is about to end the processes in the task's worktree:
+ * the app shell (App.tsx) closes the task's workspace so no pane is left
+ * attached to a killed pty. Returns the unsubscribe.
+ */
+export function subscribeTaskPanesClosing(
+  listener: TaskPanesClosingListener,
+): () => void {
+  panesClosingListeners.add(listener);
+  return () => {
+    panesClosingListeners.delete(listener);
+  };
+}
+
+/** What the single Done question looks like (title, button), body lines from core. */
+export const DONE_QUESTION = {
+  title: "Mark done?",
+  confirmLabel: "Mark done",
+} as const;
+
+/**
+ * Move a task to Done (button, `x`, a drop on Done, an inbox action). One
+ * small question, its lines computed by core up front (worktree removed,
+ * uncommitted changes discarded, unmerged branch deleted, pane closed);
+ * Enter confirms, cancel leaves the task untouched. A parent with active
+ * children is asked about them first (a separate question: it is about
+ * other tasks). Once confirmed Done is final: the worktree housekeeping is
+ * the app's (core records `task.cleanup` and retries it), so nothing here
+ * ever warns about it.
  */
 export async function toDoneMutation(taskId: string): Promise<void> {
   try {
     const force: ToDoneForce = {};
     for (;;) {
       const result = await window.harbormaster.core.toDone(taskId, { force });
-      if (!("requiresConfirmation" in result)) {
-        if (result.warning) pushToast(result.warning, "warning");
-        return;
+      // Landed. Cleanup outcomes live on `task.cleanup` (inbox item after
+      // repeated failures), never in a toast.
+      if (!("requiresConfirmation" in result)) return;
+      if (result.requiresConfirmation === "activeChildren") {
+        // Core asks this at most once (the answer accumulates); never loop.
+        if (force.leaveChildren) {
+          pushToast(result.detail, "error");
+          return;
+        }
+        const confirmed = await requestConfirm({
+          title: "Complete with active children?",
+          message: `They keep running and stay nested under it once it's Done. (${result.detail})`,
+          confirmLabel: "Complete anyway",
+        });
+        if (!confirmed) return;
+        force.leaveChildren = true;
+        continue;
       }
-      const question = DONE_QUESTIONS[result.requiresConfirmation];
-      // The same question twice means core refused despite the answer;
-      // never loop on it.
-      if (force[question.flag]) {
+      if (force.confirmed) {
         pushToast(result.detail, "error");
         return;
       }
       const confirmed = await requestConfirm({
-        title: question.title,
-        message: `${DONE_MESSAGES[result.requiresConfirmation]} (${result.detail})`,
-        confirmLabel: question.confirmLabel,
+        title: DONE_QUESTION.title,
+        message: "",
+        lines: result.lines ?? [],
+        enterConfirms: true,
+        confirmLabel: DONE_QUESTION.confirmLabel,
       });
       if (!confirmed) return;
-      force[question.flag] = true;
+      if (result.closesPane) {
+        for (const listener of panesClosingListeners) listener(taskId);
+      }
+      force.confirmed = true;
     }
   } catch (error) {
     pushToast(describeThrown(error), "error");

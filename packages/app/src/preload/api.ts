@@ -127,8 +127,8 @@ export interface MessagingChangedPayload {
 
 /** The user's answers to a previous `toDone` confirmation question. */
 export interface ToDoneForce {
-  removeDirty?: boolean;
-  deleteUnmerged?: boolean;
+  /** Answers the single "Mark done?" question: Done is final, the app owns the cleanup. */
+  confirmed?: boolean;
   /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
   leaveChildren?: boolean;
 }
@@ -396,15 +396,21 @@ export interface HarbormasterApi {
       options?: ToAwaitOptions,
     ): Promise<Task>;
     /**
-     * Move a task to `done`. Uncommitted changes or an unmerged branch come
-     * back as a confirmation question (task NOT moved); answer it by calling
-     * again with `force`. A worktree open in one of this app's panes (main
-     * supplies those) is kept with a `warning`. See `CoreCommands.toDone`.
+     * Move a task to `done`. The first call comes back as the single
+     * "Mark done?" question (task NOT moved; its `lines` say what will
+     * happen); answer it by calling again with `force.confirmed`. On a
+     * confirmed call main first closes this app's processes in the task's
+     * worktree (warm session, panes), then core lands the task and owns the
+     * cleanup (`task.cleanup`). See `CoreCommands.toDone`.
      */
     toDone(
       taskId: string,
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult>;
+    /** The cleanup inbox item's Retry: force the Done task's cleanup again now. See `CoreCommands.retryDoneCleanup`. */
+    retryDoneCleanup(taskId: string): Promise<Task>;
+    /** The cleanup inbox item's Dismiss: give up on the Done task's cleanup. See `CoreCommands.abandonDoneCleanup`. */
+    abandonDoneCleanup(taskId: string): Promise<Task>;
     /**
      * Reopen a Done task as a new Dev cycle (fresh branch + worktree; the
      * previous conversation is forked into its next pi pane). A missing

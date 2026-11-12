@@ -7,6 +7,10 @@ export interface ConfirmRequest {
   id: string;
   title: string;
   message: string;
+  /** Extra body lines, one paragraph each (e.g. Done's "what will happen" list). */
+  lines?: string[];
+  /** Enter confirms: the confirm button takes focus on open (Done's "Mark done"). */
+  enterConfirms?: boolean;
   confirmLabel: string;
   resolve: (confirmed: boolean) => void;
 }
@@ -24,6 +28,8 @@ function emit(): void {
 export function requestConfirm(question: {
   title: string;
   message: string;
+  lines?: string[];
+  enterConfirms?: boolean;
   confirmLabel?: string;
 }): Promise<boolean> {
   return new Promise((resolve) => {
@@ -34,6 +40,8 @@ export function requestConfirm(question: {
         id,
         title: question.title,
         message: question.message,
+        ...(question.lines?.length ? { lines: question.lines } : {}),
+        ...(question.enterConfirms ? { enterConfirms: true } : {}),
         confirmLabel: question.confirmLabel ?? "Confirm",
         resolve: (confirmed) => {
           queue = queue.filter((request) => request.id !== id);

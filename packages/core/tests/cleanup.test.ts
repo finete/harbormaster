@@ -5,8 +5,13 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "../src/contracts/model.js";
 import {
+  classifyWorktreeRemovalError,
+  cleanupNeedsAttention,
+  doneConfirmationLines,
   findOrphanDirs,
+  isForcedCleanupDue,
   isReviewCheckoutOf,
+  nextCleanupAttemptAt,
   orphanWorktreeWarning,
   shouldArchive,
   shouldDeleteBranch,
@@ -116,5 +121,116 @@ describe("orphan worktree scan rules", () => {
     expect(
       orphanWorktreeWarning("/r", [{ path: "/r/x" }], { count: 1, bytes: 1 }),
     ).toBeDefined();
+  });
+});
+
+describe("doneConfirmationLines", () => {
+  it("lists only what is true, in a fixed order", () => {
+    expect(
+      doneConfirmationLines({
+        worktreePath: "/w/a",
+        uncommittedChanges: 4,
+        unmergedBranch: "feat",
+        closesPane: true,
+      }),
+    ).toEqual([
+      "The worktree /w/a will be removed.",
+      "4 uncommitted changes will be discarded.",
+      "Branch feat is not merged; the local branch will be deleted.",
+      "Its terminal pane will be closed.",
+    ]);
+    expect(
+      doneConfirmationLines({ worktreePath: "/w/a", uncommittedChanges: 1 }),
+    ).toEqual([
+      "The worktree /w/a will be removed.",
+      "1 uncommitted change will be discarded.",
+    ]);
+    expect(
+      doneConfirmationLines({ worktreePath: "/w/a", uncommittedChanges: 0 }),
+    ).toEqual(["The worktree /w/a will be removed."]);
+  });
+
+  it('is empty for a task without a worktree (just "Mark done?")', () => {
+    expect(doneConfirmationLines({})).toEqual([]);
+    // No worktree: no changes or pane to speak of.
+    expect(
+      doneConfirmationLines({ uncommittedChanges: 3, closesPane: true }),
+    ).toEqual([]);
+  });
+});
+
+describe("forced cleanup backoff", () => {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  const plus = (ms: number) => new Date(now.getTime() + ms).toISOString();
+
+  it("waits 1 min, 5 min, 30 min, then hourly", () => {
+    expect(nextCleanupAttemptAt(1, now)).toBe(plus(60_000));
+    expect(nextCleanupAttemptAt(2, now)).toBe(plus(5 * 60_000));
+    expect(nextCleanupAttemptAt(3, now)).toBe(plus(30 * 60_000));
+    expect(nextCleanupAttemptAt(4, now)).toBe(plus(60 * 60_000));
+    expect(nextCleanupAttemptAt(12, now)).toBe(plus(60 * 60_000));
+  });
+
+  it("is due only for an unfinished forced cleanup past its next attempt", () => {
+    const base = { requestedAt: now.toISOString(), attempts: 1 };
+    expect(isForcedCleanupDue({ mode: "forced", ...base }, now)).toBe(true);
+    expect(
+      isForcedCleanupDue(
+        { mode: "forced", ...base, nextAttemptAt: plus(1) },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isForcedCleanupDue(
+        { mode: "forced", ...base, nextAttemptAt: plus(0) },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isForcedCleanupDue(
+        { mode: "forced", ...base, completedAt: now.toISOString() },
+        now,
+      ),
+    ).toBe(false);
+    expect(isForcedCleanupDue({ mode: "abandoned", ...base }, now)).toBe(false);
+  });
+
+  it("needs the user after 3 failed attempts, never once completed or abandoned", () => {
+    const failing = (attempts: number) =>
+      doneTask({
+        cleanup: {
+          mode: "forced",
+          requestedAt: "2026-01-01T00:00:00Z",
+          attempts,
+          lastError: "busy",
+        },
+      });
+    expect(cleanupNeedsAttention(failing(2))).toBe(false);
+    expect(cleanupNeedsAttention(failing(3))).toBe(true);
+    const abandoned = failing(5);
+    if (abandoned.cleanup) abandoned.cleanup.mode = "abandoned";
+    expect(cleanupNeedsAttention(abandoned)).toBe(false);
+    expect(cleanupNeedsAttention({ ...failing(5), state: "dev" })).toBe(false);
+  });
+});
+
+describe("classifyWorktreeRemovalError", () => {
+  it("treats ENOENT as already cleaned and a missing-metadata folder as an orphan", () => {
+    expect(
+      classifyWorktreeRemovalError(
+        Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" }),
+      ),
+    ).toBe("missing");
+    expect(
+      classifyWorktreeRemovalError(
+        new Error("fatal: not a git repository: /r/.git/worktrees/x"),
+      ),
+    ).toBe("orphan");
+    expect(
+      classifyWorktreeRemovalError(
+        new Error("fatal: '/r' is a main working tree"),
+      ),
+    ).toBe("other");
+    expect(classifyWorktreeRemovalError("Device busy")).toBe("other");
   });
 });

@@ -169,6 +169,10 @@ const api: HarbormasterApi = {
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult> =>
       ipcRenderer.invoke("core:toDone", taskId, options),
+    retryDoneCleanup: (taskId: string): Promise<Task> =>
+      ipcRenderer.invoke("core:retryDoneCleanup", taskId),
+    abandonDoneCleanup: (taskId: string): Promise<Task> =>
+      ipcRenderer.invoke("core:abandonDoneCleanup", taskId),
     reopenTask: (
       taskId: string,
       input?: ReopenTaskInput,

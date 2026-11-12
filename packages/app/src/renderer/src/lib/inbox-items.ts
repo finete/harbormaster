@@ -24,12 +24,13 @@ export type InboxKind =
   | "rule"
   | "ready-to-land"
   | "launch-failed"
+  | "cleanup-failed"
   | "idle"
   | "done";
 
 /** One action an entry offers; the first is the primary (hover/selection) button. */
 export interface InboxAction {
-  /** `open` | `to-done` | `mark-done` | `dismiss` | `approve` | `edit` | `reject` | `retry` | `button:<id>` (a rule button). */
+  /** `open` | `to-done` | `mark-done` | `dismiss` | `approve` | `edit` | `reject` | `retry` | `retry-cleanup` | `reveal-worktree` | `abandon-cleanup` | `button:<id>` (a rule button). */
   id: string;
   label: string;
   /** Single-key shortcut in the inbox view. */
@@ -59,6 +60,8 @@ export interface InboxEntry {
   item?: InboxItem;
   /** The message awaiting approval (approval entries). */
   message?: TaskMessage;
+  /** The folder the entry is about (cleanup-failed: the worktree left behind). */
+  path?: string;
 }
 
 export interface InboxSources {
@@ -134,6 +137,8 @@ export function assembleInbox(sources: InboxSources): InboxEntry[] {
 
   const ready = new Map(sources.readyToLand.map((e) => [e.taskId, e]));
   for (const { task, state } of sources.tasks) {
+    const cleanup = cleanupFailure(task, state);
+    if (cleanup) entries.push(cleanup);
     if (state === "done") continue;
     const landing = ready.get(task.id);
     if (landing) {
@@ -178,6 +183,50 @@ export function assembleInbox(sources: InboxSources): InboxEntry[] {
   }
 
   return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** Failed attempts after which a confirmed Done's cleanup asks the user (core's `CLEANUP_INBOX_AFTER_ATTEMPTS`). */
+export const CLEANUP_INBOX_AFTER_ATTEMPTS = 3;
+
+/**
+ * The one "couldn't clean up" item per Done task: its app-owned forced
+ * cleanup (`task.cleanup`) failed 3+ times. Leaves on its own once the
+ * cleanup succeeds; Dismiss gives up for good (core marks it abandoned).
+ * Other tab: the task is Done, nothing is blocked on it.
+ */
+function cleanupFailure(task: Task, state: TaskState): InboxEntry | undefined {
+  const cleanup = task.cleanup;
+  if (
+    state !== "done" ||
+    cleanup?.mode !== "forced" ||
+    cleanup.completedAt ||
+    !cleanup.lastError ||
+    cleanup.attempts < CLEANUP_INBOX_AFTER_ATTEMPTS
+  ) {
+    return undefined;
+  }
+  return {
+    // Stable per Done (requestedAt): one item per task, not one per attempt.
+    id: `cleanup-failed:${task.id}:${cleanup.requestedAt}`,
+    kind: "cleanup-failed",
+    source: "harbormaster",
+    title: `Couldn't clean up ${task.title}'s worktree: ${cleanup.lastError}`,
+    body: `Harbormaster tried ${cleanup.attempts} times and keeps retrying (hourly). Retry now, open the folder to look, or dismiss to stop trying and leave it as is.`,
+    taskId: task.id,
+    createdAt: cleanup.requestedAt,
+    priority: false,
+    // Dismiss here is core's "give up" (abandon), not a local hide.
+    dismissable: false,
+    persisted: false,
+    actions: [
+      { id: "retry-cleanup", label: "Retry", key: "R" },
+      ...(cleanup.worktreePath
+        ? [{ id: "reveal-worktree", label: "Open folder", key: "F" }]
+        : []),
+      { id: "abandon-cleanup", label: "Dismiss", key: "D" },
+    ],
+    ...(cleanup.worktreePath ? { path: cleanup.worktreePath } : {}),
+  };
 }
 
 function launchFailure(

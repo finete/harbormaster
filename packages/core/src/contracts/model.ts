@@ -244,6 +244,39 @@ export interface Task {
   launchedFromTaskId?: string;
   /** Present only for a task created by `launchTask`: its background-launch queue/run state. */
   launch?: TaskLaunch;
+  /**
+   * App-owned worktree housekeeping after a confirmed manual Done (see
+   * `CoreCommands.toDone`): set when the user confirmed, kept current by
+   * the refresh sweep's forced retries, cleared when the task leaves Done.
+   */
+  cleanup?: TaskCleanup;
+}
+
+/**
+ * Worktree cleanup the app owns for a Done task (`/docs/design-decisions.md`
+ * "Blessed divergences", manual Done). `forced`: the user confirmed Done,
+ * so the cleanup removes the worktree with force (dirty allowed) and deletes
+ * the local branch; the refresh sweep retries it with backoff until it
+ * succeeds (`completedAt`). `abandoned`: the user dismissed the "couldn't
+ * clean up" inbox item; the sweep stops.
+ */
+export interface TaskCleanup {
+  mode: "forced" | "abandoned";
+  /** When the user confirmed Done. */
+  requestedAt: string;
+  /** Delete the task's local branch (merged, or the user confirmed the unmerged line). */
+  deleteBranch?: boolean;
+  /** Cleanup attempts that ran (the first one is `toDone`'s own). */
+  attempts: number;
+  lastAttemptAt?: string;
+  /** The sweep's next forced retry is due at or after this time (backoff). */
+  nextAttemptAt?: string;
+  /** Why the last attempt failed; cleared on success. */
+  lastError?: string;
+  /** Everything is cleaned up (worktree removed, binding parked, branch deleted). */
+  completedAt?: string;
+  /** The worktree path being cleaned up (for "Open folder" after the binding parks). */
+  worktreePath?: string;
 }
 
 /**
