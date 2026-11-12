@@ -272,7 +272,7 @@ describe("refresh lost-update safety (#8)", () => {
 
     const refreshing = f.core.commands.refresh();
     await f.pullRequests.waitForCalls(1);
-    await f.core.commands.toDone(task.id, { force: { deleteUnmerged: true } });
+    await f.core.commands.toDone(task.id, { force: { confirmed: true } });
     f.pullRequests.release();
     await refreshing;
 
@@ -352,8 +352,10 @@ describe("stage-less Production deploy wait (#3)", () => {
     reloaded = await f.core.commands.getTask(task.id);
     expect(reloaded?.state).toBe("awaiting");
 
-    const { task: done } = await f.core.commands.toDone(task.id);
-    expect(done.state).toBe("done");
+    const done = await f.core.commands.toDone(task.id, {
+      force: { confirmed: true },
+    });
+    expect(done).toMatchObject({ task: { state: "done" } });
   });
 });
 
@@ -442,20 +444,17 @@ describe("auto-done stays put when cleanup would be refused (#4, #5)", () => {
 });
 
 describe("done-cleanup retry sweep (#6)", () => {
-  it("retries a refused cleanup each refresh, warns once per reason, and removes the worktree once it is clean (binding kept)", async () => {
+  it("retries a refused legacy cleanup (a Done from before task.cleanup) each refresh, warns once per reason, and removes the worktree once it is clean (binding kept)", async () => {
     const f = await fixture();
     const task = await f.startedTask("Dirty done");
     const worktree = (await f.core.commands.getTaskWorkspace(task.id))!
       .worktreePath!;
     await f.core.commands.claimSessionLaunch(task.id);
     await writeFile(join(worktree, "scratch.txt"), "dirty\n");
-    // Done while a pane is still open in it: kept, no question asked.
-    const first = await f.core.commands.toDone(task.id, {
-      protectedPaths: [worktree],
-    });
-    expect(first).toMatchObject({
-      warning: expect.stringMatching(/open in a live session/),
-    });
+    // A Done recorded before the app owned cleanup: in Done, worktree kept,
+    // no `cleanup` record (so the old unforced sweep applies).
+    await f.core.commands.moveTask(task.id, "done");
+    expect((await f.core.commands.getTask(task.id))?.cleanup).toBeUndefined();
 
     const r1 = await f.core.commands.refresh();
     expect(r1.warnings).toEqual([
@@ -499,7 +498,7 @@ describe("board-transition parity (#16, #17)", () => {
       kind: "temp_task",
       start: true,
     });
-    await f.core.commands.toDone(task.id);
+    await f.core.commands.toDone(task.id, { force: { confirmed: true } });
     f.clock.current = new Date("2026-01-09T00:00:00.000Z");
     await f.core.commands.refresh();
     expect((await f.core.commands.getTask(task.id))?.archivedAt).toBeDefined();
@@ -508,6 +507,8 @@ describe("board-transition parity (#16, #17)", () => {
 
     expect(moved.completedAt).toBeUndefined();
     expect(moved.archivedAt).toBeUndefined();
+    // Leaving Done stops the app-owned cleanup too.
+    expect(moved.cleanup).toBeUndefined();
   });
 });
 

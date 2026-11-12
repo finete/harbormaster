@@ -224,6 +224,10 @@ test('"x" moves the selected card to Done', async () => {
   );
 
   await window.keyboard.press("x");
+  // The one small "Mark done?"; Enter confirms.
+  await expect(window.getByTestId("confirm-dialog")).toBeVisible();
+  await window.keyboard.press("Enter");
+  await expect(window.getByTestId("confirm-dialog")).toHaveCount(0);
   await expect(window.getByTestId("column-done-cards")).toContainText(
     "Keyboard Gamma",
   );

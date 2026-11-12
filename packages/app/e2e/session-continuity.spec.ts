@@ -277,9 +277,10 @@ test("reopening a Done task restores a workspace directory and forks the previou
   // (cards carry no buttons).
   await expect(card).toHaveAttribute("data-selected", "true");
   await window.keyboard.press("x");
-  // No PR ever merged: pi-home's "Delete unmerged task workspace?" question.
+  // The single "Mark done?" question (no PR ever merged: it says so).
   const confirm = window.getByTestId("confirm-dialog");
-  await expect(confirm).toContainText("Delete unmerged task workspace?");
+  await expect(confirm).toContainText("Mark done?");
+  await expect(confirm).toContainText("is not merged");
   await window.getByTestId("confirm-dialog-confirm").click();
   await expect(confirm).toHaveCount(0);
   await expect(

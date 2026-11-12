@@ -6,7 +6,14 @@
 // (no longer reported by activeSessionCwds/activeSessionPids, later calls on
 // its id are no-ops). Real `/bin/sh` processes via node-pty, no mocks.
 import { randomUUID } from "node:crypto";
-import { fstatSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  fstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as pty from "node-pty";
@@ -18,6 +25,7 @@ import {
   createBackgroundPrimarySession,
   createSession,
   disposeSession,
+  disposeSessionsUnder,
   getSession,
   lookupPanePid,
   resizeSession,
@@ -302,5 +310,44 @@ describe("exited sessions are retired", () => {
     expect(backgroundExits).toBe(1);
     expect(getSession(id)).toBeUndefined();
     expect(activeSessionCwds()).not.toContain(cwd);
+  });
+});
+
+describe("a confirmed Done ends the ptys in its worktree", () => {
+  it("disposes every session whose cwd is the worktree or inside it, never a lookalike sibling", () => {
+    const root = tmpCwd();
+    const inside = path.join(root, "src");
+    const sibling = `${root}-other`;
+    for (const dir of [inside, sibling]) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const open = (cwd: string) => {
+      const { id } = createSession(
+        80,
+        24,
+        { onData: () => {}, onExit: () => {} },
+        { spec: shSpec("sleep 30", cwd) },
+      );
+      openSessionIds.push(id);
+      return id;
+    };
+    const atRoot = open(root);
+    const nested = open(inside);
+    const other = open(sibling);
+
+    expect(disposeSessionsUnder(`${root}/`).sort()).toEqual(
+      [atRoot, nested].sort(),
+    );
+    expect(getSession(atRoot)).toBeUndefined();
+    expect(getSession(nested)).toBeUndefined();
+    expect(getSession(other)).toBeDefined();
+    expect(activeSessionCwds()).not.toContain(root);
+    expect(activeSessionCwds()).toContain(sibling);
+    // The question's view can leave out a task's warm session.
+    expect(activeSessionCwds({ excludeIds: new Set([other]) })).not.toContain(
+      sibling,
+    );
+    disposeSession(other);
+    rmSync(sibling, { recursive: true, force: true });
   });
 });

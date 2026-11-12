@@ -388,7 +388,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await expect(window.getByTestId("board-view")).toBeVisible();
   });
 
-  test("Done on a clean scratch task moves it straight to the Done column with no warning", async () => {
+  test('Done on a clean scratch task asks just "Mark done?" (Enter confirms) and lands in the Done column with no warning', async () => {
     // The previous test ended on the board view; back to the workspace view
     // for its sidebar "+ New task" button.
     await window.getByTestId("workspace-button").click();
@@ -417,6 +417,13 @@ test.describe("toAwait and toDone drive the board through the real core command 
     // buttons; `x` runs the same toDone path as the workspace header).
     await selectCard(window, taskId);
     await window.keyboard.press("x");
+    // The small are-you-sure: no worktree, so nothing to list.
+    const confirm = window.getByTestId("confirm-dialog");
+    await expect(confirm).toBeVisible();
+    await expect(confirm.getByRole("heading")).toHaveText("Mark done?");
+    await expect(window.getByTestId("confirm-dialog-line")).toHaveCount(0);
+    await window.keyboard.press("Enter");
+    await expect(confirm).toHaveCount(0);
 
     const doneCard = window
       .getByTestId("column-done-cards")
@@ -499,9 +506,14 @@ test.describe("toAwait and toDone drive the board through the real core command 
     expect(worktreePath && existsSync(worktreePath)).toBe(true);
 
     await dragTo(window, devCard, window.getByTestId("column-done"));
-    // The PR is open, not merged: the same question the Done button asks.
+    // The same single question the Done button asks; the PR is open, not
+    // merged, so it says the local branch goes too.
     const confirm = window.getByTestId("confirm-dialog");
-    await expect(confirm).toContainText("Delete unmerged task workspace?");
+    await expect(confirm.getByRole("heading")).toHaveText("Mark done?");
+    await expect(window.getByTestId("confirm-dialog-line")).toContainText([
+      `The worktree ${worktreePath} will be removed.`,
+      "is not merged; the local branch will be deleted.",
+    ]);
     await window.getByTestId("confirm-dialog-confirm").click();
     await expect(confirm).toHaveCount(0);
 
@@ -567,7 +579,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
   });
 });
 
-test.describe("Done on a dirty worktree asks first (pi-home's completion questions)", () => {
+test.describe("Done is final: one small question, then the app owns the worktree cleanup", () => {
   let app: ElectronApplication;
   let window: Page;
   let root: string;
@@ -606,15 +618,21 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("cancel keeps the task and its changes in place; confirming both questions lands it and removes the worktree", async () => {
+  /** A started repo task (worktree on disk) and its Dev card, from the board. */
+  async function startedRepoTask(
+    title: string,
+  ): Promise<{ taskId: string; worktreePath: string; devCard: Locator }> {
+    if (await window.getByTestId("board-view").isVisible()) {
+      await window.getByTestId("workspace-button").click();
+    }
     await window.getByTestId("sidebar-new-task-button").click();
-    await window.getByTestId("new-task-title-input").fill("Dirty Done");
+    await window.getByTestId("new-task-title-input").fill(title);
     await chooseWhere(window, { index: 1 });
     await submitAs(window, "park");
     await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
     await window.getByTestId("board-button").click();
-    const card = cardLocator(window, "Dirty Done");
+    const card = cardLocator(window, title);
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
     await window.evaluate(
@@ -632,10 +650,17 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
         )?.worktreePath,
       taskId,
     )) as string;
+    expect(existsSync(worktreePath)).toBe(true);
+    return { taskId, worktreePath, devCard };
+  }
+
+  test("a dirty worktree: ONE dialog lists the discard line; cancel keeps everything, confirming removes the worktree", async () => {
+    const { taskId, worktreePath, devCard } =
+      await startedRepoTask("Dirty Done");
     const dirtyFile = path.join(worktreePath, "uncommitted.txt");
     writeFileSync(dirtyFile, "work in progress\n");
-    // A fresh app auto-opens the new task's workspace; a live pane in the
-    // worktree would (correctly) skip the questions and keep it. Close it.
+    // A fresh app may auto-open the new task's workspace; this case is about
+    // the dirty line alone (the live-pane case is the next test). Close it.
     await window.getByTestId("workspace-button").click();
     const closeButton = window.getByTestId("close-workspace-button");
     if ((await closeButton.count()) > 0) {
@@ -645,12 +670,15 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     await window.getByTestId("board-button").click();
 
     const confirm = window.getByTestId("confirm-dialog");
+    const lines = window.getByTestId("confirm-dialog-line");
     await selectCard(window, taskId);
     await window.keyboard.press("x");
-    await expect(confirm).toContainText("Discard uncommitted changes?");
-    await expect(window.getByTestId("confirm-dialog-message")).toContainText(
-      "uncommitted changes",
-    );
+    await expect(confirm.getByRole("heading")).toHaveText("Mark done?");
+    await expect(lines).toHaveText([
+      `The worktree ${worktreePath} will be removed.`,
+      "1 uncommitted change will be discarded.",
+      /^Branch \S+ is not merged; the local branch will be deleted\.$/,
+    ]);
     await window.getByTestId("confirm-dialog-cancel").click();
     await expect(confirm).toHaveCount(0);
     // Cancel changed nothing: still in Dev, the change still on disk.
@@ -658,13 +686,8 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     expect(existsSync(dirtyFile)).toBe(true);
 
     await window.keyboard.press("x");
-    await expect(confirm).toContainText("Discard uncommitted changes?");
+    await expect(confirm.getByRole("heading")).toHaveText("Mark done?");
     await window.getByTestId("confirm-dialog-confirm").click();
-    // Next question, same as pi-home: the branch never merged.
-    await expect(confirm).toContainText("Delete unmerged task workspace?");
-    await window.getByTestId("confirm-dialog-confirm").click();
-    await expect(confirm).toHaveCount(0);
-
     await expect(
       window
         .getByTestId("column-done-cards")
@@ -673,7 +696,60 @@ test.describe("Done on a dirty worktree asks first (pi-home's completion questio
     await expect
       .poll(() => existsSync(worktreePath), { timeout: 15_000 })
       .toBe(false);
+    // Never a second question, never a cleanup toast.
+    await expect(confirm).toHaveCount(0);
+    await expect(window.getByTestId("toast-warning")).toHaveCount(0);
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
+    const task = await window.evaluate(
+      (id) => window.harbormaster.core.getTask(id),
+      taskId,
+    );
+    expect(task?.cleanup).toMatchObject({ mode: "forced", attempts: 1 });
+    expect(task?.cleanup?.completedAt).toBeDefined();
+  });
+
+  test("a worktree open in a live pane: Done says the pane closes; confirming closes it and removes the worktree (nothing left in place)", async () => {
+    const { taskId, worktreePath, devCard } =
+      await startedRepoTask("Live Pane Done");
+    // Open the task: its pane runs in the worktree.
+    await devCard.click();
+    await window.getByTestId("workspace-view").waitFor();
+    const panel = window.getByTestId("terminal-panel").first();
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("data-received-output", "true", {
+      timeout: 20_000,
+    });
+
+    await window.getByTestId(`to-done-button-${taskId}`).click();
+    const confirm = window.getByTestId("confirm-dialog");
+    await expect(confirm.getByRole("heading")).toHaveText("Mark done?");
+    await expect(window.getByTestId("confirm-dialog-line")).toContainText([
+      `The worktree ${worktreePath} will be removed.`,
+      "Its terminal pane will be closed.",
+    ]);
+    // Enter confirms ("Mark done" has focus).
+    await window.keyboard.press("Enter");
+    await expect(confirm).toHaveCount(0);
+
+    await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
+    await expect
+      .poll(() => existsSync(worktreePath), { timeout: 15_000 })
+      .toBe(false);
+    const binding = await window.evaluate(
+      (id) => window.harbormaster.core.getTaskWorkspace(id),
+      taskId,
+    );
+    expect(binding?.worktreePath).toBeUndefined();
+    await expect(window.getByTestId("toast-warning")).toHaveCount(0);
+    await expect(window.getByTestId("toast-error")).toHaveCount(0);
+    expect(
+      (
+        await window.evaluate(
+          (id) => window.harbormaster.core.getTask(id),
+          taskId,
+        )
+      )?.state,
+    ).toBe("done");
   });
 });
 

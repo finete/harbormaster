@@ -274,7 +274,7 @@ describe.skipIf(!gitAvailable)("registered folders", () => {
       (await f.core.commands.listRepositories()).map((repo) => repo.id),
     ).toEqual([f.repositoryId]);
 
-    await f.core.commands.toDone(task.id);
+    await f.core.commands.toDone(task.id, { force: { confirmed: true } });
     expect(await readFile(join(folder, "todo.md"), "utf8")).toBe("keep me");
     const parked = await f.core.commands.getTaskWorkspace(task.id);
     expect(parked?.worktreePath).toBeUndefined();
@@ -356,7 +356,7 @@ describe.skipIf(!gitAvailable)("registered folders", () => {
     // Not registered as a folder: the repository is already known.
     expect(await f.core.commands.listLocations()).toEqual([]);
 
-    await f.core.commands.toDone(task.id);
+    await f.core.commands.toDone(task.id, { force: { confirmed: true } });
     expect(await git(["branch", "--show-current"], f.checkout)).toBe("main");
     expect(await exists(f.checkout)).toBe(true);
 

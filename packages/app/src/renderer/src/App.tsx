@@ -39,6 +39,7 @@ import {
   storePrefs,
 } from "./lib/new-task-draft";
 import { modKeyLabel } from "./lib/platform";
+import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { useInbox } from "./lib/use-inbox";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
@@ -181,6 +182,11 @@ export function App({
     },
     [removeClosed],
   );
+
+  // A confirmed Done ends every process in the task's worktree (main kills
+  // them; the cleanup is the app's): close its workspace so no pane is left
+  // on a dead pty.
+  useEffect(() => subscribeTaskPanesClosing(closeTask), [closeTask]);
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
   // session, and doing that for whatever happens to sort first on the board

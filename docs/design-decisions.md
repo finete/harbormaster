@@ -200,9 +200,30 @@ difference not listed here is a bug.
   last deployment stage) never asks and never forces: if cleanup would be
   refused (dirty worktree, open in a live pane, ...) the task stays in
   Awaiting with a "deployed and ready to land — mark it Done" warning.
-  Manual Done matches pi-home: it asks "Discard uncommitted changes?" /
-  "Delete unmerged task workspace?" before destroying work, and keeps a
-  live pane's worktree without asking (cleaned up by a later refresh).
+- **Manual Done is final; the worktree housekeeping is the app's.** Done
+  (button, `x`, a drop on Done, an inbox action) asks ONE small question,
+  "Mark done?", whose lines core computes up front: "The worktree <path>
+  will be removed.", and only when true "N uncommitted changes will be
+  discarded.", "Branch <name> is not merged; the local branch will be
+  deleted.", "Its terminal pane will be closed." (a task without a worktree
+  gets just "Mark done?"). Cancel / Mark done (Enter); never a second
+  question. (A parent with active children is still asked about them
+  first: that one is about other tasks.) Once confirmed the task moves to
+  Done immediately and records `task.cleanup` (`mode: "forced"`): the app
+  ends the task's warm session and every pty in the worktree (closing its
+  panes), then core force-removes the worktree, parks the binding (session
+  identity survives a reopen), removes review checkouts and deletes the
+  local branch. A failure never blocks the move and is never a toast: it
+  is recorded on the task (`attempts`, `lastError`, audit log) and the
+  refresh sweep retries silently with force (1 min, 5 min, 30 min, then
+  hourly). Orphans are handled without asking: a folder whose git metadata
+  is gone is deleted and pruned, metadata without a folder is pruned, a
+  missing folder counts as cleaned. After 3 failed attempts one Other-tab
+  inbox item per task ("Couldn't clean up <task>'s worktree: <reason>":
+  Retry, Open folder, Dismiss = give up, `mode: "abandoned"`) is the only
+  thing the user ever sees about it. pi-home asked "Discard uncommitted
+  changes?" / "Delete unmerged task workspace?" one after the other and
+  kept a live pane's worktree with a warning.
 - **Dev → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at

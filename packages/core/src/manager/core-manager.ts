@@ -64,6 +64,7 @@ import type {
   GlobalConfig,
   PullRequestRole,
   Task,
+  TaskCleanup,
   TaskLaunch,
   TaskPullRequest,
   TaskState,
@@ -129,8 +130,13 @@ import {
 import { groupColumnTasks } from "../engines/board-grouping.js";
 import { branchToAdopt } from "../engines/branch-adoption.js";
 import {
+  classifyWorktreeRemovalError,
+  type DoneConfirmationFacts,
+  doneConfirmationLines,
   findOrphanDirs,
+  isForcedCleanupDue,
   isReviewCheckoutOf,
+  nextCleanupAttemptAt,
   orphanWorktreeWarning,
   shouldArchive,
   shouldDeleteBranch,
@@ -287,6 +293,8 @@ export class CoreManager implements CoreCommands {
   private refreshInFlight: Promise<RefreshResult> | undefined;
   /** Last reported done-cleanup retry failure per task (dedupe). */
   private readonly cleanupWarnings = new Map<string, string>();
+  /** Tasks whose forced Done cleanup is running right now (toDone vs the sweep vs Retry). */
+  private readonly cleanupsInFlight = new Set<string>();
   /** Registered folders resolved to repositories (see `locationEntries`). */
   private locationCache:
     | { at: number; entries: Array<{ path: string; repo?: RepositoryInfo }> }
@@ -1093,6 +1101,7 @@ export class CoreManager implements CoreCommands {
     };
     delete reopened.completedAt;
     delete reopened.archivedAt;
+    delete reopened.cleanup;
     delete reopened.awaiting;
     if (objective) {
       // Delivered once, as the reopened session's first message.
@@ -1259,6 +1268,9 @@ export class CoreManager implements CoreCommands {
       if (task.state === "done" && state !== "done") {
         delete moved.completedAt;
         delete moved.archivedAt;
+        // Back in play: the app-owned Done cleanup stops (a pending retry
+        // must never remove the worktree a reopened cycle runs in).
+        delete moved.cleanup;
       }
       return moved;
     });
@@ -1435,17 +1447,62 @@ export class CoreManager implements CoreCommands {
   async toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "done");
-    const result = await this.executeSafeDone(
-      task,
-      options?.protectedPaths ?? [],
-      { mode: "manual", force: options?.force ?? {} },
+    const force = options?.force ?? {};
+    const protectedPaths = options?.protectedPaths ?? [];
+    // A parent with active children asks first (children are never touched
+    // either way): it is about other tasks, so it stays its own question.
+    if (!force.leaveChildren) {
+      const children = await this.listChildren(task.id);
+      const active = children.filter((child) => child.state !== "done");
+      if (active.length > 0) {
+        return {
+          requiresConfirmation: "activeChildren",
+          detail: `${task.title} has ${active.length} active child task${active.length === 1 ? "" : "s"}: ${active.map((child) => child.title).join(", ")}`,
+        };
+      }
+    }
+    // Then exactly one "Mark done?" question; once confirmed, Done is final
+    // and the housekeeping is the app's (never a second question).
+    if (!force.confirmed) return this.doneConfirmation(task, protectedPaths);
+    const landed = await this.executeConfirmedDone(task, protectedPaths);
+    if (!landed) throw new Error(`Task not found: ${taskId}`);
+    return { task: landed };
+  }
+
+  async retryDoneCleanup(
+    taskId: string,
+    options?: RefreshOptions,
+  ): Promise<Task> {
+    const task = await this.requireTask(taskId);
+    if (task.state !== "done" || !task.cleanup) {
+      throw new Error(`${task.title} has no pending cleanup`);
+    }
+    if (task.cleanup.mode !== "forced" || task.cleanup.completedAt) {
+      return task;
+    }
+    return (
+      (await this.runForcedCleanup(taskId, options?.protectedPaths ?? [])) ??
+      task
     );
-    if (result.confirm) return result.confirm;
-    if (!result.task) throw new Error(`Task not found: ${taskId}`);
-    return {
-      task: result.task,
-      ...(result.warning ? { warning: result.warning } : {}),
-    };
+  }
+
+  async abandonDoneCleanup(taskId: string): Promise<Task> {
+    const task = await this.requireTask(taskId);
+    if (!task.cleanup || task.cleanup.completedAt) return task;
+    const now = this.deps.clock.now().toISOString();
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
+      if (!fresh.cleanup || fresh.cleanup.completedAt) return undefined;
+      const cleanup: TaskCleanup = { ...fresh.cleanup, mode: "abandoned" };
+      delete cleanup.nextAttemptAt;
+      return { ...fresh, cleanup, updatedAt: now };
+    });
+    if (!next) return task;
+    await this.appendCleanupAudit(
+      taskId,
+      `cleanup abandoned by the user${task.cleanup.lastError ? ` (last error: ${task.cleanup.lastError})` : ""}`,
+    );
+    await this.publishTaskChange(next);
+    return next;
   }
 
   async launchTask(input: LaunchTaskInput): Promise<Task> {
@@ -2040,9 +2097,7 @@ export class CoreManager implements CoreCommands {
         }
         return { outcome: "applied" };
       case "done": {
-        const result = await this.executeSafeDone(task, protectedPaths, {
-          mode: "auto",
-        });
+        const result = await this.executeSafeDone(task, protectedPaths);
         if (result.stayed) {
           // pi-home: auto-landing never overrides a cleanup refusal; the
           // task stays where it is until the user marks it Done.
@@ -2060,53 +2115,26 @@ export class CoreManager implements CoreCommands {
   }
 
   /**
-   * The done path. A live pane's worktree (`protectedPaths`) is never
-   * touched: manual Done lands with a warning, auto-landing stays put.
-   * Manual Done (pi-home's `complete`) otherwise asks before destroying
-   * work — uncommitted changes, then an unmerged branch — by returning
-   * `confirm` without moving the task, and with the matching `force`
-   * answers removes the worktree (forced when dirty) and deletes the branch
-   * (`-D`). Auto-landing (`mode: "auto"`) never asks and never forces: any
-   * refusal keeps the task where it is (`stayed: true`, nothing changed).
-   * Failures that are not questions (missing repository, git errors) never
-   * block a manual Done; they become the `warning`.
+   * The auto-landing done path (a rule's `move: done`). Never asks and never
+   * forces: a live pane's worktree (`protectedPaths`), a dirty worktree or
+   * any other refusal keeps the task where it is (`stayed: true`, nothing
+   * changed) so it shows as "ready to land" for the user to mark Done.
+   * Failures after the worktree is gone (review checkouts, branch) become
+   * the `warning`. Manual Done is `toDone` (one confirmation, forced
+   * app-owned cleanup).
    */
   private async executeSafeDone(
     task: Task,
     protectedPaths: readonly string[],
-    how:
-      | { mode: "auto" }
-      | {
-          mode: "manual";
-          force: NonNullable<ToDoneOptions["force"]>;
-        },
   ): Promise<{
     task?: Task;
     warning?: string;
     stayed?: boolean;
-    confirm?: ToDoneConfirmation;
   }> {
-    const auto = how.mode === "auto";
     let warning: string | undefined;
     const addWarning = (text: string) => {
       warning = warning ? `${warning}; ${text}` : text;
     };
-    // A manual Done on a parent with active children asks first (children
-    // are never touched either way); auto-landing (rule-driven) never asks
-    // anyone, so it skips straight past this "- and a non-empty answer never
-    // blocks it.
-    if (how.mode === "manual" && !how.force.leaveChildren) {
-      const children = await this.listChildren(task.id);
-      const active = children.filter((child) => child.state !== "done");
-      if (active.length > 0) {
-        return {
-          confirm: {
-            requiresConfirmation: "activeChildren",
-            detail: `${task.title} has ${active.length} active child task${active.length === 1 ? "" : "s"}: ${active.map((child) => child.title).join(", ")}`,
-          },
-        };
-      }
-    }
     if (!task.repositoryId) {
       // Repository-less (scratch) task: there is no git here at all. The
       // scratch directory stays on disk; only park the binding, exactly
@@ -2116,86 +2144,59 @@ export class CoreManager implements CoreCommands {
       if (binding?.worktreePath) await this.parkBinding(binding);
     }
     if (task.repositoryId && task.branch) {
-      let repo: RepositoryInfo | undefined;
+      let repo: RepositoryInfo;
       try {
         repo = await this.findRepository(task.repositoryId);
       } catch (error) {
-        if (auto) return { stayed: true, warning: describeError(error) };
-        addWarning(describeError(error));
+        return { stayed: true, warning: describeError(error) };
       }
-      const binding = repo
-        ? await this.deps.bindings.getBindingForTask(task.id)
-        : undefined;
-      if (repo && binding?.worktreePath) {
+      const binding = await this.deps.bindings.getBindingForTask(task.id);
+      if (binding?.worktreePath) {
         const path = binding.worktreePath;
         if (isProtectedPath(path, protectedPaths)) {
           // A live pane (or other process) still has this worktree as its
-          // cwd: never pull it out from under it, and never ask (pi-home's
-          // protectedCwd). The branch is still checked out there too; the
-          // refresh retry sweep cleans up once the pane is gone.
-          const text = `worktree left in place: it is open in a live session (${path})`;
-          if (auto) return { stayed: true, warning: text };
-          addWarning(text);
-        } else {
-          const merged = shouldDeleteBranch(task.pr);
-          let forceRemove = false;
-          let deleteBranch = merged;
-          if (how.mode === "manual") {
-            const dirty = await this.deps.worktrees
-              .isWorktreeDirty(path)
-              .catch(() => false);
-            if (dirty && !how.force.removeDirty) {
-              return {
-                confirm: {
-                  requiresConfirmation: "dirty",
-                  detail: `${task.title}: the worktree has uncommitted changes (${path})`,
-                },
-              };
-            }
-            if (!merged && task.kind === "task" && !how.force.deleteUnmerged) {
-              return {
-                confirm: {
-                  requiresConfirmation: "unmerged",
-                  detail: `${task.title}: branch ${task.branch} isn't merged; the worktree and local branch will be deleted`,
-                },
-              };
-            }
-            forceRemove = dirty;
-            deleteBranch = merged || Boolean(how.force.deleteUnmerged);
-          }
-          let removed = false;
-          try {
-            await this.deps.worktrees.removeWorktree(repo, path, forceRemove);
-            removed = true;
-            await this.parkBinding(binding);
-          } catch (error) {
-            const text = `worktree left in place: ${describeError(error)}`;
-            if (auto && !removed) return { stayed: true, warning: text };
-            addWarning(text);
-          }
-          if (removed) {
-            const reviewWarning = await this.removeReviewCheckouts(
-              repo,
-              path,
-              protectedPaths,
-            );
-            if (reviewWarning) addWarning(reviewWarning);
-          }
-          if (deleteBranch) {
-            const branchWarning = await this.deleteTaskBranch(
-              repo,
-              task.branch,
-            );
-            if (branchWarning) addWarning(branchWarning);
-          }
+          // cwd: never pull it out from under it (pi-home's protectedCwd).
+          return {
+            stayed: true,
+            warning: `worktree left in place: it is open in a live session (${path})`,
+          };
+        }
+        try {
+          await this.deps.worktrees.removeWorktree(repo, path, false);
+        } catch (error) {
+          return {
+            stayed: true,
+            warning: `worktree left in place: ${describeError(error)}`,
+          };
+        }
+        await this.parkBinding(binding);
+        const reviewWarning = await this.removeReviewCheckouts(
+          repo,
+          path,
+          protectedPaths,
+        );
+        if (reviewWarning) addWarning(reviewWarning);
+        if (shouldDeleteBranch(task.pr)) {
+          const branchWarning = await this.deleteTaskBranch(repo, task.branch);
+          if (branchWarning) addWarning(branchWarning);
         }
       }
     }
+    const next = await this.landInDone(task.id);
+    return { ...(next ? { task: next } : {}), ...(warning ? { warning } : {}) };
+  }
+
+  /**
+   * Patch the move onto the task as persisted now (cleanup can take a
+   * while, and a concurrent refresh may have updated the PR snapshot
+   * meanwhile), optionally recording the app-owned `cleanup`, and publish.
+   */
+  private async landInDone(
+    taskId: string,
+    cleanup?: TaskCleanup,
+  ): Promise<Task | undefined> {
     const now = this.deps.clock.now().toISOString();
-    // Patch the move onto the task as persisted now: the worktree removal
-    // above can take a while, and a concurrent refresh may have updated
-    // the PR snapshot meanwhile.
-    const next = await this.deps.tasks.patchTask(task.id, (fresh) => {
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
       assertAllowedTransition(fresh.state, "done");
       const landed: Task = {
         ...fresh,
@@ -2203,12 +2204,105 @@ export class CoreManager implements CoreCommands {
         updatedAt: now,
         stateChangedAt: now,
         completedAt: fresh.completedAt ?? now,
+        ...(cleanup ? { cleanup } : {}),
       };
       delete landed.awaiting;
       return landed;
     });
     if (next) await this.publishTaskChange(next);
-    return { ...(next ? { task: next } : {}), ...(warning ? { warning } : {}) };
+    return next;
+  }
+
+  /**
+   * The single "Mark done?" question for a manual Done, its lines computed
+   * up front (`doneConfirmationLines`). Read-only: nothing moves or is
+   * touched until the user confirms.
+   */
+  private async doneConfirmation(
+    task: Task,
+    protectedPaths: readonly string[],
+  ): Promise<ToDoneConfirmation> {
+    let facts: DoneConfirmationFacts = {};
+    if (task.repositoryId && task.branch) {
+      const binding = await this.deps.bindings
+        .getBindingForTask(task.id)
+        .catch(() => undefined);
+      const repo = await this.findRepository(task.repositoryId).catch(
+        () => undefined,
+      );
+      const path = binding?.worktreePath;
+      const uncommittedChanges = path
+        ? await this.uncommittedChangeCount(path)
+        : 0;
+      const branchPresent = repo
+        ? await this.deps.worktrees
+            .branchExists(repo, task.branch)
+            .catch(() => Boolean(path))
+        : Boolean(path);
+      facts = {
+        ...(path ? { worktreePath: path } : {}),
+        uncommittedChanges,
+        ...(branchPresent && !shouldDeleteBranch(task.pr)
+          ? { unmergedBranch: task.branch }
+          : {}),
+        closesPane: Boolean(path && isProtectedPath(path, protectedPaths)),
+      };
+    }
+    return {
+      requiresConfirmation: "done",
+      detail: task.title,
+      lines: doneConfirmationLines(facts),
+      ...(facts.closesPane ? { closesPane: true } : {}),
+    };
+  }
+
+  /** Uncommitted changes in a worktree (0 when it is missing or unreadable). */
+  private async uncommittedChangeCount(path: string): Promise<number> {
+    try {
+      return await this.deps.worktrees.uncommittedChangeCount(path);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * A confirmed manual Done: the task moves to Done right away with
+   * `cleanup: { mode: "forced" }` recorded, then the first forced cleanup
+   * attempt runs (`runForcedCleanup`). A failure never blocks the move and
+   * never comes back as a warning: it is recorded on `task.cleanup` and the
+   * refresh sweep retries it.
+   */
+  private async executeConfirmedDone(
+    task: Task,
+    protectedPaths: readonly string[],
+  ): Promise<Task | undefined> {
+    const binding = await this.deps.bindings
+      .getBindingForTask(task.id)
+      .catch(() => undefined);
+    if (!task.repositoryId && binding?.worktreePath) {
+      // Scratch / folder task: no git here; the directory stays, the
+      // binding parks (session identity survives for a reopen).
+      await this.parkBinding(binding);
+    }
+    const now = this.deps.clock.now().toISOString();
+    const repoBacked = Boolean(task.repositoryId && task.branch);
+    const cleanup: TaskCleanup = {
+      mode: "forced",
+      requestedAt: now,
+      attempts: 0,
+      ...(repoBacked
+        ? {
+            // The user confirmed either a merged branch or the unmerged line.
+            deleteBranch: true,
+            ...(binding?.worktreePath
+              ? { worktreePath: binding.worktreePath }
+              : {}),
+          }
+        : { completedAt: now }),
+    };
+    const landed = await this.landInDone(task.id, cleanup);
+    if (!landed || !repoBacked) return landed;
+    return (await this.runForcedCleanup(task.id, protectedPaths)) ?? landed;
   }
 
   /** The worktree is gone; keep the binding (session identity survives for a reopen — pi-home parks it the same way). */
@@ -2273,6 +2367,144 @@ export class CoreManager implements CoreCommands {
       : undefined;
   }
 
+  /**
+   * One forced cleanup attempt for a confirmed Done task (`task.cleanup.mode
+   * === "forced"`): force-remove the worktree (orphans and missing folders
+   * handled, see `removeWorktreeForced`), park the binding, remove review
+   * checkouts, delete the local branch. Records the outcome on
+   * `task.cleanup` (`attempts`, `lastError`, backoff `nextAttemptAt`, or
+   * `completedAt`) and in the audit log; never throws, never warns. A
+   * worktree still open in a live process (`protectedPaths`) is skipped
+   * without counting an attempt. Returns the task as persisted afterwards.
+   */
+  private async runForcedCleanup(
+    taskId: string,
+    protectedPaths: readonly string[],
+  ): Promise<Task | undefined> {
+    if (this.cleanupsInFlight.has(taskId)) {
+      return this.deps.tasks.getTask(taskId);
+    }
+    this.cleanupsInFlight.add(taskId);
+    try {
+      const task = await this.deps.tasks.getTask(taskId);
+      if (
+        task?.state !== "done" ||
+        task.cleanup?.mode !== "forced" ||
+        task.cleanup.completedAt
+      ) {
+        return task;
+      }
+      let failure: string | undefined;
+      try {
+        if (!task.repositoryId || !task.branch) {
+          // Nothing git-shaped to clean (scratch / folder task).
+        } else {
+          const repo = await this.findRepository(task.repositoryId);
+          const binding = await this.deps.bindings.getBindingForTask(task.id);
+          const path = binding?.worktreePath;
+          if (path && isProtectedPath(path, protectedPaths)) {
+            // Still open in a live process: never pull a cwd out from under
+            // it; the sweep tries again once it is gone (no attempt counted).
+            return task;
+          }
+          if (binding && path) {
+            await this.removeWorktreeForced(repo, path);
+            await this.parkBinding(binding);
+          }
+          const reviewRoot = path ?? task.cleanup.worktreePath;
+          const reviewWarning = reviewRoot
+            ? await this.removeReviewCheckouts(repo, reviewRoot, protectedPaths)
+            : undefined;
+          if (reviewWarning) {
+            // Throwaway checkouts; leftovers show in the orphan scan.
+            await this.appendCleanupAudit(task.id, reviewWarning);
+          }
+          if (task.cleanup.deleteBranch) {
+            await this.deps.worktrees.deleteBranch(repo, task.branch, true);
+          }
+        }
+      } catch (error) {
+        failure = describeError(error);
+      }
+      const now = this.deps.clock.now();
+      const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
+        if (
+          fresh.state !== "done" ||
+          fresh.cleanup?.mode !== "forced" ||
+          fresh.cleanup.completedAt
+        ) {
+          return undefined;
+        }
+        const attempts = fresh.cleanup.attempts + 1;
+        const cleanup: TaskCleanup = {
+          ...fresh.cleanup,
+          attempts,
+          lastAttemptAt: now.toISOString(),
+        };
+        if (failure) {
+          cleanup.lastError = failure;
+          cleanup.nextAttemptAt = nextCleanupAttemptAt(attempts, now);
+        } else {
+          delete cleanup.lastError;
+          delete cleanup.nextAttemptAt;
+          cleanup.completedAt = now.toISOString();
+        }
+        return { ...fresh, cleanup, updatedAt: now.toISOString() };
+      });
+      if (failure) {
+        // Audit only: a confirmed Done never comes back as a toast.
+        await this.appendCleanupAudit(
+          taskId,
+          `worktree left in place: ${failure}`,
+        );
+      }
+      if (next) await this.publishTaskChange(next);
+      return next ?? (await this.deps.tasks.getTask(taskId));
+    } finally {
+      this.cleanupsInFlight.delete(taskId);
+    }
+  }
+
+  /**
+   * `git worktree remove --force`, owning the edge cases instead of asking:
+   * a folder that is already gone counts as cleaned (git's bookkeeping is
+   * pruned), and a folder whose git metadata is missing ("not a git
+   * repository") is deleted outright, then pruned.
+   */
+  private async removeWorktreeForced(
+    repo: RepositoryInfo,
+    path: string,
+  ): Promise<void> {
+    try {
+      await this.deps.worktrees.removeWorktree(repo, path, true);
+      return;
+    } catch (error) {
+      const kind = classifyWorktreeRemovalError(error);
+      if (kind === "other") throw error;
+      if (kind === "orphan") await this.deps.worktrees.deleteWorktreeDir(path);
+    }
+    await this.deps.worktrees.pruneWorktrees(repo).catch(() => {});
+  }
+
+  /** One audit-log warning line for a task's cleanup (no-op without the rules storage). */
+  private async appendCleanupAudit(
+    taskId: string,
+    message: string,
+  ): Promise<void> {
+    const audit = this.deps.rules?.audit;
+    if (!audit) return;
+    await audit
+      .append([
+        {
+          kind: "warning",
+          at: this.deps.clock.now().toISOString(),
+          taskId,
+          message,
+        },
+      ])
+      .catch(() => {});
+  }
+
   /** The retry sweep never asks: it only deletes a merged PR's branch. */
   private async deleteMergedBranch(
     repo: RepositoryInfo,
@@ -2284,12 +2516,17 @@ export class CoreManager implements CoreCommands {
   }
 
   /**
-   * Retry the safe cleanup for done tasks whose worktree is still on disk
-   * (a manual Done refused it: dirty, or open in a live pane). One attempt
-   * per task per refresh; a live pane's worktree is skipped silently, and a
-   * repeated refusal is reported only when its reason changes. After the
-   * session-continuity rework a Done task keeps its binding, so "still on
-   * disk" means the binding still carries a `worktreePath`.
+   * The done-cleanup sweep. A confirmed Done (`task.cleanup.mode ===
+   * "forced"`, not completed) gets a forced retry once its backoff is due
+   * (1 min, 5 min, 30 min, then hourly), silently: the outcome lands on
+   * `task.cleanup` and the audit log, never in `warnings`. Abandoned or
+   * completed cleanups are left alone. Older done tasks without a `cleanup`
+   * record keep the safe (unforced) retry for a worktree still on disk: one
+   * attempt per task per refresh; a live pane's worktree is skipped
+   * silently, and a repeated refusal is reported only when its reason
+   * changes. After the session-continuity rework a Done task keeps its
+   * binding, so "still on disk" means the binding still carries a
+   * `worktreePath`.
    */
   private async retryDoneCleanups(
     tasks: readonly Task[],
@@ -2301,7 +2538,14 @@ export class CoreManager implements CoreCommands {
     // One bindings read per pass, not one per done task: the done list only
     // grows, and each per-task lookup used to re-read the whole file.
     let bindingsByTask: Map<string, WorkspaceBinding> | undefined;
+    const now = this.deps.clock.now();
     for (const task of tasks) {
+      if (task.state === "done" && task.cleanup) {
+        if (isForcedCleanupDue(task.cleanup, now)) {
+          await this.runForcedCleanup(task.id, protectedPaths);
+        }
+        continue;
+      }
       if (
         task.state !== "done" ||
         task.kind !== "task" ||

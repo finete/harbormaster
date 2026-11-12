@@ -246,6 +246,69 @@ describe("assembleInbox", () => {
   });
 });
 
+describe("cleanup-failed items", () => {
+  const failing = (attempts: number, patch: Partial<Task> = {}): Task =>
+    task("d1", {
+      state: "done",
+      title: "Ship it",
+      cleanup: {
+        mode: "forced",
+        requestedAt: "2026-11-11T10:00:00.000Z",
+        attempts,
+        lastError: "Device or resource busy",
+        worktreePath: "/code/.harbormaster-worktrees/ship-it",
+      },
+      ...patch,
+    });
+
+  it("shows ONE Other-tab item per Done task once its forced cleanup failed 3 times: Retry, Open folder, Dismiss", () => {
+    expect(assembleInbox(sources({ tasks: rows(failing(2)) }))).toEqual([]);
+    const entries = assembleInbox(sources({ tasks: rows(failing(3)) }));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "cleanup-failed:d1:2026-11-11T10:00:00.000Z",
+      kind: "cleanup-failed",
+      title: "Couldn't clean up Ship it's worktree: Device or resource busy",
+      taskId: "d1",
+      priority: false,
+      path: "/code/.harbormaster-worktrees/ship-it",
+    });
+    expect(entries[0]?.actions.map((a) => [a.id, a.label])).toEqual([
+      ["retry-cleanup", "Retry"],
+      ["reveal-worktree", "Open folder"],
+      ["abandon-cleanup", "Dismiss"],
+    ]);
+    // Same id on every later attempt: still one item, never a new one.
+    expect(assembleInbox(sources({ tasks: rows(failing(7)) }))[0]?.id).toBe(
+      entries[0]?.id,
+    );
+    expect(priorityCount(entries, new Map())).toBe(0);
+  });
+
+  it("goes away once the cleanup completed or was abandoned, or the task left Done", () => {
+    const done = failing(4);
+    const completed = {
+      ...done,
+      cleanup: { ...done.cleanup!, completedAt: "2026-11-11T11:00:00.000Z" },
+    };
+    const abandoned = {
+      ...done,
+      cleanup: { ...done.cleanup!, mode: "abandoned" as const },
+    };
+    for (const t of [
+      completed,
+      abandoned,
+      { ...done, state: "dev" as const },
+    ]) {
+      expect(
+        assembleInbox(sources({ tasks: rows(t) })).filter(
+          (e) => e.kind === "cleanup-failed",
+        ),
+      ).toEqual([]);
+    }
+  });
+});
+
 describe("tabs, groups and the badge", () => {
   const entries = assembleInbox(
     sources({

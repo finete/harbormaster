@@ -812,8 +812,36 @@ export function activeSessionPids(): Set<number> {
  * pane. (Spawn cwd, not the shell's current cwd — a pane that `cd`s
  * elsewhere still protects the directory it was opened in.)
  */
-export function activeSessionCwds(): string[] {
-  return [...new Set([...sessions.values()].map((session) => session.cwd))];
+export function activeSessionCwds(
+  options: { excludeIds?: ReadonlySet<string> } = {},
+): string[] {
+  return [
+    ...new Set(
+      [...sessions.entries()]
+        .filter(([id]) => !options.excludeIds?.has(id))
+        .map(([, session]) => session.cwd),
+    ),
+  ];
+}
+
+/**
+ * Kill every live pty whose spawn cwd is `root` or inside it (a confirmed
+ * Done owns its worktree's cleanup: the panes and shells in it go first).
+ * Returns the ids it disposed.
+ */
+export function disposeSessionsUnder(root: string): string[] {
+  const normalize = (value: string) => value.replace(/\/+$/, "");
+  const target = normalize(root);
+  if (!target) return [];
+  const disposed: string[] = [];
+  for (const [id, session] of [...sessions.entries()]) {
+    const cwd = normalize(session.cwd);
+    if (cwd === target || cwd.startsWith(`${target}/`)) {
+      disposeSession(id);
+      disposed.push(id);
+    }
+  }
+  return disposed;
 }
 
 export function hostShellLabel(): string {
