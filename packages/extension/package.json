@@ -1,7 +1,7 @@
 {
   "name": "@harbormaster/extension",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "description": "Pi extension: inbox delivery for Harbormaster task sessions (messages other tasks send land via pi.sendMessage as steer/followUp), plus the per-session `harbormaster` MCP server registration. One self-contained file the app installs into Pi's extensions dir.",
@@ -18,7 +18,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.3",
     "@earendil-works/pi-tui": "1.0.3",
-    "@harbormaster/core": "0.0.1",
+    "@harbormaster/core": "0.1.0",
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
