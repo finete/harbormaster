@@ -145,12 +145,10 @@ function TaskCardFace({
         "flex select-none flex-col gap-1 p-3",
         isOverlay
           ? // "Lifted" pick-up (Trello/Linear convention), overlay only.
-            "scale-[1.02] cursor-grabbing shadow-xl ring-1 ring-primary"
-          : "cursor-grab touch-none transition-colors hover:border-primary/40 hover:bg-accent/40 active:cursor-grabbing",
+            "scale-[1.02] cursor-grabbing border-primary"
+          : "cursor-grab touch-none hover:border-foreground/20 active:cursor-grabbing",
         variant === "placeholder" && "opacity-40",
-        !isOverlay &&
-          selected &&
-          "ring-2 ring-primary ring-offset-1 ring-offset-background",
+        !isOverlay && selected && "border-primary hover:border-primary",
         // Attached under its parent's card (see lib/task-lineage.ts): a
         // visible left rail + indent, pi-home-style tree attachment.
         nested && "ml-4 border-l-2 border-l-primary/30",
@@ -224,7 +222,7 @@ function TaskCardFace({
           className={cn(
             "truncate text-xs",
             outcome.status === "blocked"
-              ? "text-amber-300"
+              ? "text-status-needsYou"
               : "text-muted-foreground",
           )}
           data-slot="outcome"
@@ -258,7 +256,7 @@ function TaskCardFace({
         >
           {running && (
             <Badge
-              variant="secondary"
+              variant="neutral"
               className="shrink-0 gap-1"
               data-testid="badge-running"
             >
@@ -268,12 +266,12 @@ function TaskCardFace({
           )}
           {attention && (
             <Badge
-              variant="outline"
-              className="shrink-0 gap-1 border-amber-400/60 text-amber-300"
+              variant="needsYou"
+              className="shrink-0 gap-1"
               data-testid="badge-attention"
             >
               <span
-                className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                className="h-1.5 w-1.5 rounded-full bg-status-needsYou"
                 aria-hidden
               />
               your move
@@ -281,7 +279,7 @@ function TaskCardFace({
           )}
           {messaging.waitingOnParent && (
             <Badge
-              variant="secondary"
+              variant="neutral"
               className="shrink-0"
               data-testid="badge-waiting-on-parent"
               title="Asked its parent a question; waiting for the answer"
@@ -291,8 +289,8 @@ function TaskCardFace({
           )}
           {messaging.approvalsWaiting > 0 && (
             <Badge
-              variant="outline"
-              className="shrink-0 border-primary/60 text-primary"
+              variant="needsYou"
+              className="shrink-0"
               data-testid="badge-approval-waiting"
               title="A message to this task is waiting for your approval"
             >
@@ -301,8 +299,8 @@ function TaskCardFace({
           )}
           {messaging.childQuestionsWaiting > 0 && (
             <Badge
-              variant="outline"
-              className="shrink-0 border-primary/60 text-primary"
+              variant="needsYou"
+              className="shrink-0"
               data-testid="badge-child-question"
               title="A child task asked this task a question"
             >
@@ -311,8 +309,8 @@ function TaskCardFace({
           )}
           {messaging.loopCapReached && (
             <Badge
-              variant="outline"
-              className="shrink-0 border-amber-400/60 text-amber-300"
+              variant="needsYou"
+              className="shrink-0"
               data-testid="badge-loop-cap"
               title={loopCapLabel(messaging.loopCapReached)}
             >
@@ -321,7 +319,7 @@ function TaskCardFace({
           )}
           {launchMarker === "queued" && (
             <Badge
-              variant="secondary"
+              variant="neutral"
               className="shrink-0"
               data-testid="badge-launch-queued"
             >
@@ -330,8 +328,8 @@ function TaskCardFace({
           )}
           {launchMarker === "interrupted" && (
             <Badge
-              variant="outline"
-              className="shrink-0 gap-1 border-amber-400/60 text-amber-300"
+              variant="error"
+              className="shrink-0 gap-1"
               data-testid="badge-launch-interrupted"
             >
               interrupted

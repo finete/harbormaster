@@ -28,7 +28,7 @@ export function Sheet({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/40">
+    <div className="fixed inset-0 z-40 flex justify-end bg-background/70">
       <button
         type="button"
         aria-label={`Close ${title}`}
@@ -43,7 +43,7 @@ export function Sheet({
         data-testid={testId}
         onKeyDown={onKeyDown}
         className={cn(
-          "relative flex h-full w-[440px] max-w-full flex-col border-l border-border bg-card text-card-foreground shadow-xl",
+          "relative flex h-full w-[440px] max-w-full flex-col border-l border-border bg-card text-card-foreground",
         )}
       >
         {children}

@@ -161,7 +161,7 @@ export function SidebarRowContextMenu({
           onClose();
       }}
       style={style}
-      className="fixed z-50 min-w-[180px] rounded-md border border-border bg-background p-1 text-sm text-foreground shadow-lg outline-none"
+      className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground outline-none"
     >
       {items.map((item, index) => (
         <div key={item.key}>
@@ -192,10 +192,12 @@ export function SidebarRowContextMenu({
               }
             }}
             className={cn(
-              "relative flex cursor-pointer items-center rounded px-2 py-1.5 text-xs transition-colors",
+              // 14px text on a 16px line keeps every item 28px tall: the clamp
+              // below and the flyout placement assume that height.
+              "relative flex cursor-pointer items-center rounded px-2 py-1.5 text-sm leading-4 transition-colors duration-[120ms] ease-out",
               item.disabled && "cursor-default opacity-40",
-              !item.disabled && activeIndex === index && "bg-accent/70",
-              item.danger && !item.disabled && "text-red-400",
+              !item.disabled && activeIndex === index && "bg-accent",
+              item.danger && !item.disabled && "text-status-error",
             )}
           >
             <span className="flex-1">{item.label}</span>
@@ -205,7 +207,7 @@ export function SidebarRowContextMenu({
                 role="menu"
                 data-testid={`${testId}-submenu-${item.key}`}
                 className={cn(
-                  "absolute top-0 min-w-[160px] rounded-md border border-border bg-background p-1 shadow-lg",
+                  "absolute top-0 min-w-[160px] rounded-lg border border-border bg-popover p-1",
                   flyoutLeft ? "right-full mr-1" : "left-full ml-1",
                 )}
               >
@@ -232,9 +234,9 @@ export function SidebarRowContextMenu({
                         }
                       }}
                       className={cn(
-                        "cursor-pointer rounded px-2 py-1.5 text-xs text-foreground transition-colors",
+                        "cursor-pointer rounded px-2 py-1.5 text-sm leading-4 text-foreground transition-colors duration-[120ms] ease-out",
                         sub.disabled && "cursor-default opacity-40",
-                        !sub.disabled && subIndex === subPos && "bg-accent/70",
+                        !sub.disabled && subIndex === subPos && "bg-accent",
                       )}
                     >
                       {sub.label}

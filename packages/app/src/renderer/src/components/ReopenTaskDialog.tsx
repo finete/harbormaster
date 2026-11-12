@@ -64,7 +64,7 @@ export function ReopenTaskDialog({
             }
           }}
           placeholder="Sent as the first message of the reopened session, which continues the previous conversation."
-          className="min-h-[84px] w-full resize-y rounded-md border border-border bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="min-h-[84px] w-full resize-y rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground transition-colors duration-[120ms] ease-out placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       </div>
       <DialogFooter>

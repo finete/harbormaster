@@ -117,13 +117,14 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-        checked ? "bg-primary" : "bg-muted",
+        "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-[120ms] ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50",
+        checked ? "border-primary bg-primary" : "border-border bg-muted",
       )}
     >
       <span
         className={cn(
-          "inline-block h-4 w-4 rounded-full bg-foreground transition-transform",
+          "inline-block h-4 w-4 rounded-full transition-transform duration-[120ms] ease-out",
+          checked ? "bg-primary-foreground" : "bg-muted-foreground",
           checked ? "translate-x-4" : "translate-x-0.5",
         )}
       />
@@ -182,7 +183,7 @@ function Stepper({
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
               state === "done" &&
-                "border-emerald-500/60 bg-emerald-500/15 text-emerald-400",
+                "border-primary/50 bg-primary/15 text-primary",
               state === "current" &&
                 "border-primary bg-primary text-primary-foreground",
               state === "future" && "border-border text-muted-foreground",
@@ -220,7 +221,7 @@ function Stepper({
                 disabled={disabled}
                 title={`Back to "${entry.label}"`}
                 onClick={() => onGo(index)}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground/80 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-foreground/80 transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {body}
               </button>
@@ -315,7 +316,7 @@ function CodeStep({
             onChange={(event) => onRootChange(event.target.value)}
           />
           <Button
-            variant="outline"
+            variant="secondary"
             data-testid="onboarding-choose-root"
             onClick={async () => {
               const picked = await window.harbormaster.app.pickFolder();
@@ -330,9 +331,9 @@ function CodeStep({
       {scan?.protectedFolder && (
         <div
           data-testid="onboarding-protected-warning"
-          className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+          className="flex items-start gap-3 rounded-lg border border-status-needsYou/40 bg-status-needsYou/10 p-3 text-sm"
         >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-needsYou" />
           <div className="flex-1">
             <p>
               macOS ties folder permissions to this unsigned build; you may be
@@ -341,7 +342,7 @@ function CodeStep({
             </p>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               className="mt-2"
               data-testid="onboarding-use-code"
               onClick={onUseSuggested}
@@ -381,7 +382,7 @@ function CodeStep({
             aria-labelledby="onboarding-repos-label"
             data-testid="onboarding-repo-list"
             // Six 2rem rows, then it scrolls.
-            className="flex max-h-[12.25rem] flex-col divide-y divide-border overflow-y-auto rounded-md border border-border"
+            className="flex max-h-[12.25rem] flex-col divide-y divide-border overflow-y-auto rounded-lg border border-border bg-card"
           >
             {rows.map((row) => {
               const checked = preselect === row.key;
@@ -392,7 +393,7 @@ function CodeStep({
                   data-checked={checked}
                   data-where={row.key}
                   className={cn(
-                    "flex h-8 shrink-0 cursor-pointer items-center gap-2.5 px-3 text-sm transition-colors",
+                    "flex h-8 shrink-0 cursor-pointer items-center gap-2.5 px-3 text-sm transition-colors duration-[120ms] ease-out",
                     checked ? "bg-primary/10" : "hover:bg-accent",
                   )}
                 >
@@ -401,7 +402,7 @@ function CodeStep({
                     name="onboarding-repo"
                     checked={checked}
                     onChange={() => onPreselect(row.key)}
-                    className="h-3.5 w-3.5 shrink-0 accent-sky-500"
+                    className="h-3.5 w-3.5 shrink-0 accent-primary"
                   />
                   <span className="shrink-0 font-semibold">{row.name}</span>
                   {/* rtl + an LRM pair truncates from the start, so the org/repo end stays visible. */}
@@ -424,7 +425,7 @@ function CodeStep({
               : ""}
           </p>
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             className="shrink-0"
             data-testid="onboarding-add-folder"
@@ -463,10 +464,10 @@ function AgentCard({
       data-testid={`onboarding-agent-${id}`}
       data-checked={checked}
       className={cn(
-        "flex w-full cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 text-left text-sm transition-colors",
-        checked
-          ? "border-primary bg-primary/10"
-          : "border-border hover:bg-accent",
+        // Radio card (design system "Cards"): bg-card, hairline, radius;
+        // selected = border-primary, hover = border-foreground/20.
+        "flex w-full cursor-pointer items-start gap-3 rounded-lg border bg-card px-3 py-2.5 text-left text-sm transition-colors duration-[120ms] ease-out",
+        checked ? "border-primary" : "border-border hover:border-foreground/20",
       )}
     >
       <input
@@ -475,7 +476,7 @@ function AgentCard({
         value={id}
         checked={checked}
         onChange={onSelect}
-        className="mt-0.5 h-4 w-4 shrink-0 accent-sky-500"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
       />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-medium">{label}</span>
@@ -557,7 +558,7 @@ function AgentStep({
                   data-testid={`onboarding-agent-${id}-status`}
                   className={cn(
                     "truncate text-xs",
-                    line ? "text-emerald-400" : "text-muted-foreground",
+                    line ? "text-status-ok" : "text-muted-foreground",
                   )}
                   title={found?.path ?? found?.command}
                 >
@@ -594,7 +595,7 @@ function AgentStep({
       {chosen && !chosen.available && (
         <p
           data-testid="onboarding-agent-warning"
-          className="flex items-start gap-2 text-xs text-amber-400"
+          className="flex items-start gap-2 text-xs text-status-needsYou"
         >
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
           {AGENT_LABELS[chosen.id as keyof typeof AGENT_LABELS] ?? chosen.label}{" "}
@@ -610,7 +611,7 @@ function AgentStep({
           so messages reach its sessions.
         </p>
       )}
-      <div className="flex items-start gap-3 rounded-md border border-border p-3">
+      <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
         <Toggle
           checked={bypass}
           onChange={onBypass}
@@ -661,7 +662,7 @@ function GithubStep({
           data-testid="onboarding-gh-account"
           className="flex items-center gap-2 text-sm"
         >
-          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <CheckCircle2 className="h-4 w-4 text-status-ok" />
           Signed in to {status.host ?? "GitHub"}
           {status.account ? (
             <>
@@ -673,7 +674,7 @@ function GithubStep({
       ) : (
         <div
           data-testid="onboarding-gh-login"
-          className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm"
+          className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm"
         >
           <p>
             {status.installed
@@ -700,7 +701,7 @@ function GithubStep({
           <div>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-testid="onboarding-gh-recheck"
               onClick={onRecheck}
             >
@@ -709,7 +710,7 @@ function GithubStep({
           </div>
         </div>
       )}
-      <div className="flex items-start gap-3 rounded-md border border-border p-3">
+      <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
         <Toggle
           checked={enabled}
           onChange={onEnabled}
@@ -1163,11 +1164,11 @@ export function Onboarding({
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
-        className="relative flex h-[38rem] max-h-full w-full max-w-[720px] overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        className="relative flex h-[38rem] max-h-full w-full max-w-[720px] overflow-hidden rounded-lg border border-border bg-card"
       >
         <nav
           aria-label="Setup steps"
-          className="flex w-[200px] shrink-0 flex-col gap-6 border-r border-border bg-muted/40 px-3 py-5"
+          className="flex w-[200px] shrink-0 flex-col gap-6 border-r border-border bg-background/40 px-3 py-5"
         >
           <div className="flex items-center gap-2 px-2">
             <LogoGlyph className="h-5 w-5 shrink-0" />
@@ -1228,7 +1229,7 @@ export function Onboarding({
             {error && (
               <p
                 data-testid="onboarding-error"
-                className="mt-4 text-sm text-red-400"
+                className="mt-4 text-sm text-status-error"
               >
                 {error}
               </p>
@@ -1258,9 +1259,7 @@ export function Onboarding({
               onClick={() => void next()}
             >
               {last ? "Start Harbormaster" : "Next"}
-              <Kbd className="border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground">
-                ↵
-              </Kbd>
+              <Kbd>↵</Kbd>
             </Button>
           </footer>
         </div>
@@ -1268,7 +1267,7 @@ export function Onboarding({
           <Button
             variant="ghost"
             size="sm"
-            className="absolute right-2 top-2 h-7 w-7 p-0"
+            className="absolute right-2 top-2 w-7 p-0"
             data-testid="onboarding-close"
             title="Close (Esc)"
             onClick={onClose}

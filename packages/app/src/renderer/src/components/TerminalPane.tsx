@@ -313,7 +313,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       {worktreeMissing && !warningDismissed && (
         <div
           data-testid="worktree-missing-warning"
-          className="flex items-center justify-between gap-2 bg-amber-900/60 px-2 py-1 text-xs text-amber-200"
+          className="flex items-center justify-between gap-2 border-b border-status-needsYou/35 bg-status-needsYou/10 px-3 py-1.5 text-xs text-status-needsYou"
         >
           <span>
             Worktree folder is missing — pi was not started. Recreate it from
@@ -325,7 +325,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
             type="button"
             data-testid="worktree-missing-warning-dismiss"
             onClick={() => setWarningDismissed(true)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-800/60"
+            className="shrink-0 rounded px-1.5 py-0.5 text-foreground transition-colors duration-[120ms] ease-out hover:bg-accent"
           >
             Dismiss
           </button>
@@ -334,14 +334,14 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       {fellBackToShell && !warningDismissed && (
         <div
           data-testid="pi-fallback-warning"
-          className="flex items-center justify-between gap-2 bg-amber-900/60 px-2 py-1 text-xs text-amber-200"
+          className="flex items-center justify-between gap-2 border-b border-status-needsYou/35 bg-status-needsYou/10 px-3 py-1.5 text-xs text-status-needsYou"
         >
           <span>{missingCommand} not found — opened a plain shell</span>
           <button
             type="button"
             data-testid="pi-fallback-warning-dismiss"
             onClick={() => setWarningDismissed(true)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-amber-100 hover:bg-amber-800/60"
+            className="shrink-0 rounded px-1.5 py-0.5 text-foreground transition-colors duration-[120ms] ease-out hover:bg-accent"
           >
             Dismiss
           </button>
@@ -351,7 +351,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         data-testid="terminal-panel"
         data-panel-id={props.api.id}
         data-received-output={hasReceivedOutput}
-        className="terminal-host relative min-h-0 flex-1 bg-[#0b0f14] py-1.5 pl-3"
+        className="terminal-host relative min-h-0 flex-1 bg-background py-1.5 pl-3"
       >
         {/* Search bar (item #12) */}
         {searchOpen && searchHandleRef.current && (

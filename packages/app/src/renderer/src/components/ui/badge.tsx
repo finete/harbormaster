@@ -5,19 +5,33 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 import { cn } from "../../lib/utils";
 
-const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
+// Design system "Badges / pills": 12px text, full pill radius, status fill
+// at 12–20% with a 35–50% stroke of the same hue. Status hues come only from
+// the `status-*` tokens; neutral states use the grey ramp.
+export const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium transition-colors duration-[120ms] ease-out",
   {
     variants: {
       variant: {
         default: "border-transparent bg-primary text-primary-foreground",
-        secondary: "border-transparent bg-muted text-muted-foreground",
+        secondary: "border-border bg-muted text-muted-foreground",
         outline: "border-border text-foreground",
-        success: "border-transparent bg-emerald-900 text-emerald-300",
-        draft: "border-transparent bg-slate-700 text-slate-200",
-        merged: "border-transparent bg-violet-900 text-violet-300",
-        closed: "border-transparent bg-red-900 text-red-300",
-        changes: "border-transparent bg-amber-900 text-amber-300",
+        /** status: ok (PR open/approved, done-wants-a-look). */
+        ok: "border-status-ok/50 bg-status-ok/20 text-status-ok",
+        /** status: needs-you (your move, asked, blocked). */
+        needsYou:
+          "border-status-needsYou/45 bg-status-needsYou/15 text-status-needsYou",
+        /** status: error (failed, closed). */
+        error: "border-status-error/45 bg-status-error/15 text-status-error",
+        /** status: neutral/info (idle, draft). */
+        neutral: "border-border bg-muted text-muted-foreground",
+        // PR-state aliases (pr-badge.ts maps PR states onto these names).
+        success: "border-status-ok/50 bg-status-ok/20 text-status-ok",
+        draft: "border-border bg-muted text-muted-foreground",
+        merged: "border-status-ok/35 bg-status-ok/10 text-status-ok",
+        closed: "border-status-error/45 bg-status-error/15 text-status-error",
+        changes:
+          "border-status-needsYou/45 bg-status-needsYou/15 text-status-needsYou",
       },
     },
     defaultVariants: {

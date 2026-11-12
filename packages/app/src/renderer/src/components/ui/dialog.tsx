@@ -41,7 +41,7 @@ export function Dialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70">
       <div
         ref={panelRef}
         role="dialog"
@@ -50,10 +50,10 @@ export function Dialog({
         data-testid={testId}
         onKeyDown={onKeyDown}
         className={cn(
-          "w-[360px] rounded-lg border border-border bg-card p-4 text-card-foreground shadow-lg",
+          "w-[360px] rounded-lg border border-border bg-card p-4 text-card-foreground",
         )}
       >
-        <h2 className="mb-3 text-sm font-semibold">{title}</h2>
+        <h2 className="mb-3 text-base font-semibold">{title}</h2>
         {children}
       </div>
     </div>

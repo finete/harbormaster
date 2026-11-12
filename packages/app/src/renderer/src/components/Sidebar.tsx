@@ -1070,7 +1070,7 @@ export function Sidebar({
       <div
         data-testid="sidebar"
         data-collapsed="true"
-        className="flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-muted/10"
+        className="flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-card"
       >
         <button
           type="button"
@@ -1079,7 +1079,7 @@ export function Sidebar({
           aria-label="Expand sidebar"
           title="Expand sidebar"
           onClick={toggleCollapsed}
-          className="mt-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="mt-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         >
           <ChevronsRight className="h-4 w-4" aria-hidden />
         </button>
@@ -1124,8 +1124,8 @@ export function Sidebar({
               title={draftLabel}
               onClick={onSelectDraft}
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50",
-                draftFocused && "bg-accent/70 text-foreground",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent",
+                draftFocused && "bg-accent text-foreground ring-1 ring-primary",
               )}
             >
               <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -1141,8 +1141,9 @@ export function Sidebar({
               title={`${row.task.title} · ${repoLabel(row.task)}`}
               onClick={() => onSelectTask(row.task.id)}
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent/50",
-                focusedTaskId === row.task.id && "bg-accent/70",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors duration-[120ms] ease-out hover:bg-accent",
+                focusedTaskId === row.task.id &&
+                  "bg-accent ring-1 ring-primary",
               )}
             >
               <StatusDot
@@ -1165,7 +1166,7 @@ export function Sidebar({
       data-collapsed="false"
       style={{ width }}
       className={cn(
-        "relative flex h-full shrink-0 flex-col border-r border-border bg-muted/10",
+        "relative flex h-full shrink-0 flex-col border-r border-border bg-card",
         resizing && "select-none",
       )}
     >
@@ -1199,7 +1200,7 @@ export function Sidebar({
         />
       </nav>
       <div className="flex items-center gap-2 px-3 pb-2 pt-3">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Tasks
         </span>
         <span
@@ -1215,7 +1216,7 @@ export function Sidebar({
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
           onClick={toggleCollapsed}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         >
           <ChevronsLeft className="h-4 w-4" aria-hidden />
         </button>
@@ -1236,7 +1237,7 @@ export function Sidebar({
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onSearchKeyDown}
             spellCheck={false}
-            className="h-8 w-full rounded-md border border-border bg-background/40 pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+            className="h-8 w-full rounded-lg border border-input bg-background pl-8 pr-7 text-[13px] text-foreground transition-colors duration-[120ms] ease-out placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
           {query && (
             <button
@@ -1248,7 +1249,7 @@ export function Sidebar({
                 setQuery("");
                 searchRef.current?.focus();
               }}
-              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <X className="h-3 w-3" aria-hidden />
             </button>
@@ -1283,8 +1284,9 @@ export function Sidebar({
               data-testid="sidebar-draft-row"
               data-focused={draftFocused}
               className={cn(
-                "group flex items-center gap-2 border-l-2 border-dashed border-primary/50 px-3 py-1.5 text-sm italic text-muted-foreground transition-colors hover:bg-accent/40",
-                draftFocused && "bg-accent/70 text-foreground",
+                "group flex items-center gap-2 border-l-2 border-dashed border-primary/50 px-3 py-1.5 text-sm italic text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent/60",
+                draftFocused &&
+                  "border-solid border-primary bg-accent text-foreground",
               )}
             >
               <button
@@ -1328,7 +1330,7 @@ export function Sidebar({
             )}
           {visiblePinned.length > 0 && (
             <section data-testid="sidebar-pinned-section" className="pt-1">
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 <Pin className="h-3 w-3 shrink-0 rotate-45" aria-hidden />
                 <span>Pinned</span>
                 <span
@@ -1372,7 +1374,7 @@ export function Sidebar({
                         if (dragGuards.consumeDragClick()) return;
                         toggleGroup(group.label);
                       }}
-                      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+                      className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors duration-[120ms] ease-out hover:text-foreground"
                     >
                       {open ? (
                         <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
@@ -1432,7 +1434,7 @@ export function Sidebar({
             ) : overlayGroup ? (
               <div
                 data-testid="sidebar-drag-overlay-group"
-                className="flex items-center gap-1.5 rounded-md border bg-background px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground shadow-lg"
+                className="flex items-center gap-1.5 rounded-lg border border-primary bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
               >
                 <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
                 <span className="truncate normal-case">

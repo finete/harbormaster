@@ -33,20 +33,32 @@ import {
   stateChipLabel,
 } from "./sidebar-model";
 
-/** Bordered chip tones, matching the board's per-column colors. */
+/**
+ * Bordered chip tones from the design system's status tokens only: neutral
+ * grey ramp for backlog/dev, needs-you amber for awaiting (blocked), ok mint
+ * for done ("done, wants a look").
+ */
+const NEUTRAL_CHIP = "border-border bg-muted text-muted-foreground";
+const NEEDS_YOU_CHIP =
+  "border-status-needsYou/40 bg-status-needsYou/10 text-status-needsYou";
+const OK_CHIP = "border-status-ok/40 bg-status-ok/10 text-status-ok";
+const ERROR_CHIP =
+  "border-status-error/40 bg-status-error/10 text-status-error";
+
 const STATE_CHIP_CLASS: Record<StateTone, string> = {
-  backlog: "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
-  dev: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  awaiting: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  done: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  backlog: NEUTRAL_CHIP,
+  dev: "border-border bg-muted text-foreground",
+  awaiting: NEEDS_YOU_CHIP,
+  done: OK_CHIP,
 };
 
 const PR_CHIP_CLASS: Record<ReturnType<typeof prBadgeVariant>, string> = {
-  success: "border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15",
-  draft: "border-slate-500/40 text-slate-300 hover:bg-slate-500/15",
-  merged: "border-violet-500/40 text-violet-300 hover:bg-violet-500/15",
-  closed: "border-red-500/40 text-red-300 hover:bg-red-500/15",
-  changes: "border-amber-500/40 text-amber-300 hover:bg-amber-500/15",
+  success: "border-status-ok/50 text-status-ok hover:bg-status-ok/15",
+  draft: "border-border text-muted-foreground hover:bg-accent",
+  merged: "border-status-ok/35 text-status-ok hover:bg-status-ok/10",
+  closed: "border-status-error/45 text-status-error hover:bg-status-error/15",
+  changes:
+    "border-status-needsYou/45 text-status-needsYou hover:bg-status-needsYou/15",
 };
 
 const CHIP_BASE =
@@ -89,11 +101,11 @@ function RunningDot(): JSX.Element {
       {/* Halo blinks (no transition); reduced-motion users get it steady. */}
       <span
         className={cn(
-          "absolute inline-flex h-full w-full rounded-full ring-2 ring-sky-400/50 motion-reduce:opacity-100",
+          "absolute inline-flex h-full w-full rounded-full ring-2 ring-muted-foreground/40 motion-reduce:opacity-100",
           haloOn ? "opacity-100" : "opacity-0",
         )}
       />
-      <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-400" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
     </span>
   );
 }
@@ -127,7 +139,7 @@ export function StatusDot({
         role="img"
         aria-label="Agent stopped with an error"
       >
-        <span className="h-2 w-2 rounded-full bg-red-400" />
+        <span className="h-2 w-2 rounded-full bg-status-error" />
       </span>
     );
   }
@@ -140,7 +152,7 @@ export function StatusDot({
         role="img"
         aria-label="Agent idle"
       >
-        <span className="h-2 w-2 rounded-full bg-emerald-400/70" />
+        <span className="h-2 w-2 rounded-full bg-status-ok/70" />
       </span>
     );
   }
@@ -153,7 +165,7 @@ export function StatusDot({
         role="img"
         aria-label="Waiting on parent"
       >
-        <span className="h-2 w-2 rounded-full bg-zinc-400" />
+        <span className="h-2 w-2 rounded-full bg-muted-foreground" />
       </span>
     );
   }
@@ -166,7 +178,7 @@ export function StatusDot({
         role="img"
         aria-label="Your move: agent waiting for input"
       >
-        <span className="h-2 w-2 rounded-full bg-amber-400 ring-2 ring-amber-400/30" />
+        <span className="h-2 w-2 rounded-full bg-status-needsYou ring-2 ring-status-needsYou/30" />
       </span>
     );
   }
@@ -178,7 +190,7 @@ export function StatusDot({
       role="img"
       aria-label="No agent attached"
     >
-      <span className="h-2 w-2 rounded-full bg-zinc-600" />
+      <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
     </span>
   );
 }
@@ -416,7 +428,7 @@ export function SidebarTaskRow({
         "border-b border-border/40 px-1.5 py-1 last:border-b-0",
         // Attached under its parent's row (see lib/task-lineage.ts).
         nested && "ml-3 border-l-2 border-l-primary/30 pl-1",
-        overlay && "rounded-md border bg-background shadow-lg",
+        overlay && "rounded-lg border border-primary bg-card",
         drag?.isDragging && "opacity-40",
       )}
     >
@@ -443,9 +455,11 @@ export function SidebarTaskRow({
         onPointerDown={onPointerDown}
         onContextMenu={onRowContextMenu}
         className={cn(
-          "group flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
-          "hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/60",
-          selected && "bg-accent/70 hover:bg-accent/70",
+          "group relative flex cursor-pointer flex-col gap-1 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-[120ms] ease-out",
+          "hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
+          // Selected: accent fill + the 2px mint left edge.
+          selected &&
+            "bg-accent hover:bg-accent before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary",
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5">
@@ -475,14 +489,14 @@ export function SidebarTaskRow({
               onClick={(event) => event.stopPropagation()}
               onBlur={commitRename}
               spellCheck={false}
-              className="min-w-0 flex-1 rounded border border-primary/60 bg-background px-1 py-0.5 text-sm font-semibold text-foreground outline-none"
+              className="min-w-0 flex-1 rounded border border-primary bg-card px-1 py-0.5 text-sm font-semibold text-foreground outline-none ring-1 ring-ring"
             />
           ) : (
             // biome-ignore lint/a11y/noStaticElementInteractions: double-click-to-rename is a bonus affordance alongside the context menu's Rename item and the row's own keyboard/click handling; no new interaction surface for keyboard users.
             <span
               className={cn(
                 "min-w-0 flex-1 truncate text-sm text-foreground",
-                unread ? "font-bold" : "font-semibold",
+                unread ? "font-semibold" : "font-medium",
               )}
               title={task.title}
               data-testid="sidebar-row-title"
@@ -508,7 +522,7 @@ export function SidebarTaskRow({
             onClick={onCloseClick}
             onPointerDown={stopPointerDown}
             onKeyDown={(event) => event.stopPropagation()}
-            className="hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground group-hover:flex"
+            className="hidden shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground group-hover:flex"
           >
             <X className="h-3.5 w-3.5" aria-hidden />
           </button>
@@ -533,10 +547,7 @@ export function SidebarTaskRow({
             <span
               data-testid="sidebar-row-waiting-on-parent"
               title="Asked its parent a question; waiting for the answer"
-              className={cn(
-                CHIP_BASE,
-                "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
-              )}
+              className={cn(CHIP_BASE, NEUTRAL_CHIP)}
             >
               waiting on parent
             </span>
@@ -545,10 +556,7 @@ export function SidebarTaskRow({
             <span
               data-testid="sidebar-row-approval-waiting"
               title="A message to this task is waiting for your approval"
-              className={cn(
-                CHIP_BASE,
-                "border-sky-500/40 bg-sky-500/10 text-sky-300",
-              )}
+              className={cn(CHIP_BASE, NEEDS_YOU_CHIP)}
             >
               message awaiting approval
             </span>
@@ -557,10 +565,7 @@ export function SidebarTaskRow({
             <span
               data-testid="sidebar-row-child-question"
               title="A child task asked this task a question"
-              className={cn(
-                CHIP_BASE,
-                "border-sky-500/40 bg-sky-500/10 text-sky-300",
-              )}
+              className={cn(CHIP_BASE, NEEDS_YOU_CHIP)}
             >
               child asked a question
             </span>
@@ -569,10 +574,7 @@ export function SidebarTaskRow({
             <span
               data-testid="sidebar-row-loop-cap"
               title={loopCapLabel(messaging.loopCapReached)}
-              className={cn(
-                CHIP_BASE,
-                "border-amber-500/40 bg-amber-500/10 text-amber-300",
-              )}
+              className={cn(CHIP_BASE, NEEDS_YOU_CHIP)}
             >
               message cap reached
             </span>
@@ -580,10 +582,7 @@ export function SidebarTaskRow({
           {launchMarker === "queued" && (
             <span
               data-testid="sidebar-row-launch-queued"
-              className={cn(
-                CHIP_BASE,
-                "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
-              )}
+              className={cn(CHIP_BASE, NEUTRAL_CHIP)}
             >
               queued
             </span>
@@ -591,10 +590,7 @@ export function SidebarTaskRow({
           {launchMarker === "interrupted" && (
             <span
               data-testid="sidebar-row-launch-interrupted"
-              className={cn(
-                CHIP_BASE,
-                "border-amber-500/40 bg-amber-500/10 text-amber-300",
-              )}
+              className={cn(CHIP_BASE, ERROR_CHIP)}
             >
               interrupted
             </span>
@@ -616,8 +612,8 @@ export function SidebarTaskRow({
             <span
               className={cn(
                 "truncate",
-                attention && "font-medium text-amber-300",
-                presenceActivity === "error" && "text-red-300",
+                attention && "font-medium text-status-needsYou",
+                presenceActivity === "error" && "text-status-error",
               )}
               data-testid="sidebar-row-activity-text"
             >
@@ -656,7 +652,7 @@ export function SidebarTaskRow({
             className={cn(
               "truncate pl-5 text-[11px]",
               outcome.status === "blocked"
-                ? "text-amber-300"
+                ? "text-status-needsYou"
                 : "text-muted-foreground",
             )}
             data-testid="sidebar-row-outcome-line"

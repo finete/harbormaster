@@ -15,6 +15,9 @@ export const PRIMARY_SCROLLBACK = 10_000;
  */
 export const SHELL_SCROLLBACK = 5_000;
 
+/** The window ground token (`--background`, #0a0b0c): the terminal canvas. */
+export const TERMINAL_BACKGROUND = "#0a0b0c";
+
 export function createTerminalOptions(
   opts: { primary?: boolean } = {},
 ): ITerminalOptions {
@@ -46,12 +49,18 @@ export function createTerminalOptions(
     // allowProposedApi is required for the (EXPERIMENTAL) terminal.unicode
     // property used by Unicode11Addon (item #13).
     allowProposedApi: true,
+    // Design tokens (docs/design-system.md): ground #0a0b0c, foreground
+    // #f2f4f5, mint #6ef5d6 cursor, selection = mint at ~25% (0x40).
     theme: {
-      background: "#0b0f14",
-      foreground: "#d7dde3",
-      cursor: "#d7dde3",
-      cursorAccent: "#0b0f14",
-      selectionBackground: "#2c3a4d",
+      background: TERMINAL_BACKGROUND,
+      foreground: "#f2f4f5",
+      cursor: "#6ef5d6",
+      cursorAccent: TERMINAL_BACKGROUND,
+      selectionBackground: "#6ef5d640",
+      selectionInactiveBackground: "#6ef5d626",
+      scrollbarSliderBackground: "#22252780",
+      scrollbarSliderHoverBackground: "#222527",
+      scrollbarSliderActiveBackground: "#1c2023",
       black: "#1c2126",
       red: "#f2777a",
       green: "#99cc99",

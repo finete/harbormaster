@@ -15,10 +15,10 @@ import {
 } from "../lib/approval-cards";
 import { relativeTime } from "../lib/time-format";
 import { useNow } from "../lib/use-now";
-import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
+import { Segmented } from "./ui/segmented";
 import { Textarea } from "./ui/textarea";
 
 /** An approval's edits as the inbox view holds them (so A / E / R work from the list). */
@@ -106,7 +106,7 @@ export function ApprovalDetail({
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-testid="approval-reject"
           disabled={busy !== null}
           onClick={() => void decide("reject")}
@@ -152,31 +152,24 @@ export function ApprovalDetail({
         }}
         title="Edit, then Cmd+Enter to approve"
       />
-      <div className="flex items-center gap-1" data-testid="approval-mode">
-        {(["steer", "followUp"] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={draft.mode === option}
-            data-testid={`approval-mode-${option}`}
-            disabled={busy !== null}
-            title={
-              option === "steer"
-                ? "Lands after the current turn's tool calls"
-                : "Lands once the task has finished its pending work"
-            }
-            onClick={() => onDraftChange({ ...draft, mode: option })}
-            className={cn(
-              "rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50",
-              draft.mode === option
-                ? "border-primary/60 bg-primary/15 text-foreground"
-                : "border-border text-muted-foreground hover:bg-accent/50",
-            )}
-          >
-            {option === "steer" ? "steer" : "follow up"}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        ariaLabel="Delivery mode"
+        size="sm"
+        className="self-start"
+        testId="approval-mode"
+        value={draft.mode}
+        onValueChange={(mode) => onDraftChange({ ...draft, mode })}
+        options={(["steer", "followUp"] as const).map((option) => ({
+          value: option,
+          label: option === "steer" ? "steer" : "follow up",
+          testId: `approval-mode-${option}`,
+          disabled: busy !== null,
+          title:
+            option === "steer"
+              ? "Lands after the current turn's tool calls"
+              : "Lands once the task has finished its pending work",
+        }))}
+      />
       {message.attachments.length > 0 && (
         <div
           className="flex flex-wrap gap-2"
@@ -193,7 +186,7 @@ export function ApprovalDetail({
             ) : (
               <span
                 key={attachment.path}
-                className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                className="rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
                 title={attachment.originalPath}
               >
                 {attachmentName(attachment)}
@@ -234,7 +227,7 @@ function AttachmentThumbnail({
   }, [messageId, index]);
   if (failed) {
     return (
-      <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+      <span className="rounded-full border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
         {name}
       </span>
     );
@@ -245,12 +238,12 @@ function AttachmentThumbnail({
       alt={name}
       title={name}
       data-testid="approval-thumbnail"
-      className="h-16 w-16 rounded border border-border object-cover"
+      className="h-16 w-16 rounded-lg border border-border object-cover"
     />
   ) : (
     <span
       aria-hidden
-      className="h-16 w-16 rounded border border-border bg-muted"
+      className="h-16 w-16 rounded-lg border border-border bg-muted"
     />
   );
 }

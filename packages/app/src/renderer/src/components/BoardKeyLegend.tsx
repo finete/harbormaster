@@ -26,7 +26,7 @@ export function BoardKeyLegend(): JSX.Element {
   return (
     <div
       data-testid="board-key-legend"
-      className="pointer-events-none absolute bottom-3 right-3 z-20 grid grid-cols-2 gap-x-3 gap-y-1 whitespace-nowrap rounded-md border border-border bg-card/90 px-2.5 py-2 text-[11px] text-muted-foreground shadow-sm backdrop-blur-sm"
+      className="pointer-events-none absolute bottom-3 right-3 z-20 grid grid-cols-2 gap-x-3 gap-y-1 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-2 text-[11px] text-muted-foreground"
     >
       {ENTRIES.map((entry) => (
         <span key={entry.label} className="flex items-center gap-1">
