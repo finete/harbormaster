@@ -219,7 +219,7 @@ export interface TerminalCreateOptions {
   taskId?: string;
   /**
    * Whether this is a task workspace's first terminal panel. Only a primary
-   * panel on a task with a workspace binding launches pi; "+ terminal"
+   * panel on a task with a workspace binding launches pi; split-shell
    * panels (and primaries on scratch tasks) always get a plain `$SHELL`.
    */
   primary?: boolean;
@@ -309,7 +309,7 @@ export interface HarbormasterApi {
      * back to the background (kept alive, headless screen mirror) so
      * reopening re-attaches to the same pi instead of cold-starting one, and
      * a working task's agent is not killed by closing its tab. Non-primary
-     * ptys ("+ terminal" shells, shell fallbacks) are disposed. Prefer this
+     * ptys (split shells, shell fallbacks) are disposed. Prefer this
      * over `dispose` for pane unmount; `dispose` unconditionally kills.
      * `screen` is the pane's serialized last screen, replayed on reopen.
      */

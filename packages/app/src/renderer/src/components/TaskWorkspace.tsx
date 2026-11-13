@@ -7,7 +7,7 @@ import {
 import type { JSX } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import "dockview-react/dist/styles/dockview.css";
-import { Plus, RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
 import { defaultTerminalTitle } from "../lib/terminal-title";
@@ -277,36 +277,13 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     };
   }, [api, taskId]);
 
-  function addTerminal(): void {
-    if (!api) return;
-    const activePanel = api.activePanel;
-    api.addPanel({
-      id: `${taskId}-terminal-${nextPanelId++}`,
-      component: "terminal",
-      tabComponent: "terminal",
-      title: defaultTerminalTitle({ cwd, primary: false }),
-      params: { cwd, taskId, primary: false },
-      ...(activePanel
-        ? {
-            position: {
-              referencePanel: activePanel.id,
-              direction: "right" as const,
-            },
-          }
-        : {}),
-    });
-  }
-
   return (
     <div className="flex h-full flex-col">
       <div
-        className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3"
+        className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3"
         data-testid="workspace-header"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Terminals
-          </span>
           {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -329,15 +306,6 @@ export const TaskWorkspace = memo(function TaskWorkspace({
                 manualRefresh.busy && "animate-spin",
               )}
             />
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={addTerminal}
-            data-testid="add-terminal-button"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            terminal
           </Button>
           {onCloseTask && (
             <Button

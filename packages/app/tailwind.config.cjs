@@ -13,6 +13,7 @@ module.exports = {
           foreground: "hsl(var(--popover-foreground))",
         },
         background: "hsl(var(--background))",
+        chrome: "hsl(var(--chrome))",
         foreground: "hsl(var(--foreground))",
         muted: {
           DEFAULT: "hsl(var(--muted))",
@@ -34,9 +35,11 @@ module.exports = {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
-        // Semantic status (docs/design-system.md): amber only ever means
-        // "needs you"; mint doubles as ok; error covers failures/destructive.
+        // Semantic status (docs/design-system.md): yellow means an agent is
+        // working; mint doubles as ok and "your move"; amber only ever means
+        // blocked/warning; error covers failures/destructive.
         status: {
+          working: "hsl(var(--status-working))",
           needsYou: "hsl(var(--status-needs-you))",
           ok: "hsl(var(--status-ok))",
           error: "hsl(var(--status-error))",

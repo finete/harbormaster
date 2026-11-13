@@ -9,14 +9,14 @@ import type { ITerminalOptions } from "@xterm/xterm";
 /** Scrollback for the primary (pi) pane: the agent transcript lives here. */
 export const PRIMARY_SCROLLBACK = 10_000;
 /**
- * Scrollback for secondary "+ terminal" shells. Each buffer line costs
+ * Scrollback for secondary split shells. Each buffer line costs
  * roughly cols × 12 bytes and panes never shrink it, so halve the cap for
  * panes whose history matters less.
  */
 export const SHELL_SCROLLBACK = 5_000;
 
-/** The window ground token (`--background`, #0a0b0c): the terminal canvas. */
-export const TERMINAL_BACKGROUND = "#0a0b0c";
+/** The work-area ground token (`--background`, #1e1e1e): the terminal canvas. */
+export const TERMINAL_BACKGROUND = "#1e1e1e";
 
 export function createTerminalOptions(
   opts: { primary?: boolean } = {},
@@ -49,34 +49,36 @@ export function createTerminalOptions(
     // allowProposedApi is required for the (EXPERIMENTAL) terminal.unicode
     // property used by Unicode11Addon (item #13).
     allowProposedApi: true,
-    // Design tokens (docs/design-system.md): ground #0a0b0c, foreground
-    // #f2f4f5, mint #6ef5d6 cursor, selection = mint at ~25% (0x40).
+    // Design tokens (docs/design-system.md): ground #1e1e1e, mint #9eebd9
+    // cursor, selection = mint at ~25% (0x40). Foreground and the 16 ANSI
+    // colors are the "Apple System Colors" palette (Ghostty theme set),
+    // which reads well on the neutral grey ground.
     theme: {
       background: TERMINAL_BACKGROUND,
-      foreground: "#f2f4f5",
-      cursor: "#6ef5d6",
+      foreground: "#ffffff",
+      cursor: "#9eebd9",
       cursorAccent: TERMINAL_BACKGROUND,
-      selectionBackground: "#6ef5d640",
-      selectionInactiveBackground: "#6ef5d626",
-      scrollbarSliderBackground: "#22252780",
-      scrollbarSliderHoverBackground: "#222527",
-      scrollbarSliderActiveBackground: "#1c2023",
-      black: "#1c2126",
-      red: "#f2777a",
-      green: "#99cc99",
-      yellow: "#ffcc66",
-      blue: "#6699cc",
-      magenta: "#cc99cc",
-      cyan: "#66cccc",
-      white: "#d7dde3",
-      brightBlack: "#4a5561",
-      brightRed: "#f99157",
-      brightGreen: "#b5e0a6",
-      brightYellow: "#ffd98c",
-      brightBlue: "#8ab6e8",
-      brightMagenta: "#e0b3e0",
-      brightCyan: "#8ce0e0",
-      brightWhite: "#f2f6fa",
+      selectionBackground: "#9eebd940",
+      selectionInactiveBackground: "#9eebd926",
+      scrollbarSliderBackground: "#33343580",
+      scrollbarSliderHoverBackground: "#333435",
+      scrollbarSliderActiveBackground: "#383839",
+      black: "#1a1a1a",
+      red: "#cc372e",
+      green: "#26a439",
+      yellow: "#cdac08",
+      blue: "#0869cb",
+      magenta: "#9647bf",
+      cyan: "#479ec2",
+      white: "#98989d",
+      brightBlack: "#464646",
+      brightRed: "#ff453a",
+      brightGreen: "#32d74b",
+      brightYellow: "#ffd60a",
+      brightBlue: "#0a84ff",
+      brightMagenta: "#bf5af2",
+      brightCyan: "#76d6ff",
+      brightWhite: "#ffffff",
     },
   };
 }

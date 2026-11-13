@@ -446,7 +446,7 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
       window.getByTestId(`sidebar-task-row-${taskId}`),
       window.getByTestId("terminal-tab").first(),
       window.getByTestId("board-button"),
-      window.getByTestId("add-terminal-button"),
+      window.getByTestId("split-right-button").first(),
     ];
 
     writeFileSync(trigger, "go");

@@ -1070,7 +1070,7 @@ export function Sidebar({
       <div
         data-testid="sidebar"
         data-collapsed="true"
-        className="flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-card"
+        className="flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-chrome"
       >
         <button
           type="button"
@@ -1166,7 +1166,7 @@ export function Sidebar({
       data-collapsed="false"
       style={{ width }}
       className={cn(
-        "relative flex h-full shrink-0 flex-col border-r border-border bg-card",
+        "relative flex h-full shrink-0 flex-col border-r border-border bg-chrome",
         resizing && "select-none",
       )}
     >

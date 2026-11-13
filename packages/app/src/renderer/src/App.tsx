@@ -155,7 +155,7 @@ export function App({
   // Close-workspace confirm: set only while the focused task's agent is
   // mid-turn and the user asked to close its workspace anyway.
 
-  // Closing unmounts the TaskWorkspace. Its "+ terminal" shells are killed,
+  // Closing unmounts the TaskWorkspace. Its split shells are killed,
   // but the task's pi keeps running in the background (TerminalPane
   // releases it; main keeps the few most recently closed warm, see
   // main/warm-sessions.ts), so reopening re-attaches instantly and closing
@@ -540,10 +540,12 @@ export function App({
           <div
             data-testid="board-view"
             className={
-              view === "board" ? "flex h-full w-full flex-col" : "hidden"
+              view === "board"
+                ? "flex h-full w-full flex-col bg-chrome"
+                : "hidden"
             }
           >
-            <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-card px-3">
+            <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-chrome px-3">
               <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Board
               </span>

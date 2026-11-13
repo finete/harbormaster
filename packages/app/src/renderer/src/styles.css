@@ -3,31 +3,33 @@
 @tailwind utilities;
 
 :root.dark {
-  /* Harbormaster design system, "brand accent on precision dark"
+  /* Harbormaster design system, "brand accent on neutral grey"
      (docs/design-system.md). HSL triplets so Tailwind's `/opacity`
-     modifiers work. Color is spent on two things only: the mint brand
-     accent for actions and the semantic status colors. */
-  --background: 210 9% 4%; /* #0a0b0c window ground */
-  --foreground: 200 13% 95%; /* #f2f4f5 */
-  --card: 200 8% 8%; /* #121415 surfaces */
-  --card-foreground: 200 13% 95%;
-  --popover: 200 8% 8%; /* #121415 */
-  --popover-foreground: 200 13% 95%;
-  --muted: 204 10% 10%; /* #171a1c chips, secondary buttons, tab strip */
-  --muted-foreground: 212 9% 58%; /* #8b949e */
-  --accent: 206 11% 12%; /* #1c2023 hover fill */
-  --accent-foreground: 200 13% 95%;
-  --secondary: 204 10% 10%; /* = --muted: secondary buttons */
-  --secondary-foreground: 200 13% 95%;
-  --border: 204 7% 14%; /* #222527 every hairline */
-  --input: 204 7% 14%;
-  --primary: 166 87% 70%; /* #6ef5d6 brand mint */
+     modifiers work. Greys are neutral (no hue tint); color is spent on
+     the mint brand accent and the semantic status colors. */
+  --background: 0 0% 12%; /* #1e1e1e work area: panes, tab strip, header */
+  --chrome: 210 3% 14%; /* #222324 sidebar, board ground */
+  --foreground: 0 0% 95%; /* #f2f2f2 */
+  --card: 210 2% 17%; /* #2a2b2c surfaces: cards, dialogs, inputs */
+  --card-foreground: 0 0% 95%;
+  --popover: 210 2% 17%; /* #2a2b2c */
+  --popover-foreground: 0 0% 95%;
+  --muted: 210 2% 19%; /* #303132 chips, secondary buttons */
+  --muted-foreground: 210 2% 60%; /* #999a9c */
+  --accent: 210 2% 22%; /* #383839 hover fill */
+  --accent-foreground: 0 0% 95%;
+  --secondary: 210 2% 19%; /* = --muted: secondary buttons */
+  --secondary-foreground: 0 0% 95%;
+  --border: 210 2% 20%; /* #333435 every hairline */
+  --input: 210 2% 20%;
+  --primary: 166 66% 77%; /* #9eebd9 brand mint */
   --primary-foreground: 168 71% 8%; /* #06231d text on mint */
-  /* Mint at 60% over the surface, precomputed opaque (#499b89) so
+  /* Mint at 60% over the surface, precomputed opaque (#709e94) so
      `ring-ring/NN` modifiers keep working. */
-  --ring: 167 36% 45%;
-  --status-needs-you: 40 100% 65%; /* #ffc34d amber: your move */
-  --status-ok: 166 87% 70%; /* #6ef5d6 mint: PR open/approved, done */
+  --ring: 167 19% 53%;
+  --status-working: 48 100% 70%; /* #ffe066 yellow: agent working */
+  --status-needs-you: 40 100% 65%; /* #ffc34d amber: blocked, warnings */
+  --status-ok: 166 66% 77%; /* #9eebd9 mint: your move, PR ok, done */
   --status-error: 357 82% 66%; /* #f0636b errors, destructive */
   --radius: 0.5rem;
 }
@@ -101,10 +103,12 @@ body {
   --dv-floating-box-shadow: none;
   --dv-overlay-z-index: 999;
   --dv-group-view-background-color: hsl(var(--background));
-  --dv-tabs-and-actions-container-background-color: hsl(var(--muted));
-  --dv-activegroup-visiblepanel-tab-background-color: hsl(var(--card));
+  /* One ground for strip, tabs and panes: the active tab is told apart by
+     brighter text, its close × and the edge line, not by a fill. */
+  --dv-tabs-and-actions-container-background-color: hsl(var(--background));
+  --dv-activegroup-visiblepanel-tab-background-color: hsl(var(--background));
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: hsl(var(--card));
+  --dv-inactivegroup-visiblepanel-tab-background-color: hsl(var(--background));
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-tab-divider-color: hsl(var(--border));
   --dv-activegroup-visiblepanel-tab-color: hsl(var(--foreground));
@@ -145,17 +149,53 @@ body {
   border-radius: 4px;
   color: hsl(var(--foreground));
 }
-/* Close × is hover/focus-only, even on the active tab. */
-.dockview-theme-harbormaster
-  .tab.active-tab
-  .dv-default-tab
-  .dv-default-tab-action {
+/* Close × is always shown on the focused group's active tab (it marks the
+   tab, since tabs share the strip's fill); elsewhere hover/focus-only. */
+.dockview-theme-harbormaster .tab .dv-default-tab .dv-default-tab-action {
   visibility: hidden;
 }
 .dockview-theme-harbormaster .tab .dv-default-tab:hover .dv-default-tab-action,
 .dockview-theme-harbormaster
   .tab
   .dv-default-tab:focus-within
+  .dv-default-tab-action,
+.dockview-theme-harbormaster
+  .active-group
+  .active-tab
+  .dv-default-tab
   .dv-default-tab-action {
   visibility: visible;
+}
+
+/* Close the last tab off with the same hairline dockview draws between
+   tabs, so the strip reads as a row of cells. */
+.dockview-theme-harbormaster .tabs-container .tab:last-child::after {
+  content: " ";
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  pointer-events: none;
+  background-color: var(--dv-tab-divider-color);
+  width: 1px;
+  height: 100%;
+}
+
+/* Working spinner (components/ui/working-spinner.tsx): a ring with a gap
+   that turns one revolution per second in 12 discrete steps. It animates
+   `transform` only, so it runs on the compositor with no layout or paint,
+   and steps() caps visible changes at 12/s instead of one per vsync. Every
+   instance is phase-aligned in JS so all spinners tick together. */
+@keyframes working-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.working-spinner {
+  animation: working-spin 1s steps(12, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .working-spinner {
+    animation: none;
+  }
 }

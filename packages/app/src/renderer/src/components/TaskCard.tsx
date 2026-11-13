@@ -1,5 +1,4 @@
 import { useDraggable } from "@dnd-kit/core";
-import { Loader2 } from "lucide-react";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
@@ -22,6 +21,7 @@ import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
+import { WorkingSpinner } from "./ui/working-spinner";
 
 type TaskCardPresence = PresenceBadge | undefined;
 
@@ -256,22 +256,22 @@ function TaskCardFace({
         >
           {running && (
             <Badge
-              variant="neutral"
+              variant="working"
               className="shrink-0 gap-1"
               data-testid="badge-running"
             >
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+              <WorkingSpinner className="h-2.5 w-2.5" />
               running
             </Badge>
           )}
           {attention && (
             <Badge
-              variant="needsYou"
+              variant="ok"
               className="shrink-0 gap-1"
               data-testid="badge-attention"
             >
               <span
-                className="h-1.5 w-1.5 rounded-full bg-status-needsYou"
+                className="h-1.5 w-1.5 rounded-full bg-status-ok"
                 aria-hidden
               />
               your move

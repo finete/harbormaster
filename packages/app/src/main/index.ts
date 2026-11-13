@@ -193,7 +193,7 @@ const warmSessions = new WarmSessionCache({
  * running their cleanup (window reload, renderer crash: the webContents
  * survives, so no 'destroyed' fires). Task primaries go back to the
  * background so the reloaded panes re-attach to the same pi; every other
- * pty ("+ terminal" shells) is disposed as the old pane is gone.
+ * pty (split shells) is disposed as the old pane is gone.
  */
 function releaseSessionsFor(webContentsId: number): void {
   const ids = sessionsByWebContentsId.get(webContentsId);
@@ -1245,7 +1245,7 @@ function registerPtyIpc(): void {
 
       // Only a task workspace's first ("primary") panel ever runs pi, and
       // only when the task has a workspace binding (a worktree to run it
-      // in); "+ terminal" panels and scratch tasks always get a plain
+      // in); split panels and scratch tasks always get a plain
       // `$SHELL` in the same cwd (see AGENTS.md: harnesses are adapters,
       // core only ever hands back a launch spec "-" this is the one place
       // that spec is turned into a pty). Shared with the background
@@ -1401,7 +1401,7 @@ function registerPtyIpc(): void {
   // tab of a working task no longer kills its agent mid-run. It stays
   // tracked to this webContents so the window's 'destroyed'/'closed' cleanup
   // (and app quit) still disposes it. Everything that is not a task primary
-  // ("+ terminal" shells, shell fallbacks) is disposed as before.
+  // (split shells, shell fallbacks) is disposed as before.
   ipcMain.handle("pty:release", (event, id: string, screen?: unknown) => {
     if (
       detachPrimarySession(id, typeof screen === "string" ? screen : undefined)
@@ -1432,8 +1432,8 @@ function createWindow(): void {
     ...(offscreen
       ? { x: -4200, y: -4200, skipTaskbar: true, focusable: false }
       : {}),
-    // The --background design token (#0a0b0c): no flash before first paint.
-    backgroundColor: "#0a0b0c",
+    // The --background design token (#1e1e1e): no flash before first paint.
+    backgroundColor: "#1e1e1e",
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,

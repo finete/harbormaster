@@ -206,7 +206,7 @@ export interface PtySessionOptions {
    * The task this session belongs to, combined with `primary`. Registered
    * in the pane-pid registry (`lookupPanePid`) only when this session also
    * ends up actually running `spec` (a real harness launch, not a shell
-   * fallback) - a "+ terminal" panel, a scratch task's shell, or a primary
+   * fallback) - a split shell panel, a scratch task's shell, or a primary
    * pane that fell back to `$SHELL` because its harness command was
    * missing never has a presence record to corroborate against, and must
    * never be mistaken for one by showing a false "attached" badge.
@@ -645,7 +645,7 @@ function clearRepaintTimer(session: PtySessionRecord): void {
  * so a reopen shows it immediately (the mirror otherwise starts empty, and
  * an idle pi only redraws on a size change). A reload has no such snapshot.
  * Returns `false` for anything that is not a task's registered primary (a
- * "+ terminal" shell, a shell fallback): the caller disposes those.
+ * split shell, a shell fallback): the caller disposes those.
  */
 export function detachPrimarySession(id: string, screen?: string): boolean {
   const session = sessions.get(id);
