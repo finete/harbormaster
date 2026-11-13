@@ -1,4 +1,4 @@
-// cmux-parity terminal tab bar: live OSC titles (default -> first title
+// Terminal tab bar: live OSC titles (default -> first title
 // event -> every subsequent change), click-empty-tab-strip-space = new
 // shell, and per-group split buttons. Uses the same
 // HARBORMASTER_PI_COMMAND fake-binary pattern as e2e/pi-sessions.spec.ts so
@@ -95,7 +95,7 @@ async function createTaskWithRepo(
   // `startTask` moves the card optimistically; the worktree/workspace
   // binding that gives the primary pane its real cwd finishes slightly
   // later. Opening the workspace before that resolves is a real (and
-  // already cmux-parity-intentional, see TaskWorkspace.tsx) race: a
+  // already intentional, see TaskWorkspace.tsx) race: a
   // throwaway plain-shell panel is born with no cwd, then a second, real
   // pi panel replaces it as the active tab once the binding lands. Wait it
   // out here so this suite's single-primary-panel assumptions hold.
@@ -165,7 +165,7 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
         // Plain-shell panels spawn `$SHELL` with no args (see
         // ptySessions.ts's `defaultShell()`); on a dev machine whose real
         // interactive shell has its own title-setting integration (p10k,
-        // Ghostty/cmux shell integration, etc.) that fires within the first
+        // Ghostty shell integration, etc.) that fires within the first
         // prompt draw, that would race this suite's "shows the cwd
         // basename until the first (test-driven) OSC title" assertion. A
         // bare `/bin/sh` has no such integration, so the default holds
@@ -276,8 +276,7 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
     await window.keyboard.press("Enter");
     await expect(tabTitles.nth(1)).toHaveText("MY-TITLE", { timeout: 10_000 });
 
-    // --- middle-click closes a tab on mouse DOWN (cmux: MiddleClickCaptureView
-    // .otherMouseDown); the tab is gone before the button is released ---
+    // --- middle-click closes a tab on mouse DOWN; the tab is gone before the button is released ---
     await workspace.getByTestId("tab-strip-void").first().click();
     await expect.poll(async () => tabs.count(), { timeout: 10_000 }).toBe(3);
     await tabs.nth(2).hover();

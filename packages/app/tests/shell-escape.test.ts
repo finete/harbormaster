@@ -6,7 +6,7 @@ describe("shellEscapePath", () => {
     expect(shellEscapePath("/a b/c.png")).toBe("/a\\ b/c.png");
   });
 
-  it("escapes parentheses (cmux parity)", () => {
+  it("escapes parentheses (native-terminal parity)", () => {
     expect(shellEscapePath("/a b/c(1).png")).toBe("/a\\ b/c\\(1\\).png");
   });
 

@@ -1,5 +1,5 @@
 /**
- * Terminal tab title rules (cmux parity): a pi "primary" pane is prefixed
+ * Terminal tab title rules: a pi "primary" pane is prefixed
  * "π " once pi emits its own OSC title (task title), and shows bare "π"
  * before that. A plain shell defaults to its cwd's basename until the first
  * OSC title arrives from the shell itself (zsh/p10k emit `cd ~/foo && ...`

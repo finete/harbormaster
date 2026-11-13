@@ -49,7 +49,7 @@ export function repoLabel(task: Pick<Task, "repositoryId">): string {
  * Every *opened* task on the board, in `openedTaskIds` insertion order — NOT
  * board order, so a column move or any core push can never reshuffle the rail
  * (R1/R3); the stored task order is applied afterwards by `groupRows`. The
- * rail lists open task workspaces, cmux-style, not the full board inventory
+ * rail lists open task workspaces, not the full board inventory
  * (`openedTaskIds` is App's `openedTaskIds` state) — the Board stays the
  * full inventory, see App.tsx / docs/design-decisions.md.
  */
@@ -67,7 +67,7 @@ export function sidebarRows(
     }
   }
   const rows: SidebarRow[] = [];
-  // An open workspace always gets a row (cmux rule: every open window is
+  // An open workspace always gets a row (every open window is
   // listed), even an archived task, or it becomes an orphan pane with no way
   // to see or close it from the rail.
   for (const id of openedTaskIds) {

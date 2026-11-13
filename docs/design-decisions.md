@@ -1,16 +1,16 @@
 # Harbormaster: design decision record
 
-Product re-platforming of pi-home (Pi extension + cmux workflow) into a
+Product re-platforming of pi-home (Pi extension + terminal-multiplexer workflow) into a
 standalone desktop app. Decisions reached in a grilled design interview,
 2026-10-05. Amend this file when a decision is revisited; do not silently
 diverge.
 
-## Why leave cmux
+## Why leave the terminal multiplexer
 
 The board and the sessions lived in two different programs, so neither could
 control the other:
 
-- cmux pane metadata (branch/path/PR) is launch-time state; pi-home cannot
+- Multiplexer pane metadata (branch/path/PR) is launch-time state; pi-home cannot
   update it when a pane is reused for a different task.
 - "Click a card → open in a side pane, or focus the existing one" is
   impossible when the board is a TUI inside one pane and the window manager is
@@ -31,7 +31,7 @@ control the other:
 | 5 | Brain placement | Core extracted into `packages/core` behind a command API (commands in, state events out), hosted inside the app process. The boundary becomes the daemon API later. |
 | 6 | Extension ↔ app | Shared core library over the per-user state dir; all writes through the command API; no frontend touches state files. Movers tick only in the app. |
 | 7 | TUI board | Frozen, not killed: emergency/SSH fallback compiled against the core API. New board features are app-only. |
-| 8 | Attachment | Takeover-offer semantics (verified: Pi has no concurrent-attachment protection, append-only JSONL, no locking). `openGuarded` ports from pi-home; the cmux branch becomes "focus the app pane". |
+| 8 | Attachment | Takeover-offer semantics (verified: Pi has no concurrent-attachment protection, append-only JSONL, no locking). `openGuarded` ports from pi-home; the multiplexer branch becomes "focus the app pane". |
 | 9 | Stack | Electron + Vite + React + TS (no Next.js, no router). Verified as the stack coding agents generate most reliably in 2026. |
 | 10 | Design system | Tailwind + shadcn/ui (copy-in ownership), dnd-kit for the board (Kibo UI / Georgegriff shadcn kanban as starting blocks; astryx templates as layout reference: Kanban Board, IDE, Work Item Detail, Side Nav). Re-skin anything lifted from pi-gui. |
 | 11 | Layout engine | dockview: tabs and splits are one panel model. Three top-level views: workspace (task sidebar + per-task dockview terminal workspaces, the default), kanban board (the "home" triage screen, full-width, reached via sidebar button / Cmd+B; clicking a card enters the task's workspace), and the inbox (sidebar stays, the main area lists everything that needs a human; sidebar button / Cmd+I, Esc back; see docs/release-plan.md "Inbox"). Per-task dockview instances persist across view switches. Drag/split → extra `$SHELL` pty in the same worktree. Built-in layout serialization for restore-on-restart. |
@@ -183,9 +183,9 @@ cross-task split layouts, daemon, non-Pi adapters.
    behind the command API; the frozen TUI in `packages/extension` is its first
    client (pure refactor, value-neutral).
 2. Electron shell: board + pty panes on that API.
-3. Run alongside cmux/pi-home until trusted.
-4. Delete the cmux integration (`record.cmux`, focus-pane branch, `CMUX_*`
-   capture) and retire the old pi-home repo to frozen-extension status.
+3. Run alongside the multiplexer/pi-home setup until trusted.
+4. Delete the multiplexer integration (the presence location field,
+   focus-pane branch, multiplexer env capture) and retire the old pi-home repo to frozen-extension status.
 
 ## Blessed divergences from pi-home
 

@@ -231,7 +231,7 @@ export interface RowDragProps {
  * (only while an agent is attached) an activity line. Rows are separated by
  * a full-width hairline; the selected row gets a rounded subtle highlight.
  *
- * Closable, cmux-style: hovering reveals a small ✕ that replaces the
+ * Closable: hovering reveals a small ✕ that replaces the
  * relative time (pure CSS `group-hover`, no hover state needed) and closes
  * just this task's workspace — never the task itself, see App.tsx's
  * `requestCloseTask`. Middle-clicking anywhere on the row does the same;
@@ -368,10 +368,8 @@ export function SidebarTaskRow({
     onClose(task.id);
   };
 
-  // Middle-click closes the row from anywhere on it, on mouse DOWN like
-  // cmux's SidebarPointerInteractionMonitor (an .otherMouseDown monitor with
-  // buttonNumber == 2). preventDefault also suppresses the browser's
-  // middle-click autoscroll.
+  // Middle-click closes the row from anywhere on it, on mouse DOWN.
+  // preventDefault also suppresses the browser's middle-click autoscroll.
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     if (event.button === 1) {
       event.preventDefault();

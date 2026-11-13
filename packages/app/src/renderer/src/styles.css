@@ -84,13 +84,9 @@ body {
 /* Dockview theme (terminal tabs/splits), mapped onto the design tokens.
    A dedicated theme class rather than overriding `.dockview-theme-dark`:
    dockview.css loads after this file, so equal-specificity overrides of its
-   own theme class would lose. Strip = --muted; active tab = --card with a
-   1.5px mint TOP edge; inactive tabs muted text; hairline separators.
-   Vertical metrics follow cmux: the strip is 28px
-   (WindowChromeMetrics.sharedChromeBarHeight = bonsplitTabBarHeight) and
-   the active indicator is 1.5px on the top edge (Bonsplit
-   TabBarMetrics.activeIndicatorHeight, drawn at bounds.minY of a flipped
-   view in TabBarSelectionChromeView). */
+   own theme class would lose. Strip, tabs and panes share --background;
+   the active tab gets a 1.5px mint TOP edge; inactive tabs muted text;
+   hairline separators. The strip is 28px tall. */
 .dockview-theme-harbormaster {
   --dv-background-color: hsl(var(--background));
   --dv-paneview-active-outline-color: hsl(var(--primary));

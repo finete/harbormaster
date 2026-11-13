@@ -1,7 +1,7 @@
 /**
  * Clipboard paste resolution for terminal panes (checklist items #1, #2).
  *
- * Priority order (cmux TerminalPasteboardService+ImageMaterialization parity):
+ * Priority order (native macOS terminal paste parity):
  *   1. File URLs (NSFilenamesPboardType or public.file-url) → shell-escaped path(s)
  *   2. Plain text → raw text (no escaping; brackets handled by xterm.paste)
  *   3. Image → write PNG to tmpdir, return shell-escaped path
@@ -108,7 +108,7 @@ export function resolveClipboardPaste(
     if (png.length > MAX_IMAGE_BYTES) return null; // cap: 10 MB
 
     // Filename: clipboard-<YYYY>-<MM>-<DD>-<HHmmss>-<FIRST8HEX>.png
-    // Use local time with zero-padded en-US digits (cmux parity).
+    // Use local time with zero-padded en-US digits.
     const y = now.getFullYear();
     const mo = String(now.getMonth() + 1).padStart(2, "0");
     const d = String(now.getDate()).padStart(2, "0");

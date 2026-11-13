@@ -4,7 +4,7 @@ import type { JSX } from "react";
 import { Button } from "./ui/button";
 
 /**
- * Per-group right-corner header actions (cmux-style split buttons): split
+ * Per-group right-corner header actions (split buttons): split
  * right opens a new shell panel as a new group to the right of this one,
  * split down does the same below. Each group gets its own instance (one
  * per `DockviewGroupPanel`), so `props.group`/`props.api` always refer to
