@@ -1,6 +1,6 @@
 // Domain model — phase 1 (foundation only). Ported and heavily pruned from
 // pi-home's src/contracts/model.ts: no Beads issues, no PRs, no deployment
-// pipelines, no cmux. Those return in later phases behind the same shapes
+// pipelines, no terminal-multiplexer integration. Those return in later phases behind the same shapes
 // where it makes sense.
 
 export const STATE_VERSION = 1 as const;
@@ -67,7 +67,7 @@ export type PullRequestRole = "author" | "reviewer";
  * Pull-request linkage and GitHub review/merge snapshot for a task, as
  * refreshed by `CoreCommands.refresh()`. Ported and pruned from pi-home's
  * richer `PullRequestMeta` (src/contracts/model.ts): no Slack-thread or
- * cmux-specific fields, but the review/merge signal the rules need
+ * multiplexer-specific fields, but the review/merge signal the rules need
  * (reviewDecision, head-tracking flags, merge commit) carries over.
  */
 export interface TaskPullRequest {
@@ -395,8 +395,8 @@ export interface PresenceOutcome {
 
 /**
  * Liveness record for one agent process attached to a task session. Ported
- * from pi-home's presence registry with the Pi-specific `cmux` location
- * field dropped (cmux is gone; the app owns pane focus directly).
+ * from pi-home's presence registry with the Pi-specific multiplexer
+ * location field dropped (the app owns pane focus directly).
  */
 export interface PresenceRecord {
   taskId: string;

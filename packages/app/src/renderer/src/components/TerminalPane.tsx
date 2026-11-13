@@ -146,7 +146,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeExit: (() => void) | undefined;
 
-    // Tab title (cmux parity).
+    // Tab title.
     const initialTitle = defaultTerminalTitle({ cwd, primary: isPrimary });
     props.api.setTitle(initialTitle);
     const titleThrottle = createTitleThrottle(

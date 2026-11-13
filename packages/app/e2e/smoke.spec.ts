@@ -196,7 +196,7 @@ test("closing a workspace ends its terminals, drops it off the rail, and reopeni
   await expect(window.getByTestId("terminal-panel")).toHaveCount(0);
   await expect(window.getByTestId("close-workspace-button")).toHaveCount(0);
   await expect(window.getByTestId("workspace-empty-hint")).toBeVisible();
-  // The rail lists open task workspaces only (cmux-style): closing the only
+  // The rail lists open task workspaces only: closing the only
   // open task empties it entirely, even though the task itself is untouched.
   await expect(
     window.locator('[data-testid^="sidebar-task-row-"]'),
@@ -324,8 +324,7 @@ test("middle-clicking a row closes it too, without touching board state", async 
     .filter({ hasText: "Task Gamma" });
   await expect(gammaRow).toBeVisible();
 
-  // Closes on mouse DOWN, like cmux's SidebarPointerInteractionMonitor
-  // (.otherMouseDown): the row is gone before the button is released.
+  // Closes on mouse DOWN: the row is gone before the button is released.
   await gammaRow.hover();
   await window.mouse.down({ button: "middle" });
   await expect(

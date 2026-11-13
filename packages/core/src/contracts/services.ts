@@ -75,7 +75,7 @@ export interface RegisterPresenceInput {
 
 /**
  * Liveness and outcome registry for task-attached agent processes. Ported
- * from pi-home's presence access with the cmux location field dropped;
+ * from pi-home's presence access with the multiplexer location field dropped;
  * semantics (pid-scoped mutations from superseded processes are ignored)
  * carry over unchanged.
  */

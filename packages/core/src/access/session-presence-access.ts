@@ -1,6 +1,6 @@
 // Resource Access: one JSON file per task under the presence directory.
 // Ported from pi-home's src/access/session-presence-access.ts with the
-// cmux location field dropped. Presence is ephemeral runtime data with one
+// multiplexer location field dropped. Presence is ephemeral runtime data with one
 // writer per task (the live process), so it stays out of the durable task
 // store: registrations atomically replace the file, and mutations from a
 // superseded process are ignored via pid checks.

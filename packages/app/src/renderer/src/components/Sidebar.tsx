@@ -309,7 +309,7 @@ function SortableGroupSection({
 }
 
 /**
- * Workspace-view task rail, modeled on cmux's sidebar: the rail lists only
+ * Workspace-view task rail, modeled on a terminal app's workspace sidebar: the rail lists only
  * *open* task workspaces (`openedTaskIds`, owned by App.tsx), not the full
  * board inventory -- the Board stays the full inventory. Rows are grouped
  * by repository (collapsible, "scratch" last by default), kept in a FIXED,

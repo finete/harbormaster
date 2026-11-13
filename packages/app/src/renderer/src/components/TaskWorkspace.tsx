@@ -38,7 +38,7 @@ let nextPanelId = 1;
 
 /**
  * A click in the unoccupied area right of a group's tabs opens a new plain
- * shell in that group (cmux-style); a drag (pointerdown/up further apart
+ * shell in that group; a drag (pointerdown/up further apart
  * than this, e.g. dragging the void to reposition the group) must not.
  */
 const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
@@ -55,7 +55,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
 }: {
   taskId: string;
   /**
-   * Close a task's workspace (cmux-style): unmounts every pane, ending their
+   * Close a task's workspace: unmounts every pane, ending their
    * ptys. Takes the task id (not a pre-bound closure) so callers can pass one
    * stable callback and `memo` keeps hidden workspaces from re-rendering.
    */
@@ -210,7 +210,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     ),
   );
 
-  // Click-empty-tab-strip-space = new shell (cmux-style): attach a
+  // Click-empty-tab-strip-space = new shell: attach a
   // click-not-drag listener to each group's `.void-container` (dockview's
   // own DOM element for the unoccupied tab-strip area right of the tabs —
   // see dockview-core's TabsContainer/VoidContainer), not a global

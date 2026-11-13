@@ -1,7 +1,7 @@
 /**
  * Shell escaping utilities — pure functions with no Node or DOM dependency.
  *
- * Port of cmux `String+TerminalShellEscaping.swift` + VS Code
+ * Native macOS terminal drop escaping + VS Code
  * `terminalEnvironment.ts:335` control-char strip.
  *
  * Shared by the renderer (drop handler, context-menu paste) and the main
@@ -40,7 +40,7 @@ function stripControlChars(s: string): string {
 /**
  * Escape `p` for safe insertion into a shell command line.
  *
- * Rules (cmux parity):
+ * Rules (native-terminal parity):
  * 1. Strip control chars first.
  * 2. If the result contains a literal newline or carriage return, single-quote
  *    the whole string with embedded single-quotes escaped as `'\''`.
@@ -60,8 +60,8 @@ export function shellEscapePath(p: string): string {
 }
 
 /**
- * Escape and join multiple paths with a single space, as cmux does for
- * multi-file drags (no trailing space).
+ * Escape and join multiple paths with a single space, as native terminals do
+ * for multi-file drags (no trailing space).
  */
 export function shellEscapePaths(paths: string[]): string {
   return paths.map(shellEscapePath).join(" ");

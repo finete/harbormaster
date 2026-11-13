@@ -2,7 +2,7 @@
  * Drag-and-drop file integration for terminal panes (checklist item #3).
  *
  * When files are dragged onto the terminal container, their absolute paths
- * are shell-escaped and pasted into the terminal (cmux/Tabby/VS Code parity).
+ * are shell-escaped and pasted into the terminal (Tabby/VS Code parity).
  * A document-level guard prevents unhandled file drops from navigating the
  * renderer to file:// URLs (item #0.7).
  */

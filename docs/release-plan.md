@@ -288,7 +288,7 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   `config.json` + `harbormaster rules list` output.
 - LICENSE: MIT, `finete`.
 - Removed: `migrate-from-pihome`, Beads reading, `/totask` / `/totemptask`,
-  the TUI board, `cmux` leftovers. README rewritten around the Homebrew
+  the TUI board, multiplexer leftovers. README rewritten around the Homebrew
   install, the four concepts, and "add your agent".
 
 ## Onboarding (four screens)
