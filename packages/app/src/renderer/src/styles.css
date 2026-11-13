@@ -83,12 +83,17 @@ body {
    A dedicated theme class rather than overriding `.dockview-theme-dark`:
    dockview.css loads after this file, so equal-specificity overrides of its
    own theme class would lose. Strip = --muted; active tab = --card with a
-   2px mint bottom edge; inactive tabs muted text; hairline separators. */
+   1.5px mint TOP edge; inactive tabs muted text; hairline separators.
+   Vertical metrics follow cmux: the strip is 28px
+   (WindowChromeMetrics.sharedChromeBarHeight = bonsplitTabBarHeight) and
+   the active indicator is 1.5px on the top edge (Bonsplit
+   TabBarMetrics.activeIndicatorHeight, drawn at bounds.minY of a flipped
+   view in TabBarSelectionChromeView). */
 .dockview-theme-harbormaster {
   --dv-background-color: hsl(var(--background));
   --dv-paneview-active-outline-color: hsl(var(--primary));
   --dv-tabs-and-actions-container-font-size: 13px;
-  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tabs-and-actions-container-height: 28px;
   --dv-drag-over-background-color: hsl(var(--primary) / 0.12);
   --dv-drag-over-border-color: hsl(var(--primary) / 0.5);
   --dv-tabs-container-scrollbar-color: hsl(var(--border));
@@ -123,13 +128,13 @@ body {
 .dockview-theme-harbormaster .tab.inactive-tab:hover {
   color: hsl(var(--foreground));
 }
-/* The 2px bottom edge: mint on the focused group's visible tab, a quiet
+/* The 1.5px top edge: mint on the focused group's visible tab, a quiet
    foreground tint on other groups' visible tabs (inset, so no layout). */
 .dockview-theme-harbormaster .groupview.active-group .tab.active-tab {
-  box-shadow: inset 0 -2px 0 hsl(var(--primary));
+  box-shadow: inset 0 1.5px 0 hsl(var(--primary));
 }
 .dockview-theme-harbormaster .groupview.inactive-group .tab.active-tab {
-  box-shadow: inset 0 -2px 0 hsl(var(--foreground) / 0.2);
+  box-shadow: inset 0 1.5px 0 hsl(var(--foreground) / 0.2);
 }
 .dockview-theme-harbormaster .tab .dv-default-tab .dv-default-tab-action {
   border-radius: 4px;
