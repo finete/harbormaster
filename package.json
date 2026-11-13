@@ -1,7 +1,7 @@
 {
   "name": "harbormaster",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A kanban harbor for coding-agent tasks: every task gets a berth: worktree, branch, session, pane.",
   "license": "MIT",
   "type": "module",
