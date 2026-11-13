@@ -37,6 +37,16 @@ export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
       role="tab"
       tabIndex={0}
       onClick={() => api.setActive()}
+      // Middle-click closes the tab on mouse DOWN, like cmux
+      // (CmuxAppKitSupportUI MiddleClickCaptureView.otherMouseDown with
+      // buttonNumber == 2 → Bonsplit TabItemView onClose(.middleClick)).
+      // preventDefault also suppresses the browser's middle-click autoscroll.
+      onMouseDown={(event) => {
+        if (event.button !== 1) return;
+        event.preventDefault();
+        event.stopPropagation();
+        api.close();
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
