@@ -197,11 +197,14 @@ describe("renderer open-in helpers", () => {
     { id: "ghostty", label: "Ghostty", kind: "terminal" as const },
   ];
 
-  it("defaults to the last-used app, else the file manager, else the first", () => {
-    expect(defaultOpenInApp(apps, "cursor")?.id).toBe("cursor");
-    expect(defaultOpenInApp(apps, "uninstalled")?.id).toBe("finder");
-    expect(defaultOpenInApp(apps, undefined)?.id).toBe("finder");
-    expect(defaultOpenInApp(apps.slice(1), undefined)?.id).toBe("cursor");
+  it("defaults to the last-used app, else an editor, else the file manager, else the first", () => {
+    expect(defaultOpenInApp(apps, "ghostty")?.id).toBe("ghostty");
+    expect(defaultOpenInApp(apps, "finder")?.id).toBe("finder");
+    expect(defaultOpenInApp(apps, "uninstalled")?.id).toBe("cursor");
+    expect(defaultOpenInApp(apps, undefined)?.id).toBe("cursor");
+    const noEditor = [apps[0], apps[2]];
+    expect(defaultOpenInApp(noEditor, undefined)?.id).toBe("finder");
+    expect(defaultOpenInApp([apps[2]], undefined)?.id).toBe("ghostty");
     expect(defaultOpenInApp([], "cursor")).toBeUndefined();
   });
 
