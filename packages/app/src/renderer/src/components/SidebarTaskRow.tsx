@@ -120,7 +120,7 @@ export function StatusDot({
         role="img"
         aria-label="Agent idle"
       >
-        <span className="h-2 w-2 rounded-full bg-status-ok/70" />
+        <span className="h-2 w-2 rounded-full bg-muted-foreground" />
       </span>
     );
   }
