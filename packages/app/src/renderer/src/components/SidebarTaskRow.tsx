@@ -7,10 +7,9 @@ import type {
   MouseEvent,
   PointerEvent,
 } from "react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
-import { createSharedStore } from "../lib/shared-store";
 import { taskAgentLabel } from "../lib/task-agent";
 import {
   deriveMessagingChips,
@@ -32,6 +31,7 @@ import {
   type StateTone,
   stateChipLabel,
 } from "./sidebar-model";
+import { WorkingSpinner } from "./ui/working-spinner";
 
 /**
  * Bordered chip tones from the design system's status tokens only: neutral
@@ -64,59 +64,27 @@ const PR_CHIP_CLASS: Record<ReturnType<typeof prBadgeVariant>, string> = {
 const CHIP_BASE =
   "inline-flex h-[18px] shrink-0 items-center rounded border px-1.5 text-[10px] font-medium leading-none";
 
-/** Half-period of the running dot's halo blink. */
-const RUNNING_BLINK_MS = 1_000;
-
-/**
- * One shared, low-frequency blink for every running-turn dot. Deliberately
- * not a CSS `animate-ping`/`animate-pulse`: an infinite CSS animation makes
- * Chromium produce a frame every vsync (recompositing the window, terminal
- * panes included) for as long as any agent runs. A 1s toggle costs one tiny repaint
- * per second instead, and the timer only runs while a running dot is
- * mounted (ref-counted, see lib/shared-store.ts).
- */
-const runningBlink = createSharedStore<boolean>(false, (set) => {
-  let on = false;
-  set(on);
-  const timer = setInterval(() => {
-    on = !on;
-    set(on);
-  }, RUNNING_BLINK_MS);
-  return () => clearInterval(timer);
-});
-
 function RunningDot(): JSX.Element {
-  const haloOn = useSyncExternalStore(
-    runningBlink.subscribe,
-    runningBlink.getSnapshot,
-  );
   return (
     <span
-      className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center"
+      className="flex h-2.5 w-2.5 shrink-0 items-center justify-center"
       data-testid="sidebar-row-spinner"
       data-status="running"
       role="img"
       aria-label="Agent working"
     >
-      {/* Halo blinks (no transition); reduced-motion users get it steady. */}
-      <span
-        className={cn(
-          "absolute inline-flex h-full w-full rounded-full ring-2 ring-muted-foreground/40 motion-reduce:opacity-100",
-          haloOn ? "opacity-100" : "opacity-0",
-        )}
-      />
-      <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
+      <WorkingSpinner className="h-2.5 w-2.5" />
     </span>
   );
 }
 
 /**
  * Live-presence indicator. Keeps the pre-redesign test ids so e2e coverage
- * carries over: `sidebar-row-spinner` while an agent turn runs (pulsing
- * halo — the "moving symbol while it works", a cheap 1s blink), `sidebar-row-attention-dot`
- * for live-but-idle — pi-home's ● "your move": the agent finished its loop
- * and waits on you, so it is styled as attention (amber), not as a calm
- * "all good" — and `sidebar-row-status-dot` otherwise (muted gray).
+ * carries over: `sidebar-row-spinner` while an agent turn runs (the yellow
+ * stepped spinner, see WorkingSpinner), `sidebar-row-attention-dot` for
+ * live-but-idle — pi-home's ● "your move": the agent finished its loop and
+ * waits on you, so it gets the mint call-to-action color with a ring — and
+ * `sidebar-row-status-dot` otherwise (muted gray).
  */
 export function StatusDot({
   presence,
@@ -178,7 +146,7 @@ export function StatusDot({
         role="img"
         aria-label="Your move: agent waiting for input"
       >
-        <span className="h-2 w-2 rounded-full bg-status-needsYou ring-2 ring-status-needsYou/30" />
+        <span className="h-2 w-2 rounded-full bg-status-ok ring-2 ring-status-ok/30" />
       </span>
     );
   }
@@ -609,7 +577,7 @@ export function SidebarTaskRow({
             <span
               className={cn(
                 "truncate",
-                attention && "font-medium text-status-needsYou",
+                attention && "font-medium text-status-ok",
                 presenceActivity === "error" && "text-status-error",
               )}
               data-testid="sidebar-row-activity-text"

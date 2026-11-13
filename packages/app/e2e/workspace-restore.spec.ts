@@ -210,7 +210,7 @@ test("a task's workspace (primary pi pane + split shell) and the focused rail su
 
   // Add a split shell alongside the primary pi pane.
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
-  await workspace.getByTestId("add-terminal-button").click();
+  await workspace.getByTestId("split-right-button").first().click();
   await expect(workspace.getByTestId("terminal-panel")).toHaveCount(2);
   await expect(
     workspace.getByTestId("dockview-host").locator(".groupview"),
