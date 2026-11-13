@@ -324,13 +324,16 @@ test("middle-clicking a row closes it too, without touching board state", async 
     .filter({ hasText: "Task Gamma" });
   await expect(gammaRow).toBeVisible();
 
-  await gammaRow.click({ button: "middle" });
-
+  // Closes on mouse DOWN, like cmux's SidebarPointerInteractionMonitor
+  // (.otherMouseDown): the row is gone before the button is released.
+  await gammaRow.hover();
+  await window.mouse.down({ button: "middle" });
   await expect(
     window
       .locator('[data-testid^="sidebar-task-row-"]')
       .filter({ hasText: "Task Gamma" }),
   ).toHaveCount(0);
+  await window.mouse.up({ button: "middle" });
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("column-backlog-cards")).toContainText(
     "Task Gamma",

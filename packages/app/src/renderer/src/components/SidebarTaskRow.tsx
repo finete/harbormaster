@@ -400,18 +400,16 @@ export function SidebarTaskRow({
     onClose(task.id);
   };
 
-  // Middle-click (auxclick, button 1) closes the row from anywhere on it,
-  // matching cmux's SidebarPointerInteractionMonitor.
-  const onAuxClick = (event: MouseEvent<HTMLDivElement>): void => {
-    if (event.button !== 1) return;
-    event.preventDefault();
-    onClose(task.id);
-  };
-
-  // Suppress the browser's default middle-click autoscroll so the auxclick
-  // above isn't fighting a scroll gesture.
+  // Middle-click closes the row from anywhere on it, on mouse DOWN like
+  // cmux's SidebarPointerInteractionMonitor (an .otherMouseDown monitor with
+  // buttonNumber == 2). preventDefault also suppresses the browser's
+  // middle-click autoscroll.
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
-    if (event.button === 1) event.preventDefault();
+    if (event.button === 1) {
+      event.preventDefault();
+      onClose(task.id);
+      return;
+    }
     // dnd-kit's PointerSensor activator ignores non-primary buttons, so a
     // right-click (context menu) or middle-click never starts a drag.
     const start = drag?.listeners?.onPointerDown;
@@ -451,7 +449,6 @@ export function SidebarTaskRow({
         aria-pressed={selected}
         onClick={() => !isRenaming && onSelect(task.id)}
         onKeyDown={onKeyDown}
-        onAuxClick={onAuxClick}
         onPointerDown={onPointerDown}
         onContextMenu={onRowContextMenu}
         className={cn(

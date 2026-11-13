@@ -276,6 +276,17 @@ test.describe("terminal tab bar: live titles, void-click new shell, split button
     await window.keyboard.press("Enter");
     await expect(tabTitles.nth(1)).toHaveText("MY-TITLE", { timeout: 10_000 });
 
+    // --- middle-click closes a tab on mouse DOWN (cmux: MiddleClickCaptureView
+    // .otherMouseDown); the tab is gone before the button is released ---
+    await workspace.getByTestId("tab-strip-void").first().click();
+    await expect.poll(async () => tabs.count(), { timeout: 10_000 }).toBe(3);
+    await tabs.nth(2).hover();
+    await window.mouse.down({ button: "middle" });
+    await expect(tabs).toHaveCount(2);
+    await window.mouse.up({ button: "middle" });
+    await expect(tabTitles.nth(1)).toHaveText("MY-TITLE");
+    await tabs.nth(1).click();
+
     // --- split buttons grow the group count, each in its own direction ---
     // (each split creates a new *group*, which always renders its own
     // active panel in parallel with the others, so `panels` does grow here)
