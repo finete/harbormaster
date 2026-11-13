@@ -303,7 +303,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
         className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3"
         data-testid="workspace-header"
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Terminals
           </span>

@@ -31,7 +31,17 @@ export const RULES_SCHEMA = {
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
           description: "Unique within the file; shown in the audit log.",
         },
-        description: { type: "string" },
+        label: {
+          type: "string",
+          minLength: 1,
+          maxLength: 40,
+          description:
+            "Short tag shown with the rule's actions in the task's audit line and History (\"Needs changes\"). Defaults to the id, humanized.",
+        },
+        description: {
+          type: "string",
+          description: "Free-form note about the rule.",
+        },
         on: {
           description:
             "Event type(s): exact (`github.pr.mergedChanged`) or glob (`github.pr.*`; `*` = one segment, `**` = any).",

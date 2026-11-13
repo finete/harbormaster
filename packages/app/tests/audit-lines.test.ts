@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { AuditActionEntry, AuditEntry } from "../src/preload/api";
 import {
   auditActionVerb,
+  auditActionWhy,
+  auditRuleLabel,
   describeAuditAction,
   historyLines,
+  humanize,
   lastRuleAction,
 } from "../src/renderer/src/lib/audit-lines";
 
@@ -13,23 +16,48 @@ const move: AuditActionEntry = {
   at: "2026-11-11T11:56:00.000Z",
   taskId: "t",
   ruleId: "review-changes-requested",
+  ruleLabel: "Needs changes",
   file: "rules.yaml",
   line: 12,
   eventId: "e1",
   eventType: "github.pr.reviewDecisionChanged",
   action: "move",
   with: { to: "dev" },
+  from: { state: "awaiting", awaitingKind: "review" },
   outcome: "applied",
 };
 
 describe("audit lines", () => {
-  it("says what moved where, when and why", () => {
+  it("says from → to, when, and the rule's tag; the technical why apart", () => {
     expect(describeAuditAction(move, now)).toBe(
-      "moved to Dev 4m ago because github.pr.reviewDecisionChanged matched rule review-changes-requested (rules.yaml:12)",
+      "Review → Dev · 4m ago · Needs changes",
+    );
+    expect(auditActionWhy(move)).toBe(
+      "github.pr.reviewDecisionChanged · rule review-changes-requested (rules.yaml:12)",
     );
     expect(
-      auditActionVerb({ ...move, with: { to: "await", kind: "deploy" } }),
-    ).toBe("moved to Awaiting: deploy");
+      describeAuditAction({ ...move, at: "2026-11-11T11:59:50.000Z" }, now),
+    ).toBe("Review → Dev · just now · Needs changes");
+  });
+
+  it("falls back for older entries: no `from`, no label", () => {
+    const { from: _from, ruleLabel: _label, ...old } = move;
+    expect(auditActionVerb(old)).toBe("Moved to Dev");
+    expect(auditRuleLabel(old)).toBe("Review changes requested");
+    expect(humanize("deploy_land.now")).toBe("Deploy land now");
+  });
+
+  it("names awaiting columns by kind and words other outcomes", () => {
+    expect(
+      auditActionVerb({
+        ...move,
+        from: { state: "dev" },
+        with: { to: "await", kind: "deploy" },
+      }),
+    ).toBe("Dev → Deploy");
+    expect(auditActionVerb({ ...move, with: { to: "await" } })).toBe(
+      "Review → Review",
+    );
     expect(
       auditActionVerb({
         ...move,
@@ -37,16 +65,21 @@ describe("audit lines", () => {
         outcome: "stayed",
         detail: "dirty worktree",
       }),
-    ).toBe("tried to move to Done, stayed (dirty worktree)");
+    ).toBe("Tried Done, stayed (dirty worktree)");
     expect(auditActionVerb({ ...move, action: "inbox", with: {} })).toBe(
-      "added an inbox item",
+      "Added an inbox item",
     );
     expect(
-      describeAuditAction({ ...move, at: "2026-11-11T11:59:50.000Z" }, now),
-    ).toMatch(/^moved to Dev just now because/);
+      auditActionVerb({
+        ...move,
+        action: "message",
+        outcome: "failed",
+        detail: "x",
+      }),
+    ).toBe("Failed: sent a message (x)");
   });
 
-  it("finds the newest action and lists history newest first", () => {
+  it("finds the newest action; history hides raw events unless asked", () => {
     const entries: AuditEntry[] = [
       {
         kind: "event",
@@ -65,15 +98,36 @@ describe("audit lines", () => {
         at: "2026-11-11T11:57:00.000Z",
         message: "boom",
         ruleId: "r",
+        file: "rules.yaml",
+        line: 3,
       },
     ];
     expect(lastRuleAction(entries)).toBe(move);
     expect(lastRuleAction([])).toBeUndefined();
-    expect(
-      historyLines(entries, now, 2).map((line) => [line.kind, line.text]),
-    ).toEqual([
-      ["warning", "warning in rule r: boom"],
-      ["action", describeAuditAction(move, now)],
+    expect(historyLines(entries, now)).toEqual([
+      expect.objectContaining({
+        kind: "warning",
+        text: "Warning: boom",
+        why: "rule r (rules.yaml:3)",
+        when: "3m ago",
+      }),
+      expect.objectContaining({
+        kind: "action",
+        text: "Review → Dev",
+        label: "Needs changes",
+        why: auditActionWhy(move),
+        when: "4m ago",
+      }),
     ]);
+    expect(
+      historyLines(entries, now, { includeEvents: true, limit: 2 }).map(
+        (line) => line.kind,
+      ),
+    ).toEqual(["warning", "action"]);
+    expect(
+      historyLines(entries, now, { includeEvents: true }).map(
+        (line) => line.text,
+      ),
+    ).toContain("github.pr.reviewDecisionChanged");
   });
 });

@@ -1,22 +1,32 @@
 // The rules audit on a task (docs/release-plan.md "Audit log"): the
-// workspace header shows the task's last rule action ("moved to Dev 4m ago
-// because … matched rule … (rules.yaml:12)") and a History popover with
-// its last 20 audit entries, read through `listEvents({ taskId })`.
-// Re-read whenever the task record changes (a rule move changes it).
+// workspace header shows the task's last rule action ("Review → Dev ·
+// 4m ago [Needs changes]", the event/rule/file:line in its tooltip) and a
+// History popover with recent rule actions (raw events on request), read
+// through `listEvents({ taskId })`. Re-read whenever the task record
+// changes (a rule move changes it). The component fills the space it is
+// given so History stays pinned to its right edge whether or not there is
+// a last action to show.
 import { History } from "lucide-react";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import type { AuditEntry } from "../../../preload/api";
 import {
-  describeAuditAction,
+  auditActionVerb,
+  auditActionWhy,
+  auditAge,
+  auditRuleLabel,
   historyLines,
   lastRuleAction,
 } from "../lib/audit-lines";
 import { useNow } from "../lib/use-now";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 const HISTORY_LIMIT = 20;
+/** Raw events outnumber actions; read enough to still find 20 actions. */
+const READ_LIMIT = 300;
 
 export function TaskAudit({
   taskId,
@@ -29,11 +39,12 @@ export function TaskAudit({
   const now = useNow();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [open, setOpen] = useState(false);
+  const [showEvents, setShowEvents] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `revision` and `open` are re-read triggers.
   useEffect(() => {
     let cancelled = false;
     void window.harbormaster.core
-      .listEvents({ taskId, limit: HISTORY_LIMIT })
+      .listEvents({ taskId, limit: READ_LIMIT })
       .then((list) => {
         if (!cancelled) setEntries(list);
       })
@@ -45,16 +56,33 @@ export function TaskAudit({
 
   if (entries.length === 0) return null;
   const last = lastRuleAction(entries);
+  const lines = historyLines(entries, now, {
+    limit: HISTORY_LIMIT,
+    includeEvents: showEvents,
+  });
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      {last && (
-        <span
-          className="min-w-0 truncate text-[11px] text-muted-foreground"
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      {last ? (
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2 text-xs"
           data-testid="task-audit-last"
-          title={describeAuditAction(last, now)}
+          title={`${auditActionVerb(last)} ${auditAge(last.at, now)}\n${auditActionWhy(last)}`}
         >
-          {describeAuditAction(last, now)}
-        </span>
+          <span className="shrink-0 font-medium text-foreground">
+            {auditActionVerb(last)}
+          </span>
+          <span className="shrink-0 text-muted-foreground">
+            · {auditAge(last.at, now)}
+          </span>
+          <Badge
+            variant="neutral"
+            className="min-w-0 truncate px-1.5 py-0 text-[11px]"
+          >
+            {auditRuleLabel(last)}
+          </Badge>
+        </div>
+      ) : (
+        <div className="flex-1" />
       )}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -74,31 +102,72 @@ export function TaskAudit({
           className="w-[460px] p-2"
           data-testid="task-audit-history"
         >
-          <h4 className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Rule history (last {HISTORY_LIMIT})
-          </h4>
-          <ol className="flex max-h-80 flex-col gap-1 overflow-y-auto">
-            {historyLines(entries, now, HISTORY_LIMIT).map((line) => (
-              <li
-                key={line.key}
-                data-kind={line.kind}
-                className="rounded px-1 py-0.5 text-xs"
-                title={line.at}
-              >
-                <span
-                  className={
-                    line.kind === "action"
-                      ? "text-foreground"
-                      : line.kind === "warning"
-                        ? "text-status-needsYou"
-                        : "text-muted-foreground"
-                  }
+          <div className="flex items-center justify-between px-1 pb-1">
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Rule history
+            </h4>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              aria-pressed={showEvents}
+              data-testid="task-audit-show-events"
+              onClick={() => setShowEvents((value) => !value)}
+            >
+              {showEvents ? "Hide events" : "Show events"}
+            </Button>
+          </div>
+          {lines.length === 0 ? (
+            <p className="px-1 py-2 text-xs text-muted-foreground">
+              No rule actions yet.
+            </p>
+          ) : (
+            <ol className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
+              {lines.map((line) => (
+                <li
+                  key={line.key}
+                  data-kind={line.kind}
+                  className={cn(
+                    "rounded px-1",
+                    line.kind === "event" ? "py-0" : "py-1",
+                  )}
+                  title={line.at}
                 >
-                  {line.text}
-                </span>
-              </li>
-            ))}
-          </ol>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "min-w-0 truncate",
+                        line.kind === "action" &&
+                          "text-xs font-medium text-foreground",
+                        line.kind === "warning" &&
+                          "text-xs text-status-needsYou",
+                        line.kind === "event" &&
+                          "font-mono text-[11px] text-muted-foreground",
+                      )}
+                    >
+                      {line.text}
+                    </span>
+                    {line.label && (
+                      <Badge
+                        variant="neutral"
+                        className="shrink-0 px-1.5 py-0 text-[11px]"
+                      >
+                        {line.label}
+                      </Badge>
+                    )}
+                    <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+                      {line.when}
+                    </span>
+                  </div>
+                  {line.why && (
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {line.why}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
         </PopoverContent>
       </Popover>
     </div>

@@ -164,7 +164,11 @@ export function formatAuditLine(entry: AuditEntry): string {
     case "action": {
       const input = entry.with ? ` ${JSON.stringify(entry.with)}` : "";
       const detail = entry.detail ? ` (${entry.detail})` : "";
-      return `${entry.at} ${entry.outcome} ${entry.action}${input}${task} because ${entry.eventType} matched rule ${entry.ruleId} (${entry.file}:${entry.line})${detail}`;
+      const from = entry.from
+        ? ` from ${entry.from.state}${entry.from.awaitingKind ? `:${entry.from.awaitingKind}` : ""}`
+        : "";
+      const label = entry.ruleLabel ? ` [${entry.ruleLabel}]` : "";
+      return `${entry.at} ${entry.outcome} ${entry.action}${input}${from}${task} because ${entry.eventType} matched rule ${entry.ruleId}${label} (${entry.file}:${entry.line})${detail}`;
     }
     case "warning": {
       const where = entry.ruleId

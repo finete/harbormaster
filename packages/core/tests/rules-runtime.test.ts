@@ -318,6 +318,34 @@ describe("rules runtime through createCore", () => {
     expect(addons[1]?.suggestedRules).toBe("rules: []\n");
   });
 
+  it("records where a move started and the rule's label in the audit", async () => {
+    const { core } = await setup({
+      "rules/rules.yaml": `rules:
+  - id: finish-scratch
+    label: Scratch finished
+    on: harbormaster.task.appeared
+    do: [{ action: move, with: { to: done } }]
+`,
+    });
+    const task = await core.commands.createTask({
+      title: "Scratch",
+      initialPrompt: "",
+      start: true,
+    });
+    await core.commands.refresh();
+    const action = (await core.commands.listEvents({ taskId: task.id })).find(
+      (entry): entry is Extract<AuditEntry, { kind: "action" }> =>
+        entry.kind === "action",
+    );
+    expect(action).toMatchObject({
+      ruleId: "finish-scratch",
+      ruleLabel: "Scratch finished",
+      from: { state: "dev" },
+      outcome: "applied",
+    });
+    expect(action?.from).not.toHaveProperty("awaitingKind");
+  });
+
   it("does nothing automatic with the kill switch off", async () => {
     const { core } = await setup(
       { "rules/rules.yaml": RULES, "rules/checks.mjs": CHECKS },
