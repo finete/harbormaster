@@ -23,6 +23,9 @@ const HEADER = `# Harbormaster rules: event → condition → action.
 # at most one move (the first matching rule wins), every matching inbox /
 # createTask / message action runs.
 #
+# A rule's optional \`label\` is the short tag the task's audit line and
+# History show for its actions (default: the id, humanized).
+#
 # CEL variables: event, task, facts (facts.github, facts["version-endpoint"],
 # facts.harbormaster), repo. JS escape hatch: if: js:./checks.mjs#fn
 `;
@@ -33,6 +36,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # A merged PR enters the first deployment stage (or the stage-less
   # "Production deploy" wait when the repository has no pipeline).
   - id: pr-merged-enter-deploy
+    label: PR merged
     on: [github.pr.*, harbormaster.task.*]
     if: >-
       task.pr != null && task.pr.role == "author" &&
@@ -48,6 +52,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # Changes requested (or human feedback) on the current head, or the PR
   # went back to draft: the work returns to Dev.
   - id: review-changes-requested
+    label: Needs changes
     on: [github.pr.*, harbormaster.task.*]
     if: >-
       task.state == "awaiting" && task.awaiting.kind == "review" &&
@@ -66,6 +71,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # A requested or submitted review moves Dev work into Awaiting review
   # (unless that review asked for changes on the current head).
   - id: review-requested-enter-review
+    label: Review requested
     on: [github.pr.*, harbormaster.task.*]
     if: >-
       task.state == "dev" && task.pr != null && task.pr.role == "author" &&
@@ -84,6 +90,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # A stage-less production wait in a repository that has since gained a
   # pipeline adopts its first stage.
   - id: deploy-adopt-first-stage
+    label: Pipeline added
     on: [harbormaster.task.*]
     if: >-
       task.state == "awaiting" && task.awaiting.kind == "deploy" &&
@@ -99,6 +106,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # The version endpoint shows the merge commit deployed: enter the next
   # stage (scanning past consecutive hooked stages that already have it).
   - id: deploy-advance-stage
+    label: Stage deployed
     on: [version-endpoint.deployment.*]
     if: >-
       task.state == "awaiting" && task.awaiting.kind == "deploy" &&
@@ -118,6 +126,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
   # dirty worktree or a live pane keeps it in Awaiting with a
   # "deployed and ready to land" warning until you mark it Done.
   - id: deploy-land
+    label: Fully deployed
     on: [version-endpoint.deployment.*]
     if: >-
       task.state == "awaiting" && task.awaiting.kind == "deploy" &&
@@ -132,6 +141,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     mover: "github-review",
     yaml: `  # Reviewer tasks (someone else's PR): the author pushed or replied.
   - id: reviewer-author-activity
+    label: Author activity
     on: github.pr.lastAuthorActivityAtChanged
     if: task.pr != null && task.pr.role == "reviewer" && task.state == "awaiting"
     do: [{ action: move, with: { to: dev } }]
@@ -141,6 +151,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     mover: "github-review",
     yaml: `  # Reviewer tasks: the PR closed (or merged), the review is over.
   - id: reviewer-pr-closed
+    label: PR closed
     on: github.pr.closedChanged
     if: task.pr != null && task.pr.role == "reviewer" && event.data.to == true
     do: [{ action: move, with: { to: done } }]
@@ -151,6 +162,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     yaml: `  # Someone asked you for a review (needs config sources.github.settings
   # .watchReviewRequests: true): an inbox item that can open a reviewer task.
   - id: review-requested-inbox
+    label: Review request
     on: github.reviewRequest.appeared
     do:
       - action: inbox

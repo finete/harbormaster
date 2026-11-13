@@ -283,6 +283,19 @@ export class RulesRuntime {
     let changed = false;
     const nextPending = new Map<string, PendingRuleMove>();
     for (const action of planned.actions) {
+      // Where a move starts, read before it runs (the audit's "Review → Dev").
+      const before =
+        action.action === "move" && action.candidate.taskId
+          ? tasksById.get(action.candidate.taskId)
+          : undefined;
+      const from: AuditActionEntry["from"] = before
+        ? {
+            state: before.state,
+            ...(before.state === "awaiting" && before.awaiting
+              ? { awaitingKind: before.awaiting.kind }
+              : {}),
+          }
+        : undefined;
       const result = await this.execute(action, tasksById, input, warnings);
       if (result.outcome === "applied" && action.action !== "inbox") {
         changed = true;
@@ -295,7 +308,7 @@ export class RulesRuntime {
         previous?.lastOutcome === result.outcome &&
         previous?.lastDetail === result.detail;
       if (!retryRepeat) {
-        audit.push(actionEntry(action, result, time));
+        audit.push(actionEntry(action, result, time, from));
       }
       if (
         action.action === "move" &&
@@ -854,12 +867,16 @@ function actionEntry(
   action: PlannedRuleAction,
   result: { outcome: AuditActionEntry["outcome"]; detail?: string },
   time: string,
+  from?: AuditActionEntry["from"],
 ): AuditActionEntry {
   return {
     kind: "action",
     at: time,
     ...(action.candidate.taskId ? { taskId: action.candidate.taskId } : {}),
     ruleId: action.candidate.rule.id,
+    ...(action.candidate.rule.label
+      ? { ruleLabel: action.candidate.rule.label }
+      : {}),
     file: action.candidate.rule.file,
     line: action.line,
     eventId: action.candidate.event.id,
@@ -869,6 +886,7 @@ function actionEntry(
         ? action.action
         : `${action.source} → ${action.action}`,
     with: action.with,
+    ...(from ? { from } : {}),
     outcome: result.outcome,
     ...(result.detail ? { detail: result.detail } : {}),
   };

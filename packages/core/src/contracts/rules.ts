@@ -219,6 +219,8 @@ export interface RuleActionSpec {
 /** One rule as loaded (validated) from a rules file. */
 export interface Rule {
   id: string;
+  /** Short human tag for the audit log ("Needs changes"); absent = the id, humanized. */
+  label?: string;
   /** Exact event type or glob (`github.pr.*`, `*` = one segment, `**` = any). */
   on: string[];
   /** CEL expression, or `js:./file.mjs#fn`; absent = always. */
@@ -325,10 +327,14 @@ export interface AuditActionEntry extends AuditBase {
   line: number;
   eventId: string;
   eventType: string;
+  /** The rule's `label` when it fired (absent in older entries or unlabeled rules). */
+  ruleLabel?: string;
   /** `move` / `inbox` / `createTask` / `message` / `js:…`. */
   action: string;
   /** Rendered (templated) input. */
   with?: Record<string, unknown>;
+  /** Where a `move` started: the task's column (and awaiting kind) before it ran. */
+  from?: { state: TaskState; awaitingKind?: string };
   outcome: RuleActionOutcome;
   detail?: string;
 }

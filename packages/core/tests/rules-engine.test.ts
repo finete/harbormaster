@@ -40,6 +40,7 @@ describe("rules files", () => {
     const file = parse(`# comment
 rules:
   - id: one
+    label: Needs changes
     on: github.pr.*
     if: task.state == "dev"
     do:
@@ -55,11 +56,12 @@ rules:
     expect(file.rules).toEqual([
       {
         id: "one",
+        label: "Needs changes",
         on: ["github.pr.*"],
         if: 'task.state == "dev"',
         do: [
-          { action: "move", with: { to: "dev" }, line: 7 },
-          { action: "inbox", with: { title: "hi" }, line: 9 },
+          { action: "move", with: { to: "dev" }, line: 8 },
+          { action: "inbox", with: { title: "hi" }, line: 10 },
         ],
         file: "rules.yaml",
         line: 3,
@@ -67,9 +69,9 @@ rules:
       {
         id: "two",
         on: ["a.b", "c.*"],
-        do: [{ action: "js:./x.mjs#fn", line: 13 }],
+        do: [{ action: "js:./x.mjs#fn", line: 14 }],
         file: "rules.yaml",
-        line: 11,
+        line: 12,
       },
     ]);
   });

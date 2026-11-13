@@ -93,6 +93,7 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
     });
     return {
       id: entry.id,
+      ...(entry.label !== undefined ? { label: entry.label } : {}),
       on: Array.isArray(entry.on) ? entry.on : [entry.on],
       ...(entry.if !== undefined ? { if: entry.if } : {}),
       do: actions,
@@ -106,6 +107,7 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
 
 interface RawRule {
   id: string;
+  label?: string;
   on: string | string[];
   if?: string;
   do: Array<{ action: string; with?: Record<string, unknown> }>;
