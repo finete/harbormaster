@@ -134,10 +134,11 @@ test("opens the task's worktree folder in the chosen app, remembers it, copies t
     );
 
   // The split button shows, enabled once the binding resolves (no last app
-  // yet: the default is Finder).
+  // yet: the default is the first installed editor, VS Code in the stubbed
+  // catalog, never Finder).
   const main = workspace.getByTestId("open-in-main");
   await expect(main).toBeEnabled();
-  await expect(main).toHaveText("Open in Finder");
+  await expect(main).toHaveText("Open in VS Code");
 
   // Choosing Cursor from the dropdown opens the folder in Cursor.
   await workspace.getByTestId("open-in-menu-trigger").click();

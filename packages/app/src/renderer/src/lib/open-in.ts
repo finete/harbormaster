@@ -29,7 +29,8 @@ export function writeLastOpenInAppId(storage: StorageLike, id: string): void {
 
 /**
  * The app the split button's main part opens in: the last used one when it
- * is still installed, else the file manager, else the first available app.
+ * is still installed, else the first installed editor (IDE), else the file
+ * manager, else the first available app.
  */
 export function defaultOpenInApp(
   apps: readonly OpenInAppInfo[],
@@ -37,6 +38,7 @@ export function defaultOpenInApp(
 ): OpenInAppInfo | undefined {
   return (
     apps.find((app) => app.id === lastId) ??
+    apps.find((app) => app.kind === "editor") ??
     apps.find((app) => app.kind === "file-manager") ??
     apps[0]
   );
