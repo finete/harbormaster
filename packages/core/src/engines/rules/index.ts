@@ -5,6 +5,7 @@ export * from "./default-rules.js";
 export * from "./evaluation.js";
 export * from "./outline.js";
 export * from "./rule-files.js";
+export * from "./rules-guide.js";
 export * from "./rules-schema.js";
 export * from "./snapshot-diff.js";
 export * from "./source-settings.js";

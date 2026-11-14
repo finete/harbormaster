@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AuditEntry, Rule, RuleFile } from "../src/preload/api";
 import {
+  applyDraftPrefill,
+  emptyDraft,
+  emptyPrefs,
+  parseWhere,
+  planSubmit,
+} from "../src/renderer/src/lib/new-task-draft";
+import {
   activityEntries,
   DOT_CLASS,
   dayKey,
@@ -14,11 +21,15 @@ import {
   onChips,
   outcomeDot,
   problemLine,
+  RULES_EDIT_CHOICE_KEY,
+  readRulesEditChoice,
   ruleDot,
+  rulesEditRequest,
   rulesFolder,
   rulesPageState,
   triggeringEvent,
   withSummary,
+  writeRulesEditChoice,
 } from "../src/renderer/src/lib/rules-format";
 
 const now = Date.parse("2026-11-14T12:00:00.000Z");
@@ -317,5 +328,89 @@ describe("activity", () => {
       ...(dayKey(other.at) === dayKey(warning.at) ? [] : [dayKey(other.at)]),
       ...(dayKey(action.at) === dayKey(other.at) ? [] : [dayKey(action.at)]),
     ]);
+  });
+});
+
+describe("the Edit split button", () => {
+  it("prefills the composer for Edit in chat: the rules folder, a title and the prompt", () => {
+    const request = rulesEditRequest("/Users/me/.harbormaster/rules");
+    expect(request).toEqual({
+      mode: "chat",
+      where: "folder:/Users/me/.harbormaster/rules",
+      title: "Edit rules",
+      prompt:
+        "Edit my Harbormaster rules in /Users/me/.harbormaster/rules/rules.yaml (and repos/*.yaml). Read AGENTS.md in this folder first; it documents the rules language. After editing, validate with `harbormaster rules list` and `harbormaster rules check`.",
+    });
+    expect(parseWhere(request.where)).toEqual({
+      kind: "folder",
+      path: "/Users/me/.harbormaster/rules",
+    });
+  });
+
+  it("maps the request onto an empty draft in Chat mode (from any sticky mode), never onto a started one", () => {
+    const folder = "/Users/me/.harbormaster/rules";
+    const request = rulesEditRequest(folder);
+    for (const mode of ["task", "review", "chat"] as const) {
+      const draft = applyDraftPrefill(
+        emptyDraft(null, {
+          ...emptyPrefs(),
+          mode,
+          where: "repo:github.com/a/b",
+        }),
+        request,
+      );
+      expect(draft).toMatchObject({
+        mode: "chat",
+        where: `folder:${folder}`,
+        title: "Edit rules",
+        prompt: request.prompt,
+        baseRef: null,
+      });
+      // Submitting (the user's call) creates a folder chat in the rules dir.
+      expect(planSubmit(draft, "start", null)).toEqual({
+        command: "createTask",
+        input: expect.objectContaining({
+          title: "Edit rules",
+          folderPath: folder,
+          start: true,
+        }),
+      });
+    }
+    const started = { ...emptyDraft(), prompt: "my own work" };
+    expect(applyDraftPrefill(started, request)).toBe(started);
+    // Without a mode, a prompt still never lands in Review mode.
+    expect(
+      applyDraftPrefill(emptyDraft(null, { ...emptyPrefs(), mode: "review" }), {
+        prompt: "x",
+      }).mode,
+    ).toBe("task");
+  });
+
+  it("remembers the last choice, defaulting to Edit in chat", () => {
+    const map = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        map.set(key, value);
+      },
+    };
+    expect(readRulesEditChoice(storage)).toBe("chat");
+    writeRulesEditChoice(storage, "app");
+    expect(map.get(RULES_EDIT_CHOICE_KEY)).toBe("app");
+    expect(readRulesEditChoice(storage)).toBe("app");
+    writeRulesEditChoice(storage, "chat");
+    expect(readRulesEditChoice(storage)).toBe("chat");
+    map.set(RULES_EDIT_CHOICE_KEY, "garbage");
+    expect(readRulesEditChoice(storage)).toBe("chat");
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    expect(readRulesEditChoice(broken)).toBe("chat");
+    expect(() => writeRulesEditChoice(broken, "app")).not.toThrow();
   });
 });

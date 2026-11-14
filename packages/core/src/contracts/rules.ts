@@ -540,6 +540,8 @@ export interface RulesFileAccess {
   hasGlobalRules(): Promise<boolean>;
   /** Write files (rules-dir-relative path → text) that do not exist yet. */
   writeDefaults(files: Readonly<Record<string, string>>): Promise<void>;
+  /** Write Harbormaster-managed files (always overwritten; written only when the content differs). */
+  writeManaged(files: Readonly<Record<string, string>>): Promise<void>;
   /** The global file (when present) and every `repos/**\/*.yaml`. */
   readRuleFiles(): Promise<RuleFileText[]>;
   /** Import a JS module from inside the rules dir (fresh after edits). */

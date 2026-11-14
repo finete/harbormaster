@@ -1806,6 +1806,9 @@ export class CoreManager implements CoreCommands {
       if (patched) changed = true;
     });
 
+    // The agent guide in the rules dir is written on every start, rules on
+    // or off.
+    if (this.rules) warnings.push(...(await this.rules.ensureManagedFiles()));
     // Board automation: the rules engine (sources → events → rules →
     // actions), only with the kill switch on.
     if (config.automation && this.rules) {

@@ -66,6 +66,7 @@ import {
   parseRuleFile,
   repositoryRulesFile,
 } from "../engines/rules/rule-files.js";
+import { RULES_MANAGED_FILES } from "../engines/rules/rules-guide.js";
 import {
   diffSnapshots,
   taskIdOfSubject,
@@ -161,6 +162,7 @@ export class RulesRuntime {
     builtinSources.map((source) => source.id),
   );
   private defaultsEnsured = false;
+  private managedWritten = false;
   private addonLoad:
     | Promise<{ sources: Source[]; infos: AddonInfo[]; problems: string[] }>
     | undefined;
@@ -176,6 +178,7 @@ export class RulesRuntime {
   async tick(input: RulesTickInput): Promise<RulesTickResult> {
     const warnings: string[] = [];
     const sourceFailures: string[] = [];
+    warnings.push(...(await this.ensureManagedFiles()));
     await this.ensureDefaultRules(warnings);
     const files = await this.loadRuleFiles(warnings);
     const sources = await this.activeSources(input.config, warnings);
@@ -347,6 +350,7 @@ export class RulesRuntime {
     config: GlobalConfig,
   ): Promise<RulesCheckResult> {
     const warnings: string[] = [];
+    await this.ensureManagedFiles();
     const files = await this.loadRuleFiles(warnings, true);
     const sources = await this.activeSources(config, warnings, true);
     const known = new Set(sources.all.map((source) => source.id));
@@ -445,6 +449,7 @@ export class RulesRuntime {
   async listRules(enabled: boolean): Promise<RulesListing> {
     const now = this.deps.now();
     const windowDays = RULE_ACTIVITY_WINDOW_DAYS;
+    await this.ensureManagedFiles();
     const [files, entries] = await Promise.all([
       this.loadRuleFiles([], true),
       this.deps.audit
@@ -516,6 +521,7 @@ export class RulesRuntime {
    * overwritten. Rejects when it could not be written.
    */
   async ensureDefaults(): Promise<{ created: boolean }> {
+    await this.ensureManagedFiles();
     const existed = await this.deps.rules.hasGlobalRules();
     if (existed) return { created: false };
     // Deleted since the last tick: write the defaults again.
@@ -528,6 +534,26 @@ export class RulesRuntime {
       );
     }
     return { created: true };
+  }
+
+  /**
+   * Rewrite the managed agent guide in the rules dir (`AGENTS.md` and a
+   * `CLAUDE.md` importing it) once per start, so an agent editing rules
+   * there has the language reference. Never touches rule files. Returns
+   * the problem (once) when it could not be written.
+   */
+  async ensureManagedFiles(): Promise<string[]> {
+    if (this.managedWritten) return [];
+    const warnings: string[] = [];
+    try {
+      await this.deps.rules.writeManaged(RULES_MANAGED_FILES);
+      this.managedWritten = true;
+    } catch (error) {
+      this.reportOnce(warnings, [
+        `Could not write the rules guide (AGENTS.md): ${describe(error)}`,
+      ]);
+    }
+    return warnings;
   }
 
   // --- internals --------------------------------------------------------

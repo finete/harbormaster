@@ -232,6 +232,7 @@ class RulesBoard {
       rules: {
         hasGlobalRules: async () => true,
         writeDefaults: async () => {},
+        writeManaged: async () => {},
         readRuleFiles: async () => [
           {
             file: "rules.yaml",

@@ -1,7 +1,8 @@
 // Resource Access: the rules directory, `<stateDir>/rules/`. Reads the
 // global `rules.yaml` and every `repos/<repository id>.yaml` (repository
 // ids contain slashes, so `repos/github.com/acme/api.yaml`), writes the
-// first-run defaults, and imports the JS escape-hatch modules rules point
+// first-run defaults and the managed agent guide (`AGENTS.md`,
+// `CLAUDE.md`), and imports the JS escape-hatch modules rules point
 // at (`js:./checks.mjs#fn`) — only from inside the rules dir, re-imported
 // after an edit.
 
@@ -32,6 +33,15 @@ export class LocalRulesFileAccess implements RulesFileAccess {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
+    }
+  }
+
+  async writeManaged(files: Readonly<Record<string, string>>): Promise<void> {
+    for (const [file, text] of Object.entries(files)) {
+      const path = this.inside(file);
+      if ((await readOptional(path)) === text) continue;
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text, "utf8");
     }
   }
 

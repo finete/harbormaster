@@ -32,6 +32,8 @@ import {
 } from "./core-client";
 import { isTypingTarget } from "./lib/keyboard-guard";
 import {
+  applyDraftPrefill,
+  type DraftPrefill,
   draftLabel,
   emptyDraft,
   isDraftEmpty,
@@ -77,10 +79,14 @@ type View = "board" | "workspace" | "inbox" | "rules";
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-/** Open the New task composer once per `id` (onboarding's Start), on `where` when the draft is still empty. */
-export interface ComposerRequest {
+/**
+ * Open the New task composer once per `id` (onboarding's Start), prefilled
+ * with `where` / `title` / `prompt` when the draft is still empty (the
+ * Rules page's "Edit in chat" uses the same prefill). Never launches: the
+ * user reviews and submits.
+ */
+export interface ComposerRequest extends DraftPrefill {
   id: number;
-  where?: string;
 }
 
 export function App({
@@ -360,6 +366,26 @@ export function App({
     setView("workspace");
   }, [focusedTaskId, boardTasks, newTaskPrefs]);
 
+  // Open THE draft prefilled (a `ComposerRequest` minus its id). A draft
+  // the user already started is only focused, never overwritten.
+  const openComposer = useCallback(
+    (prefill: DraftPrefill) => {
+      const busy = draft !== null && !isDraftEmpty(draft);
+      openDraft();
+      if (busy) {
+        if (prefill.title !== undefined || prefill.prompt !== undefined) {
+          pushToast(
+            "Your New task draft has content: send or discard it first",
+            "warning",
+          );
+        }
+        return;
+      }
+      setDraft((prev) => (prev ? applyDraftPrefill(prev, prefill) : prev));
+    },
+    [draft, openDraft],
+  );
+
   // Onboarding's Start (components/OnboardingGate.tsx): open the composer
   // on the repository picked in the wizard.
   const handledComposerRequest = useRef(0);
@@ -367,14 +393,9 @@ export function App({
     if (!composerRequest) return;
     if (composerRequest.id === handledComposerRequest.current) return;
     handledComposerRequest.current = composerRequest.id;
-    openDraft();
-    const where = composerRequest.where;
-    if (where) {
-      setDraft((prev) =>
-        prev && isDraftEmpty(prev) ? { ...prev, where, baseRef: null } : prev,
-      );
-    }
-  }, [composerRequest, openDraft]);
+    const { id: _id, ...prefill } = composerRequest;
+    openComposer(prefill);
+  }, [composerRequest, openComposer]);
 
   const discardDraft = useCallback(() => {
     setDraft(null);
@@ -678,6 +699,7 @@ export function App({
                   setView("workspace");
                 }}
                 onBack={leavePage}
+                onEditInChat={openComposer}
               />
             )}
             <div

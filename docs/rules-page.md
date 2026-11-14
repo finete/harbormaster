@@ -18,7 +18,7 @@ points here.
 | 6 | Page scope: **Rules** and **Activity** tabs in the page top bar, plus a **Rules on/off switch** (`config.automation`). Sources and dry-run stay CLI-only. |
 | 7 | **Activity tab**: actions + warnings by default, "show events" toggle, day group headers, newest first; an action row expands to its triggering event's `data`. Filters: rule, task, outcome. |
 | 8 | Sidebar entry **Rules**, between Board and Inbox, lucide `ListChecks`, shortcut **⌘⇧R** (Ctrl+Shift+R elsewhere). |
-| 9 | **Two-line rows**: `dot · label · last fired` / `on chips → do chip`. `on` collapses to `+N` beyond two globs. No per-row or per-file actions; the page top bar has one **Edit** button that opens the rules folder. |
+| 9 | **Two-line rows**: `dot · label · last fired` / `on chips → do chip`. `on` collapses to `+N` beyond two globs. No per-row or per-file actions; the page top bar has one **Edit split button** (`RulesEditButton.tsx`, OpenInButton style): the main part repeats the last-used choice (persisted; first time **Edit in chat**), the chevron opens a menu: **Edit in chat** (opens the New task composer, not launched, in **Chat** mode with Where = `folder:<rules dir>`, title "Edit rules" and a prompt pointing the agent at `rules.yaml`/`repos/*.yaml`, `AGENTS.md` and `harbormaster rules list`/`check`), then the open-in apps for the rules folder grouped as in OpenInButton, then **Copy path**. |
 | 10 | Sheet is **non-modal, 560px**: no scrim; clicking another row or ↑/↓ swaps it in place; Esc / ✕ closes; the last selection is restored when the page is reopened. |
 | 11 | File group headers use **four fixed strings** (below). Load problems are listed under the header as `line N · message` (validator output verbatim). |
 | 12 | Degenerate states: rules off → amber banner + **Turn on**, list dimmed; no files → empty state with **Restore defaults** + Open rules folder; only broken files → header + one-line hint + Open in editor. |
@@ -32,6 +32,12 @@ points here.
 The product word is **Rules**. "Automation" is the internal config field
 (`config.automation`), never UI copy: the switch is "Rules on/off", the
 banner says "Rules are turned off — they're loaded but never run."
+
+The rules folder also holds a managed **`AGENTS.md`** (the rules-language
+guide for agents, `engines/rules/rules-guide.ts`) and a **`CLAUDE.md`**
+(`@AGENTS.md`), rewritten by core on every start (only when their content
+differs; `RulesFileAccess.writeManaged`). They are not rule files: users
+put their own notes in `rules.yaml` comments.
 
 ### File header strings
 
@@ -156,8 +162,9 @@ says exactly that).
   `listEvents({ruleId, file, limit: 5})` for the sheet;
   `listEvents({since})` for the Activity tab (client-side filters).
 - "Open in editor" → `openIn(file.path, defaultApp)` via the existing
-  open-in picker; top-bar "Edit (opens the rules folder)" → the parent
-  directory.
+  open-in picker; the top-bar Edit split button → "Edit in chat" (the
+  composer via App's `ComposerRequest` prefill: `where`, `title`,
+  `prompt`) or the open-in apps on the parent directory.
 
 ## Tests
 
