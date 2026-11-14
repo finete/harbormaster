@@ -4,8 +4,8 @@
 // rule plus the rule's action on that task). Covers: the sidebar Rules row
 // and Cmd/Ctrl+Shift+R open the page; the defaults are listed under the
 // global header by label; clicking a rule opens the sheet with On / If /
-// Do; the Activity tab lists the seeded action, which expands to its
-// event's data; its rule name returns to the Rules tab with the sheet open;
+// Do, and a click outside it closes it; the Activity tab lists the seeded
+// action, which expands to its event's data; its rule name returns to the Rules tab with the sheet open;
 // its task link opens the task's workspace; the Edit split button's "Edit
 // in chat" opens the New task composer in Chat mode, prefilled for the
 // rules folder.
@@ -198,6 +198,11 @@ test("sidebar + shortcut open Rules; list, sheet, Activity and cross-links", asy
     "Needs changes",
   );
   await window.keyboard.press("ArrowUp");
+  await expect(sheet.getByTestId("rule-sheet-label")).toHaveText("PR merged");
+  // A click outside the sheet (here the page title) closes it; a row reopens it.
+  await window.getByTestId("rules-title").click();
+  await expect(sheet).toHaveCount(0);
+  await row.click();
   await expect(sheet.getByTestId("rule-sheet-label")).toHaveText("PR merged");
 
   // "View all activity for this rule" → Activity, filtered to the rule.

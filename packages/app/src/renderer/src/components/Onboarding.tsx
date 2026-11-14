@@ -32,6 +32,7 @@ import type {
   GithubAuthStatus,
   OnboardingState,
 } from "../../../preload/api";
+import type { DraftPrefill } from "../lib/new-task-draft";
 import {
   AGENT_INSTALL_HINTS,
   type AgentChoice,
@@ -43,6 +44,7 @@ import {
   wizardKeyAction,
 } from "../lib/onboarding";
 import { modKeyLabel } from "../lib/platform";
+import { rulesEditRequest, rulesFolder } from "../lib/rules-format";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -51,11 +53,12 @@ import { Label } from "./ui/label";
 
 const STEP_COUNT = ONBOARDING_STEPS.length;
 
-/** What "Start" hands back: the Where the first task's composer preselects. */
-export interface OnboardingResult {
-  /** A composer Where token (`repo:<id>` / `folder:<path>`), when one was picked. */
-  where?: string;
-}
+/**
+ * What "Start" hands back: the first composer's prefill. Start gives the
+ * Where picked in the wizard (`repo:<id>` / `folder:<path>`), when one was;
+ * "Write your first rule with your agent" gives `rulesEditRequest(folder)`.
+ */
+export type OnboardingResult = DraftPrefill;
 
 interface OnboardingProps {
   /** Shown from the menu over a running app: offers a close button (and Esc on step 1). */
@@ -755,7 +758,14 @@ function Concept({
   );
 }
 
-function ConceptsStep(): JSX.Element {
+function ConceptsStep({
+  busy,
+  onWriteRule,
+}: {
+  busy: boolean;
+  /** Finish onboarding into the composer set up to edit the rules (Edit in chat). */
+  onWriteRule: () => void;
+}): JSX.Element {
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-concepts">
       <StepHeader title={ONBOARDING_STEPS[3].label}>
@@ -774,16 +784,32 @@ function ConceptsStep(): JSX.Element {
           icon={<Scale className="h-4 w-4" />}
           title="Rules move cards for you"
         >
-          They live in{" "}
+          Rules live in{" "}
           <code className="text-foreground">
             ~/.harbormaster/rules/rules.yaml
           </code>
-          . Ask your agent to add a rule, e.g.
+          , e.g.
           <code className="mt-1 block whitespace-pre-wrap break-words rounded bg-muted px-1.5 py-1 text-[11px] text-foreground">
             {
-              "- { id: merged-done, on: github.pr.mergedChanged, do: [{ action: move, with: { to: done } }] }"
+              "- { id: merged-done, label: Merged, on: github.pr.mergedChanged, do: [{ action: move, with: { to: done } }] }"
             }
           </code>
+          <span className="mt-1 block">
+            See them on the <strong className="text-foreground">Rules</strong>{" "}
+            page ({modKeyLabel()}⇧R). <strong>Edit → Edit in chat</strong> opens
+            your agent in the rules folder with the language reference (
+            <code className="text-foreground">AGENTS.md</code>) loaded.
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 mt-1"
+            data-testid="onboarding-write-rule"
+            disabled={busy}
+            onClick={onWriteRule}
+          >
+            Write your first rule with your agent
+          </Button>
         </Concept>
         <Concept icon={<Inbox className="h-4 w-4" />} title="The inbox">
           Everything that needs you lands in the inbox, split into Priority and
@@ -1043,6 +1069,28 @@ export function Onboarding({
     }
   };
 
+  /**
+   * The concepts screen's secondary action: finish exactly like Start, but
+   * into the composer set up as the Rules page's "Edit in chat" does. The
+   * rules folder comes from the listing (the defaults exist since screen 3).
+   */
+  const writeFirstRule = async (): Promise<void> => {
+    if (busy || !state) return;
+    setBusy(true);
+    setError("");
+    try {
+      const listing = await window.harbormaster.core.listRules();
+      const folder = rulesFolder(listing.files);
+      if (!folder) throw new Error("Could not find the rules folder");
+      await api.complete();
+      onFinish(rulesEditRequest(folder));
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const goTo = (index: number): void => {
     if (busy || index < 0 || index >= step) return;
     setError("");
@@ -1224,7 +1272,10 @@ export function Onboarding({
                 onRecheck={checkGithub}
               />
             ) : (
-              <ConceptsStep />
+              <ConceptsStep
+                busy={busy || !state}
+                onWriteRule={() => void writeFirstRule()}
+              />
             )}
             {error && (
               <p

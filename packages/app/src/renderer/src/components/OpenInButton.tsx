@@ -59,10 +59,16 @@ const NO_WORKTREE = "This task has no worktree yet";
 export function OpenInButton({
   path,
   testId = "open-in",
+  menuOwner,
 }: {
   /** The task's worktree/workspace folder; undefined disables the button. */
   path: string | undefined;
   testId?: string;
+  /**
+   * Set as `data-menu-owner` on the (portaled) menu, so a surface that
+   * closes on outside clicks (RuleSheet) can recognise its own menu.
+   */
+  menuOwner?: string;
 }): JSX.Element {
   const apps = useOpenInApps();
   const lastId = useLastOpenInAppId();
@@ -109,6 +115,7 @@ export function OpenInButton({
           align="end"
           className="min-w-[12rem]"
           data-testid={`${testId}-menu`}
+          data-menu-owner={menuOwner}
         >
           {groups.map((group, index) => (
             <DropdownMenuGroup key={group.kind}>
