@@ -252,6 +252,38 @@ export function draftLabel(draft: { title: string; prompt: string }): string {
   return effectiveTitle(draft) || "New task";
 }
 
+/** What a composer request prefills (App's `ComposerRequest` minus its id). */
+export interface DraftPrefill {
+  where?: WhereToken;
+  title?: string;
+  prompt?: string;
+  mode?: DraftMode;
+}
+
+/**
+ * Apply a composer request's prefill to THE draft. Only an empty draft is
+ * filled (a draft the user started is returned unchanged). A prefilled
+ * prompt without an explicit mode never lands in Review mode.
+ */
+export function applyDraftPrefill(
+  draft: NewTaskDraft,
+  prefill: DraftPrefill,
+): NewTaskDraft {
+  if (!isDraftEmpty(draft)) return draft;
+  const { where, title, prompt, mode } = prefill;
+  return {
+    ...draft,
+    ...(where ? { where, baseRef: null } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(mode
+      ? { mode }
+      : prompt !== undefined && draft.mode === "review"
+        ? { mode: "task" as const }
+        : {}),
+  };
+}
+
 /**
  * Whether closing the draft needs a discard confirmation. Where and the
  * agent choice are prefilled defaults, so they never count on their own.

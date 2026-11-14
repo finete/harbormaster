@@ -6,8 +6,17 @@
 // global header by label; clicking a rule opens the sheet with On / If /
 // Do; the Activity tab lists the seeded action, which expands to its
 // event's data; its rule name returns to the Rules tab with the sheet open;
-// its task link opens the task's workspace.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+// its task link opens the task's workspace; the Edit split button's "Edit
+// in chat" opens the New task composer in Chat mode, prefilled for the
+// rules folder.
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createCore } from "@harbormaster/core";
@@ -52,6 +61,10 @@ test.beforeAll(async () => {
     initialPrompt: "",
   });
   taskId = task.id;
+  // The managed agent guide is the app's to write on start.
+  for (const managed of ["AGENTS.md", "CLAUDE.md"]) {
+    rmSync(path.join(stateDir, "rules", managed), { force: true });
+  }
 
   // The audit log as the rules tick writes it (one UTC-day file).
   const at = new Date(Date.now() - 60_000).toISOString();
@@ -227,4 +240,41 @@ test("sidebar + shortcut open Rules; list, sheet, Activity and cross-links", asy
   await action.getByTestId("rules-task-link").click();
   await expect(view).toHaveCount(0);
   await expect(window.getByTestId(`task-workspace-${taskId}`)).toBeVisible();
+
+  // Edit ▾ → "Edit in chat": the New task composer in Chat mode, prefilled to work in
+  // the rules folder (whose managed AGENTS.md documents the language). It
+  // is not launched: the composer just waits for the user.
+  const rulesDir = path.join(stateDir, "rules");
+  await expect
+    .poll(() => existsSync(path.join(rulesDir, "AGENTS.md")))
+    .toBe(true);
+  expect(readFileSync(path.join(rulesDir, "AGENTS.md"), "utf8")).toContain(
+    "**`label` is required**",
+  );
+  expect(readFileSync(path.join(rulesDir, "CLAUDE.md"), "utf8")).toBe(
+    "@AGENTS.md\n",
+  );
+  await window.keyboard.press(`${MOD}+Shift+R`);
+  await expect(window.getByTestId("rules-open-folder")).toHaveAttribute(
+    "data-choice",
+    "chat",
+  );
+  await window.getByTestId("rules-edit-menu-trigger").click();
+  await expect(window.getByTestId("rules-edit-copy-path")).toBeVisible();
+  await window.getByTestId("rules-edit-chat").click();
+  await expect(view).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toHaveAttribute(
+    "data-mode",
+    "chat",
+  );
+  await expect(window.getByTestId("new-task-title-input")).toHaveValue(
+    "Edit rules",
+  );
+  await expect(window.getByTestId("new-task-prompt-input")).toHaveValue(
+    `Edit my Harbormaster rules in ${rulesDir}/rules.yaml (and repos/*.yaml). Read AGENTS.md in this folder first; it documents the rules language. After editing, validate with \`harbormaster rules list\` and \`harbormaster rules check\`.`,
+  );
+  await expect(window.getByTestId("new-task-where")).toHaveAttribute(
+    "data-where",
+    `folder:${rulesDir}`,
+  );
 });

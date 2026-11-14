@@ -120,7 +120,8 @@ async function harness(
     pullRequests: new NoPullRequests(),
     versions: new NoVersions(),
     rules: {
-      files: {} as never,
+      // refresh() writes the managed rules guide on every start.
+      files: { writeManaged: async () => {} } as never,
       state: {} as never,
       audit: {
         append: async (entries) => {

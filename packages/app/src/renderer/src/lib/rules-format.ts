@@ -12,6 +12,7 @@ import type {
   RuleActivity,
   RuleFile,
 } from "../../../preload/api";
+import { folderWhere } from "./new-task-draft";
 import { relativeTime } from "./time-format";
 
 // --- File group headers --------------------------------------------------
@@ -119,6 +120,51 @@ export function rulesFolder(
     }
   }
   return undefined;
+}
+
+// --- The top bar's Edit split button ------------------------------------
+
+/** What the Edit button's main part does: open the composer, or open the folder in an app. */
+export type RulesEditChoice = "chat" | "app";
+
+/** localStorage key of the Edit button's last-used choice. */
+export const RULES_EDIT_CHOICE_KEY = "harbormaster.rules.editWith";
+
+type ChoiceStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** The last-used choice; Edit in chat until something else was used. */
+export function readRulesEditChoice(storage: ChoiceStorage): RulesEditChoice {
+  try {
+    return storage.getItem(RULES_EDIT_CHOICE_KEY) === "app" ? "app" : "chat";
+  } catch {
+    return "chat";
+  }
+}
+
+export function writeRulesEditChoice(
+  storage: ChoiceStorage,
+  choice: RulesEditChoice,
+): void {
+  try {
+    storage.setItem(RULES_EDIT_CHOICE_KEY, choice);
+  } catch {
+    // Storage full/blocked: the choice just isn't remembered.
+  }
+}
+
+/** The New task composer's prefill for "Edit in chat": Chat mode in the rules folder (the user reviews and launches it). */
+export function rulesEditRequest(folder: string): {
+  where: string;
+  title: string;
+  prompt: string;
+  mode: "chat";
+} {
+  return {
+    mode: "chat",
+    where: folderWhere(folder),
+    title: "Edit rules",
+    prompt: `Edit my Harbormaster rules in ${folder}/rules.yaml (and repos/*.yaml). Read AGENTS.md in this folder first; it documents the rules language. After editing, validate with \`harbormaster rules list\` and \`harbormaster rules check\`.`,
+  };
 }
 
 // --- Row chips -----------------------------------------------------------

@@ -16,6 +16,7 @@ interface DefaultRuleBlock {
 
 const HEADER = `# Harbormaster rules: event → condition → action.
 # Docs: docs/release-plan.md "Rules engine". Schema: packages/core/schemas/rules.schema.json
+# Language reference (for you and your agents): AGENTS.md in this folder.
 #
 # This global list applies to every repository; a file at
 # repos/<repository id>.yaml (e.g. repos/github.com/acme/api.yaml) replaces

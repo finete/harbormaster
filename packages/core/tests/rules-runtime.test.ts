@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuditEntry } from "../src/contracts/rules.js";
+import { RULES_GUIDE_MARKDOWN } from "../src/engines/rules/rules-guide.js";
 import { createCore } from "../src/index.js";
 
 const roots: string[] = [];
@@ -321,6 +322,36 @@ describe("rules runtime through createCore", () => {
       "version-endpoint",
     ]);
     expect(addons[1]?.suggestedRules).toBe("rules: []\n");
+  });
+
+  it("writes the managed AGENTS.md / CLAUDE.md guide on every start, rules on or off, never touching rules.yaml", async () => {
+    const own = "# my rules\nrules: []\n";
+    const { core, stateDir } = await setup(
+      { "rules/rules.yaml": own, "rules/AGENTS.md": "stale\n" },
+      { automation: false },
+    );
+    const rulesDir = join(stateDir, "rules");
+    await core.commands.refresh();
+    expect(await readFile(join(rulesDir, "AGENTS.md"), "utf8")).toBe(
+      RULES_GUIDE_MARKDOWN,
+    );
+    expect(await readFile(join(rulesDir, "CLAUDE.md"), "utf8")).toBe(
+      "@AGENTS.md\n",
+    );
+    expect(await readFile(join(rulesDir, "rules.yaml"), "utf8")).toBe(own);
+
+    // Edited by hand: the next start (a fresh core) rewrites it.
+    await writeFile(join(rulesDir, "AGENTS.md"), "edited\n");
+    const restarted = createCore({
+      stateDir,
+      clock: { now: () => clockNow },
+      ids: { next: () => "x" },
+    });
+    await restarted.commands.listRules();
+    expect(await readFile(join(rulesDir, "AGENTS.md"), "utf8")).toBe(
+      RULES_GUIDE_MARKDOWN,
+    );
+    expect(await readFile(join(rulesDir, "rules.yaml"), "utf8")).toBe(own);
   });
 
   it("records where a move started and the rule's label in the audit", async () => {

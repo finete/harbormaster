@@ -1,15 +1,15 @@
 // The Rules page (docs/rules-page.md): a read-only view of the rules
 // engine, a top-level view like the inbox (sidebar Rules row or Cmd/Ctrl+
 // Shift+R; the sidebar stays). Top bar: Rules | Activity tabs, the Rules
-// on/off switch (`setRulesEnabled`) and one "Edit" button that opens the
-// rules folder in the default open-in app. The Rules tab
+// on/off switch (`setRulesEnabled`) and the Edit split button
+// (RulesEditButton.tsx: Edit in chat, or open the rules folder in an app). The Rules tab
 // lists every loaded rule grouped by file (components/RulesList.tsx) with
 // the selected rule in a non-modal sheet (RuleSheet.tsx); the Activity tab
 // is the audit log (RulesActivity.tsx). Data: `listRules()` on open and on
 // every refresh tick (main's `core:refreshed` push); nothing else. The
 // page's selection, tab and filters live in App (`RulesPageMemory`) so
 // they survive leaving and reopening the page within the session.
-import { ListChecks, SquarePen } from "lucide-react";
+import { ListChecks } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
@@ -26,6 +26,7 @@ import {
   moveRuleSelection,
   type RuleKey,
   ruleKeyString,
+  type rulesEditRequest,
   rulesFolder,
   sinceDaysAgo,
 } from "../lib/rules-format";
@@ -39,7 +40,8 @@ import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
 import { RuleSheet } from "./RuleSheet";
 import { RulesActivity } from "./RulesActivity";
-import { NO_RULES_FOLDER_TITLE, RulesList } from "./RulesList";
+import { RulesEditButton } from "./RulesEditButton";
+import { RulesList } from "./RulesList";
 import { Kbd } from "./ui/kbd";
 import { Segmented } from "./ui/segmented";
 
@@ -68,6 +70,7 @@ export function RulesView({
   onMemoryChange,
   onOpenTask,
   onBack,
+  onEditInChat,
 }: {
   /** The page is showing and no dialog is up: keys are live. */
   active: boolean;
@@ -78,6 +81,8 @@ export function RulesView({
   onOpenTask: (taskId: string) => void;
   /** Esc with no sheet open: back to the previous view. */
   onBack: () => void;
+  /** "Edit in chat": open the New task composer with this prefill. */
+  onEditInChat: (request: ReturnType<typeof rulesEditRequest>) => void;
 }): JSX.Element {
   const now = useNow();
   const [listing, setListing] = useState<RulesListing | null>(null);
@@ -318,21 +323,7 @@ export function RulesView({
               />
             </button>
           </label>
-          <button
-            type="button"
-            data-testid="rules-open-folder"
-            disabled={!folder}
-            title={
-              folder
-                ? "Open the rules folder in your editor"
-                : NO_RULES_FOLDER_TITLE
-            }
-            onClick={() => folder && openWithDefault(folder)}
-            className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-          >
-            <SquarePen className="h-3.5 w-3.5" aria-hidden />
-            Edit
-          </button>
+          <RulesEditButton folder={folder} onEditInChat={onEditInChat} />
         </div>
       </header>
       <div className="relative flex min-h-0 flex-1 flex-col">
