@@ -150,6 +150,8 @@ closing without abandoning that thesis, roughly in order:
 - **Diff view in the task pane** with "send this comment to the agent"
 (line comments routed through task messaging). Today there is nothing
 between "agent finished" and the PR page.
+- **Costs pane**: token usage and spend per task, repository and harness,
+so it's clear what each piece of work actually cost.
 - **Worktree setup scripts** (per repository, run on worktree creation:
 install deps, copy `.env`, seed data).
 - **More harness adapters**: Codex CLI, Cursor CLI, OpenCode. The adapter
