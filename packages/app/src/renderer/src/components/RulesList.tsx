@@ -4,7 +4,13 @@
 // broken files). Purely presentational (props in, callbacks out, no window
 // access) so the states render under plain vitest
 // (tests/rules-list.test.ts); RulesView.tsx owns data and selection.
-import { AlertTriangle, ArrowRight, FileCode2, ListChecks } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  FileCode2,
+  ListChecks,
+  SquarePen,
+} from "lucide-react";
 import type { JSX } from "react";
 import type { Rule, RuleFile, RulesListing } from "../../../preload/api";
 import {
@@ -171,7 +177,7 @@ function FileGroup({
     >
       <header
         className={cn(
-          "group/file mx-3 flex items-start gap-2 border-l-2 pl-2",
+          "mx-3 flex items-start gap-2 border-l-2 pl-2",
           broken ? "border-status-error" : "border-transparent",
         )}
       >
@@ -214,10 +220,9 @@ function FileGroup({
           )}
         </div>
         {file.path && (
-          <OpenFileIcon
-            className="group-hover/file:flex"
+          <EditFileButton
+            path={file.path}
             onClick={() => onOpenFile(file.path)}
-            testId="rules-file-open"
           />
         )}
       </header>
@@ -231,7 +236,6 @@ function FileGroup({
             selected={selected === key}
             now={now}
             onSelect={() => onSelect({ file: rule.file, ruleId: rule.id })}
-            onOpen={file.path ? () => onOpenFile(file.path) : undefined}
           />
         );
       })}
@@ -239,31 +243,26 @@ function FileGroup({
   );
 }
 
-function OpenFileIcon({
-  className,
+/** The file header's always-visible Edit button: opens that rules file
+ * (loaded or broken; for a broken file it's the main way to fix it). Styled
+ * like the top bar's "Open rules folder" ghost button. */
+function EditFileButton({
+  path,
   onClick,
-  testId,
 }: {
-  className: string;
+  path: string;
   onClick: () => void;
-  testId: string;
 }): JSX.Element {
   return (
     <button
       type="button"
-      data-testid={testId}
-      title="Open in editor"
-      aria-label="Open in editor"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      className={cn(
-        "hidden h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground",
-        className,
-      )}
+      data-testid="rules-file-edit"
+      title={path}
+      onClick={onClick}
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
     >
-      <FileCode2 className="h-3.5 w-3.5" aria-hidden />
+      <SquarePen className="h-3.5 w-3.5" aria-hidden />
+      Edit
     </button>
   );
 }
@@ -277,19 +276,17 @@ function RuleRow({
   selected,
   now,
   onSelect,
-  onOpen,
 }: {
   rule: Rule;
   rowKey: string;
   selected: boolean;
   now: number;
   onSelect: () => void;
-  onOpen: (() => void) | undefined;
 }): JSX.Element {
   const dot = ruleDot(rule.activity);
   const on = onChips(rule.on);
   return (
-    // biome-ignore lint/a11y/useSemanticElements: the row hosts a button, so it can't be a <button>.
+    // biome-ignore lint/a11y/useSemanticElements: a block-level div keeps the two-line row layout (matches the inbox rows).
     <div
       role="button"
       tabIndex={-1}
@@ -300,7 +297,7 @@ function RuleRow({
       onClick={onSelect}
       onKeyDown={() => {}}
       className={cn(
-        "group/row relative mx-3 flex cursor-default flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 outline-none transition-colors duration-[120ms] ease-out hover:border-foreground/20",
+        "relative mx-3 flex cursor-default flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 outline-none transition-colors duration-[120ms] ease-out hover:border-foreground/20",
         selected && "border-primary hover:border-primary",
       )}
     >
@@ -324,13 +321,6 @@ function RuleRow({
         >
           {lastFiredText(rule.activity, now)}
         </span>
-        {onOpen && (
-          <OpenFileIcon
-            className="group-hover/row:flex"
-            onClick={onOpen}
-            testId="rule-row-open"
-          />
-        )}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1">
         {on.shown.map((glob) => (
