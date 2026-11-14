@@ -147,7 +147,7 @@ test("the fixture repo appears in the New Task dialog's repository picker", asyn
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 });
 
-test("derived branch subline and pty cwd inside the .harbormaster-worktrees checkout", async () => {
+test("derived branch subline and pty cwd inside the task worktree checkout", async () => {
   await window.getByTestId("board-button").click();
   const card = cardLocator("Add git workspace");
   await expect(card).toBeVisible();
@@ -173,7 +173,8 @@ test("derived branch subline and pty cwd inside the .harbormaster-worktrees chec
   await panel.click();
   await window.keyboard.type("pwd\n");
 
-  await expect(panel).toContainText(".harbormaster-worktrees", {
+  // Pi's footer truncates the cwd, so match only its stable head.
+  await expect(panel).toContainText("/state/worktrees/fixture-repo/", {
     timeout: 20_000,
   });
 });

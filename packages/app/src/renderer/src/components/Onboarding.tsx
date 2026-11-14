@@ -155,8 +155,7 @@ function StepHeader({
 }
 
 /** `~/…` for display when `path` is under the suggested root's home. */
-function tildePath(path: string, suggested: string): string {
-  const home = suggested.replace(/\/Code$/, "");
+function tildePath(path: string, home: string): string {
   return home && path.startsWith(`${home}/`)
     ? `~/${path.slice(home.length + 1)}`
     : path;
@@ -301,11 +300,12 @@ function CodeStep({
   return (
     <div className="flex flex-col gap-4">
       <StepHeader title={ONBOARDING_STEPS[0].label}>
-        Harbormaster finds every git repository directly under this folder. Each
-        task gets its own worktree inside it.
+        Harbormaster finds every git repository directly under this folder, and
+        agents clone new ones into it. Task worktrees live separately, in
+        ~/.harbormaster/worktrees.
       </StepHeader>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="onboarding-code-root">Code folder</Label>
+        <Label htmlFor="onboarding-code-root">Repositories folder</Label>
         <div className="flex gap-2">
           <Input
             id="onboarding-code-root"
@@ -337,8 +337,8 @@ function CodeStep({
           <div className="flex-1">
             <p>
               macOS ties folder permissions to this unsigned build; you may be
-              asked again after each upgrade. A plain folder like ~/Code never
-              asks.
+              asked again after each upgrade. A plain folder like{" "}
+              {tildePath(scan.suggestedRoot, state.homeDir)} never asks.
             </p>
             <Button
               size="sm"
@@ -347,8 +347,7 @@ function CodeStep({
               data-testid="onboarding-use-code"
               onClick={onUseSuggested}
             >
-              Use {tildePath(scan.suggestedRoot, state.suggestedCodeRoot)}{" "}
-              instead
+              Use {tildePath(scan.suggestedRoot, state.homeDir)} instead
             </Button>
           </div>
         </div>
@@ -365,7 +364,7 @@ function CodeStep({
             data-testid="onboarding-root-missing"
             className="text-sm text-muted-foreground"
           >
-            This folder does not exist yet.
+            This folder does not exist yet; it is created when you continue.
           </p>
         ) : rows.length === 0 && !scanning ? (
           <p
@@ -506,7 +505,7 @@ function AgentStep({
   onBypass(bypass: boolean): void;
 }): JSX.Element {
   const agent = (id: string) => detected?.find((entry) => entry.id === id);
-  const display = (path: string) => tildePath(path, state.suggestedCodeRoot);
+  const display = (path: string) => tildePath(path, state.homeDir);
   // A custom agent (config.json) that already is the default stays
   // pickable, so reopening the wizard never silently replaces it.
   const configuredCustom = isBuiltinAgent(state.defaultHarness)
@@ -1005,7 +1004,8 @@ export function Onboarding({
   const saveStep = async (): Promise<void> => {
     setError("");
     if (step === 0) {
-      const saved = await api.setCodeRoot(root);
+      // A missing folder (e.g. the ~/harbormaster default) is created.
+      const saved = await api.setCodeRoot(root, { create: true });
       setScan(saved);
       return;
     }

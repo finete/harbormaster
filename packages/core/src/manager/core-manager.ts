@@ -157,12 +157,13 @@ import {
 } from "../engines/messaging.js";
 import {
   BUILTIN_AGENT_IDS,
+  codeRootCandidates,
   customAgentProblems,
   expandHome,
+  fallbackCodeRoot,
   parseCliVersion,
   parseGhAuthStatus,
   protectedHomeFolder,
-  suggestedCodeRoot,
   toScannedRepositories,
 } from "../engines/onboarding.js";
 import { parsePullRequestUrl } from "../engines/pull-request-url.js";
@@ -181,6 +182,7 @@ import {
 } from "../harness/registry.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
+import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
 import {
   type ActionResult,
   type RuleActionExecutor,
@@ -529,6 +531,13 @@ export class CoreManager implements CoreCommands {
       };
     }
     if ("cloneUrl" in where) {
+      // Any checkout we already know with this remote (under the code root
+      // or a registered folder) wins over a second clone.
+      const wanted = normalizeRemoteIdentity(where.cloneUrl);
+      const known = (await this.allRepositories(config)).find(
+        (repo) => repo.id === wanted,
+      );
+      if (known) return { kind: "repository", repo: known };
       if (!config.codeRoot) {
         throw new Error(
           "Cloning a repository requires codeRoot to be configured",
@@ -1331,16 +1340,29 @@ export class CoreManager implements CoreCommands {
 
   async scanOrphanWorktrees(): Promise<OrphanWorktreeReport> {
     const config = await this.deps.config.load();
-    if (!config.codeRoot) return { root: "", orphans: [] };
-    const { root, dirs } = await this.deps.worktrees.listTaskWorktreeDirs(
-      config.codeRoot,
-    );
+    // Legacy (pre-0.1.2) worktrees sit in `.harbormaster-worktrees` next to
+    // a checkout: under the code root, or next to any known repository.
+    const repositories = await this.allRepositories(config).catch(() => []);
+    const roots = await this.deps.worktrees.listTaskWorktreeDirs({
+      ...(config.codeRoot ? { codeRoot: config.codeRoot } : {}),
+      checkoutRoots: repositories.map((repo) => repo.root),
+    });
     // Parked bindings carry no worktreePath, so a Done task's leftover
     // directory counts as an orphan too (its cleanup failed or never ran).
     const bound = (await this.deps.bindings.listBindings())
       .map((binding) => binding.worktreePath)
       .filter((path): path is string => Boolean(path));
-    const paths = findOrphanDirs(dirs, bound);
+    let root = roots[0]?.root ?? "";
+    let mostOrphans = 0;
+    const paths: string[] = [];
+    for (const group of roots) {
+      const found = findOrphanDirs(group.dirs, bound);
+      paths.push(...found);
+      if (found.length > mostOrphans) {
+        mostOrphans = found.length;
+        root = group.root;
+      }
+    }
     const orphans = await Promise.all(
       paths.map(async (path) => {
         const sizeBytes = await this.deps.worktrees.diskUsageBytes(path);
@@ -1538,11 +1560,6 @@ export class CoreManager implements CoreCommands {
       throw new Error('baseBranch "parent" and baseRef are mutually exclusive');
     }
 
-    if ("cloneUrl" in input.repository && !config.codeRoot) {
-      throw new Error(
-        "launchTask with a cloneUrl requires codeRoot to be configured",
-      );
-    }
     const where = await this.resolveWhere(
       input.repository,
       config,
@@ -3385,14 +3402,37 @@ export class CoreManager implements CoreCommands {
     return this.onboardingState(await this.deps.config.load());
   }
 
-  private onboardingState(config: GlobalConfig): OnboardingState {
-    const suggested = suggestedCodeRoot(this.requireOnboarding().homeDir());
+  /** The first existing usual code folder (`~/Code`, `~/src`, …), else `~/harbormaster`. */
+  private async suggestCodeRoot(): Promise<string> {
+    const probes = this.requireOnboarding();
+    const home = probes.homeDir();
+    for (const candidate of codeRootCandidates(home)) {
+      if (await probes.isDirectory(candidate)) return candidate;
+    }
+    return fallbackCodeRoot(home);
+  }
+
+  private async onboardingState(
+    config: GlobalConfig,
+  ): Promise<OnboardingState> {
+    const probes = this.requireOnboarding();
+    const suggested = await this.suggestCodeRoot();
+    // An unset codeRoot loads as the legacy `~/Code` default, so before the
+    // wizard is finished only a configured root that exists beats the
+    // suggestion.
+    const configured =
+      config.codeRoot &&
+      (config.onboardingCompletedAt ||
+        (await probes.isDirectory(config.codeRoot)))
+        ? config.codeRoot
+        : undefined;
     return {
       ...(config.onboardingCompletedAt
         ? { completedAt: config.onboardingCompletedAt }
         : {}),
-      codeRoot: config.codeRoot || suggested,
+      codeRoot: configured ?? suggested,
       suggestedCodeRoot: suggested,
+      homeDir: probes.homeDir(),
       defaultHarness: config.launch?.defaultHarness ?? DEFAULT_HARNESS_ID,
       bypassPermissions:
         config.launch?.bypassPermissions ?? DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
@@ -3417,7 +3457,7 @@ export class CoreManager implements CoreCommands {
       root,
       exists,
       ...(protectedFolder ? { protectedFolder } : {}),
-      suggestedRoot: suggestedCodeRoot(home),
+      suggestedRoot: await this.suggestCodeRoot(),
       repositories,
     };
   }

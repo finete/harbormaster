@@ -4,7 +4,7 @@
 // remote identity ("github.com/org/repo") carries over unchanged, but the
 // shape is explicit-codeRoot / cwd-driven verbs instead of pi-home's
 // preference-map discovery, and task worktrees are scoped under a fixed
-// <codeRoot>/.harbormaster-worktrees/ directory instead of pi-home's
+// <stateDir>/worktrees/<repo-folder>/ directory instead of pi-home's
 // free-form worktree roots. Managers and Engines only ever see these
 // interfaces; concrete git-shelling-out implementations live in access/.
 
@@ -96,15 +96,18 @@ export interface GitRepositoryAccess {
 
 /**
  * Resource Access: worktree lifecycle for task execution. Task worktrees
- * live under `<codeRoot>/.harbormaster-worktrees/` (one directory per
- * branch) so they are easy to find, gitignore, and garbage-collect
- * independently of a repository's own checkout tree.
+ * live under `<stateDir>/worktrees/<repo-folder>/<branch-slug>`: one
+ * app-owned root independent of where checkouts live (the code root, or a
+ * folder added with "Open folder…"), so they are easy to find and
+ * garbage-collect. Worktrees made before 0.1.2 sit in
+ * `<parent-of-checkout>/.harbormaster-worktrees/`; their tasks keep the
+ * recorded paths.
  */
 export interface GitWorktreeAccess {
   listWorktrees(repo: RepositoryInfo): Promise<WorktreeInfo[]>;
   /**
-   * Create a branched worktree for task execution under
-   * `<codeRoot>/.harbormaster-worktrees/`, branching `branch` off `baseRef`.
+   * Create a branched worktree for task execution under the worktrees root
+   * (`<root>/<repo-folder>/<branch-slug>`), branching `branch` off `baseRef`.
    */
   createTaskWorktree(
     repo: RepositoryInfo,
@@ -171,14 +174,17 @@ export interface GitWorktreeAccess {
    */
   pushBranch(path: string, branch: string): Promise<void>;
   /**
-   * The worktrees root (`<codeRoot>/.harbormaster-worktrees/`) and every
-   * directory directly under it (absolute paths; files and dotfiles
-   * skipped; `dirs: []` when the root does not exist). Feeds the
-   * orphan-worktree scan; never throws.
+   * Every task-worktree directory, grouped by root: first the worktrees
+   * root itself (always present, `dirs` = `<root>/<repo>/<branch>`), then
+   * each legacy `.harbormaster-worktrees/` that has any (`dirs` = its direct
+   * children): inside `legacy.codeRoot` and next to each of
+   * `legacy.checkoutRoots`. Absolute paths; files and dotfiles skipped.
+   * Feeds the orphan-worktree scan; never throws.
    */
-  listTaskWorktreeDirs(
-    codeRoot: string,
-  ): Promise<{ root: string; dirs: string[] }>;
+  listTaskWorktreeDirs(legacy?: {
+    codeRoot?: string;
+    checkoutRoots?: readonly string[];
+  }): Promise<Array<{ root: string; dirs: string[] }>>;
   /** Apparent on-disk size of `path` in bytes (`du`); `undefined` when it can't be measured. Never throws. */
   diskUsageBytes(path: string): Promise<number | undefined>;
 }
@@ -186,7 +192,8 @@ export interface GitWorktreeAccess {
 // Ambient augmentation (not a textual edit of contracts/model.ts, which is
 // owned by concurrent work on this branch): GlobalConfig gains the two
 // workspace-discovery fields this phase needs. `codeRoot` is the absolute
-// folder containing every repository checkout (default `~/Code`);
+// "repositories folder": scanned for checkouts and where clone-by-URL puts
+// new clones (default `~/Code`; never holds task worktrees any more);
 // `branchPrefix` optionally namespaces every branch Harbormaster creates
 // (default `""`, meaning no prefix). json-config-access.ts validates and
 // defaults both on load.

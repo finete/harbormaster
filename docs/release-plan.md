@@ -295,7 +295,9 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
 
 1. Code root + add a repository (detects git repos under the root). Warns
    when the root is inside `~/Documents`, `~/Desktop` or `~/Downloads`
-   (unsigned build: folder permission re-prompts) and suggests `~/Code`.
+   (unsigned build: folder permission re-prompts) and suggests the first
+   existing usual code folder (`~/Code`, `~/src`, `~/Projects`, …), else
+   `~/harbormaster` (created on continue).
 2. Default agent: detected Pi / Claude Code (resolved path and version, or
    the install command when missing). Custom CLIs are configured in
    `config.json` (`agents.custom[]`), not in the wizard.

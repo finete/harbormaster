@@ -332,20 +332,40 @@ describe("onboarding commands", () => {
     ).toHaveLength(2);
   });
 
-  it("warns about a protected root, refuses a missing one, and creates ~/Code on request", async () => {
+  it("warns about a protected root, refuses a missing one, and creates ~/harbormaster on request", async () => {
     const { home, core } = await setup();
     const scan = await core.commands.scanCodeRoot("~/Documents/code");
     expect(scan.root).toBe(join(home, "Documents", "code"));
     expect(scan.protectedFolder).toBe("Documents");
-    expect(scan.suggestedRoot).toBe(join(home, "Code"));
-    await expect(core.commands.setCodeRoot("~/Code")).rejects.toThrow(
+    // No usual code folder on this machine: the app's own one.
+    const fallback = join(home, "harbormaster");
+    expect(scan.suggestedRoot).toBe(fallback);
+    const state = await core.commands.getOnboardingState();
+    expect(state).toMatchObject({
+      codeRoot: fallback,
+      suggestedCodeRoot: fallback,
+      homeDir: home,
+    });
+    await expect(core.commands.setCodeRoot("~/harbormaster")).rejects.toThrow(
       /not a folder/,
     );
-    const created = await core.commands.setCodeRoot("~/Code", { create: true });
-    expect(created).toMatchObject({ root: join(home, "Code"), exists: true });
+    const created = await core.commands.setCodeRoot("~/harbormaster", {
+      create: true,
+    });
+    expect(created).toMatchObject({ root: fallback, exists: true });
+    expect((await core.commands.getOnboardingState()).codeRoot).toBe(fallback);
+  });
+
+  it("suggests the first existing usual code folder", async () => {
+    const { home, core } = await setup();
+    await mkdir(join(home, "src"));
     expect((await core.commands.getOnboardingState()).codeRoot).toBe(
-      join(home, "Code"),
+      join(home, "src"),
     );
+    await mkdir(join(home, "Code"));
+    const state = await core.commands.getOnboardingState();
+    expect(state.suggestedCodeRoot).toBe(join(home, "Code"));
+    expect(state.codeRoot).toBe(join(home, "Code"));
   });
 
   it("detects agents with versions and saves the default agent", async () => {

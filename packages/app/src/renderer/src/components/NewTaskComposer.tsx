@@ -730,8 +730,8 @@ export function NewTaskComposer({
           ) : where.kind === "clone" ? (
             <span data-testid="new-task-where-hint">
               {chat
-                ? "Cloned under your code root; the chat runs in the clone"
-                : "Cloned under your code root, then a new branch + worktree"}
+                ? "Cloned into your repositories folder; the chat runs in the clone"
+                : "Cloned into your repositories folder, then a new branch + worktree"}
             </span>
           ) : null}
           {error && (

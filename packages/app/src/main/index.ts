@@ -1565,8 +1565,8 @@ function registerShellIpc(): void {
 
   // "Reveal in Finder" (Orca polish item 6 context menu): same allowlist
   // shape as openExternal above, but for local paths "-" only a worktree
-  // path under the configured codeRoot, or anything under this app's own
-  // state dir, is ever handed to the OS file manager (see reveal-path.ts).
+  // path inside a known checkout or its parent, or anything under this
+  // app's own state dir (task worktrees included), is ever handed to the OS file manager (see reveal-path.ts).
   ipcMain.handle(
     "shell:revealInFolder",
     async (_event, targetPath: unknown): Promise<boolean> => {
@@ -1651,8 +1651,9 @@ function whichSync(bin: string): boolean {
 /**
  * The local folders the renderer may ask main to reveal or open: this app's
  * state dir, every discovered repository's checkout, and each checkout's
- * parent (the code root task worktrees live under, at
- * `<codeRoot>/.harbormaster-worktrees/`). See reveal-path.ts.
+ * parent (where legacy `.harbormaster-worktrees/` folders sit; current task
+ * worktrees are under the state dir, `<stateDir>/worktrees/`). See
+ * reveal-path.ts.
  */
 async function allowedLocalPathRoots(): Promise<string[]> {
   // No direct `codeRoot` getter on the command API; derive the allowed

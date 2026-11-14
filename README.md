@@ -26,8 +26,10 @@ This puts `Harbormaster.app` in `/Applications` and the `harbormaster`
 command on your PATH (agents use it to reach the app). Open the app; a
 four-screen setup walks you through:
 
-1. **Your code folder** (default `~/Code`). Every git repository directly
-   under it is picked up. Keep code out of `~/Documents`, `~/Desktop` and
+1. **Your repositories folder**: the first of `~/Code`, `~/src`,
+   `~/Projects`, … that exists, else `~/harbormaster` (created for you).
+   Every git repository directly under it is picked up, and agents clone
+   new repositories into it. Keep code out of `~/Documents`, `~/Desktop` and
    `~/Downloads` (see "Known limitations").
 2. **Your agent**: Pi or Claude Code, whichever is installed. Pi users get a
    one-file extension installed into `~/.pi/agent/extensions` automatically;
@@ -54,7 +56,8 @@ brew uninstall --cask harbormaster
 
 Your tasks, rules and inbox stay in `~/.harbormaster`; delete that folder
 too for a clean slate. Task worktrees live under
-`<code folder>/.harbormaster-worktrees`.
+`~/.harbormaster/worktrees/<repo>/<branch>` (worktrees made before 0.1.2
+stay in `<code folder>/.harbormaster-worktrees` until their tasks finish).
 
 ### If the app won't open
 

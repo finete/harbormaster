@@ -295,7 +295,11 @@ export interface OrphanWorktree {
 
 /** `CoreCommands.scanOrphanWorktrees` result. */
 export interface OrphanWorktreeReport {
-  /** The scanned worktrees root (`<codeRoot>/.harbormaster-worktrees`). */
+  /**
+   * The root holding the most orphans (ties: the worktrees root,
+   * `<stateDir>/worktrees`), what "Show in Finder" opens. Legacy
+   * `.harbormaster-worktrees` folders next to checkouts are scanned too.
+   */
   root: string;
   orphans: OrphanWorktree[];
   /** Set once the orphans cross the count or size threshold: surface it once. */
@@ -323,8 +327,8 @@ export interface LaunchTaskInput {
   /** The user's objective; the kickoff contract (see `engines/launch-kickoff.ts`) is appended automatically. */
   prompt: string;
   /**
-   * A discovered repository id, a clone URL (cloned under `codeRoot`, reused
-   * when already present with the same remote), or `{ none: true }` for a
+   * A discovered repository id, a clone URL (reuses any known checkout with
+   * the same remote, else cloned under `codeRoot`), or `{ none: true }` for a
    * repository-less scratch task.
    */
   repository:
@@ -412,7 +416,7 @@ export interface CoreCommands {
    * are only created when starting now: derives a branch (`branchPrefix +
    * slug(title) + "-" + first 6 chars of the task id`, unless `input.branch`
    * overrides it), creates a git worktree off the repository's default
-   * branch under `.harbormaster-worktrees/`, and persists a
+   * branch under `<stateDir>/worktrees/<repo-folder>/`, and persists a
    * `WorkspaceBinding` alongside the task. On any git failure the task is
    * not created (or is rolled back if already persisted) and no orphan
    * worktree is left behind; the triggering error is rethrown as-is.
@@ -429,8 +433,9 @@ export interface CoreCommands {
    * relation from a task that already has a `parentTaskId` (one level
    * only), and an invalid `baseBranch: "parent"` (not a child, cross-
    * repository, or a parent with no branch yet). A `{ cloneUrl }`
-   * repository is cloned under `GlobalConfig.codeRoot` (reused if already
-   * checked out with the same remote); `{ none: true }` creates a
+   * repository reuses any known checkout with the same remote (under
+   * `codeRoot` or a registered folder), else is cloned under
+   * `GlobalConfig.codeRoot`; `{ none: true }` creates a
    * `temp_task` with a scratch-directory binding instead of a git worktree.
    * Same rollback guarantees as `createTask`/`startTask` for the
    * repository-backed path.
@@ -693,7 +698,8 @@ export interface CoreCommands {
   /** Removes attachment files per decision 12; returns how many messages were pruned. */
   pruneMessageAttachments(): Promise<number>;
   /**
-   * Directories under `<codeRoot>/.harbormaster-worktrees` that no
+   * Task-worktree directories (under `<stateDir>/worktrees`, plus legacy
+   * `.harbormaster-worktrees` folders next to known checkouts) that no
    * workspace binding owns (crashed launches, deleted tasks, agent-made
    * checkouts, leaking tests), each sized with `du`. Slow (walks every
    * orphan): run it rarely, off the refresh tick. Read-only.
@@ -772,7 +778,7 @@ export interface CoreCommands {
   scanCodeRoot(path: string): Promise<CodeRootScan>;
   /**
    * Save `codeRoot` (an existing folder; `options.create` makes it first,
-   * for "Use ~/Code instead"); returns the scan of the saved root.
+   * e.g. the suggested default); returns the scan of the saved root.
    */
   setCodeRoot(
     path: string,

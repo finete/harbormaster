@@ -35,6 +35,7 @@ let app: ElectronApplication;
 let window: Page;
 let root: string;
 let codeRoot: string;
+let stateDir: string;
 let stubFile: string;
 const mainProcessErrors: string[] = [];
 
@@ -48,7 +49,7 @@ function stubLines(): string[][] {
 
 test.beforeAll(async () => {
   root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-open-in-"));
-  const stateDir = path.join(root, "state");
+  stateDir = path.join(root, "state");
   codeRoot = path.join(root, "Code");
   stubFile = path.join(root, "open-in-calls.jsonl");
   mkdirSync(stateDir, { recursive: true });
@@ -125,12 +126,12 @@ test("opens the task's worktree folder in the chosen app, remembers it, copies t
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
   await expect(workspace).toBeVisible();
 
-  const worktreesDir = path.join(codeRoot, ".harbormaster-worktrees");
+  const worktreesDir = path.join(stateDir, "worktrees", "fixture-repo");
   await expect.poll(() => readdirSync(worktreesDir).length).toBe(1);
   const worktreeName = readdirSync(worktreesDir)[0] ?? "";
   const isWorktree = (arg: string | undefined): boolean =>
     !!arg?.endsWith(
-      `${path.sep}.harbormaster-worktrees${path.sep}${worktreeName}`,
+      `${path.sep}worktrees${path.sep}fixture-repo${path.sep}${worktreeName}`,
     );
 
   // The split button shows, enabled once the binding resolves (no last app

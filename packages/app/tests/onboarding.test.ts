@@ -83,7 +83,7 @@ describe("agent detection lines", () => {
 
   it("labels the four steps verb-first", () => {
     expect(ONBOARDING_STEPS.map((step) => step.label)).toEqual([
-      "Pick your code folder",
+      "Pick your repositories folder",
       "Choose your agent",
       "Connect GitHub",
       "How it works",

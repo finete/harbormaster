@@ -83,7 +83,7 @@ function taskWorktrees(): string[] {
     .split("\n")
     .filter((line) => line.startsWith("worktree "))
     .map((line) => line.slice("worktree ".length))
-    .filter((dir) => dir.includes(".harbormaster-worktrees"));
+    .filter((dir) => dir.includes(`${path.sep}worktrees${path.sep}`));
 }
 
 /** The fake gh answers `pr list` with whatever PR json the test last wrote (none = `[]`). */

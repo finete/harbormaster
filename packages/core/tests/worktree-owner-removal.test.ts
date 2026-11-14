@@ -38,7 +38,7 @@ describe("removeWorktree resolves the owning checkout", () => {
     // Force the primary root to simulate the migrated-task case.
     const primaryRepo = { ...repo, root: primary };
 
-    await new LocalGitWorktreeAccess().removeWorktree(
+    await new LocalGitWorktreeAccess(join(root, "worktrees")).removeWorktree(
       primaryRepo,
       worktreePath,
       true,

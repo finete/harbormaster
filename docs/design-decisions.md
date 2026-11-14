@@ -227,8 +227,22 @@ difference not listed here is a bug.
 - **Dev → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at
-  `<codeRoot>/.harbormaster-worktrees/<branch-slug>`, and derived branch
-  names end in a 6-character task-id suffix.
+  `<stateDir>/worktrees/<repo-folder>/<branch-slug>` (default
+  `~/.harbormaster/worktrees/`), and derived branch names end in a
+  6-character task-id suffix. One app-owned root for every repository,
+  whether it was found under `codeRoot` or added with "Open folder…": the
+  old `<parent-of-checkout>/.harbormaster-worktrees/` layout scattered
+  worktrees next to registered folders, where the orphan scan (which only
+  looked under `codeRoot`) never saw them. Pre-0.1.2 worktrees keep their
+  recorded paths, and the orphan scan still covers the legacy folders.
+- **`codeRoot` is the repositories folder.** It is scanned for checkouts
+  (so agents can launch into repositories never opened in the app) and is
+  where clone-by-URL puts new clones; a clone URL whose remote is already
+  checked out anywhere known (under `codeRoot` or a registered folder) is
+  reused instead. Onboarding suggests the first existing usual code folder
+  (`~/Code`, `~/src`, `~/Projects`, …), else `~/harbormaster`: not inside
+  `~/.harbormaster`, because clones are the user's long-lived checkouts,
+  not app state.
 - **Rules evaluate only in the app.** The Electron app is the single automation
   host; the Pi extension never runs rules or refreshes. ("Movers" became the
   rules engine in decision #18; the single-host rule is unchanged.)

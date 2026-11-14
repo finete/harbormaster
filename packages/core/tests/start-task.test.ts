@@ -137,7 +137,7 @@ async function fixture(): Promise<{
     stateDir,
     checkout,
     repositoryId: "github.com/acme/harbor-repo",
-    worktreesRoot: join(codeRoot, ".harbormaster-worktrees"),
+    worktreesRoot: join(stateDir, "worktrees"),
   };
 }
 
@@ -211,7 +211,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     expect(task.state).toBe("dev");
     expect(task.branch).toMatch(/^ship-it-[a-z0-9]{6}$/);
     const binding = await commands.getTaskWorkspace(task.id);
-    expect(binding?.worktreePath).toContain(".harbormaster-worktrees");
+    expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);
     expect(await git(["branch", "--show-current"], binding?.worktreePath)).toBe(
       task.branch,
     );
@@ -252,7 +252,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
     expect((await commands.getTask(parked.id))?.state).toBe("dev");
     const binding = await commands.getTaskWorkspace(parked.id);
     expect(binding?.branch).toBe(started.branch);
-    expect(binding?.worktreePath).toContain(".harbormaster-worktrees");
+    expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);
     expect(await git(["branch", "--show-current"], binding?.worktreePath)).toBe(
       started.branch,
     );
@@ -338,7 +338,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
       events: new CoreEventBus(),
       config: new JsonConfigAccess(paths.configFile),
       repositories: new LocalGitRepositoryAccess(),
-      worktrees: new LocalGitWorktreeAccess(),
+      worktrees: new LocalGitWorktreeAccess(paths.worktreesDir),
       bindings,
       sessions: new LocalSessionFileAccess(),
       scratch: new LocalScratchWorkspaceAccess(join(f.stateDir, "scratch")),
