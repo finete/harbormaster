@@ -1,4 +1,4 @@
-<p align="center"><img src="packages/app/build/icon.png" alt="Harbormaster" width="128"></p>
+![Harbormaster](packages/app/build/icon.png)
 
 # Harbormaster
 
@@ -27,17 +27,20 @@ command on your PATH (agents use it to reach the app). Open the app; a
 four-screen setup walks you through:
 
 1. **Your repositories folder**: the first of `~/Code`, `~/src`,
+
    `~/Projects`, … that exists, else `~/harbormaster` (created for you).
-   Every git repository directly under it is picked up, and agents clone
-   new repositories into it. Keep code out of `~/Documents`, `~/Desktop` and
-   `~/Downloads` (see "Known limitations").
+    Every git repository directly under it is picked up, and agents clone
+    new repositories into it. Keep code out of `~/Documents`, `~/Desktop` and
+    `~/Downloads` (see "Known limitations").
 2. **Your agent**: Pi or Claude Code, whichever is installed. Pi users get a
+
    one-file extension installed into `~/.pi/agent/extensions` automatically;
-   Claude Code needs nothing global.
+    Claude Code needs nothing global.
 3. **GitHub**: if `gh auth status` is logged in, card moves for your PRs and
+
    review tasks for other people's PRs are switched on. Otherwise run
-   `gh auth login` and re-run the setup from the Harbormaster menu
-   (Welcome / Setup…).
+    `gh auth login` and re-run the setup from the Harbormaster menu
+    (Welcome / Setup…).
 4. **How it works**: the four concepts below, one screen.
 
 ### Upgrade
@@ -117,25 +120,48 @@ your inbox for approval first.
 ## Supported agents
 
 - **Pi** and **Claude Code**: fully supported, including status, tools and
-  message delivery.
+message delivery.
 - **Any other CLI agent**: runs in a task pane with the same worktree,
-  branch and session handling. Status works for agents that speak the
-  OSC 7501 program-status protocol; tools work for any agent that can load
-  an MCP server or run a shell command. Sending messages *to* an agent needs
-  per-agent delivery glue; agents without it refuse messages up front.
+branch and session handling. Status works for agents that speak the
+OSC 7501 program-status protocol; tools work for any agent that can load
+an MCP server or run a shell command. Sending messages *to* an agent needs
+per-agent delivery glue; agents without it refuse messages up front.
 
 Pick the default agent in the app; override it per repository or per task.
 
 ## Known limitations
 
 - **The build is unsigned.** Homebrew clears the quarantine flag so the app
-  opens, but macOS ties folder permissions to the exact build: if your code
-  root is under `~/Documents`, `~/Desktop` or `~/Downloads`, macOS may ask
-  "Harbormaster would like to access files in your Documents folder" again
-  after every upgrade. Keep code under a plain folder such as `~/Code` and it
-  never asks. Signing (and the automatic updater it unlocks) is planned once
-  there are more than a handful of users.
+opens, but macOS ties folder permissions to the exact build: if your code
+root is under `~/Documents`, `~/Desktop` or `~/Downloads`, macOS may ask
+"Harbormaster would like to access files in your Documents folder" again
+after every upgrade. Keep code under a plain folder such as `~/Code` and it
+never asks. Signing (and the automatic updater it unlocks) is planned once
+there are more than a handful of users.
 - **Apple Silicon only.**
+
+## Future
+
+Harbormaster is about what happens *around* the agent — the review →
+merge → deploy lifecycle driven by rules, one inbox for everything that
+needs a human, and tasks that coordinate each other. The gaps worth
+closing without abandoning that thesis, roughly in order:
+
+- **Diff view in the task pane** with "send this comment to the agent"
+(line comments routed through task messaging). Today there is nothing
+between "agent finished" and the PR page.
+- **Worktree setup scripts** (per repository, run on worktree creation:
+install deps, copy `.env`, seed data).
+- **More harness adapters**: Codex CLI, Cursor CLI, OpenCode. The adapter
+seam exists; each is a contract-test run plus a launch spec.
+- **Signed, auto-updating build** (see Known limitations).
+- **Remote daemon**: the core API is transport-ready (`docs/design-decisions.md`);
+a socket transport would let the app drive agents on another machine.
+- **Rules page follow-ups**: Sources/addons tab, dry-run (`rules check`) in
+the app, per-rule enable/disable.
+
+Deliberately not planned: a built-in editor, a browser pane, mobile apps,
+or multi-agent "races" on one task.
 
 ## Development
 
