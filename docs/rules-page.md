@@ -18,7 +18,7 @@ points here.
 | 6 | Page scope: **Rules** and **Activity** tabs in the page top bar, plus a **Rules on/off switch** (`config.automation`). Sources and dry-run stay CLI-only. |
 | 7 | **Activity tab**: actions + warnings by default, "show events" toggle, day group headers, newest first; an action row expands to its triggering event's `data`. Filters: rule, task, outcome. |
 | 8 | Sidebar entry **Rules**, between Board and Inbox, lucide `ListChecks`, shortcut **⌘⇧R** (Ctrl+Shift+R elsewhere). |
-| 9 | **Two-line rows**: `dot · label · last fired` / `on chips → do chip`. `on` collapses to `+N` beyond two globs. Each file header has a visible **Edit** button (opens that file); rows have no per-row action. |
+| 9 | **Two-line rows**: `dot · label · last fired` / `on chips → do chip`. `on` collapses to `+N` beyond two globs. No per-row or per-file actions; the page top bar has one **Edit** button that opens the rules folder. |
 | 10 | Sheet is **non-modal, 560px**: no scrim; clicking another row or ↑/↓ swaps it in place; Esc / ✕ closes; the last selection is restored when the page is reopened. |
 | 11 | File group headers use **four fixed strings** (below). Load problems are listed under the header as `line N · message` (validator output verbatim). |
 | 12 | Degenerate states: rules off → amber banner + **Turn on**, list dimmed; no files → empty state with **Restore defaults** + Open rules folder; only broken files → header + one-line hint + Open in editor. |
@@ -156,7 +156,8 @@ says exactly that).
   `listEvents({ruleId, file, limit: 5})` for the sheet;
   `listEvents({since})` for the Activity tab (client-side filters).
 - "Open in editor" → `openIn(file.path, defaultApp)` via the existing
-  open-in picker; "Open rules folder" → the parent directory.
+  open-in picker; top-bar "Edit (opens the rules folder)" → the parent
+  directory.
 
 ## Tests
 

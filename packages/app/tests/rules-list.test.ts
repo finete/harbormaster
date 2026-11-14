@@ -92,22 +92,15 @@ describe("RulesList", () => {
     expect(html).not.toContain("rules-off-banner");
   });
 
-  it("each file header has a visible Edit button; rows have no per-row action", () => {
+  it("no per-file or per-row actions (the top bar's Edit opens the folder)", () => {
     const html = render({ files: [loaded] });
-    const edit = html.match(
-      /<button[^>]*data-testid="rules-file-edit"[^>]*>.*?<\/button>/,
-    );
-    expect(edit).not.toBeNull();
-    expect(text(edit?.[0] ?? "")).toBe("Edit");
-    // Always visible: no hover-only `hidden` class.
-    expect(edit?.[0]).not.toMatch(/class="[^"]*\bhidden\b/);
-    expect(html.match(/data-testid="rules-file-edit"/g)).toHaveLength(1);
+    expect(html).not.toContain("rules-file-edit");
     expect(html).not.toContain("rule-row-open");
     expect(html).not.toContain("rules-file-open");
     expect(html).not.toContain("group-hover");
-    // The row hosts no button of its own.
-    const row = html.slice(html.indexOf('data-testid="rule-row-'));
-    expect(row).not.toContain("<button");
+    // Neither the file header nor the row hosts a button.
+    const section = html.slice(html.indexOf('data-testid="rules-file-'));
+    expect(section).not.toContain("<button");
   });
 
   it("rules off: amber banner with Turn on, list dimmed", () => {
@@ -153,7 +146,7 @@ describe("RulesList", () => {
     );
     expect(html).toContain('data-testid="rules-only-broken-open"');
     expect(plain).toContain("Open in editor");
-    // The broken file's header keeps its Edit button (the way to fix it).
-    expect(html).toContain('data-testid="rules-file-edit"');
+    // No per-file Edit button on the broken file's header either.
+    expect(html).not.toContain("rules-file-edit");
   });
 });
