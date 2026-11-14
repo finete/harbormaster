@@ -65,11 +65,24 @@ import { TaskCard } from "./TaskCard";
  * the same fallback dnd-kit's multiple-containers example uses). Unlike a
  * `closestCorners`/`closestCenter` fallback this can still return nothing,
  * so releasing over the sidebar/toolbar cancels instead of committing a
- * move — a Done drop runs the destructive worktree cleanup.
+ * move — a Done drop runs the destructive worktree cleanup. The fallback is
+ * limited to the columns' own vertical span: with the pointer above or
+ * below every column (the toolbar), a tall drag preview that still
+ * overlaps a column must not turn the release into a drop.
  */
 const columnCollisionDetection: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
   if (pointerCollisions.length > 0) return pointerCollisions;
+  const pointer = args.pointerCoordinates;
+  if (pointer) {
+    let top = Number.POSITIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+    for (const rect of args.droppableRects.values()) {
+      top = Math.min(top, rect.top);
+      bottom = Math.max(bottom, rect.bottom);
+    }
+    if (pointer.y < top || pointer.y > bottom) return [];
+  }
   return rectIntersection(args);
 };
 

@@ -282,3 +282,15 @@ difference not listed here is a bug.
   parent's block detaches into a top-level row with the "↳ parent" line
   (`harbormaster.sidebar.detachedChildIds`) until it is dragged back. The
   order is committed once, on drop.
+- **Lineage wins over repo within a column.** On the board, a child nests
+  under its parent whenever both are in the same column (in Awaiting: the
+  same awaiting kind), whatever their repositories; on the rail, whenever
+  both are open (and neither is pinned). The parent's repo group hosts the
+  family, and a group's count is the rows shown under its header. A child
+  whose parent is in another column (or, on the rail, not open, pinned, or
+  hidden by the search) keeps its own repo group with a "↳ parent" line.
+  Core still groups columns purely by repository
+  (`engines/board-grouping.ts`); the renderer applies the lineage move
+  (`lib/task-lineage.ts`). Every card and rail row carries a quiet mono repo
+  chip (short repo name, or "scratch") so a hosted cross-repo child still
+  shows where it lives.

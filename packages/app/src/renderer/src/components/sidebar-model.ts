@@ -15,13 +15,15 @@ import type {
   Task,
   TaskState,
 } from "../../../preload/api";
+import { SCRATCH_REPO_LABEL, taskRepoLabel } from "../lib/repository-label";
 import { sortByOrder } from "../lib/sidebar-order";
+import { hoistChildrenIntoParentGroups } from "../lib/task-lineage";
 import { lastInteractionTimestamp, relativeTime } from "../lib/time-format";
 
 export { relativeTime };
 
 /** Group label for repository-less (scratch) tasks; always sorted last. */
-export const SCRATCH_GROUP = "scratch";
+export const SCRATCH_GROUP = SCRATCH_REPO_LABEL;
 
 /** One sidebar row: a task, its board column, and its live presence (if any). */
 export interface SidebarRow {
@@ -37,13 +39,9 @@ export interface SidebarGroup {
   rows: SidebarRow[];
 }
 
-/** Short repository name ("github.com/org/repo" -> "repo"), or "scratch". */
-export function repoLabel(task: Pick<Task, "repositoryId">): string {
-  const id = task.repositoryId?.trim();
-  if (!id) return SCRATCH_GROUP;
-  const parts = id.split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? id;
-}
+/** Short repository name ("github.com/org/repo" -> "repo"), or "scratch" (shared helper, lib/repository-label.ts). */
+export const repoLabel: (task: Pick<Task, "repositoryId">) => string =
+  taskRepoLabel;
 
 /**
  * Every *opened* task on the board, in `openedTaskIds` insertion order — NOT
@@ -124,6 +122,29 @@ export function groupRows(
       (row) => row.task.id,
     ),
   }));
+}
+
+/**
+ * The lineage rule (lib/task-lineage.ts) on the rail: an open child whose
+ * parent is open in another repo group moves into the parent's group, so
+ * the family renders together there (nested by `layoutLineageRows`). Rows
+ * re-sort by `taskOrder` in their new group (unknown ids after, input
+ * order); emptied groups drop out, so a group's count is the rows it shows.
+ * Callers pass the groups that render together — the unpinned ones, after
+ * any search filter — so a pinned or filtered-out parent never hosts.
+ */
+export function nestChildrenUnderParents(
+  groups: SidebarGroup[],
+  taskOrder: readonly string[] = [],
+): SidebarGroup[] {
+  return hoistChildrenIntoParentGroups(groups, {
+    items: (group) => group.rows,
+    task: (row) => row.task,
+    withItems: (group, rows) => ({
+      ...group,
+      rows: sortByOrder(rows, taskOrder, (row) => row.task.id),
+    }),
+  });
 }
 
 /** Visual tone of a state chip; mirrors the board's per-column colors. */

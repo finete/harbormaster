@@ -19,6 +19,7 @@ import {
 import { useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
+import { RepoChip } from "./RepoChip";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { WorkingSpinner } from "./ui/working-spinner";
@@ -26,7 +27,7 @@ import { WorkingSpinner } from "./ui/working-spinner";
 type TaskCardPresence = PresenceBadge | undefined;
 
 /**
- * One board card: title, branch, PR/presence/unread chrome only, plus a
+ * One board card: title, branch + repo chip, PR/presence/unread chrome only, plus a
  * muted relative-time indicator (top-right of the title row) and, for
  * Awaiting cards, a "waiting <duration>" fragment in the sub-line — ported
  * from pi-home's card anatomy (`withLastInteraction` +
@@ -140,8 +141,9 @@ function TaskCardFace({
       className={cn(
         // One fixed slot skeleton for every variant (item 18): top-pinned
         // column, slots in order title-row / mono-subline / badge-row, each
-        // absent slot rendering nothing (no empty padded wrapper), so a
-        // title-only card is simply shorter, never differently aligned.
+        // absent slot rendering nothing (no empty padded wrapper; the
+        // subline always holds the repo chip), so a card without badges is
+        // simply shorter, never differently aligned.
         "flex select-none flex-col gap-1 p-3",
         isOverlay
           ? // "Lifted" pick-up (Trello/Linear convention), overlay only.
@@ -181,23 +183,29 @@ function TaskCardFace({
           {relativeTime(lastInteractionTimestamp(task, presence), now)}
         </span>
       </div>
-      {(task.branch || isAwaiting) && (
-        <p className="text-xs text-muted-foreground" data-slot="subline">
-          {task.branch && <span className="font-mono">{task.branch}</span>}
-          {task.branch && task.targetBranch && (
-            <>
-              {" → "}
-              <span className="font-mono">{task.targetBranch}</span>
-            </>
-          )}
-          {isAwaiting && (
-            <span data-testid="card-waiting-duration" className="font-mono">
-              {task.branch ? " · " : ""}
-              {waitingDurationText(task.stateChangedAt, now)}
-            </span>
-          )}
-        </p>
-      )}
+      {/* Mono sub-line: branch → target / waiting duration, plus the quiet
+        repo chip, always shown (a lineage-hosted child can sit under its
+        parent's repo header, see lib/task-lineage.ts). */}
+      <div className="flex min-w-0 items-start gap-1.5" data-slot="subline">
+        {(task.branch || isAwaiting) && (
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {task.branch && <span className="font-mono">{task.branch}</span>}
+            {task.branch && task.targetBranch && (
+              <>
+                {" → "}
+                <span className="font-mono">{task.targetBranch}</span>
+              </>
+            )}
+            {isAwaiting && (
+              <span data-testid="card-waiting-duration" className="font-mono">
+                {task.branch ? " · " : ""}
+                {waitingDurationText(task.stateChangedAt, now)}
+              </span>
+            )}
+          </p>
+        )}
+        <RepoChip task={task} testId="card-repo-chip" className="ml-auto" />
+      </div>
       {parentTitle && (
         <p
           className="truncate text-xs text-muted-foreground"

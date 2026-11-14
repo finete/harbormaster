@@ -5,6 +5,7 @@ import {
   clampSidebarWidth,
   groupRows,
   matchesQuery,
+  nestChildrenUnderParents,
   partitionPinned,
   pullRequestUrl,
   relativeTime,
@@ -15,6 +16,7 @@ import {
   stateChipLabel,
   visibleTaskOrder,
 } from "../src/renderer/src/components/sidebar-model";
+import { taskRepoLabel } from "../src/renderer/src/lib/repository-label";
 
 const T0 = "2025-01-01T00:00:00.000Z";
 
@@ -374,5 +376,74 @@ describe("visibleTaskOrder", () => {
 
   it("returns an empty list for no rows", () => {
     expect(visibleTaskOrder([], [])).toEqual([]);
+  });
+});
+
+describe("repo chip label (taskRepoLabel)", () => {
+  it("is the short repository name, or scratch for repository-less tasks", () => {
+    expect(taskRepoLabel({ repositoryId: "github.com/org/harbor" })).toBe(
+      "harbor",
+    );
+    expect(taskRepoLabel({ repositoryId: "github.com/org/harbor/" })).toBe(
+      "harbor",
+    );
+    expect(taskRepoLabel({})).toBe("scratch");
+    expect(taskRepoLabel({ repositoryId: " " })).toBe("scratch");
+  });
+
+  it("is the same rule the sidebar groups by", () => {
+    for (const repositoryId of ["github.com/o/alpha", undefined]) {
+      const t = task({ id: "t", ...(repositoryId ? { repositoryId } : {}) });
+      expect(taskRepoLabel(t)).toBe(repoLabel(t));
+    }
+  });
+});
+
+describe("nestChildrenUnderParents", () => {
+  const parent = task({ id: "p", repositoryId: "github.com/o/alpha" });
+  const alphaOther = task({ id: "a2", repositoryId: "github.com/o/alpha" });
+  const betaChild = task({
+    id: "kid",
+    parentTaskId: "p",
+    repositoryId: "github.com/o/beta",
+  });
+  const betaOther = task({ id: "b2", repositoryId: "github.com/o/beta" });
+
+  it("hosts an open cross-repo child in its open parent's group, re-sorted by the task order", () => {
+    const groups = groupRows(
+      [row(parent), row(alphaOther), row(betaChild), row(betaOther)],
+      ["p", "kid", "a2", "b2"],
+    );
+    const nested = nestChildrenUnderParents(groups, ["p", "kid", "a2", "b2"]);
+    expect(nested.map((g) => [g.label, g.rows.map((r) => r.task.id)])).toEqual([
+      ["alpha", ["p", "kid", "a2"]],
+      ["beta", ["b2"]],
+    ]);
+    // The header count is the rows shown under it.
+    expect(nested.map((g) => g.rows.length)).toEqual([3, 1]);
+  });
+
+  it("drops a group whose only row moved, and leaves a child of an unopened parent alone", () => {
+    expect(
+      nestChildrenUnderParents(groupRows([row(parent), row(betaChild)])).map(
+        (g) => [g.label, g.rows.length],
+      ),
+    ).toEqual([["alpha", 2]]);
+    expect(
+      nestChildrenUnderParents(groupRows([row(betaChild)])).map((g) => g.label),
+    ).toEqual(["beta"]);
+  });
+
+  it("never hosts under a pinned parent (pinned rows are partitioned out first)", () => {
+    const { rest } = partitionPinned(
+      groupRows([row(parent), row(betaChild)]),
+      new Set(["p"]),
+    );
+    expect(
+      nestChildrenUnderParents(rest).map((g) => [
+        g.label,
+        g.rows.map((r) => r.task.id),
+      ]),
+    ).toEqual([["beta", ["kid"]]]);
   });
 });
