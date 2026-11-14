@@ -1,21 +1,30 @@
 // Pure lineage-nesting logic shared by the board (BoardColumn.tsx) and the
-// workspace sidebar (Sidebar.tsx) — see /docs/design-decisions.md "Launching tasks from an agent"'s
-// "renderer: children nested under parents" line and the wave-3 task
-// brief's UI decisions.
+// workspace sidebar (Sidebar.tsx) — see /docs/design-decisions.md
+// "Launching tasks from an agent" and its "Lineage wins over repo within a
+// column" bullet.
 //
-// One consistent rule, documented here once instead of twice: a child nests
-// directly under its parent's row only when BOTH land in the very same
-// *rendering group* the caller hands in (a board column's repo/awaiting
-// group, or the sidebar's repo group of currently-open tasks) — nesting
-// never crosses a board-column or repo-group boundary, so it can never
-// fight the existing group-collapse / drag-and-drop / keyboard-selection
-// grid, all of which are already scoped per group. Everywhere else (a
-// different column, a different repo group, or — sidebar-only — a parent
-// that isn't currently open) the child keeps its own natural position and
-// gets a muted "↳ <parent title>" line instead (`parentTitle` on its row).
-// This also gives "a Done parent's children stay attached to it" for free:
-// the Done parent still reports its full child count (`children.count`),
-// even though none of them render nested there once they're off in Dev.
+// One consistent rule, documented here once instead of twice, in two steps:
+//
+// 1. Grouping (`hoistChildrenIntoParentGroups`): lineage wins over
+//    repository within a column. A child whose parent sits in the same
+//    *scope* — the same board column (and, in Awaiting, the same awaiting
+//    kind), or the sidebar's open, unpinned rows — moves into its parent's
+//    repo group, whatever its own repository is. The parent's group hosts
+//    the family; a group's count is the rows it then holds.
+// 2. Layout (`layoutLineageRows`): within one rendering group, a child
+//    nests directly under its parent's row when both are present. Nesting
+//    never crosses a board-column / awaiting-kind boundary (and on the
+//    sidebar never reaches a parent that isn't open, or is pinned), so it
+//    can never fight the group-collapse / drag-and-drop /
+//    keyboard-selection grid, all of which stay scoped per group.
+//
+// Everywhere else (a different column, a different awaiting kind, or —
+// sidebar-only — a parent that isn't open or a user-detached child) the
+// child keeps its own repo group / position and gets a muted
+// "↳ <parent title>" line instead (`parentTitle` on its row). This also
+// gives "a Done parent's children stay attached to it" for free: the Done
+// parent still reports its full child count (`children.count`), even
+// though none of them render nested there once they're off in Dev.
 import type { Task } from "../../../preload/api";
 
 /** One task's lineage neighborhood, indexed once per render from the full (unfiltered) board. */
@@ -40,6 +49,65 @@ export function buildLineageIndex(tasks: Iterable<Task>): LineageIndex {
     bucket.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
   return { childrenByParent, taskById };
+}
+
+/** How `hoistChildrenIntoParentGroups` reads and rebuilds a caller's group shape. */
+export interface LineageGroupAccess<G, T> {
+  items(group: G): readonly T[];
+  task(item: T): Task;
+  withItems(group: G, items: T[]): G;
+  /** Groups with different scopes never exchange children (the Awaiting column's kind). Default: one scope. */
+  scope?(group: G): string;
+}
+
+/**
+ * Step 1 of the module rule: moves every child whose parent is in another
+ * group of the same scope into its parent's group (appended after that
+ * group's own items, in input order — `layoutLineageRows` then places it
+ * under the parent). Groups emptied by the move are dropped; when nothing
+ * moves, `groups` is returned as-is. Pure; caller-owned group shape.
+ */
+export function hoistChildrenIntoParentGroups<G, T>(
+  groups: readonly G[],
+  access: LineageGroupAccess<G, T>,
+): G[] {
+  const groupOfTask = new Map<string, number>();
+  groups.forEach((group, index) => {
+    for (const item of access.items(group)) {
+      groupOfTask.set(access.task(item).id, index);
+    }
+  });
+  const scopeOf = (index: number): string => {
+    const group = groups[index];
+    return group === undefined || !access.scope ? "" : access.scope(group);
+  };
+  const staying: T[][] = groups.map(() => []);
+  const incoming: T[][] = groups.map(() => []);
+  let moved = false;
+  groups.forEach((group, index) => {
+    for (const item of access.items(group)) {
+      const parentId = access.task(item).parentTaskId;
+      const host =
+        parentId === undefined ? undefined : groupOfTask.get(parentId);
+      if (
+        host !== undefined &&
+        host !== index &&
+        scopeOf(host) === scopeOf(index)
+      ) {
+        incoming[host]?.push(item);
+        moved = true;
+      } else {
+        staying[index]?.push(item);
+      }
+    }
+  });
+  if (!moved) return [...groups];
+  const result: G[] = [];
+  groups.forEach((group, index) => {
+    const items = [...(staying[index] ?? []), ...(incoming[index] ?? [])];
+    if (items.length > 0) result.push(access.withItems(group, items));
+  });
+  return result;
 }
 
 /** Anything with a `.task` the layout can key off of (a bare `Task`, a `SidebarRow`, ...). */

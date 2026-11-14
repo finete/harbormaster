@@ -99,6 +99,7 @@ import {
   clampSidebarWidth,
   groupRows,
   matchesQuery,
+  nestChildrenUnderParents,
   partitionPinned,
   pullRequestUrl,
   repoLabel,
@@ -493,10 +494,15 @@ export function Sidebar({
     () => groupRows(rows, taskOrder, groupOrder),
     [rows, taskOrder, groupOrder],
   );
-  const { pinned, rest: restGroups } = useMemo(
-    () => partitionPinned(groups, pinnedIds, taskOrder),
-    [groups, pinnedIds, taskOrder],
-  );
+  // Lineage wins over repo (lib/task-lineage.ts): an open child whose parent
+  // is open (and unpinned) moves into the parent's repo group.
+  const { pinned, rest: restGroups } = useMemo(() => {
+    const partition = partitionPinned(groups, pinnedIds, taskOrder);
+    return {
+      pinned: partition.pinned,
+      rest: nestChildrenUnderParents(partition.rest, taskOrder),
+    };
+  }, [groups, pinnedIds, taskOrder]);
   const layoutOptions = useMemo(
     () => ({ detachedIds, siblingOrder: taskOrder }),
     [detachedIds, taskOrder],
@@ -517,15 +523,22 @@ export function Sidebar({
     () => pinned.filter((row) => matchesQuery(row, query)),
     [pinned, query],
   );
+  // While searching, a child whose parent is filtered out goes back to its
+  // own repo group (its parent isn't shown, so nothing hosts it).
   const visibleGroups = useMemo(
     () =>
-      restGroups
-        .map((group) => ({
-          ...group,
-          rows: group.rows.filter((row) => matchesQuery(row, query)),
-        }))
-        .filter((group) => group.rows.length > 0),
-    [restGroups, query],
+      searching
+        ? nestChildrenUnderParents(
+            partitionPinned(groups, pinnedIds, taskOrder)
+              .rest.map((group) => ({
+                ...group,
+                rows: group.rows.filter((row) => matchesQuery(row, query)),
+              }))
+              .filter((group) => group.rows.length > 0),
+            taskOrder,
+          )
+        : restGroups,
+    [searching, groups, pinnedIds, taskOrder, restGroups, query],
   );
   // The rail's full top-to-bottom task order as currently rendered; drives
   // both keyboard cycling (item 5) and the reveal-filter-clear check (item 1).
@@ -757,9 +770,13 @@ export function Sidebar({
   const sectionOfTask = (taskId: string): string => {
     const row = rows.find((entry) => entry.task.id === taskId);
     if (!row) return PINNED_SECTION;
-    return pinnedIds.has(taskId)
-      ? PINNED_SECTION
-      : groupSection(repoLabel(row.task));
+    if (pinnedIds.has(taskId)) return PINNED_SECTION;
+    // The group actually hosting the row (a child may sit in its parent's
+    // repo group, see lib/task-lineage.ts), else its own repo group.
+    const host = visibleGroups.find((group) =>
+      group.rows.some((entry) => entry.task.id === taskId),
+    );
+    return groupSection(host?.label ?? repoLabel(row.task));
   };
   const announcements: Announcements = {
     onDragStart: ({ active }) => `Picked up ${describeSortable(active.id)}.`,

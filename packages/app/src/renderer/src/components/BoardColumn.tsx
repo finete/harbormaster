@@ -135,14 +135,21 @@ export function BoardColumn({
 
   // Drop-placement preview (item 7): ordering inside a group is automatic
   // (core's board-grouping sorts by stateChangedAt, so a moved card lands
-  // last in its repository's group), so the preview sits exactly there —
-  // or at the column's end when that group doesn't exist yet / is collapsed
-  // / the column is Awaiting (its group depends on the reason picked next).
+  // last in its repository's group — or, for a child whose parent is in
+  // this column, in the parent's group, see lib/task-lineage.ts), so the
+  // preview sits exactly there — or at the column's end when that group
+  // doesn't exist yet / is collapsed / the column is Awaiting (its group
+  // depends on the reason picked next).
   const showDropPreview =
     isOver && !!dragTask && dragTask.state !== column.state;
+  const parentGroupId = dragTask?.parentTaskId
+    ? visibleGroups.find((group) =>
+        group.tasks.some((task) => task.id === dragTask.parentTaskId),
+      )?.id
+    : undefined;
   const landingGroupId =
     showDropPreview && column.state !== "awaiting"
-      ? (dragTask?.repositoryId ?? "scratch")
+      ? (parentGroupId ?? dragTask?.repositoryId ?? "scratch")
       : null;
   const previewInGroup =
     landingGroupId !== null &&

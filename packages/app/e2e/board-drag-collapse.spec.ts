@@ -564,12 +564,19 @@ test("every card variant shares one top-pinned skeleton (title-only vs subline v
   expect(
     Math.abs(a.timeBottomMinusTitleBottom - b.timeBottomMinusTitleBottom),
   ).toBeLessThanOrEqual(0.5);
-  // Title-only cards are just shorter: no empty padded badge row.
+  // Every card's subline carries the repo chip ("scratch" here), so a card
+  // with no branch/waiting text still has that one slot — and no empty
+  // padded badge row: it is exactly as tall as the subline card.
+  await expect(titleOnly.getByTestId("card-repo-chip")).toHaveText("scratch");
+  await expect(titleOnly.locator('[data-slot="badges"]')).toHaveCount(0);
+  await expect(withSubline.locator('[data-slot="badges"]')).toHaveCount(0);
   const [titleOnlyBox, sublineBox] = await Promise.all([
     titleOnly.boundingBox(),
     withSubline.boundingBox(),
   ]);
-  expect(titleOnlyBox?.height ?? 0).toBeLessThan(sublineBox?.height ?? 0);
+  expect(
+    Math.abs((titleOnlyBox?.height ?? 0) - (sublineBox?.height ?? 0)),
+  ).toBeLessThanOrEqual(0.5);
 
   // The lifted overlay keeps the same internal layout (scaled 1.02).
   const from = await beginDrag(titleOnly);

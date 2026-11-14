@@ -4,7 +4,10 @@
 // nearest adjacent non-empty column). Kept dependency-free from React so it
 // is cheaply unit-testable (see tests/board-selection.test.ts).
 import type { BoardColumn, BoardGroup } from "../../../preload/api";
-import { hiddenNestedChildIds } from "./task-lineage";
+import {
+  hiddenNestedChildIds,
+  hoistChildrenIntoParentGroups,
+} from "./task-lineage";
 
 export type MoveDirection = "left" | "right" | "up" | "down";
 
@@ -17,21 +20,32 @@ export interface SelectionColumn {
 export type SelectionGrid = SelectionColumn[];
 
 /**
- * Same archived-task filter `BoardColumn.tsx` applies (done-column-only,
- * hidden unless `showArchived`), extracted so the keyboard grid always
- * matches what's actually on screen.
+ * The groups `BoardColumn.tsx` renders: the archived-task filter
+ * (done-column-only, hidden unless `showArchived`), then the lineage rule
+ * (lib/task-lineage.ts): a child whose parent is in this column — and, in
+ * Awaiting, under the same awaiting kind — moves into the parent's repo
+ * group. Extracted so the keyboard grid always matches what's actually on
+ * screen. Core's own grouping (engines/board-grouping.ts) stays per-repo.
  */
 export function visibleGroupsForColumn(
   column: BoardColumn,
   showArchived: boolean,
 ): BoardGroup[] {
-  if (column.state !== "done" || showArchived) return column.groups;
-  return column.groups
-    .map((group) => ({
-      ...group,
-      tasks: group.tasks.filter((task) => !task.archivedAt),
-    }))
-    .filter((group) => group.tasks.length > 0);
+  const groups =
+    column.state !== "done" || showArchived
+      ? column.groups
+      : column.groups
+          .map((group) => ({
+            ...group,
+            tasks: group.tasks.filter((task) => !task.archivedAt),
+          }))
+          .filter((group) => group.tasks.length > 0);
+  return hoistChildrenIntoParentGroups(groups, {
+    items: (group) => group.tasks,
+    task: (task) => task,
+    withItems: (group, tasks) => ({ ...group, tasks }),
+    scope: (group) => group.primaryLabel ?? "",
+  });
 }
 
 /**

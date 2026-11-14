@@ -572,3 +572,73 @@ test("a plain click selects a row, a drag does not; close + reopen lands at the 
     .poll(() => groupTitles(window, BETA))
     .toEqual(["Beta Two", "Beta One"]);
 });
+
+test("lineage wins over repo: a cross-repo child nests under its parent's repo group, with its own repo chip", async () => {
+  const parentId = await rowId(row(window, "Alpha One"));
+  const alphaBefore = await groupTitles(window, ALPHA);
+  const betaBefore = await groupTitles(window, BETA);
+  // A child of Alpha One that lives in the *beta* repository.
+  await window.evaluate(
+    async ({ fromTaskId, repositoryId }) => {
+      await (
+        globalThis as unknown as {
+          harbormaster: {
+            core: { launchTask(input: unknown): Promise<unknown> };
+          };
+        }
+      ).harbormaster.core.launchTask({
+        relation: "child",
+        fromTaskId,
+        title: "Kid Beta",
+        prompt: "child work in another repo",
+        repository: { repositoryId },
+      });
+    },
+    { fromTaskId: parentId, repositoryId: `github.com/test/${BETA}` },
+  );
+
+  // Board: same column as its parent, so it sits in the parent's (alpha)
+  // repo group, nested, and the beta group never shows it.
+  await window.getByTestId("board-button").click();
+  const card = window
+    .locator('[data-testid^="card-"]')
+    .filter({ hasText: "Kid Beta" });
+  const alphaDev = window.getByTestId(`group-dev-github.com/test/${ALPHA}`);
+  await expect(alphaDev.filter({ has: card })).toBeVisible();
+  await expect(card.getByTestId("card-repo-chip")).toHaveText(BETA);
+  await expect(card.getByTestId("card-lineage-line")).toHaveCount(0);
+
+  // Rail: once open, it nests in the alpha group under Alpha One; counts are
+  // the rows shown under each header.
+  await card.click();
+  await expect(row(window, "Kid Beta")).toBeVisible();
+  const kids = alphaBefore.filter((title) => title.startsWith("Kid "));
+  const rest = alphaBefore.filter(
+    (title) => title !== "Alpha One" && !title.startsWith("Kid "),
+  );
+  await expect
+    .poll(() => groupTitles(window, ALPHA))
+    .toEqual(["Alpha One", ...kids, "Kid Beta", ...rest]);
+  expect(await groupTitles(window, BETA)).toEqual(betaBefore);
+  await expect(
+    window
+      .getByTestId(`sidebar-group-${ALPHA}`)
+      .getByTestId("sidebar-group-count"),
+  ).toHaveText(String(alphaBefore.length + 1));
+  await expect(
+    window
+      .getByTestId(`sidebar-group-${BETA}`)
+      .getByTestId("sidebar-group-count"),
+  ).toHaveText(String(betaBefore.length));
+  expect(
+    await row(window, "Kid Beta").evaluate(
+      (el) => el.parentElement?.classList.contains("ml-3") ?? false,
+    ),
+  ).toBe(true);
+  await expect(
+    row(window, "Kid Beta").getByTestId("sidebar-row-repo-chip"),
+  ).toHaveText(BETA);
+  await expect(
+    row(window, "Alpha One").getByTestId("sidebar-row-repo-chip"),
+  ).toHaveText(ALPHA);
+});

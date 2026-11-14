@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Task } from "../src/preload/api";
+import type { BoardColumn, Task } from "../src/preload/api";
+import {
+  buildSelectionGrid,
+  visibleGroupsForColumn,
+} from "../src/renderer/src/lib/board-selection";
 import {
   buildLineageIndex,
   hiddenNestedChildIds,
+  hoistChildrenIntoParentGroups,
   layoutLineageRows,
 } from "../src/renderer/src/lib/task-lineage";
 
@@ -202,5 +207,191 @@ describe("layoutLineageRows opt-in options (sidebar)", () => {
       collapsed: false,
       nestedHere: false,
     });
+  });
+});
+
+describe("lineage wins over repo within a column", () => {
+  const ALPHA = "github.com/o/alpha";
+  const BETA = "github.com/o/beta";
+  const parent = task({ id: "parent", repositoryId: ALPHA });
+  const betaChild = task({
+    id: "beta-child",
+    parentTaskId: "parent",
+    repositoryId: BETA,
+  });
+  const betaSolo = task({ id: "beta-solo", repositoryId: BETA });
+  const scratchChild = task({ id: "scratch-child", parentTaskId: "parent" });
+
+  /** One column grouped the way core's board-grouping does (per repo). */
+  function devColumn(tasks: Task[]): BoardColumn {
+    const byRepo = new Map<string, Task[]>();
+    for (const t of tasks) {
+      const id = t.repositoryId ?? "scratch";
+      byRepo.set(id, [...(byRepo.get(id) ?? []), t]);
+    }
+    return {
+      state: "dev",
+      title: "Dev",
+      groups: [...byRepo.entries()].map(([id, groupTasks]) => ({
+        id,
+        repoLabel: id.split("/").pop() ?? id,
+        tasks: groupTasks,
+      })),
+    };
+  }
+
+  it("moves a cross-repo child into its parent's repo group and nests it there", () => {
+    const column = devColumn([parent, betaChild, betaSolo, scratchChild]);
+    const groups = visibleGroupsForColumn(column, false);
+    expect(groups.map((g) => [g.id, g.tasks.map((t) => t.id)])).toEqual([
+      [ALPHA, ["parent", "beta-child", "scratch-child"]],
+      [BETA, ["beta-solo"]],
+    ]);
+    // Group counts are the rows under each header.
+    expect(groups.map((g) => g.tasks.length)).toEqual([3, 1]);
+    const index = buildLineageIndex([
+      parent,
+      betaChild,
+      betaSolo,
+      scratchChild,
+    ]);
+    const rows = layoutLineageRows(
+      (groups[0]?.tasks ?? []).map((t) => ({ task: t })),
+      index,
+      new Set(),
+    );
+    expect(rows.map((r) => [r.item.task.id, r.nested])).toEqual([
+      ["parent", false],
+      ["beta-child", true],
+      ["scratch-child", true],
+    ]);
+    expect(rows[0]?.children).toEqual({
+      count: 2,
+      collapsed: false,
+      nestedHere: true,
+    });
+  });
+
+  it("drops a repo group the move empties", () => {
+    const groups = visibleGroupsForColumn(
+      devColumn([parent, betaChild]),
+      false,
+    );
+    expect(groups.map((g) => [g.id, g.tasks.length])).toEqual([[ALPHA, 2]]);
+  });
+
+  it("leaves a child whose parent is in another column in its own repo group", () => {
+    // Parent sits in Done; only the child is in this (Dev) column.
+    const groups = visibleGroupsForColumn(
+      devColumn([betaChild, betaSolo]),
+      false,
+    );
+    expect(groups.map((g) => [g.id, g.tasks.map((t) => t.id)])).toEqual([
+      [BETA, ["beta-child", "beta-solo"]],
+    ]);
+    const index = buildLineageIndex([
+      { ...parent, state: "done" },
+      betaChild,
+      betaSolo,
+    ]);
+    const rows = layoutLineageRows(
+      (groups[0]?.tasks ?? []).map((t) => ({ task: t })),
+      index,
+      new Set(),
+    );
+    expect(rows[0]?.nested).toBe(false);
+    expect(rows[0]?.parentTitle).toBe("parent");
+  });
+
+  it("never moves a child into a parent hidden as archived", () => {
+    const archivedParent = {
+      ...parent,
+      state: "done" as const,
+      archivedAt: T0,
+    };
+    const doneChild = { ...betaChild, state: "done" as const };
+    const column: BoardColumn = {
+      ...devColumn([archivedParent, doneChild]),
+      state: "done",
+      title: "Done",
+    };
+    expect(visibleGroupsForColumn(column, false).map((g) => g.id)).toEqual([
+      BETA,
+    ]);
+    expect(
+      visibleGroupsForColumn(column, true).map((g) => [g.id, g.tasks.length]),
+    ).toEqual([[ALPHA, 2]]);
+  });
+
+  it("in Awaiting, nests across repos only within the same awaiting kind", () => {
+    const review = { kind: "review" as const };
+    const slack = { kind: "slack" as const };
+    const p = { ...parent, state: "awaiting" as const, awaiting: review };
+    const sameKind = {
+      ...betaChild,
+      state: "awaiting" as const,
+      awaiting: review,
+    };
+    const otherKind = {
+      ...task({
+        id: "slack-child",
+        parentTaskId: "parent",
+        repositoryId: BETA,
+      }),
+      state: "awaiting" as const,
+      awaiting: slack,
+    };
+    const column: BoardColumn = {
+      state: "awaiting",
+      title: "Awaiting",
+      groups: [
+        { id: `Review::${ALPHA}`, primaryLabel: "Review", tasks: [p] },
+        { id: `Review::${BETA}`, primaryLabel: "Review", tasks: [sameKind] },
+        {
+          id: `Slack response::${BETA}`,
+          primaryLabel: "Slack response",
+          tasks: [otherKind],
+        },
+      ],
+    };
+    expect(
+      visibleGroupsForColumn(column, false).map((g) => [
+        g.id,
+        g.tasks.map((t) => t.id),
+      ]),
+    ).toEqual([
+      [`Review::${ALPHA}`, ["parent", "beta-child"]],
+      [`Slack response::${BETA}`, ["slack-child"]],
+    ]);
+  });
+
+  it("keeps the keyboard grid in on-screen order, hiding a collapsed parent's hosted child", () => {
+    const columns = [devColumn([betaSolo, parent, betaChild])];
+    // Core order would put beta first; the hosted child follows its parent.
+    expect(buildSelectionGrid(columns, false)[0]?.taskIds).toEqual([
+      "beta-solo",
+      "parent",
+      "beta-child",
+    ]);
+    expect(
+      buildSelectionGrid(
+        columns,
+        false,
+        undefined,
+        undefined,
+        new Set(["parent"]),
+      )[0]?.taskIds,
+    ).toEqual(["beta-solo", "parent"]);
+  });
+
+  it("returns the groups unchanged when nothing moves", () => {
+    const groups = [{ tasks: [parent] }, { tasks: [betaSolo] }];
+    const result = hoistChildrenIntoParentGroups(groups, {
+      items: (g) => g.tasks,
+      task: (t) => t,
+      withItems: (g, tasks) => ({ ...g, tasks }),
+    });
+    expect(result).toEqual(groups);
+    expect(result[0]).toBe(groups[0]);
   });
 });

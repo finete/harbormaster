@@ -21,3 +21,22 @@ export function repositoryLabel(
   if (count <= 1) return repo.id;
   return `${repo.id} — ${count} checkouts`;
 }
+
+/** Short-name label for repository-less (scratch) tasks; also their sidebar group label. */
+export const SCRATCH_REPO_LABEL = "scratch";
+
+/**
+ * A task's short repository name — the last path segment of its
+ * `repositoryId` ("github.com/org/repo" -> "repo"), or "scratch" when it
+ * has none. The one renderer-side copy of core's `repoShortName`
+ * (engines/board-grouping.ts): the sidebar's repo groups and every card's
+ * repo chip (TaskCard / SidebarTaskRow) all read it from here.
+ */
+export function taskRepoLabel(task: {
+  repositoryId?: string | undefined;
+}): string {
+  const id = task.repositoryId?.trim();
+  if (!id) return SCRATCH_REPO_LABEL;
+  const parts = id.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? id;
+}

@@ -23,6 +23,7 @@ import {
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
+import { RepoChip } from "./RepoChip";
 import {
   activityTimestamp,
   pullRequestUrl,
@@ -498,6 +499,7 @@ export function SidebarTaskRow({
           >
             {task.branch ?? ""}
           </span>
+          <RepoChip task={task} testId="sidebar-row-repo-chip" />
           <span
             data-testid="state-chip"
             data-state={state}
