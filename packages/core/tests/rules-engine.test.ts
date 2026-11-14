@@ -33,7 +33,12 @@ import { diffSnapshots } from "../src/engines/rules/snapshot-diff.js";
 import { toRuleTaskView } from "../src/engines/rules/views.js";
 
 const parse = (text: string, file = "rules.yaml", repositoryId?: string) =>
-  parseRuleFile({ file, text, ...(repositoryId ? { repositoryId } : {}) });
+  parseRuleFile({
+    file,
+    path: `/state/rules/${file}`,
+    text,
+    ...(repositoryId ? { repositoryId } : {}),
+  });
 
 describe("rules files", () => {
   it("parses rules with file and line numbers for the rule and each action", () => {
@@ -49,6 +54,7 @@ rules:
       - action: inbox
         with: { title: hi }
   - id: two
+    label: two
     on: [a.b, c.*]
     do: [{ action: "js:./x.mjs#fn" }]
 `);
@@ -65,35 +71,44 @@ rules:
         ],
         file: "rules.yaml",
         line: 3,
+        condition: {
+          kind: "cel",
+          source: 'task.state == "dev"',
+          outline: { kind: "leaf", text: 'task.state == "dev"' },
+        },
       },
       {
         id: "two",
+        label: "two",
         on: ["a.b", "c.*"],
-        do: [{ action: "js:./x.mjs#fn", line: 14 }],
+        do: [{ action: "js:./x.mjs#fn", line: 15 }],
         file: "rules.yaml",
         line: 12,
+        condition: { kind: "always" },
       },
     ]);
+    expect(file.path).toBe("/state/rules/rules.yaml");
   });
 
   it("rejects (whole file) bad YAML, schema violations, duplicate ids and invalid CEL", () => {
     expect(parse("rules: [\n").problems[0]).toMatch(/^rules\.yaml: /);
     const schema = parse(
-      "rules:\n  - id: x\n    on: a\n    do:\n      - action: move\n        with: { to: sideways }\n",
+      "rules:\n  - id: x\n    label: x\n    on: a\n    do:\n      - action: move\n        with: { to: sideways }\n",
     );
     expect(schema.rules).toEqual([]);
     expect(schema.problems.join("\n")).toContain("/rules/0/do/0/with/to");
     expect(
-      parse("rules:\n  - id: x\n    on: a\n    do: [{ action: teleport }]\n")
-        .problems.length,
+      parse(
+        "rules:\n  - id: x\n    label: x\n    on: a\n    do: [{ action: teleport }]\n",
+      ).problems.length,
     ).toBeGreaterThan(0);
     expect(
       parse(
-        "rules:\n  - { id: x, on: a, do: [{ action: move, with: { to: dev } }] }\n  - { id: x, on: b, do: [{ action: move, with: { to: dev } }] }\n",
+        "rules:\n  - { id: x, label: x, on: a, do: [{ action: move, with: { to: dev } }] }\n  - { id: x, label: x, on: b, do: [{ action: move, with: { to: dev } }] }\n",
       ).problems,
     ).toEqual([expect.stringContaining('duplicate rule id "x"')]);
     const cel = parse(
-      "rules:\n  - id: x\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: dev } }]\n",
+      "rules:\n  - id: x\n    label: x\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: dev } }]\n",
     );
     expect(cel.rules).toEqual([]);
     expect(cel.problems).toEqual([
@@ -103,7 +118,7 @@ rules:
 
   it("a repository file replaces the global list for that repository, even when empty", () => {
     const global = parse(
-      "rules:\n  - { id: g, on: a, do: [{ action: move, with: { to: dev } }] }\n",
+      "rules:\n  - { id: g, label: g, on: a, do: [{ action: move, with: { to: dev } }] }\n",
     );
     const repo = parse(
       "rules: []\n",
@@ -318,26 +333,32 @@ describe("matching and arbitration", () => {
   const files = [
     parse(`rules:
   - id: illegal-first
+    label: illegal-first
     on: github.pr.*
     do: [{ action: move, with: { to: await, kind: deploy, input: { stage: pre } } }]
   - id: noop
+    label: noop
     on: github.pr.*
     do: [{ action: move, with: { to: dev } }]
   - id: winner
+    label: winner
     on: github.pr.*
     do:
       - { action: move, with: { to: await, kind: review } }
       - { action: inbox, with: { title: "moved \${task.id}" } }
   - id: loser
+    label: loser
     on: [github.pr.mergedChanged, harbormaster.task.*]
     do:
       - { action: move, with: { to: done } }
       - { action: message, with: { text: hi } }
   - id: broken-condition
+    label: broken-condition
     on: github.pr.*
     if: facts.nope.x == 1
     do: [{ action: move, with: { to: done } }]
   - id: not-matching
+    label: not-matching
     on: version-endpoint.*
     do: [{ action: move, with: { to: done } }]
 `),
@@ -382,8 +403,9 @@ describe("matching and arbitration", () => {
     const ctx = context(
       [
         parse(`rules:
-  - { id: noop, on: github.pr.*, do: [{ action: move, with: { to: dev } }] }
+  - { id: noop, label: noop, on: github.pr.*, do: [{ action: move, with: { to: dev } }] }
   - id: deploy
+    label: deploy
     on: github.pr.*
     do: [{ action: move, with: { to: await, kind: deploy, input: { stage: pre } } }]
 `),
@@ -419,6 +441,7 @@ describe("matching and arbitration", () => {
     const jsFiles = [
       parse(`rules:
   - id: js
+    label: js
     on: github.pr.*
     if: "js:./checks.mjs#isHotfix"
     do:

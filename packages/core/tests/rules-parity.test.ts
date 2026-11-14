@@ -232,7 +232,13 @@ class RulesBoard {
       rules: {
         hasGlobalRules: async () => true,
         writeDefaults: async () => {},
-        readRuleFiles: async () => [{ file: "rules.yaml", text: rulesYaml }],
+        readRuleFiles: async () => [
+          {
+            file: "rules.yaml",
+            path: "/state/rules/rules.yaml",
+            text: rulesYaml,
+          },
+        ],
         importModule: async () => {
           throw new Error("no modules");
         },

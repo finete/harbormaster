@@ -3215,7 +3215,16 @@ export class CoreManager implements CoreCommands {
   }
 
   async listRules(): Promise<RulesListing> {
-    return this.requireRules().listRules();
+    const rules = this.requireRules();
+    const config = await this.deps.config.load();
+    return rules.listRules(config.automation);
+  }
+
+  async setRulesEnabled(enabled: boolean): Promise<void> {
+    if (typeof enabled !== "boolean") {
+      throw new Error("enabled must be true or false");
+    }
+    await this.applySettings({ automation: enabled });
   }
 
   async listAddons(): Promise<AddonInfo[]> {

@@ -3,7 +3,7 @@
 // `event`, `task`, `facts`, `repo` (see contracts/rules.ts RuleVariables).
 // Optional chaining (`a.?b.orValue(x)`) is enabled.
 
-import { Environment } from "@marcbachmann/cel-js";
+import { type ASTNode, Environment } from "@marcbachmann/cel-js";
 import type { RuleVariables } from "../../contracts/rules.js";
 
 const environment = new Environment({
@@ -12,7 +12,9 @@ const environment = new Environment({
   homogeneousAggregateLiterals: false,
 });
 
-type Compiled = (context: Record<string, unknown>) => unknown;
+type Compiled = ((context: Record<string, unknown>) => unknown) & {
+  ast: ASTNode;
+};
 
 /** Parsed expressions by source text (rules are re-read every tick). */
 const compiled = new Map<string, Compiled>();
@@ -30,6 +32,11 @@ function compile(expression: string): Compiled {
 /** Throws a parse error message when `expression` is not valid CEL. */
 export function assertValidCel(expression: string): void {
   compile(expression);
+}
+
+/** The parser's AST for `expression` (throws the parse error when invalid). */
+export function parseCelAst(expression: string): ASTNode {
+  return compile(expression).ast;
 }
 
 /** Evaluate a CEL expression; CEL ints come back as JS numbers. */

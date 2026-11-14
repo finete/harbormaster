@@ -51,6 +51,7 @@ async function setup(files: Record<string, string>, config: object = {}) {
 
 const RULES = `rules:
   - id: greet
+    label: greet
     on: harbormaster.task.appeared
     if: "js:./checks.mjs#isScratch"
     do:
@@ -64,6 +65,7 @@ const RULES = `rules:
       - action: message
         with: { text: hello }
   - id: spawn
+    label: spawn
     on: pinger.ping
     do:
       - action: "js:./actions.mjs#spawn"
@@ -160,7 +162,7 @@ describe("rules runtime through createCore", () => {
         entry.kind === "action",
     );
     // The line of the `do` entry that ran (the rule itself starts at line 2).
-    expect(action).toMatchObject({ file: "rules.yaml", line: 6 });
+    expect(action).toMatchObject({ file: "rules.yaml", line: 7 });
 
     // A second tick: nothing changed, nothing new happens.
     expect((await core.commands.refresh()).warnings).toEqual([]);
@@ -188,6 +190,7 @@ describe("rules runtime through createCore", () => {
       {
         "rules/rules.yaml": `rules:
   - id: fyi
+    label: fyi
     on: harbormaster.task.appeared
     do:
       - action: inbox
@@ -253,9 +256,11 @@ describe("rules runtime through createCore", () => {
       join(stateDir, "rules", "rules.yaml"),
       `rules:
   - id: would-inbox
+    label: would-inbox
     on: harbormaster.task.*
     do: [{ action: inbox, with: { title: "hi \${task.title}" } }]
   - id: would-move
+    label: would-move
     on: harbormaster.task.appeared
     do: [{ action: move, with: { to: await, kind: slack } }]
 `,
@@ -359,5 +364,230 @@ describe("rules runtime through createCore", () => {
     await core.commands.refresh();
     expect(await core.commands.listInbox()).toEqual([]);
     expect(await core.commands.listEvents()).toEqual([]);
+  });
+});
+
+describe("the Rules page data (listRules / listEvents / setRulesEnabled)", () => {
+  const GLOBAL = `rules:
+  - id: r1
+    label: Needs changes
+    on: github.pr.*
+    if: task.state == "awaiting" && (a || b)
+    do: [{ action: move, with: { to: dev } }]
+  - id: r2
+    label: Quiet
+    on: github.pr.*
+    do: [{ action: move, with: { to: dev } }]
+`;
+  const REPO = `rules:
+  - id: r1
+    label: Repo override
+    on: github.pr.*
+    if: "js:./checks.mjs#fn"
+    do: [{ action: move, with: { to: dev } }]
+`;
+  const act = (
+    at: string,
+    file: string,
+    outcome: string,
+    extra: object = {},
+  ): string =>
+    JSON.stringify({
+      kind: "action",
+      at,
+      ruleId: "r1",
+      file,
+      line: 2,
+      eventId: "e1",
+      eventType: "github.pr.stateChanged",
+      action: "move",
+      outcome,
+      ...extra,
+    });
+  const REPO_FILE = "repos/github.com/acme/api.yaml";
+
+  async function seeded(config: object = {}) {
+    const lines = (entries: string[]) => `${entries.join("\n")}\n`;
+    return setup(
+      {
+        "rules/rules.yaml": GLOBAL,
+        [`rules/${REPO_FILE}`]: REPO,
+        // Outside the 30-day window ending 2026-03-01T10:00Z.
+        "events/2026-01-15.jsonl": lines([
+          act("2026-01-15T10:00:00.000Z", "rules.yaml", "applied"),
+        ]),
+        "events/2026-02-20.jsonl": lines([
+          JSON.stringify({
+            kind: "event",
+            at: "2026-02-20T09:00:00.000Z",
+            taskId: "t1",
+            event: {
+              specversion: "1.0",
+              id: "e1",
+              source: "github",
+              type: "github.pr.stateChanged",
+              subject: "task/t1",
+              time: "2026-02-20T09:00:00.000Z",
+            },
+          }),
+          act("2026-02-20T10:00:00.000Z", "rules.yaml", "applied", {
+            taskId: "t1",
+          }),
+          act("2026-02-20T11:00:00.000Z", REPO_FILE, "stayed", {
+            taskId: "t2",
+            detail: "dirty worktree",
+          }),
+        ]),
+        "events/2026-02-28.jsonl": lines([
+          act("2026-02-28T10:00:00.000Z", "rules.yaml", "failed", {
+            taskId: "t3",
+            detail: "boom",
+          }),
+          JSON.stringify({
+            kind: "warning",
+            at: "2026-02-28T10:00:01.000Z",
+            message: "condition error",
+            ruleId: "r1",
+            file: "rules.yaml",
+            line: 2,
+          }),
+        ]),
+      },
+      config,
+    );
+  }
+
+  it("listRules carries the absolute path, the on/off state, conditions and 30-day activity per (file, rule)", async () => {
+    const { core, stateDir } = await seeded();
+    const listing = await core.commands.listRules();
+    expect(listing.enabled).toBe(true);
+    expect(listing.activityWindowDays).toBe(30);
+    expect(
+      listing.files.map((file) => [file.file, file.path, file.repositoryId]),
+    ).toEqual([
+      ["rules.yaml", join(stateDir, "rules", "rules.yaml"), undefined],
+      [
+        REPO_FILE,
+        join(stateDir, "rules", "repos", "github.com", "acme", "api.yaml"),
+        "github.com/acme/api",
+      ],
+    ]);
+    const [global, repo] = listing.files;
+    expect(global?.rules.map((rule) => [rule.id, rule.label])).toEqual([
+      ["r1", "Needs changes"],
+      ["r2", "Quiet"],
+    ]);
+    expect(global?.rules[0]?.condition).toEqual({
+      kind: "cel",
+      source: 'task.state == "awaiting" && (a || b)',
+      outline: {
+        kind: "all",
+        items: [
+          { kind: "leaf", text: 'task.state == "awaiting"' },
+          {
+            kind: "any",
+            items: [
+              { kind: "leaf", text: "a" },
+              { kind: "leaf", text: "b" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(global?.rules[0]?.activity).toEqual({
+      lastAt: "2026-02-28T10:00:00.000Z",
+      lastOutcome: "failed",
+      lastDetail: "boom",
+      lastTaskId: "t3",
+      count: 2,
+    });
+    expect(global?.rules[1]).not.toHaveProperty("activity");
+    expect(repo?.rules[0]?.condition).toEqual({
+      kind: "js",
+      ref: "js:./checks.mjs#fn",
+    });
+    expect(repo?.rules[0]?.activity).toEqual({
+      lastAt: "2026-02-20T11:00:00.000Z",
+      lastOutcome: "stayed",
+      lastDetail: "dirty worktree",
+      lastTaskId: "t2",
+      count: 1,
+    });
+  });
+
+  it("listEvents keeps one rule's actions and warnings, optionally of one file", async () => {
+    const { core } = await seeded();
+    const summary = (entries: AuditEntry[]) =>
+      entries.map((entry) => [
+        entry.kind,
+        entry.kind === "event" ? undefined : entry.file,
+        entry.at,
+      ]);
+    expect(summary(await core.commands.listEvents({ ruleId: "r1" }))).toEqual([
+      ["action", "rules.yaml", "2026-01-15T10:00:00.000Z"],
+      ["action", "rules.yaml", "2026-02-20T10:00:00.000Z"],
+      ["action", REPO_FILE, "2026-02-20T11:00:00.000Z"],
+      ["action", "rules.yaml", "2026-02-28T10:00:00.000Z"],
+      ["warning", "rules.yaml", "2026-02-28T10:00:01.000Z"],
+    ]);
+    expect(
+      summary(
+        await core.commands.listEvents({
+          ruleId: "r1",
+          file: "rules.yaml",
+          limit: 2,
+        }),
+      ),
+    ).toEqual([
+      ["action", "rules.yaml", "2026-02-28T10:00:00.000Z"],
+      ["warning", "rules.yaml", "2026-02-28T10:00:01.000Z"],
+    ]);
+    expect(
+      summary(
+        await core.commands.listEvents({ ruleId: "r1", file: REPO_FILE }),
+      ),
+    ).toEqual([["action", REPO_FILE, "2026-02-20T11:00:00.000Z"]]);
+    expect(await core.commands.listEvents({ ruleId: "r2" })).toEqual([]);
+    // Without a rule filter, events are still listed.
+    expect(await core.commands.listEvents({ taskId: "t1" })).toHaveLength(2);
+  });
+
+  it("setRulesEnabled writes config.automation, keeping every other key", async () => {
+    const { core, stateDir } = await seeded({ customKey: "kept" });
+    await core.commands.setRulesEnabled(false);
+    expect((await core.commands.listRules()).enabled).toBe(false);
+    const written = JSON.parse(
+      await readFile(join(stateDir, "config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written).toMatchObject({ automation: false, customKey: "kept" });
+    await core.commands.setRulesEnabled(true);
+    expect((await core.commands.listRules()).enabled).toBe(true);
+    await expect(
+      core.commands.setRulesEnabled("yes" as unknown as boolean),
+    ).rejects.toThrow("enabled must be true or false");
+  });
+
+  it("a rule without a label is a load problem: the file contributes no rules", async () => {
+    const { core } = await setup({
+      "rules/rules.yaml": `rules:
+  - id: labelled
+    label: Fine
+    on: a
+    do: [{ action: move, with: { to: dev } }]
+  - id: unlabelled
+    on: a
+    do: [{ action: move, with: { to: dev } }]
+  - id: empty
+    label: ""
+    on: a
+    do: [{ action: move, with: { to: dev } }]
+`,
+    });
+    const [file] = (await core.commands.listRules()).files;
+    expect(file?.rules).toEqual([]);
+    expect(file?.problems).toEqual([
+      'rules.yaml:6: rule "unlabelled": label is required',
+      'rules.yaml:9: rule "empty": label is required',
+    ]);
   });
 });

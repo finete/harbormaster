@@ -182,6 +182,7 @@ function applyPatch(
   if (patch.onboardingCompletedAt !== undefined) {
     raw.onboardingCompletedAt = patch.onboardingCompletedAt;
   }
+  if (patch.automation !== undefined) raw.automation = patch.automation;
   return raw;
 }
 

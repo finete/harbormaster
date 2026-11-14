@@ -11,8 +11,8 @@
 //   harbormaster inbox claim --task <id> [--idle true|false]
 //   harbormaster inbox list [--priority|--other] [--json]
 //   harbormaster inbox resolve <id> [<button>]
-//   harbormaster events [--task <id>] [--since <time>] [--limit <n>] [--json]
-//   harbormaster rules list | rules check [--task <id>] [--replay <from>]
+//   harbormaster events [--task <id>] [--rule <id> [--file <f>]] [--since <time>] [--limit <n>] [--json]
+//   harbormaster rules list | rules on | rules off | rules check [--task <id>] [--replay <from>]
 //   harbormaster addons list
 //
 // The inbox / events / rules / addons verbs are the core's user operations
@@ -124,8 +124,9 @@ function usage(): string {
     "  inbox claim --task <id> [--idle true|false]  Claim a task's inbox messages as JSON",
     "  inbox list [--priority|--other] [--json]  Items that need you (rule items, approvals)",
     "  inbox resolve <id> [<button>]             Press an item's button (default: dismiss)",
-    "  events [--task <id>] [--since <t>] [--limit <n>] [--json]  The rules audit log",
-    "  rules list [--json]                       Rules files as loaded, with problems",
+    "  events [--task <id>] [--rule <id> [--file <f>]] [--since <t>] [--limit <n>] [--json]  The rules audit log",
+    "  rules list [--json]                       Rules as loaded: label, last fired, problems",
+    "  rules on | rules off                      Turn the rules on or off",
     "  rules check [--task <id>] [--replay <from>] [--json]  Dry run over recorded events",
     "  addons list [--json]                      Built-in sources and installed addons",
     "",
@@ -306,7 +307,7 @@ export async function main(
       const flags = parseFlags(rest);
       return await runOp(
         "events",
-        pick(flags, ["task", "since", "limit"]),
+        pick(flags, ["task", "rule", "file", "since", "limit"]),
         flags,
         socketPath,
         io,
@@ -318,6 +319,16 @@ export async function main(
       if (verb === "list") {
         return await runOp("rules_list", {}, flags, socketPath, io);
       }
+      if (verb === "on" || verb === "off") {
+        pick(flags, []);
+        return await runOp(
+          "rules_enable",
+          { enabled: verb === "on" },
+          flags,
+          socketPath,
+          io,
+        );
+      }
       if (verb === "check") {
         return await runOp(
           "rules_check",
@@ -327,7 +338,9 @@ export async function main(
           io,
         );
       }
-      throw new UsageError("usage: rules list | rules check");
+      throw new UsageError(
+        "usage: rules list | rules on | rules off | rules check",
+      );
     }
     if (command === "addons") {
       const [verb, ...flagArgs] = rest;

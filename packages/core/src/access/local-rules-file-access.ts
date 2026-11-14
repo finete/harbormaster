@@ -37,15 +37,19 @@ export class LocalRulesFileAccess implements RulesFileAccess {
 
   async readRuleFiles(): Promise<RuleFileText[]> {
     const files: RuleFileText[] = [];
-    const global = await readOptional(join(this.dir, GLOBAL_FILE));
-    if (global !== undefined) files.push({ file: GLOBAL_FILE, text: global });
-    const reposRoot = join(this.dir, REPOS_DIR);
+    const globalPath = this.inside(GLOBAL_FILE);
+    const global = await readOptional(globalPath);
+    if (global !== undefined) {
+      files.push({ file: GLOBAL_FILE, path: globalPath, text: global });
+    }
+    const reposRoot = this.inside(REPOS_DIR);
     for (const path of await yamlFilesUnder(reposRoot)) {
       const text = await readOptional(path);
       if (text === undefined) continue;
       const rel = relative(reposRoot, path).split(sep).join("/");
       files.push({
         file: `${REPOS_DIR}/${rel}`,
+        path,
         repositoryId: rel.replace(/\.ya?ml$/, ""),
         text,
       });

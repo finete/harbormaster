@@ -10,7 +10,7 @@ import type {
   RuleFile,
   RuleFileText,
 } from "../../contracts/rules.js";
-import { assertValidCel } from "./cel.js";
+import { ruleConditionView } from "./outline.js";
 import { RULES_SCHEMA } from "./rules-schema.js";
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -28,6 +28,7 @@ export function repositoryRulesFile(repositoryId: string): string {
 export function parseRuleFile(source: RuleFileText): RuleFile {
   const base = {
     file: source.file,
+    path: source.path,
     ...(source.repositoryId ? { repositoryId: source.repositoryId } : {}),
   };
   const lineCounter = new LineCounter();
@@ -45,22 +46,33 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
     };
   }
   const data: unknown = document.toJS() ?? {};
-  if (!validateDocument(data)) {
-    return {
-      ...base,
-      rules: [],
-      problems: (validateDocument.errors ?? []).map(
-        (error) => `${source.file}: ${describeSchemaError(error)}`,
-      ),
-    };
-  }
-  const raw = (data as { rules: RawRule[] }).rules;
   const ruleNodes = document.get("rules", true);
   const lineOf = (node: unknown): number => {
     const range = (node as { range?: [number, number, number] } | undefined)
       ?.range;
     return range ? lineCounter.linePos(range[0]).line : 0;
   };
+  if (!validateDocument(data)) {
+    return {
+      ...base,
+      rules: [],
+      problems: (validateDocument.errors ?? []).map((error) => {
+        const missingLabel = missingLabelRule(error);
+        if (missingLabel === undefined) {
+          return `${source.file}: ${describeSchemaError(error)}`;
+        }
+        const node = isSeq(ruleNodes)
+          ? ruleNodes.items[missingLabel]
+          : undefined;
+        const id = (data as { rules?: Array<{ id?: unknown }> }).rules?.[
+          missingLabel
+        ]?.id;
+        const name = typeof id === "string" ? id : `#${missingLabel + 1}`;
+        return `${source.file}:${lineOf(node)}: rule "${name}": label is required`;
+      }),
+    };
+  }
+  const raw = (data as { rules: RawRule[] }).rules;
   const problems: string[] = [];
   const seen = new Set<string>();
   const rules: Rule[] = raw.map((entry, index) => {
@@ -71,14 +83,11 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
       problems.push(`${source.file}:${line}: duplicate rule id "${entry.id}"`);
     }
     seen.add(entry.id);
-    if (entry.if !== undefined && !entry.if.startsWith("js:")) {
-      try {
-        assertValidCel(entry.if);
-      } catch (error) {
-        problems.push(
-          `${source.file}:${line}: rule "${entry.id}" has an invalid condition: ${firstLine(errorMessage(error))}`,
-        );
-      }
+    const condition = ruleConditionView(entry.if);
+    if (condition.kind === "cel-invalid") {
+      problems.push(
+        `${source.file}:${line}: rule "${entry.id}" has an invalid condition: ${condition.error}`,
+      );
     }
     const actions: RuleActionSpec[] = entry.do.map((action, actionIndex) => {
       const actionNode = isSeq(doNodes)
@@ -93,12 +102,13 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
     });
     return {
       id: entry.id,
-      ...(entry.label !== undefined ? { label: entry.label } : {}),
+      label: entry.label,
       on: Array.isArray(entry.on) ? entry.on : [entry.on],
       ...(entry.if !== undefined ? { if: entry.if } : {}),
       do: actions,
       file: source.file,
       line,
+      condition,
     };
   });
   if (problems.length > 0) return { ...base, rules: [], problems };
@@ -107,7 +117,7 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
 
 interface RawRule {
   id: string;
-  label?: string;
+  label: string;
   on: string | string[];
   if?: string;
   do: Array<{ action: string; with?: Record<string, unknown> }>;
@@ -152,6 +162,18 @@ export function matchesEventType(pattern: string, type: string): boolean {
   return new RegExp(`^${regex}$`).test(type);
 }
 
+/** The rule index a schema error reports a missing (or empty) `label` for. */
+function missingLabelRule(error: ErrorObject): number | undefined {
+  const missing =
+    error.keyword === "required" &&
+    (error.params as { missingProperty?: string }).missingProperty === "label"
+      ? error.instancePath.match(/^\/rules\/(\d+)$/)
+      : error.keyword === "minLength"
+        ? error.instancePath.match(/^\/rules\/(\d+)\/label$/)
+        : null;
+  return missing?.[1] !== undefined ? Number(missing[1]) : undefined;
+}
+
 function describeSchemaError(error: ErrorObject): string {
   const at = error.instancePath || "(root)";
   if (error.keyword === "additionalProperties") {
@@ -165,10 +187,6 @@ function describeSchemaError(error: ErrorObject): string {
     )}`;
   }
   return `${at} ${error.message ?? "is invalid"}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function firstLine(text: string): string {

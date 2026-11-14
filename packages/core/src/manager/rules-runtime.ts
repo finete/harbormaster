@@ -44,6 +44,12 @@ import type {
 } from "../contracts/rules.js";
 import type { ConfigAccess } from "../contracts/services.js";
 import { builtinAwaitingKinds } from "../engines/awaiting-kinds.js";
+import {
+  foldRuleActivity,
+  RULE_ACTIVITY_WINDOW_DAYS,
+  ruleActivityKey,
+  ruleActivitySince,
+} from "../engines/rules/activity.js";
 import { validateAddons } from "../engines/rules/addons.js";
 import { defaultRulesYaml } from "../engines/rules/default-rules.js";
 import {
@@ -403,10 +409,14 @@ export class RulesRuntime {
       await this.deps.audit.read(normalizeSince(filter.since))
     ).filter(
       (entry) =>
-        !filter.taskId ||
-        entry.taskId === filter.taskId ||
-        (entry.kind === "event" &&
-          entry.event.subject === `task/${filter.taskId}`),
+        (!filter.taskId ||
+          entry.taskId === filter.taskId ||
+          (entry.kind === "event" &&
+            entry.event.subject === `task/${filter.taskId}`)) &&
+        (!filter.ruleId ||
+          (entry.kind !== "event" && entry.ruleId === filter.ruleId)) &&
+        (!filter.file ||
+          (entry.kind !== "event" && entry.file === filter.file)),
     );
     const limit = filter.limit ?? 500;
     return entries.slice(Math.max(0, entries.length - limit));
@@ -431,8 +441,28 @@ export class RulesRuntime {
     );
   }
 
-  async listRules(): Promise<RulesListing> {
-    return { files: await this.loadRuleFiles([], true) };
+  /** Every rules file as loaded, each rule with its activity over the window. */
+  async listRules(enabled: boolean): Promise<RulesListing> {
+    const now = this.deps.now();
+    const windowDays = RULE_ACTIVITY_WINDOW_DAYS;
+    const [files, entries] = await Promise.all([
+      this.loadRuleFiles([], true),
+      this.deps.audit
+        .read(ruleActivitySince(now, windowDays))
+        .catch((): AuditEntry[] => []),
+    ]);
+    const activity = foldRuleActivity(entries, now, windowDays);
+    return {
+      files: files.map((file) => ({
+        ...file,
+        rules: file.rules.map((rule) => {
+          const summary = activity.get(ruleActivityKey(rule.file, rule.id));
+          return summary ? { ...rule, activity: summary } : rule;
+        }),
+      })),
+      enabled,
+      activityWindowDays: windowDays,
+    };
   }
 
   async listAddons(): Promise<AddonInfo[]> {
@@ -543,7 +573,7 @@ export class RulesRuntime {
     }
     const files: RuleFile[] = [];
     for (const text of texts) {
-      const key = `${text.file}\u0000${text.text}`;
+      const key = `${text.file}\u0000${text.path}\u0000${text.text}`;
       let parsed = this.parsedFiles.get(key);
       if (!parsed) {
         parsed = parseRuleFile(text);
