@@ -146,6 +146,20 @@ export function SidebarRowContextMenu({
     top: Math.min(y, window.innerHeight - items.length * 28 - 16),
   };
 
+  // A flyout taller than the room below its item slides up to fit (never
+  // above the window's top edge): long "Open in…" app lists otherwise
+  // spill off the bottom when the row sits low in the sidebar.
+  const clampFlyout = (element: HTMLDivElement | null): void => {
+    if (!element) return;
+    element.style.transform = "";
+    const rect = element.getBoundingClientRect();
+    const overflow = rect.bottom - (window.innerHeight - 8);
+    if (overflow > 0) {
+      const shift = Math.min(overflow, Math.max(0, rect.top - 8));
+      element.style.transform = `translateY(-${shift}px)`;
+    }
+  };
+
   // Flyouts open to the left when there is no room on the right.
   const flyoutLeft = style.left + 200 + 170 > window.innerWidth;
 
@@ -205,6 +219,7 @@ export function SidebarRowContextMenu({
             {item.submenu && openSubmenu === item.key && (
               <div
                 role="menu"
+                ref={clampFlyout}
                 data-testid={`${testId}-submenu-${item.key}`}
                 className={cn(
                   "absolute top-0 min-w-[160px] rounded-lg border border-border bg-popover p-1",

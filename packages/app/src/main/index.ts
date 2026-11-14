@@ -784,6 +784,9 @@ function registerCoreIpc(): void {
     core.commands.rulesCheck(input),
   );
   ipcMain.handle("core:listRules", () => core.commands.listRules());
+  ipcMain.handle("core:setRulesEnabled", (_event, enabled: unknown) =>
+    core.commands.setRulesEnabled(enabled === true),
+  );
   ipcMain.handle("core:listAddons", () => core.commands.listAddons());
   // The last lines of a paneless task's screen (main's headless mirror);
   // `null` when a pane shows it (the renderer reads its own xterm then).
@@ -1104,6 +1107,15 @@ function pushRefreshWarning(warning: string | undefined): void {
   }
 }
 
+// Every finished refresh tick: views derived from refresh-time state (the
+// Rules page's listing and activity) re-read on it. Not deduped: it is
+// the tick itself.
+function pushRefreshed(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "core:refreshed", undefined);
+  }
+}
+
 // Last connectivity state pushed to windows, deduped the same way as
 // refresh warnings: a long run of identical ticks (every offline poll, or
 // every healthy 30s tick) never re-announces a state the renderer's banner
@@ -1147,6 +1159,7 @@ async function performRefresh(): Promise<{
     pushRefreshWarning(
       result.warnings.length > 0 ? result.warnings.join("; ") : undefined,
     );
+    pushRefreshed();
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1155,6 +1168,7 @@ async function performRefresh(): Promise<{
     }
     console.error("[main] refresh failed:", error);
     pushRefreshWarning(message);
+    pushRefreshed();
     return { warnings: [message] };
   }
 }
@@ -1612,14 +1626,18 @@ function registerShellIpc(): void {
         console.warn("[main] open-in refused a path outside the allowlist");
         return { ok: false, error: "Path is outside the allowed folders" };
       }
-      const dir = resolvePath(targetPath);
-      let isDirectory = false;
+      let dir = resolvePath(targetPath);
+      let openable = false;
       try {
-        isDirectory = statSync(dir).isDirectory();
+        const stat = statSync(dir);
+        // A file (the Rules page's "Open in editor" on a rules YAML): an
+        // editor opens the file itself, any other app its folder.
+        openable = stat.isDirectory() || stat.isFile();
+        if (stat.isFile() && app.kind !== "editor") dir = dirname(dir);
       } catch {
         // missing: refused below
       }
-      if (!isDirectory) return { ok: false, error: "Folder does not exist" };
+      if (!openable) return { ok: false, error: "Folder does not exist" };
       const argv = buildOpenInArgv(app, dir, currentOpenInPlatform());
       if (!argv.ok) return argv;
       const stub = openInStubFile();
@@ -1884,7 +1902,21 @@ function installApplicationMenu(): void {
       : []),
     { role: "fileMenu" },
     { role: "editMenu" },
-    { role: "viewMenu" },
+    // The stock View menu minus Force Reload: its Cmd/Ctrl+Shift+R
+    // accelerator is the Rules page shortcut (renderer App.tsx).
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
     { role: "windowMenu" },
     {
       role: "help",

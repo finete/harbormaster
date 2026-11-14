@@ -10,3 +10,10 @@ export function isMacPlatform(platform: string = navigator.platform): boolean {
 export function modKeyLabel(platform: string = navigator.platform): string {
   return isMacPlatform(platform) ? "⌘" : "Ctrl+";
 }
+
+/** The Rules page shortcut: "⌘⇧R" on macOS, "Ctrl+Shift+R" elsewhere. */
+export function rulesShortcutLabel(
+  platform: string = navigator.platform,
+): string {
+  return isMacPlatform(platform) ? "⌘⇧R" : "Ctrl+Shift+R";
+}

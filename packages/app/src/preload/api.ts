@@ -63,6 +63,8 @@ export type {
   AddonInfo,
   AuditActionEntry,
   AuditEntry,
+  AuditEventEntry,
+  AuditWarningEntry,
   AwaitingKind,
   AwaitingKindField,
   AwaitingKindId,
@@ -70,6 +72,7 @@ export type {
   BoardChangedPayload,
   BoardColumn,
   BoardGroup,
+  CelOutline,
   CodeRootScan,
   CreateTaskActionInput,
   CreateTaskInput,
@@ -84,6 +87,7 @@ export type {
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
+  ListEventsFilter,
   MessageAttachment,
   MessageMode,
   MessageRoute,
@@ -101,6 +105,13 @@ export type {
   RepositoryCheckout,
   RepositoryInfo,
   ResolveInboxItemResult,
+  Rule,
+  RuleActionOutcome,
+  RuleActionSpec,
+  RuleActivity,
+  RuleConditionView,
+  RuleFile,
+  RulesListing,
   ScannedRepository,
   SetDefaultAgentInput,
   Task,
@@ -448,6 +459,8 @@ export interface HarbormasterApi {
      * Returns an unsubscribe fn.
      */
     onRefreshWarning(listener: (warning: string) => void): () => void;
+    /** Fires after every refresh tick (30s loop or manual), success or not: re-read refresh-derived views (the Rules page). */
+    onRefreshed(listener: () => void): () => void;
     /**
      * Subscribes to the main process's offline/reconnecting/restored banner
      * push channel (see `main/connectivity-loop.ts`): one state per actual
@@ -526,6 +539,8 @@ export interface HarbormasterApi {
     rulesCheck(input?: RulesCheckInput): Promise<RulesCheckResult>;
     /** Every rules file as loaded. See `CoreCommands.listRules`. */
     listRules(): Promise<RulesListing>;
+    /** Turn rules on/off (`config.automation`). See `CoreCommands.setRulesEnabled`. */
+    setRulesEnabled(enabled: boolean): Promise<void>;
     /** Built-in sources and addons. See `CoreCommands.listAddons`. */
     listAddons(): Promise<AddonInfo[]>;
     /** Last lines of a paneless task's screen (main's mirror); `null` when a pane shows it or nothing runs. */

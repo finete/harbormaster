@@ -20,6 +20,7 @@ import type {
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
+  ListEventsFilter,
   MessageMode,
   MessagingChangedPayload,
   MoveTaskOptions,
@@ -35,6 +36,7 @@ import type {
   ReopenTaskInput,
   RepositoryInfo,
   ResolveInboxItemResult,
+  RulesListing,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -218,6 +220,11 @@ const api: HarbormasterApi = {
       ipcRenderer.on("core:refresh-warning", handler);
       return () => ipcRenderer.removeListener("core:refresh-warning", handler);
     },
+    onRefreshed: (listener: () => void): (() => void) => {
+      const handler = (): void => listener();
+      ipcRenderer.on("core:refreshed", handler);
+      return () => ipcRenderer.removeListener("core:refreshed", handler);
+    },
     onConnectivityChanged: (
       listener: (state: ConnectivityState) => void,
     ): (() => void) => {
@@ -293,14 +300,14 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:parsePullRequestUrl", url),
     previewPullRequest: (url: string): Promise<PullRequestPreview> =>
       ipcRenderer.invoke("core:previewPullRequest", url),
-    listEvents: (filter?: {
-      taskId?: string;
-      since?: string;
-      limit?: number;
-    }): Promise<AuditEntry[]> => ipcRenderer.invoke("core:listEvents", filter),
+    listEvents: (filter?: ListEventsFilter): Promise<AuditEntry[]> =>
+      ipcRenderer.invoke("core:listEvents", filter),
     rulesCheck: (input?: { taskId?: string; replayFrom?: string }) =>
       ipcRenderer.invoke("core:rulesCheck", input),
-    listRules: () => ipcRenderer.invoke("core:listRules"),
+    listRules: (): Promise<RulesListing> =>
+      ipcRenderer.invoke("core:listRules"),
+    setRulesEnabled: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke("core:setRulesEnabled", enabled),
     listAddons: (): Promise<AddonInfo[]> =>
       ipcRenderer.invoke("core:listAddons"),
     terminalTail: (taskId: string, count?: number): Promise<string | null> =>

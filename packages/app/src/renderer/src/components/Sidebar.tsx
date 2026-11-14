@@ -26,6 +26,7 @@ import {
   ChevronsRight,
   Inbox,
   LayoutGrid,
+  ListChecks,
   Pencil,
   Pin,
   Plus,
@@ -49,7 +50,7 @@ import {
   useUnreadTaskIds,
 } from "../core-client";
 import { defaultOpenInApp } from "../lib/open-in";
-import { modKeyLabel } from "../lib/platform";
+import { modKeyLabel, rulesShortcutLabel } from "../lib/platform";
 import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
 import {
@@ -341,6 +342,8 @@ export function Sidebar({
   onOpenInbox,
   inboxCount,
   inboxActive,
+  onOpenRules,
+  rulesActive,
   onNewTask,
   draftLabel,
   draftFocused,
@@ -364,6 +367,10 @@ export function Sidebar({
   inboxCount: number;
   /** The inbox view is showing. */
   inboxActive: boolean;
+  /** Toggle the Rules page (App owns it; same as Cmd/Ctrl+Shift+R). */
+  onOpenRules: () => void;
+  /** The Rules page is showing. */
+  rulesActive: boolean;
   /** Open/focus THE new-task draft (same path as Cmd/Ctrl+N). */
   onNewTask: () => void;
   /** Live label of the new-task draft row; `null` = no draft exists. */
@@ -377,6 +384,8 @@ export function Sidebar({
     inboxCount > 0
       ? `Inbox: ${inboxCount} need${inboxCount === 1 ? "s" : ""} you (${modKeyLabel()}I)`
       : `Inbox: nothing needs you (${modKeyLabel()}I)`;
+  const rulesShortcut = rulesShortcutLabel();
+  const rulesTitle = `Rules: what each rule says and did (${rulesShortcut})`;
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const messagingStates = useMessagingStates();
@@ -1105,6 +1114,15 @@ export function Sidebar({
           />
           <SidebarNavItem
             compact
+            icon={<ListChecks aria-hidden />}
+            label="Rules"
+            active={rulesActive}
+            title={rulesTitle}
+            onClick={onOpenRules}
+            testId="rules-button-compact"
+          />
+          <SidebarNavItem
+            compact
             icon={<Inbox aria-hidden />}
             label="Inbox"
             badge={inboxCount}
@@ -1187,6 +1205,15 @@ export function Sidebar({
           shortcut={`${modKeyLabel()}B`}
           onClick={onShowBoard}
           testId="board-button"
+        />
+        <SidebarNavItem
+          icon={<ListChecks aria-hidden />}
+          label="Rules"
+          shortcut={rulesShortcut}
+          active={rulesActive}
+          title={rulesTitle}
+          onClick={onOpenRules}
+          testId="rules-button"
         />
         <SidebarNavItem
           icon={<Inbox aria-hidden />}

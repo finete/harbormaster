@@ -269,6 +269,15 @@ test.beforeAll(async () => {
   app.process().stderr?.on("data", onChunk);
   window = await app.firstWindow();
   await window.waitForLoadState("domcontentloaded");
+  // The whole fixture rail must fit without scrolling: a drop target at the
+  // list's bottom edge would trigger dnd-kit's edge auto-scroll mid-drag and
+  // move the rows out from under the pointer, confounding every drop.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(1280, 1000);
+  });
+  await expect
+    .poll(() => window.evaluate(() => innerHeight))
+    .toBeGreaterThan(900);
 
   const alphaId = `github.com/test/${ALPHA}`;
   const betaId = `github.com/test/${BETA}`;
