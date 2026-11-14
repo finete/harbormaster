@@ -70,6 +70,22 @@ users run `brew trust finete/tap` once (documented in the root README).
 3. Make sure `gh auth token --user finete` prints a token (`gh auth login`
    as finete otherwise).
 
+## New machine
+
+What a fresh Mac needs before `release/release.sh` works:
+
+1. Apple Silicon (the build is arm64-only) and **Xcode Command Line Tools**
+   (`xcode-select --install`): node-pty's `electron-rebuild` on `npm install`
+   and the ad-hoc `codesign` in the afterPack hook need them. Full Xcode is
+   not required.
+2. Node 24 / npm 11 (see `engines` in the root `package.json`), then
+   `npm install` in this repo.
+3. Homebrew with `gh`, logged in as `finete`: `gh auth login`, then check
+   `gh auth token --user finete` prints a token.
+4. The tap checkout next to this repo with the same identity pinning
+   (step 2 of "One-time setup" above).
+5. This repo's git identity pinned to `finete` (see `AGENTS.md`, "Identity").
+
 ## Cutting a release
 
 From a clean `main`:
