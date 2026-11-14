@@ -112,6 +112,8 @@ runs the hook. Real-key e2e is skipped when the key is absent.
 Replaces `engines/movers/*`, `contracts/addons.ts`, `StageHook` and the
 `movers` config. Terminology: **source** produces **events**; a **rule** has
 an event filter (`on`), a **condition** (`if`) and **actions** (`do`).
+The in-app **Rules page** (read-only list, sheet, Activity tab, on/off
+switch) is specified in `docs/rules-page.md`.
 
 ### Events
 
@@ -325,6 +327,7 @@ with the full gate green and the acceptance checked.
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
 | E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | merged |
+| F | Rules page (`docs/rules-page.md`): core activity fold + CEL outline + `setRulesEnabled` + mandatory `label`; app list/sheet/Activity/switch; sidebar entry + ⌘⇧R | Units per the doc; one e2e (`rules.spec.ts`) proven to fail with the page reverted | in progress |
 
 ## Follow-ups logged during merges
 
