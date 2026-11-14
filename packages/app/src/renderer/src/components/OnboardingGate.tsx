@@ -3,7 +3,8 @@
 // wizard is the whole window and the app is not mounted yet (nothing
 // restores or spawns behind it); "Welcome / Setup…" from the menu shows it
 // over the running app instead, so open panes stay alive. "Start" enters
-// the app with the New task composer open on the picked repository.
+// the app with the New task composer open on the picked repository; "Write
+// your first rule with your agent" opens it prefilled for the rules folder.
 
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
@@ -49,7 +50,7 @@ export function OnboardingGate(): JSX.Element {
   const finish = (result: OnboardingResult): void => {
     setComposerRequest((previous) => ({
       id: (previous?.id ?? 0) + 1,
-      ...(result.where ? { where: result.where } : {}),
+      ...result,
     }));
     setOverlay(false);
     setPhase("app");

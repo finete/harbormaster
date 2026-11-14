@@ -261,6 +261,9 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     await expect(window.getByTestId("onboarding-concepts")).toContainText(
       "rules.yaml",
     );
+    await expect(window.getByTestId("onboarding-write-rule")).toHaveText(
+      "Write your first rule with your agent",
+    );
     await expect(window.getByTestId("onboarding-start")).toContainText(
       "Start Harbormaster",
     );

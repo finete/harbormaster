@@ -1,11 +1,12 @@
 // The selected rule's slide-over (docs/rules-page.md decisions 3, 5, 10,
-// 15): non-modal, 560px, no scrim. Header (label, last-outcome dot,
+// 15): non-modal, 560px, no scrim (RulesView closes it on clicks outside
+// it that are not on a rule row). Header (label, last-outcome dot,
 // `id · file:line`, Open in editor), then On · If · Do and the rule's
 // recent activity (`listEvents({ ruleId, file, limit: 5 })`). `If` is
 // core's structure-only outline of the user's own CEL (never paraphrased);
 // `js:` and unparsable conditions show their raw text.
 import { ArrowRight, X } from "lucide-react";
-import type { JSX } from "react";
+import type { JSX, Ref } from "react";
 import { useEffect, useState } from "react";
 import type {
   AuditEntry,
@@ -26,6 +27,9 @@ import {
 import { cn } from "../lib/utils";
 import { OpenInButton } from "./OpenInButton";
 
+/** `data-menu-owner` of the sheet's portaled menus (exempt from click-outside). */
+export const RULE_SHEET_MENU_OWNER = "rule-sheet";
+
 export const JS_CONDITION_HINT = "custom JavaScript — open the file to read it";
 
 const SECTION =
@@ -34,6 +38,7 @@ const CHIP =
   "inline-flex items-center rounded-md border border-border bg-muted px-1.5 py-px font-mono text-[11px]";
 
 export function RuleSheet({
+  sheetRef,
   rule,
   path,
   now,
@@ -43,6 +48,8 @@ export function RuleSheet({
   onViewAllActivity,
   onClose,
 }: {
+  /** The sheet element, for the page's click-outside check. */
+  sheetRef?: Ref<HTMLElement>;
   rule: Rule;
   /** The rule file's absolute path (Open in editor). */
   path: string;
@@ -58,6 +65,7 @@ export function RuleSheet({
   const dot = ruleDot(rule.activity);
   return (
     <aside
+      ref={sheetRef}
       data-testid="rule-sheet"
       data-rule-id={rule.id}
       aria-label={`Rule ${rule.label}`}
@@ -77,7 +85,11 @@ export function RuleSheet({
           >
             {rule.label}
           </h2>
-          <OpenInButton path={path || undefined} testId="rule-sheet-open-in" />
+          <OpenInButton
+            path={path || undefined}
+            testId="rule-sheet-open-in"
+            menuOwner={RULE_SHEET_MENU_OWNER}
+          />
           <button
             type="button"
             data-testid="rule-sheet-close"

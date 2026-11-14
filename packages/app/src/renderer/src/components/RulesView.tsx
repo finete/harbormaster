@@ -11,7 +11,7 @@
 // they survive leaving and reopening the page within the session.
 import { ListChecks } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AuditEntry,
   RepositoryInfo,
@@ -38,7 +38,7 @@ import {
 } from "../lib/use-open-in";
 import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
-import { RuleSheet } from "./RuleSheet";
+import { RULE_SHEET_MENU_OWNER, RuleSheet } from "./RuleSheet";
 import { RulesActivity } from "./RulesActivity";
 import { RulesEditButton } from "./RulesEditButton";
 import { RulesList } from "./RulesList";
@@ -254,6 +254,30 @@ export function RulesView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [active, memory.tab, memory.selected, order, selectedKey, select, onBack]);
 
+  // Click outside closes the sheet (docs/rules-page.md #10): a pointerdown
+  // anywhere but the sheet or a rule row (rows swap it in place). The
+  // sheet's own Open-in menu is portaled out of it, so it is recognised by
+  // its `data-menu-owner`; while that menu is open, an outside click only
+  // dismisses the menu.
+  const sheetRef = useRef<HTMLElement>(null);
+  const sheetOpen = Boolean(selectedRule && selectedFile);
+  useEffect(() => {
+    if (!active || memory.tab !== "rules" || !sheetOpen) return;
+    const ownMenu = `[data-menu-owner="${RULE_SHEET_MENU_OWNER}"]`;
+    function onPointerDown(event: PointerEvent): void {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (sheetRef.current?.contains(target)) return;
+      if (document.querySelector(ownMenu)) return;
+      const element = target instanceof Element ? target : target.parentElement;
+      if (element?.closest('[data-testid^="rule-row-"]')) return;
+      select(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () =>
+      document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [active, memory.tab, sheetOpen, select]);
+
   // Keep the selected row in view as ↑/↓ move it.
   useEffect(() => {
     if (!selectedKey) return;
@@ -271,7 +295,9 @@ export function RulesView({
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
         <ListChecks className="h-4 w-4 text-foreground" aria-hidden />
-        <span className="text-sm font-medium">Rules</span>
+        <span className="text-sm font-medium" data-testid="rules-title">
+          Rules
+        </span>
         <Segmented
           ariaLabel="Rules tabs"
           size="sm"
@@ -346,6 +372,7 @@ export function RulesView({
               {selectedRule && selectedFile && (
                 <RuleSheet
                   key={selectedKey}
+                  sheetRef={sheetRef}
                   rule={selectedRule}
                   path={selectedFile.path}
                   now={now}
