@@ -10,6 +10,11 @@ import {
   NewTaskComposer,
   type NewTaskOutcome,
 } from "./components/NewTaskComposer";
+import {
+  INITIAL_RULES_PAGE,
+  type RulesPageMemory,
+  RulesView,
+} from "./components/RulesView";
 import { Sidebar } from "./components/Sidebar";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
@@ -52,7 +57,7 @@ import {
 } from "./lib/workspace-persistence";
 import { pushToast } from "./toast";
 
-type View = "board" | "workspace" | "inbox";
+type View = "board" | "workspace" | "inbox" | "rules";
 
 /**
  * Three top-level views, switched instantly (no router, see AGENTS.md):
@@ -65,6 +70,9 @@ type View = "board" | "workspace" | "inbox";
  * - "inbox": everything that needs a human (docs/release-plan.md "Inbox"),
  *   in place of the task workspace; the sidebar stays. Sidebar Inbox row or
  *   Cmd+I; Esc goes back to the previous view.
+ * - "rules": the Rules page (docs/rules-page.md), like the inbox: in place
+ *   of the task workspace, sidebar Rules row or Cmd/Ctrl+Shift+R; Esc (with
+ *   no rule sheet open) goes back to the previous view.
  */
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -81,20 +89,29 @@ export function App({
   composerRequest?: ComposerRequest | undefined;
 } = {}): JSX.Element {
   const [view, setView] = useState<View>("workspace");
-  // The view the inbox returns to (Esc / Cmd+I again).
-  const viewBeforeInbox = useRef<Exclude<View, "inbox">>("workspace");
-  const openInbox = useCallback(() => {
+  // The view the inbox / Rules page returns to (Esc, or its shortcut again).
+  const viewBeforePage = useRef<Exclude<View, "inbox" | "rules">>("workspace");
+  const togglePage = useCallback((page: "inbox" | "rules") => {
     setView((current) => {
-      if (current === "inbox") return viewBeforeInbox.current;
-      viewBeforeInbox.current = current;
-      return "inbox";
+      if (current === page) return viewBeforePage.current;
+      if (current !== "inbox" && current !== "rules") {
+        viewBeforePage.current = current;
+      }
+      return page;
     });
   }, []);
-  const leaveInbox = useCallback(() => {
+  const openInbox = useCallback(() => togglePage("inbox"), [togglePage]);
+  const openRules = useCallback(() => togglePage("rules"), [togglePage]);
+  const leavePage = useCallback(() => {
     setView((current) =>
-      current === "inbox" ? viewBeforeInbox.current : current,
+      current === "inbox" || current === "rules"
+        ? viewBeforePage.current
+        : current,
     );
   }, []);
+  // The Rules page's tab / selected rule / filters, kept across visits.
+  const [rulesPage, setRulesPage] =
+    useState<RulesPageMemory>(INITIAL_RULES_PAGE);
   // The one inbox model (lib/use-inbox.ts): the sidebar badge and the view.
   const inbox = useInbox();
   const [focusedTaskId, setFocusedTaskId] = useState<string>("");
@@ -434,6 +451,11 @@ export function App({
         openInbox();
         return;
       }
+      if (key === "r" && event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        openRules();
+        return;
+      }
       if (key === "n") {
         // No dialog already open, and not mid-typing in some unrelated field
         // (see lib/keyboard-guard.ts) — matches the board's single-key guard.
@@ -445,7 +467,7 @@ export function App({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [takeover, openDraft, openInbox]);
+  }, [takeover, openDraft, openInbox, openRules]);
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
@@ -606,7 +628,7 @@ export function App({
           <div
             data-testid="workspace-view"
             className={
-              view === "workspace" || view === "inbox"
+              view === "workspace" || view === "inbox" || view === "rules"
                 ? "flex h-full w-full"
                 : "hidden"
             }
@@ -624,6 +646,8 @@ export function App({
               onOpenInbox={openInbox}
               inboxCount={inbox.priorityCount}
               inboxActive={view === "inbox"}
+              onOpenRules={openRules}
+              rulesActive={view === "rules"}
               onNewTask={openDraft}
               draftLabel={draft ? draftLabel(draft) : null}
               draftFocused={draftFocused}
@@ -641,12 +665,26 @@ export function App({
                   selectTask(taskId);
                   setView("workspace");
                 }}
-                onBack={leaveInbox}
+                onBack={leavePage}
+              />
+            )}
+            {view === "rules" && (
+              <RulesView
+                memory={rulesPage}
+                onMemoryChange={setRulesPage}
+                active={view === "rules" && takeover === null}
+                onOpenTask={(taskId) => {
+                  selectTask(taskId);
+                  setView("workspace");
+                }}
+                onBack={leavePage}
               />
             )}
             <div
               className={
-                view === "inbox" ? "hidden" : "flex h-full min-w-0 flex-1"
+                view === "inbox" || view === "rules"
+                  ? "hidden"
+                  : "flex h-full min-w-0 flex-1"
               }
             >
               <WorkspaceView
