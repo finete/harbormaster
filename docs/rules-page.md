@@ -128,9 +128,13 @@ Layering: the activity fold is an engine function
 (`engines/rules/activity.ts`, pure, over `AuditEntry[]`); `listRules` in the
 manager reads the window from `AuditLogAccess` and applies it. The outline
 is an engine function (`engines/rules/outline.ts`) over the
-`@marcbachmann/cel-js` AST, called from `parseRuleFile`. The CLI's
-`harbormaster rules list` prints label and last fired from the same
-listing.
+`@marcbachmann/cel-js` AST (each node's `range` into the source, widened
+until parentheses balance), called from `parseRuleFile`. A parenthesised
+same-operator group the user wrote stays a nested group. The CLI's
+`harbormaster rules list` prints on/off and, per rule, label and last
+fired from the same listing; `harbormaster rules on|off` flips the switch
+(socket op `rules_enable`); `harbormaster events --rule <id> [--file <f>]`
+uses the new filter. `RuleFileText.path` is filled by the access layer.
 
 ### Schema change: `label` is required
 
@@ -156,10 +160,12 @@ says exactly that).
 
 ## Tests
 
-- core: `engines/rules/activity.test.ts`, `engines/rules/outline.test.ts`
-  (table incl. all shipped default rules, nested groups, parse error,
-  `js:`), manager tests for `listRules` enrichment, `listEvents` filters,
-  `setRulesEnabled`, schema `label` required.
+- core (`packages/core/tests/`, the only dir vitest picks up):
+  `rules-activity.test.ts`, `rules-outline.test.ts` (table incl. all
+  shipped default rules, nested groups, parse error, `js:`), and a
+  Rules-page block in `rules-runtime.test.ts` for `listRules`
+  enrichment, `listEvents` filters, `setRulesEnabled`, schema `label`
+  required.
 - app units: `rules-format.test.ts` (four header strings, chip collapse,
   dot mapping), component tests for the three degenerate states.
 - e2e `rules.spec.ts` (one launch): sidebar + ⌘⇧R open the page; shipped

@@ -23,8 +23,8 @@ const HEADER = `# Harbormaster rules: event → condition → action.
 # at most one move (the first matching rule wins), every matching inbox /
 # createTask / message action runs.
 #
-# A rule's optional \`label\` is the short tag the task's audit line and
-# History show for its actions (default: the id, humanized).
+# Every rule needs a \`label\`: its name on the Rules page and the short tag
+# the task's audit line and History show for its actions.
 #
 # CEL variables: event, task, facts (facts.github, facts["version-endpoint"],
 # facts.harbormaster), repo. JS escape hatch: if: js:./checks.mjs#fn

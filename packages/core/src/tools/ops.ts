@@ -12,7 +12,7 @@ import type { CoreCommands } from "../contracts/commands.js";
 import type { InboxItem, InboxPriorityInput } from "../contracts/inbox.js";
 import type { TaskMessage } from "../contracts/messaging.js";
 import type { Task } from "../contracts/model.js";
-import type { AuditEntry } from "../contracts/rules.js";
+import type { AuditEntry, RulesListing } from "../contracts/rules.js";
 import type { ToolInputSchema, ToolResult } from "./catalog.js";
 
 export interface OpDefinition {
@@ -266,6 +266,8 @@ const events: OpDefinition = {
     type: "object",
     properties: {
       task: { type: "string" },
+      rule: { type: "string" },
+      file: { type: "string" },
       since: { type: "string" },
       limit: { type: "string" },
     },
@@ -273,10 +275,14 @@ const events: OpDefinition = {
   },
   async handler(args, commands) {
     const taskId = str(args, "task");
+    const ruleId = str(args, "rule");
+    const file = str(args, "file");
     const since = str(args, "since");
     const limit = int(args, "limit");
     const entries = await commands.listEvents({
       ...(taskId ? { taskId } : {}),
+      ...(ruleId ? { ruleId } : {}),
+      ...(file ? { file } : {}),
       ...(since ? { since } : {}),
       ...(limit ? { limit } : {}),
     });
@@ -289,24 +295,59 @@ const events: OpDefinition = {
   },
 };
 
+/** `rules list` text: on/off, then per file each rule's label, filter and last activity. */
+export function formatRulesListing(listing: RulesListing): string {
+  const head = `Rules are ${listing.enabled ? "on" : "off"}${listing.enabled ? "" : " (loaded but never run)"}; activity over the last ${listing.activityWindowDays} days.`;
+  const files = listing.files.map((file) => {
+    const scope = file.repositoryId ? ` (${file.repositoryId})` : "";
+    const rules = file.rules.map((rule) => {
+      const last = rule.activity
+        ? `last ${rule.activity.lastOutcome} ${rule.activity.lastAt}${rule.activity.lastTaskId ? ` task/${rule.activity.lastTaskId}` : ""}${rule.activity.lastDetail ? ` (${rule.activity.lastDetail})` : ""}; ${rule.activity.count} action${rule.activity.count === 1 ? "" : "s"}`
+        : "never fired";
+      return `  ${rule.label}  [${rule.id}, line ${rule.line}]  on ${rule.on.join(", ")}\n    ${last}`;
+    });
+    const problems = file.problems.map((problem) => `  ! ${problem}`);
+    return [`${file.file}${scope}  ${file.path}`, ...rules, ...problems].join(
+      "\n",
+    );
+  });
+  return [head, ...(files.length ? files : ["No rules files."])].join("\n");
+}
+
 const rulesList: OpDefinition = {
   name: "rules_list",
-  title: "Every rules file as loaded, with its problems",
+  title:
+    "Every rules file as loaded, with its problems and each rule's last activity",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, commands) {
     const listing = await commands.listRules();
-    const text = listing.files
-      .map((file) => {
-        const scope = file.repositoryId ? ` (${file.repositoryId})` : "";
-        const rules = file.rules.map(
-          (rule) =>
-            `  ${rule.id}  on ${rule.on.join(", ")}  (line ${rule.line})`,
-        );
-        const problems = file.problems.map((problem) => `  ! ${problem}`);
-        return [`${file.file}${scope}`, ...rules, ...problems].join("\n");
-      })
-      .join("\n");
-    return { text: text || "No rules files.", details: listing };
+    return { text: formatRulesListing(listing), details: listing };
+  },
+};
+
+const rulesEnable: OpDefinition = {
+  name: "rules_enable",
+  title: "Turn the rules on or off (config.automation)",
+  inputSchema: {
+    type: "object",
+    properties: { enabled: { type: "boolean" } },
+    required: ["enabled"],
+    additionalProperties: false,
+  },
+  async handler(args, commands) {
+    const value = args.enabled;
+    const enabled =
+      value === true || value === "true"
+        ? true
+        : value === false || value === "false"
+          ? false
+          : undefined;
+    if (enabled === undefined) throw new Error("enabled must be true or false");
+    await commands.setRulesEnabled(enabled);
+    return {
+      text: enabled ? "Rules are on." : "Rules are off.",
+      details: { enabled },
+    };
   },
 };
 
@@ -376,6 +417,7 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   inboxResolve,
   events,
   rulesList,
+  rulesEnable,
   rulesCheck,
   addonsList,
 ];

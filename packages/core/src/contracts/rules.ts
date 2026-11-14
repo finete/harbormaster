@@ -216,11 +216,42 @@ export interface RuleActionSpec {
   line?: number;
 }
 
+/** How a rule's `if` reads, computed at parse time. */
+export type RuleConditionView =
+  /** No `if`. */
+  | { kind: "always" }
+  /** Parsed OK. */
+  | { kind: "cel"; source: string; outline: CelOutline }
+  | { kind: "cel-invalid"; source: string; error: string }
+  /** `js:./file.mjs#fn`. */
+  | { kind: "js"; ref: string };
+
+/**
+ * Structure-only outline of a CEL expression: top-level `&&` chains become
+ * `all`, `||` chains become `any` (same-operator chains flattened, parens
+ * respected); everything else is a `leaf` whose `text` is a verbatim slice
+ * of `source` (whitespace collapsed). Never paraphrases.
+ */
+export type CelOutline =
+  | { kind: "all" | "any"; items: CelOutline[] }
+  | { kind: "leaf"; text: string };
+
+/** What a rule last did, within `RulesListing.activityWindowDays`. */
+export interface RuleActivity {
+  /** ISO time of the latest audited action. */
+  lastAt: string;
+  lastOutcome: RuleActionOutcome;
+  lastDetail?: string;
+  lastTaskId?: string;
+  /** Actions audited for this rule in the window. */
+  count: number;
+}
+
 /** One rule as loaded (validated) from a rules file. */
 export interface Rule {
   id: string;
-  /** Short human tag for the audit log ("Needs changes"); absent = the id, humanized. */
-  label?: string;
+  /** Short human tag ("Needs changes") for the Rules page and the audit log; required by the schema. */
+  label: string;
   /** Exact event type or glob (`github.pr.*`, `*` = one segment, `**` = any). */
   on: string[];
   /** CEL expression, or `js:./file.mjs#fn`; absent = always. */
@@ -230,11 +261,17 @@ export interface Rule {
   file: string;
   /** 1-based line of the rule in that file. */
   line: number;
+  /** How the `if` reads (structure-only CEL outline, raw `js:` ref, or the parse error). */
+  condition: RuleConditionView;
+  /** Absent when the rule did nothing in the window. Filled by `listRules`. */
+  activity?: RuleActivity;
 }
 
 /** One parsed rules file. */
 export interface RuleFile {
   file: string;
+  /** Absolute path, for "Open in editor" (`openIn`). */
+  path: string;
   /** Set for `repos/<repo>.yaml`: this list replaces the global one for that repository. */
   repositoryId?: string;
   rules: Rule[];
@@ -356,6 +393,10 @@ export type AuditEntry = AuditEventEntry | AuditActionEntry | AuditWarningEntry;
 export interface ListEventsFilter {
   /** Keep entries about this task (events with subject `task/<id>`, actions/warnings on it). */
   taskId?: string;
+  /** Keep this rule's actions and warnings (events are dropped). */
+  ruleId?: string;
+  /** Keep actions/warnings from this rules-dir-relative file; with `ruleId` it disambiguates overrides. */
+  file?: string;
   /** ISO time (or `YYYY-MM-DD`); entries at or after it. */
   since?: string;
   /** Newest N entries (default 500), returned oldest first. */
@@ -395,6 +436,10 @@ export interface RulesCheckResult {
 /** `listRules` result: every rules file as currently loaded. */
 export interface RulesListing {
   files: RuleFile[];
+  /** `config.automation`: whether rules run at all. */
+  enabled: boolean;
+  /** Days of audit log folded into each rule's `activity` (30). */
+  activityWindowDays: number;
 }
 
 // --- Addons -------------------------------------------------------------
@@ -483,6 +528,8 @@ export interface AuditLogAccess {
 export interface RuleFileText {
   /** Rules-dir-relative path. */
   file: string;
+  /** Absolute path of the file on disk. */
+  path: string;
   repositoryId?: string;
   text: string;
 }

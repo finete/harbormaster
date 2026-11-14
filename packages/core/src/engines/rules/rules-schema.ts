@@ -24,7 +24,7 @@ export const RULES_SCHEMA = {
     rule: {
       type: "object",
       additionalProperties: false,
-      required: ["id", "on", "do"],
+      required: ["id", "label", "on", "do"],
       properties: {
         id: {
           type: "string",
@@ -36,7 +36,7 @@ export const RULES_SCHEMA = {
           minLength: 1,
           maxLength: 40,
           description:
-            "Short tag shown with the rule's actions in the task's audit line and History (\"Needs changes\"). Defaults to the id, humanized.",
+            "Required. Short name shown on the Rules page and with the rule's actions in the task's audit line and History (\"Needs changes\").",
         },
         description: {
           type: "string",

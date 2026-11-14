@@ -289,6 +289,8 @@ export interface ConfigSettingsPatch {
   sourceEnabled?: { id: string; enabled: boolean };
   /** `onboardingCompletedAt`. */
   onboardingCompletedAt?: string;
+  /** `automation`: whether rules run at all (the Rules on/off switch). */
+  automation?: boolean;
 }
 
 /** Pre-rules `movers` config lists (global and per repository). */

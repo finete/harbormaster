@@ -520,6 +520,7 @@ describe("rules config parity (#12, #13, #14)", () => {
   }
   const REVIEW_RULE = `rules:
   - id: review-requested-enter-review
+    label: review-requested-enter-review
     on: [github.pr.*, harbormaster.task.*]
     if: task.state == "dev" && "reviewRequested" in facts.github && facts.github.reviewRequested == true
     do: [{ action: move, with: { to: await, kind: review } }]
@@ -590,7 +591,11 @@ describe("rules config parity (#12, #13, #14)", () => {
         },
       },
     });
-    await writeRules(f, "rules.yaml", "rules:\n  - id: broken\n    on: x\n");
+    await writeRules(
+      f,
+      "rules.yaml",
+      "rules:\n  - id: broken\n    label: broken\n    on: x\n",
+    );
     const first = await f.core.commands.refresh();
     expect(first.warnings).toEqual([
       expect.stringContaining(

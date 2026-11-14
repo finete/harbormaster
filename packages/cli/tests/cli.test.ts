@@ -312,7 +312,40 @@ describe("harbormaster inbox list / resolve, events, rules, addons", () => {
     expect(check.out()).toMatch(/^Replayed 0 events; 0 actions would run\./);
     const rules = io();
     expect(await main(["rules", "list", "--json"], rules)).toBe(0);
-    expect(JSON.parse(rules.out())).toHaveProperty("files");
+    const listing = JSON.parse(rules.out()) as {
+      files: unknown[];
+      enabled: boolean;
+      activityWindowDays: number;
+    };
+    expect(listing).toHaveProperty("files");
+    expect(listing.activityWindowDays).toBe(30);
+    const off = io();
+    expect(await main(["rules", "off"], off)).toBe(0);
+    expect(off.out()).toBe("Rules are off.\n");
+    expect((await core.commands.listRules()).enabled).toBe(false);
+    await mkdir(join(stateDir, "rules"), { recursive: true });
+    await writeFile(
+      join(stateDir, "rules", "rules.yaml"),
+      "rules:\n  - id: r1\n    label: Needs changes\n    on: github.pr.*\n    do: [{ action: move, with: { to: dev } }]\n",
+    );
+    const text = io();
+    expect(await main(["rules", "list"], text)).toBe(0);
+    expect(text.out()).toMatch(/^Rules are off \(loaded but never run\)/);
+    expect(text.out()).toContain(
+      "  Needs changes  [r1, line 2]  on github.pr.*",
+    );
+    expect(text.out()).toContain("    never fired");
+    const on = io();
+    expect(await main(["rules", "on"], on)).toBe(0);
+    expect((await core.commands.listRules()).enabled).toBe(true);
+    const ruleEvents = io();
+    expect(
+      await main(
+        ["events", "--rule", "r1", "--file", "rules.yaml"],
+        ruleEvents,
+      ),
+    ).toBe(0);
+    expect(ruleEvents.out()).toBe("No events recorded.\n");
     const addons = io();
     expect(await main(["addons", "list"], addons)).toBe(0);
     expect(addons.out()).toContain("built-in");

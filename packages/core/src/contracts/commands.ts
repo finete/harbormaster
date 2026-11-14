@@ -711,7 +711,8 @@ export interface CoreCommands {
   /**
    * The rules audit log (every event and every action outcome, with rule
    * id, file and line), oldest first; `filter.taskId` keeps entries about
-   * one task, `filter.since` (ISO or `YYYY-MM-DD`) bounds it, `limit`
+   * one task, `filter.ruleId` (+ `filter.file`) one rule's actions and
+   * warnings, `filter.since` (ISO or `YYYY-MM-DD`) bounds it, `limit`
    * (default 500) keeps the newest entries.
    */
   listEvents(filter?: ListEventsFilter): Promise<AuditEntry[]>;
@@ -721,8 +722,16 @@ export interface CoreCommands {
    * evaluated against current task state and facts. Executes nothing.
    */
   rulesCheck(input?: RulesCheckInput): Promise<RulesCheckResult>;
-  /** Every rules file as currently loaded, with its problems (a file with problems contributes no rules). */
+  /**
+   * Every rules file as currently loaded (absolute `path`, each rule's
+   * `condition` outline), with its problems (a file with problems
+   * contributes no rules); `enabled` is `config.automation`, and each rule
+   * carries its `activity` over the last `activityWindowDays` of the audit
+   * log.
+   */
   listRules(): Promise<RulesListing>;
+  /** Flip `config.automation`; the next refresh honours it. */
+  setRulesEnabled(enabled: boolean): Promise<void>;
   /** The built-in sources (read-only) and every user addon, loaded or skipped with its problems. */
   listAddons(): Promise<AddonInfo[]>;
 
