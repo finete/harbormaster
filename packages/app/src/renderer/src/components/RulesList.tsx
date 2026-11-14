@@ -4,13 +4,7 @@
 // broken files). Purely presentational (props in, callbacks out, no window
 // access) so the states render under plain vitest
 // (tests/rules-list.test.ts); RulesView.tsx owns data and selection.
-import {
-  AlertTriangle,
-  ArrowRight,
-  FileCode2,
-  ListChecks,
-  SquarePen,
-} from "lucide-react";
+import { AlertTriangle, ArrowRight, FileCode2, ListChecks } from "lucide-react";
 import type { JSX } from "react";
 import type { Rule, RuleFile, RulesListing } from "../../../preload/api";
 import {
@@ -44,7 +38,7 @@ export interface RulesListProps {
   selected: string | null;
   now: number;
   onSelect: (key: RuleKey) => void;
-  /** Open a rules file in the default open-in app. */
+  /** Open a rules file in the default open-in app (only-broken hint). */
   onOpenFile: (path: string) => void;
   /** Open the rules folder; absent = its location is unknown (button disabled). */
   onOpenFolder?: (() => void) | undefined;
@@ -161,7 +155,6 @@ function FileGroup({
   selected,
   now,
   onSelect,
-  onOpenFile,
 }: RulesListProps & { file: RuleFile }): JSX.Element {
   const broken = file.problems.length > 0;
   const kind = fileHeaderKind(file);
@@ -219,12 +212,6 @@ function FileGroup({
             </ul>
           )}
         </div>
-        {file.path && (
-          <EditFileButton
-            path={file.path}
-            onClick={() => onOpenFile(file.path)}
-          />
-        )}
       </header>
       {file.rules.map((rule) => {
         const key = ruleKeyString({ file: rule.file, ruleId: rule.id });
@@ -240,30 +227,6 @@ function FileGroup({
         );
       })}
     </section>
-  );
-}
-
-/** The file header's always-visible Edit button: opens that rules file
- * (loaded or broken; for a broken file it's the main way to fix it). Styled
- * like the top bar's "Open rules folder" ghost button. */
-function EditFileButton({
-  path,
-  onClick,
-}: {
-  path: string;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      data-testid="rules-file-edit"
-      title={path}
-      onClick={onClick}
-      className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
-    >
-      <SquarePen className="h-3.5 w-3.5" aria-hidden />
-      Edit
-    </button>
   );
 }
 

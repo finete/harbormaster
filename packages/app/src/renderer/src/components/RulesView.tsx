@@ -1,14 +1,15 @@
 // The Rules page (docs/rules-page.md): a read-only view of the rules
 // engine, a top-level view like the inbox (sidebar Rules row or Cmd/Ctrl+
 // Shift+R; the sidebar stays). Top bar: Rules | Activity tabs, the Rules
-// on/off switch (`setRulesEnabled`) and "Open rules folder". The Rules tab
+// on/off switch (`setRulesEnabled`) and one "Edit" button that opens the
+// rules folder in the default open-in app. The Rules tab
 // lists every loaded rule grouped by file (components/RulesList.tsx) with
 // the selected rule in a non-modal sheet (RuleSheet.tsx); the Activity tab
 // is the audit log (RulesActivity.tsx). Data: `listRules()` on open and on
 // every refresh tick (main's `core:refreshed` push); nothing else. The
 // page's selection, tab and filters live in App (`RulesPageMemory`) so
 // they survive leaving and reopening the page within the session.
-import { FolderOpen, ListChecks } from "lucide-react";
+import { ListChecks, SquarePen } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
@@ -321,12 +322,16 @@ export function RulesView({
             type="button"
             data-testid="rules-open-folder"
             disabled={!folder}
-            title={folder ?? NO_RULES_FOLDER_TITLE}
+            title={
+              folder
+                ? "Open the rules folder in your editor"
+                : NO_RULES_FOLDER_TITLE
+            }
             onClick={() => folder && openWithDefault(folder)}
             className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
-            <FolderOpen className="h-3.5 w-3.5" aria-hidden />
-            Open rules folder
+            <SquarePen className="h-3.5 w-3.5" aria-hidden />
+            Edit
           </button>
         </div>
       </header>
