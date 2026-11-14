@@ -288,7 +288,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
       return execFileRunner(request);
     });
     try {
-      const worktrees = new LocalGitWorktreeAccess();
+      const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
       expect(await worktrees.currentBranch(f.checkout)).toBe("main");
       expect(await worktrees.currentBranch(linked)).toBe("task/linked");
       expect(await worktrees.currentBranch(detached)).toBeUndefined();
@@ -305,11 +305,11 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     }
   });
 
-  it("creates a task worktree under <codeRoot>/.harbormaster-worktrees/ and lists it", async () => {
+  it("creates a task worktree under <worktreesRoot>/<repo-folder>/ and lists it", async () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
 
     const info = await worktrees.createTaskWorktree(
       repo,
@@ -319,7 +319,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     expect(info.branch).toBe("task/add-widget");
     expect(info.detached).toBe(false);
     expect(info.path).toBe(
-      join(f.code, TASK_WORKTREES_DIRNAME, "task-add-widget"),
+      join(f.root, "worktrees", "harbor-repo", "task-add-widget"),
     );
 
     const listed = await worktrees.listWorktrees(repo);
@@ -329,11 +329,43 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     );
   });
 
+  it("lists task worktree dirs under the root, plus legacy .harbormaster-worktrees next to checkouts", async () => {
+    const f = await fixture();
+    const repo = await new LocalGitRepositoryAccess().resolveRepository(
+      f.checkout,
+    );
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
+    const info = await worktrees.createTaskWorktree(
+      repo,
+      "task/listed",
+      repo.defaultBranch,
+    );
+    // A pre-0.1.2 worktree sat next to the checkout.
+    const legacy = join(f.code, TASK_WORKTREES_DIRNAME);
+    await mkdir(join(legacy, "old-task"), { recursive: true });
+    await mkdir(join(legacy, ".hidden"));
+
+    expect(await worktrees.listTaskWorktreeDirs()).toEqual([
+      { root: join(f.root, "worktrees"), dirs: [info.path] },
+    ]);
+    // The code root and the checkout's parent are the same legacy folder:
+    // listed once.
+    expect(
+      await worktrees.listTaskWorktreeDirs({
+        codeRoot: f.code,
+        checkoutRoots: [repo.root],
+      }),
+    ).toEqual([
+      { root: join(f.root, "worktrees"), dirs: [info.path] },
+      { root: legacy, dirs: [join(legacy, "old-task")] },
+    ]);
+  });
+
   it("refuses to remove a dirty worktree unless forced", async () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
     const info = await worktrees.createTaskWorktree(
       repo,
       "task/dirty",
@@ -354,7 +386,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
     const info = await worktrees.createTaskWorktree(
       repo,
       "task/clean",
@@ -370,7 +402,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
 
     expect(await worktrees.branchExists(repo, "task/branch-lifecycle")).toBe(
       false,
@@ -401,7 +433,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
 
     const info = await worktrees.createTaskWorktree(
       repo,
@@ -426,7 +458,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     const f = await fixture();
     const repoAccess = new LocalGitRepositoryAccess();
     const repo = await repoAccess.resolveRepository(f.checkout);
-    const worktrees = new LocalGitWorktreeAccess();
+    const worktrees = new LocalGitWorktreeAccess(join(f.root, "worktrees"));
 
     const gone = await worktrees.createTaskWorktree(repo, "task/gone", "main");
     await writeFile(join(gone.path, "a.txt"), "a\n");

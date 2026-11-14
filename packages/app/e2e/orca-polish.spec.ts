@@ -361,7 +361,7 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
     expect(clipboard).toBe(branch);
   });
 
-  test("copy worktree path writes a path under .harbormaster-worktrees to the clipboard", async () => {
+  test("copy worktree path writes a path under the worktrees root to the clipboard", async () => {
     const row = rowLocator(window, "Orca Repo Task");
     await row.click({ button: "right" });
     const menu = window.getByTestId("sidebar-row-context-menu");
@@ -377,14 +377,16 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
     const clipboard = await window.evaluate(() =>
       navigator.clipboard.readText(),
     );
-    expect(clipboard).toContain(".harbormaster-worktrees");
+    expect(clipboard).toContain(
+      path.join(stateDir, "worktrees", "fixture-repo"),
+    );
   });
 
   test("reveal in Finder calls the main-process IPC with an allowlisted path, never with an arbitrary one", async () => {
     // Stub `shell.showItemInFolder` in the main process so this never
     // actually shells out to (or depends on) a real file manager — only
     // that main's `shell:revealInFolder` handler was invoked, and with a
-    // path inside the allowlisted code root, is asserted.
+    // path inside the allowlisted state dir (the worktrees root), is asserted.
     await app.evaluate(({ shell }) => {
       (globalThis as unknown as { __revealCalls: string[] }).__revealCalls = [];
       shell.showItemInFolder = (itemPath: string) => {
@@ -410,8 +412,9 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
           (globalThis as unknown as { __revealCalls: string[] }).__revealCalls,
       );
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toContain(codeRoot);
-      expect(calls[0]).toContain(".harbormaster-worktrees");
+      expect(calls[0]).toContain(
+        path.join(stateDir, "worktrees", "fixture-repo"),
+      );
     }).toPass({ timeout: 5_000 });
   });
 });

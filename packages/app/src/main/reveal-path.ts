@@ -5,7 +5,7 @@
 // `shell.showItemInFolder` (path traversal into the user's home directory,
 // `/etc`, ...). Only a path that resolves *inside* one of the configured
 // root directories (the discovered-repositories `codeRoot`, or this app's
-// own state dir "-" where worktrees and session files live) is allowed.
+// own state dir "-" where task worktrees and session files live) is allowed.
 
 import { resolve, sep } from "node:path";
 

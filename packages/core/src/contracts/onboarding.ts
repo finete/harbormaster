@@ -12,10 +12,18 @@ export type ProtectedHomeFolder = "Documents" | "Desktop" | "Downloads";
 export interface OnboardingState {
   /** ISO time the wizard was finished (`config.onboardingCompletedAt`); absent = never. */
   completedAt?: string;
-  /** The configured code root (absolute; default `~/Code`). */
+  /**
+   * The repositories folder (absolute): the configured one, or before the
+   * wizard is finished, `suggestedCodeRoot` unless the configured one exists.
+   */
   codeRoot: string;
-  /** `~/Code`, for the protected-folder warning's "Use ~/Code instead". */
+  /**
+   * The first existing usual code folder (`~/Code`, `~/src`, `~/Projects`,
+   * …), else `~/harbormaster`. Also offered by the protected-folder warning.
+   */
   suggestedCodeRoot: string;
+  /** The user's home folder, for showing paths as `~/…`. */
+  homeDir: string;
   /** `launch.defaultHarness`, else Pi. */
   defaultHarness: string;
   /** `launch.bypassPermissions`, else the default (on). */
@@ -44,7 +52,7 @@ export interface CodeRootScan {
   exists: boolean;
   /** Set when the folder is (inside) `~/Documents`, `~/Desktop` or `~/Downloads`. */
   protectedFolder?: ProtectedHomeFolder;
-  /** `~/Code`, offered instead of a protected folder. */
+  /** {@link OnboardingState.suggestedCodeRoot}, offered instead of a protected folder. */
   suggestedRoot: string;
   repositories: ScannedRepository[];
 }

@@ -17,6 +17,8 @@ export interface StatePaths {
   readonly presenceDir: string;
   /** Root for `launchTask` `{ none: true }` scratch directories: `<stateDir>/scratch/<taskId>`. */
   readonly scratchDir: string;
+  /** Task worktrees root: `<stateDir>/worktrees/<repo-folder>/<branch-slug>`. */
+  readonly worktreesDir: string;
   /** `<stateDir>/locations.json`: folders registered outside `codeRoot` (composer "Open folder…"). */
   readonly locationsFile: string;
   /** `<stateDir>/task-attachments/<taskId>/`: copies of images pasted into a task's prompt. */
@@ -77,6 +79,7 @@ export function resolveStatePaths(
     configFile: join(stateDir, "config.json"),
     presenceDir: join(stateDir, "presence"),
     scratchDir: join(stateDir, "scratch"),
+    worktreesDir: join(stateDir, "worktrees"),
     locationsFile: join(stateDir, "locations.json"),
     taskAttachmentsDir: join(stateDir, "task-attachments"),
     messagesDir: join(stateDir, "messages"),

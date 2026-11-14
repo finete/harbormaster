@@ -157,19 +157,21 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     await expect(wizard).toHaveAttribute("data-step", "code");
     await expect(window.getByTestId("workspace-view")).toHaveCount(0);
 
-    // Screen 1: a root under ~/Documents warns; "Use ~/Code instead" fixes it.
+    // Screen 1: no usual code folder in this home, so ~/harbormaster is
+    // suggested; a root under ~/Documents warns; "Use ~/harbormaster
+    // instead" fixes it (and creates it).
     const rootInput = window.getByTestId("onboarding-code-root");
-    await expect(rootInput).toHaveValue(path.join(home, "Code"));
+    await expect(rootInput).toHaveValue(path.join(home, "harbormaster"));
     await rootInput.fill(path.join(home, "Documents", "projects"));
     await expect(
       window.getByTestId("onboarding-protected-warning"),
     ).toContainText("macOS ties folder permissions to this unsigned build");
     await window.getByTestId("onboarding-use-code").click();
-    await expect(rootInput).toHaveValue(path.join(home, "Code"));
+    await expect(rootInput).toHaveValue(path.join(home, "harbormaster"));
     await expect(
       window.getByTestId("onboarding-protected-warning"),
     ).toHaveCount(0);
-    expect(existsSync(path.join(home, "Code"))).toBe(true);
+    expect(existsSync(path.join(home, "harbormaster"))).toBe(true);
 
     // The primary button sits in the card's own footer, not at the
     // window's edge.

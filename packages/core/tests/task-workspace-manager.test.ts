@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Clock } from "../src/contracts/index.js";
@@ -152,7 +152,9 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     const binding = await f.core.commands.getTaskWorkspace(task.id);
     expect(binding).toBeDefined();
     expect(binding?.branch).toBe(task.branch);
-    expect(binding?.worktreePath).toContain(".harbormaster-worktrees");
+    expect(binding?.worktreePath).toBe(
+      join(f.stateDir, "worktrees", "harbor-repo", task.branch ?? ""),
+    );
 
     // The worktree actually exists on disk and is checked out to the branch.
     const branchInWorktree = await git(
@@ -341,22 +343,25 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     expect(worktrees).toContain(dirty);
   });
 
-  it("scanOrphanWorktrees lists only unbound directories under the worktrees root, sized", async () => {
+  it("scanOrphanWorktrees lists only unbound directories under the worktrees root and legacy folders, sized", async () => {
     const f = await fixture();
     const { worktreePath, review } = await taskWithReviewCheckout(f, "Bound");
-    const stray = join(
-      f.codeRoot,
-      ".harbormaster-worktrees",
-      "observed-abc123",
-    );
+    expect(dirname(review)).toBe(join(f.stateDir, "worktrees", "harbor-repo"));
+    // A pre-0.1.2 leftover next to the checkout.
+    const legacy = join(f.codeRoot, ".harbormaster-worktrees");
+    const stray = join(legacy, "observed-abc123");
     await mkdir(stray, { recursive: true });
     await writeFile(join(stray, "blob"), "x".repeat(4096));
 
     const report = await f.core.commands.scanOrphanWorktrees();
 
-    expect(report.root).toBe(join(f.codeRoot, ".harbormaster-worktrees"));
+    // One orphan in each root: the tie goes to the worktrees root.
+    expect(report.root).toBe(join(f.stateDir, "worktrees"));
     const paths = report.orphans.map((orphan) => orphan.path).sort();
     expect(paths).toEqual([review, stray].sort());
+    // "Show in Finder" opens the root holding most orphans.
+    await mkdir(join(legacy, "observed-def456"));
+    expect((await f.core.commands.scanOrphanWorktrees()).root).toBe(legacy);
     expect(paths).not.toContain(worktreePath);
     const strayEntry = report.orphans.find((orphan) => orphan.path === stray);
     expect(strayEntry?.sizeBytes).toBeGreaterThanOrEqual(4096);

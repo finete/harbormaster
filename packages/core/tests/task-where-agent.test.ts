@@ -329,9 +329,26 @@ describe.skipIf(!gitAvailable)("registered folders", () => {
     });
     expect(task.repositoryId).toBe("github.com/acme/side-repo");
     const binding = await f.core.commands.getTaskWorkspace(task.id);
-    expect(binding?.worktreePath).toBeDefined();
-    expect(binding?.worktreePath).not.toBe(outside);
+    // Same app-owned worktrees root as code-root repos, never next to the
+    // registered folder.
+    expect(binding?.worktreePath).toBe(
+      join(f.stateDir, "worktrees", "side-repo", task.branch ?? ""),
+    );
+    expect(
+      await exists(join(f.root, "elsewhere", ".harbormaster-worktrees")),
+    ).toBe(false);
     expect(binding?.inPlace).toBeUndefined();
+
+    // A clone URL for a remote we already have checked out (here outside
+    // codeRoot, ssh form) reuses that checkout instead of cloning again.
+    const viaUrl = await f.core.commands.launchTask({
+      relation: "standalone",
+      title: "Side work by URL",
+      prompt: "go",
+      repository: { cloneUrl: "git@github.com:acme/side-repo.git" },
+    });
+    expect(viaUrl.repositoryId).toBe("github.com/acme/side-repo");
+    expect(await exists(join(f.root, "Code", "side-repo"))).toBe(false);
   });
 
   it("chat mode (inPlace) runs in the repository's own checkout, never as a task worktree", async () => {

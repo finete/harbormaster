@@ -28,7 +28,11 @@ import type {
   RepositoryCheckout,
   RepositoryInfo,
 } from "../contracts/workspace.js";
+import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
 import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
+
+// Re-exported: callers (and tests) historically import it from here.
+export { normalizeRemoteIdentity };
 
 /** One directory entry under a code root, described well enough to group by identity. */
 interface CheckoutDescriptor {
@@ -377,11 +381,6 @@ async function discoveryFingerprint(
   ]);
 }
 
-/**
- * Normalize an `origin` remote URL to a stable, comparable identity:
- * `git@github.com:org/repo.git`, `https://github.com/org/repo.git`, and
- * `https://user@github.com/org/repo` all normalize to `github.com/org/repo`.
- */
 /** The last path segment of a clone URL, `.git` stripped (`cloneRepository`'s target directory name). */
 function repoNameFromUrl(url: string): string {
   const trimmed = url
@@ -391,18 +390,4 @@ function repoNameFromUrl(url: string): string {
   const name = trimmed.split(/[/:]/).filter(Boolean).pop();
   if (!name) throw new Error(`Cannot derive a repository name from "${url}"`);
   return name;
-}
-
-export function normalizeRemoteIdentity(remote: string): string {
-  let value = remote
-    .trim()
-    .replace(/\.git\/?$/i, "")
-    .replace(/\/$/, "");
-  const scp = value.match(/^[^@/]+@([^:]+):(.+)$/);
-  if (scp) value = `${scp[1]}/${scp[2]}`;
-  else
-    value = value
-      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-      .replace(/^[^@/]+@/, "");
-  return value.toLowerCase();
 }

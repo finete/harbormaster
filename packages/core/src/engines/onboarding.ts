@@ -46,9 +46,32 @@ export function protectedHomeFolder(
   return undefined;
 }
 
-/** The default code root: `~/Code`. */
-export function suggestedCodeRoot(home: string): string {
-  return resolve(home, "Code");
+/**
+ * Home-relative folders people usually keep checkouts in, most common
+ * first. The first that exists is suggested as the repositories folder, so
+ * existing repos are found and agent clones land next to them.
+ */
+export const CODE_ROOT_CANDIDATES: readonly string[] = [
+  "Code",
+  "code",
+  "src",
+  "Projects",
+  "projects",
+  "dev",
+  "Developer",
+  "repos",
+  "git",
+  "workspace",
+];
+
+/** {@link CODE_ROOT_CANDIDATES} as absolute paths under `home`, in order. */
+export function codeRootCandidates(home: string): string[] {
+  return CODE_ROOT_CANDIDATES.map((name) => resolve(home, name));
+}
+
+/** The repositories folder when no candidate exists: `~/harbormaster` (created on save). */
+export function fallbackCodeRoot(home: string): string {
+  return resolve(home, "harbormaster");
 }
 
 /**

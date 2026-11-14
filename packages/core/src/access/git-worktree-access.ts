@@ -1,8 +1,8 @@
 // Resource Access: Git worktree lifecycle for task execution. Ported from
 // pi-home's src/access/git-worktree-access.ts, reshaped around a single
 // atomic verb for task creation (createTaskWorktree) that owns the
-// <codeRoot>/.harbormaster-worktrees/ layout instead of taking a caller-
-// supplied path, and with explicit dirty-refusal / safe-branch-delete
+// <stateDir>/worktrees/<repo-folder>/<branch-slug> layout instead of taking
+// a caller-supplied path, and with explicit dirty-refusal / safe-branch-delete
 // semantics called out as separate, testable verbs.
 
 import {
@@ -13,7 +13,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   GitWorktreeAccess,
   RepositoryInfo,
@@ -21,11 +21,26 @@ import type {
 } from "../contracts/workspace.js";
 import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
 
-/** Directory (sibling of every repository checkout) that holds task worktrees. */
+/**
+ * Legacy (pre-0.1.2) task worktrees directory: a sibling of the repository
+ * checkout (`<parent-of-checkout>/.harbormaster-worktrees/<branch-slug>`).
+ * New worktrees never go there; it is only scanned for orphans, and tasks
+ * created back then keep their recorded paths.
+ */
 export const TASK_WORKTREES_DIRNAME = ".harbormaster-worktrees";
 
 /** `git`-shelling-out implementation of {@link GitWorktreeAccess}. */
 export class LocalGitWorktreeAccess implements GitWorktreeAccess {
+  /** @param worktreesRoot Root for task worktrees (`StatePaths.worktreesDir`). */
+  constructor(private readonly worktreesRoot: string) {}
+
+  private taskWorktreePath(repo: RepositoryInfo, branch: string): string {
+    return join(
+      this.worktreesRoot,
+      slugify(basename(repo.root)),
+      slugify(branch),
+    );
+  }
   async listWorktrees(repo: RepositoryInfo): Promise<WorktreeInfo[]> {
     const raw = await run(
       "git",
@@ -40,7 +55,7 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     branch: string,
     baseRef: string,
   ): Promise<WorktreeInfo> {
-    const path = taskWorktreePath(repo, branch);
+    const path = this.taskWorktreePath(repo, branch);
     await mkdir(dirname(path), { recursive: true });
     const preExisted = await fsAccess(path).then(
       () => true,
@@ -93,7 +108,7 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     }
     // The branch already exists locally (e.g. the author's own checkout):
     // check it out as-is, never resetting local commits.
-    const path = taskWorktreePath(repo, branch);
+    const path = this.taskWorktreePath(repo, branch);
     await mkdir(dirname(path), { recursive: true });
     await run("git", ["worktree", "add", path, branch], repo.root, {
       timeoutMs: LONG_RUN_TIMEOUT_MS,
@@ -229,17 +244,27 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
   }
 
   async listTaskWorktreeDirs(
-    codeRoot: string,
-  ): Promise<{ root: string; dirs: string[] }> {
-    const root = join(codeRoot, TASK_WORKTREES_DIRNAME);
-    const entries = await readdir(root, { withFileTypes: true }).catch(
-      () => [],
-    );
-    const dirs = entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => join(root, entry.name))
-      .sort();
-    return { root, dirs };
+    legacy: { codeRoot?: string; checkoutRoots?: readonly string[] } = {},
+  ): Promise<Array<{ root: string; dirs: string[] }>> {
+    const legacyParents = [
+      ...(legacy.codeRoot ? [legacy.codeRoot] : []),
+      ...(legacy.checkoutRoots ?? []).map((root) => dirname(root)),
+    ];
+    const current: string[] = [];
+    for (const repoDir of await subdirectories(this.worktreesRoot)) {
+      current.push(...(await subdirectories(repoDir)));
+    }
+    const roots = [{ root: this.worktreesRoot, dirs: current.sort() }];
+    const seen = new Set([resolve(this.worktreesRoot)]);
+    for (const parent of legacyParents) {
+      if (!parent) continue;
+      const root = resolve(parent, TASK_WORKTREES_DIRNAME);
+      if (seen.has(root)) continue;
+      seen.add(root);
+      const dirs = await subdirectories(root);
+      if (dirs.length > 0) roots.push({ root, dirs: dirs.sort() });
+    }
+    return roots;
   }
 
   async diskUsageBytes(path: string): Promise<number | undefined> {
@@ -283,12 +308,18 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function taskWorktreePath(repo: RepositoryInfo, branch: string): string {
-  return join(dirname(repo.root), TASK_WORKTREES_DIRNAME, slugify(branch));
+/** Absolute paths of the non-dot directories directly under `dir` (`[]` when it is missing). */
+async function subdirectories(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => join(dir, entry.name));
 }
 
-function slugify(branch: string): string {
-  const slug = branch.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+function slugify(name: string): string {
+  const slug = name
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^[-.]+|-+$/g, "");
   return slug || "branch";
 }
 

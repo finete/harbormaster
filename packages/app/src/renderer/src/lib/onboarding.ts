@@ -23,7 +23,7 @@ export function isBuiltinAgent(id: string): id is BuiltinAgentId {
 
 /** The wizard's four steps, in order: id (the `data-step` value) and the verb-first label. */
 export const ONBOARDING_STEPS = [
-  { id: "code", label: "Pick your code folder" },
+  { id: "code", label: "Pick your repositories folder" },
   { id: "agent", label: "Choose your agent" },
   { id: "github", label: "Connect GitHub" },
   { id: "concepts", label: "How it works" },

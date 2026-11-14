@@ -175,7 +175,7 @@ async function fixture(): Promise<Fixture> {
     events: new CoreEventBus(),
     config: new JsonConfigAccess(paths.configFile),
     repositories: new LocalGitRepositoryAccess(),
-    worktrees: new LocalGitWorktreeAccess(),
+    worktrees: new LocalGitWorktreeAccess(paths.worktreesDir),
     bindings,
     sessions: new LocalSessionFileAccess(),
     scratch: new LocalScratchWorkspaceAccess(join(stateDir, "scratch")),
