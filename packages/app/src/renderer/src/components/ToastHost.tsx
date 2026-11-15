@@ -57,7 +57,9 @@ export function ToastHost(): JSX.Element {
                 : "border-status-needsYou/50 text-status-needsYou",
           )}
         >
-          <span className="flex-1">{toast.text}</span>
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            {toast.text}
+          </span>
           {toast.action && (
             <button
               type="button"
@@ -75,7 +77,10 @@ export function ToastHost(): JSX.Element {
             type="button"
             aria-label="Dismiss"
             data-testid="toast-dismiss"
-            onClick={() => dismissToast(toast.id)}
+            onClick={() => {
+              toast.onDismiss?.();
+              dismissToast(toast.id);
+            }}
             className="shrink-0 rounded text-muted-foreground transition-colors duration-[120ms] ease-out hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />

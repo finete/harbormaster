@@ -2,7 +2,8 @@
 // <codeRoot>/.harbormaster-worktrees, that no task owns) once filled the disk without a word. At startup the
 // renderer asks core for an orphan scan and, past the threshold (10 dirs or
 // 20 GB, decided in core), shows one sticky warning toast with a
-// "Show in Finder" action. The action itself is not clicked: it would open a
+// "Show in Finder" action. Closing it with ✕ is remembered across reloads
+// until the orphans grow. The action itself is not clicked: it would open a
 // visible Finder window, and the user must never see a test run.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,9 @@ const mainProcessErrors: string[] = [];
 
 test.beforeAll(async () => {
   root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-orphans-"));
-  stateDir = path.join(root, "state");
+  // A long unbreakable path segment (like a real home directory path) must
+  // wrap inside the toast instead of pushing its buttons off the card.
+  stateDir = path.join(root, `state${"x".repeat(60)}`);
   const codeRoot = path.join(root, "Code");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(
@@ -72,4 +75,34 @@ test("orphaned worktrees past the threshold surface one warning with a Show in F
   // Named after the root holding most of them.
   await expect(toast).toContainText(path.join(stateDir, "worktrees"));
   await expect(toast.getByTestId("toast-action")).toHaveText("Show in Finder");
+});
+
+test("the warning's buttons stay on the card, and closing it is remembered until the orphans grow", async () => {
+  const toast = window
+    .getByTestId("toast-warning")
+    .filter({ hasText: "belong to no task" });
+  const card = await toast.boundingBox();
+  const dismiss = toast.getByTestId("toast-dismiss");
+  const close = await dismiss.boundingBox();
+  expect(card && close).toBeTruthy();
+  if (card && close) {
+    expect(close.x + close.width).toBeLessThanOrEqual(card.x + card.width);
+  }
+
+  await dismiss.click();
+  await expect(toast).toHaveCount(0);
+  await window.reload();
+  await window.getByTestId("sidebar").waitFor();
+  // The scan resolved (it reads the disk) yet the same pile stays quiet:
+  // wait for a scan round-trip before asserting absence.
+  await window.evaluate(() => window.harbormaster.core.scanOrphanWorktrees());
+  await expect(toast).toHaveCount(0);
+
+  // One more orphan is new information: the warning comes back.
+  mkdirSync(path.join(stateDir, "worktrees", "some-repo", "observed-10"), {
+    recursive: true,
+  });
+  await window.reload();
+  await expect(toast).toHaveCount(1);
+  await expect(toast).toContainText("11 worktrees");
 });

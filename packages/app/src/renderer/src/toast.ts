@@ -23,6 +23,8 @@ export interface ToastMessage {
   tone: "error" | "warning" | "success";
   /** One optional button; a toast that carries one stays until dismissed (it asks for a deliberate click). */
   action?: ToastAction;
+  /** Runs when the user closes the toast with its ✕ (e.g. to remember the dismissal). */
+  onDismiss?: () => void;
 }
 
 type Listener = (toasts: ToastMessage[]) => void;
@@ -67,6 +69,7 @@ export function pushToast(
   text: string,
   tone: ToastMessage["tone"] = "error",
   action?: ToastAction,
+  options: { onDismiss?: () => void } = {},
 ): void {
   // Defense-in-depth: a connectivity-shaped message must never reach the
   // toast stack even if some future call site forgets to route it through
@@ -76,7 +79,16 @@ export function pushToast(
   if (isDuplicateToast(toasts, text)) return;
 
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  toasts = [{ id, text, tone, ...(action ? { action } : {}) }, ...toasts];
+  toasts = [
+    {
+      id,
+      text,
+      tone,
+      ...(action ? { action } : {}),
+      ...(options.onDismiss ? { onDismiss: options.onDismiss } : {}),
+    },
+    ...toasts,
+  ];
   emit();
 
   if (!action && (tone === "warning" || tone === "success")) {

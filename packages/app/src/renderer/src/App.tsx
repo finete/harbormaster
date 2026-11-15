@@ -45,6 +45,10 @@ import {
   storeDraft,
   storePrefs,
 } from "./lib/new-task-draft";
+import {
+  dismissOrphanWarning,
+  shouldShowOrphanWarning,
+} from "./lib/orphan-warning";
 import { modKeyLabel } from "./lib/platform";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { useInbox } from "./lib/use-inbox";
@@ -554,12 +558,21 @@ export function App({
         .scanOrphanWorktrees()
         .then((report) => {
           if (!report.warning) return;
-          pushToast(report.warning, "warning", {
-            label: "Show in Finder",
-            run: () => {
-              void window.harbormaster.shell.revealInFolder(report.root);
+          const seen = { root: report.root, count: report.orphans.length };
+          if (!shouldShowOrphanWarning(window.localStorage, seen)) return;
+          pushToast(
+            report.warning,
+            "warning",
+            {
+              label: "Show in Finder",
+              run: () => {
+                void window.harbormaster.shell.revealInFolder(report.root);
+              },
             },
-          });
+            {
+              onDismiss: () => dismissOrphanWarning(window.localStorage, seen),
+            },
+          );
         })
         .catch(() => {});
     };
