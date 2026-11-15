@@ -180,7 +180,7 @@ test("workspace, board, inbox", async () => {
 
   const core = createCore({ stateDir });
   await core.commands.createTask({
-    title: "Fix Jito MEV",
+    title: "Fix fee rounding",
     initialPrompt: "",
     repositoryId: REPO_ID,
   });
@@ -190,7 +190,7 @@ test("workspace, board, inbox", async () => {
   });
   try {
     await core.commands.createTask({
-      title: "DEV-18921 FE: show Jito tip in mined swap fee",
+      title: "DEV-1234 FE: show fee tip in the order summary",
       initialPrompt: "",
       repositoryId: REPO_ID,
       pullRequest: 26873,
@@ -217,7 +217,7 @@ test("workspace, board, inbox", async () => {
   // Workspace: open the repo task, start it, add a second terminal tab.
   await window
     .locator('[data-testid^="card-"]')
-    .filter({ hasText: "Fix Jito MEV" })
+    .filter({ hasText: "Fix fee rounding" })
     .click();
   const startButton = window.locator('[data-testid^="start-task-button-"]');
   await expect(startButton.first()).toBeVisible();
@@ -281,7 +281,7 @@ test("new-task composer at 1200px and 800px", async () => {
   await expect(window.getByTestId("new-task-base")).toBeVisible();
   await window
     .getByTestId("new-task-prompt-input")
-    .fill("Show the Jito tip in the mined swap fee breakdown");
+    .fill("Show the fee tip in the order summary breakdown");
   for (const width of [1200, 800]) {
     await window.setViewportSize({ width, height: 800 });
     await window.screenshot({

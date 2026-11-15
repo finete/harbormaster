@@ -31,7 +31,7 @@ function task(overrides: Partial<Task> = {}): Task {
     title: "Permit bug",
     initialPrompt: "",
     repositoryId: REPO,
-    branch: "alice/dai-permit-bug-task",
+    branch: "alice/permit-bug-task",
     pr: {
       number: 24161,
       url: `https://${REPO}/pull/24161`,
@@ -55,11 +55,11 @@ const stage = (options: Record<string, unknown> = {}): RuleStageView => ({
 const HOTFIX = {
   oid: "a82117049087dd39410dc04b8062a9c4ad726ac0",
   subject:
-    "[Hotfix][pre] alice/dai-keyber-permit-issue alice/dai-permit-bug-task [DEV-26101] (#24220)",
+    "[Hotfix][pre] alice/token-permit-issue alice/permit-bug-task [DEV-26101] (#24220)",
 };
 const NOISE = {
   oid: "ca9bdff2aaaaaaaa",
-  subject: "[Hotfix][pre] bob/fix_stellar_txs [DEV-26273] (#24226)",
+  subject: "[Hotfix][pre] bob/fix_ledger_txs [DEV-26273] (#24226)",
 };
 
 function services(

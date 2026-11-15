@@ -20,7 +20,7 @@ export interface DeployedVersion {
 export function parseDeployedVersion(document: string): DeployedVersion {
   const raw = document.trim();
   // Accept semver (v0.115.20+sha) AND calendar/CI versions with any number
-  // of numeric segments (2026.10.15.019+sha) — One deployment switched to the latter,
+  // of numeric segments (2026.10.15.019+sha) — one deployment switched to the latter,
   // which silently broke pi-home's stricter three-segment regex.
   const match = raw.match(/^v?(\d+(?:\.\d+)*)\+([0-9a-fA-F]{7,40})$/);
   const commitOid = match?.[2];

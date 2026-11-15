@@ -11,7 +11,7 @@ describe("parseDeployedVersion format tolerance", () => {
       "ca9bdff2",
     ]);
   });
-  it("parses calendar/CI versions with four segments (One deployment format)", () => {
+  it("parses calendar/CI versions with four segments (calendar format)", () => {
     const v = parseDeployedVersion("2026.10.15.019+0075f431");
     expect([v.major, v.minor, v.patch]).toEqual([2026, 10, 15]);
     expect(v.commitOid).toBe("0075f431");

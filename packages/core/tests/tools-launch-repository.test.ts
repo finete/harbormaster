@@ -80,7 +80,7 @@ describe("resolveLaunchRepository", () => {
   });
 
   it("resolves a unique short name", () => {
-    expect(resolveLaunchRepository("widgets", repos)).toEqual({
+    expect(resolveLaunchRepository("gadgets", repos)).toEqual({
       repositoryId: "github.com/org/gadgets",
     });
   });
@@ -97,7 +97,7 @@ describe("resolveLaunchRepository", () => {
 
   it("rejects an unknown repository, listing known candidates", () => {
     expect(() => resolveLaunchRepository("nope", repos)).toThrow(
-      /Unknown repository "nope".*github\.com\/org\/widgets/s,
+      /Unknown repository "nope".*github\.com\/org\/gadgets/s,
     );
   });
 

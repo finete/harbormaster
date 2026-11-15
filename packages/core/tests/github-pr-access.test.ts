@@ -503,12 +503,11 @@ describe("GithubPrAccess fixtures", () => {
       return JSON.stringify([
         {
           oid: "ca9bdff2aaaa",
-          subject: "[Hotfix][pre] bob/fix_stellar_txs [DEV-26273] (#24226)",
+          subject: "[Hotfix][pre] bob/fix_ledger_txs [DEV-26273] (#24226)",
         },
         {
           oid: "a8211704bbbb",
-          subject:
-            "[Hotfix][pre] alice/dai-permit-bug-task [DEV-26101] (#24220)",
+          subject: "[Hotfix][pre] alice/permit-bug-task [DEV-26101] (#24220)",
         },
       ]);
     });
@@ -517,7 +516,7 @@ describe("GithubPrAccess fixtures", () => {
     expect(log).toHaveLength(2);
     expect(log[1]).toEqual({
       oid: "a8211704bbbb",
-      subject: "[Hotfix][pre] alice/dai-permit-bug-task [DEV-26101] (#24220)",
+      subject: "[Hotfix][pre] alice/permit-bug-task [DEV-26101] (#24220)",
     });
     await access.commitLog(repositoryId, "ca9bdff2", 50);
     expect(execute).toHaveBeenCalledTimes(1);
