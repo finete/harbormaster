@@ -32,6 +32,7 @@ import type {
   UpdateTaskInput,
 } from "@harbormaster/core";
 import {
+  consoleCoreLogger,
   createCore,
   createHarnessRegistry,
   DEFAULT_STATE_DIR,
@@ -82,17 +83,31 @@ import { createBackgroundLauncher } from "./background-launcher";
 import { resolveCliPath } from "./cli-path";
 import type { ConnectivityState } from "./connectivity-loop";
 import { createConnectivityLoop } from "./connectivity-loop";
+import { debugLog } from "./debug-log";
 import {
+  buildDiagnosticsState,
   buildDiagnosticsZip,
   buildEnvironmentInfo,
   buildTasksSummary,
   diagnosticsFileName,
 } from "./diagnostics";
 import {
+  type DoctorHostFacts,
+  diagnosticsSummary,
+  doctorForDiagnostics,
+  registerDoctorIpc,
+} from "./doctor-ipc";
+import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
-import { applyLoginShellPath } from "./login-shell-path";
+import { createLogDedupe } from "./log-dedupe";
+import { applyLoginShellPath, loginShellPathAtStart } from "./login-shell-path";
+import {
+  installIpcTiming,
+  installRunSentinel,
+  startMainHealthMonitor,
+} from "./main-health";
 import {
   createDedupedPusher,
   createIntervalGate,
@@ -113,6 +128,7 @@ import {
   type OpenInResult,
   runOpenInArgv,
 } from "./open-in";
+import { passTimer } from "./pass-timer";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
@@ -138,6 +154,7 @@ import {
   writeToSession,
 } from "./ptySessions";
 import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
+import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import {
@@ -258,9 +275,17 @@ if (process.env.HARBORMASTER_USER_DATA_DIR) {
 // error` call is teed here in addition to its normal stdout/stderr
 // destination, so the `[main] uncaughtException` stdout grep e2e relies on
 // keeps working unchanged.
-const appLog = createAppLog(join(app.getPath("userData"), "logs", "main.log"));
+const appLog = createAppLog(
+  join(app.getPath("userData"), "logs", "main.log"),
+  undefined,
+  // Identical lines within 60 s are written once (see log-dedupe.ts).
+  { dedupe: createLogDedupe() },
+);
 installConsoleTee(appLog);
 console.log(`[main] Harbormaster ${app.getVersion()} starting`);
+// Crash sentinel + IPC timing (see main-health.ts): before any handler registers.
+installRunSentinel();
+installIpcTiming(ipcMain);
 // After the tee, so it lands in main.log. Logged once, every run (including e2e, which keeps the PATH it was
 // given so its fake binaries stay first): the actual PATH a launch
 // resolves commands against, and where `pi`/`claude` were found on it (or
@@ -292,7 +317,29 @@ const spawnHost = createSpawnHostRunner({
 setProcessRunner(spawnHost.run);
 app.on("will-quit", () => spawnHost.dispose());
 
-const core = createCore({ stateDir: activeStateDir });
+// The bundled Pi extension is what `doctor`'s agents.pi-extension check
+// compares the installed copy with.
+const bundledPiExtension = resolvePiExtensionSource({
+  env: process.env,
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  mainDir: __dirname,
+});
+// Core's operation log (`[core:<scope>] …` lines) goes through console, so
+// it lands in main.log with everything else.
+const core = createCore({
+  stateDir: activeStateDir,
+  logger: consoleCoreLogger(console),
+  ...(bundledPiExtension ? { piExtensionSource: bundledPiExtension } : {}),
+});
+/** App-only facts for the `doctor` command (Setup screen, Export Diagnostics). */
+const doctorFacts: DoctorHostFacts = {
+  loginShellPath: loginShellPathAtStart,
+  appPath: app.getAppPath(),
+  appVersion: app.getVersion(),
+};
+/** "Copy summary" text of the last diagnostics export (see the export toast). */
+let lastDiagnosticsSummary = "";
 
 // Where the app's agent-facing pieces live (the `harbormaster` CLI, the Pi
 // inbox extension): absolute paths, the app's PATH is not the shell's.
@@ -507,7 +554,7 @@ function broadcastTaskLaunched(taskId: string): void {
   }
 }
 
-const backgroundLauncher = createBackgroundLauncher({
+const untimedBackgroundLauncher = createBackgroundLauncher({
   listStartedLaunches: async () =>
     flattenTasks(await core.commands.listBoard()).filter(
       (task) => task.launch?.status === "started",
@@ -553,6 +600,10 @@ const backgroundLauncher = createBackgroundLauncher({
     console.log(`[background-launcher] ${event} ${JSON.stringify(details)}`);
   },
 });
+// Every trigger's pass is timed (`[pass] launcher`, see pass-timer.ts).
+const backgroundLauncher = {
+  runPass: () => passTimer.run("launcher", untimedBackgroundLauncher.runPass),
+};
 
 function registerCoreIpc(): void {
   ipcMain.handle("core:listBoard", () => {
@@ -560,7 +611,11 @@ function registerCoreIpc(): void {
     // than the last push; never let the watcher's unchanged-board skip
     // (see `pushBoardToWindows`) suppress the next push against it.
     lastPushedBoardJson = undefined;
-    return core.commands.listBoard();
+    return passTimer.run(
+      "listBoard",
+      () => core.commands.listBoard(),
+      (columns) => flattenTasks(columns).length,
+    );
   });
   ipcMain.handle("core:getTask", (_event, id: string) =>
     core.commands.getTask(id),
@@ -717,7 +772,11 @@ function registerCoreIpc(): void {
   // Slow (du over every orphan): the renderer calls it at startup and every
   // few hours, never on the refresh tick.
   ipcMain.handle("core:scanOrphanWorktrees", () =>
-    core.commands.scanOrphanWorktrees(),
+    passTimer.run(
+      "scanOrphanWorktrees",
+      () => core.commands.scanOrphanWorktrees(),
+      (report) => report.orphans.length,
+    ),
   );
   ipcMain.handle("core:refresh", async (): Promise<{ warnings: string[] }> => {
     const outcome = await connectivityLoop.runOnce();
@@ -1038,9 +1097,14 @@ let presencePoll: (() => Promise<void>) | undefined;
  * logged, never an unhandled rejection.
  */
 function pollPresenceOnce(): Promise<void> {
-  presencePoll ??= createSingleFlight(pollPresenceTick, (error) => {
-    console.error("[presence] poll failed:", error);
-  });
+  presencePoll ??= createSingleFlight(
+    async () => {
+      await passTimer.run("presence", pollPresenceTick, (n) => n);
+    },
+    (error) => {
+      console.error("[presence] poll failed:", error);
+    },
+  );
   return presencePoll();
 }
 
@@ -1050,11 +1114,11 @@ function pollPresenceOnce(): Promise<void> {
  * is restarted by `startPresencePolling`) once no window is left open, so
  * exactly one timer ever runs regardless of window count.
  */
-async function pollPresenceTick(): Promise<void> {
+async function pollPresenceTick(): Promise<number> {
   const windows = BrowserWindow.getAllWindows();
   if (windows.length === 0) {
     stopPresencePolling();
-    return;
+    return 0;
   }
   const columns = await core.commands.listBoard();
   const tasks = columns
@@ -1115,6 +1179,13 @@ async function pollPresenceTick(): Promise<void> {
   // triggers (a turn started/ended with no board/pty-exit event of its
   // own) "-" see background-launcher.ts's "on each presence poll tick".
   void backgroundLauncher.runPass();
+  // Diagnostics: warn when a `new` session never wrote its file (~20 s).
+  void core.commands.checkPendingSessionFiles().catch(() => {});
+  debugLog(
+    "presence",
+    `tasks=${tasks.length} live=${entries.filter(([, p]) => p.live).length} running=${runningTaskIds.size} windows=${windows.length}`,
+  );
+  return tasks.length;
 }
 
 /**
@@ -1239,11 +1310,15 @@ function maybePruneMessageAttachments(): void {
 
 const connectivityLoop = createConnectivityLoop({
   isOnline: () => net.isOnline(),
-  performRefresh: async () => {
-    maybePruneMessageAttachments();
-    const result = await performRefresh();
-    return { offline: Boolean(result.connectivity), warnings: result.warnings };
-  },
+  performRefresh: () =>
+    passTimer.run("refresh", async () => {
+      maybePruneMessageAttachments();
+      const result = await performRefresh();
+      return {
+        offline: Boolean(result.connectivity),
+        warnings: result.warnings,
+      };
+    }),
   onStateChange: pushConnectivityState,
 });
 
@@ -1931,11 +2006,18 @@ async function exportDiagnostics(): Promise<string | null> {
   const claudeCommand = process.env.HARBORMASTER_CLAUDE_COMMAND || "claude";
   const piResolved = resolveCommandPath(piCommand);
   const claudeResolved = resolveCommandPath(claudeCommand);
-  const [tasksSummary, piVersion, claudeVersion] = await Promise.all([
-    buildTasksSummary(core.commands).catch(() => undefined),
-    commandVersion(piResolved),
-    commandVersion(claudeResolved),
-  ]);
+  const [tasksSummary, state, piVersion, claudeVersion, doctor] =
+    await Promise.all([
+      buildTasksSummary(core.commands).catch(() => undefined),
+      buildDiagnosticsState(core.commands).catch(() => undefined),
+      commandVersion(piResolved),
+      commandVersion(claudeResolved),
+      doctorForDiagnostics(core.commands, doctorFacts),
+    ]);
+  lastDiagnosticsSummary = diagnosticsSummary(doctor, {
+    appVersion: app.getVersion(),
+    os: `${process.platform === "darwin" ? "macOS" : process.platform} ${process.getSystemVersion()} (${process.arch})`,
+  });
   const zip = buildDiagnosticsZip({
     logsDir: join(app.getPath("userData"), "logs"),
     configFile: resolveStatePaths(activeStateDir).configFile,
@@ -1951,7 +2033,13 @@ async function exportDiagnostics(): Promise<string | null> {
       cli: cli ?? "not found",
     },
     rulesList: await rulesListOutput(),
+    doctor,
     ...(tasksSummary ? { tasksSummary } : {}),
+    ...(state ? { state } : {}),
+    // Crash evidence (see run-sentinel.ts): the previous run's unclean exit
+    // and the OS crash-report names, never their contents.
+    ...(getLastUncleanExit() ? { lastUncleanExit: getLastUncleanExit() } : {}),
+    crashReports: listRecentCrashReports(),
     environment: buildEnvironmentInfo({
       app: app.getVersion(),
       electron: process.versions.electron,
@@ -2073,6 +2161,10 @@ function registerReleaseIpc(): void {
     if (typeof text === "string") clipboard.writeText(text);
   });
   ipcMain.handle("app:exportDiagnostics", () => exportDiagnostics());
+  ipcMain.handle("app:copyDiagnosticsSummary", (): string => {
+    clipboard.writeText(lastDiagnosticsSummary);
+    return lastDiagnosticsSummary;
+  });
 
   // See preload's `reportError`: an uncaught renderer error/rejection,
   // logged as `[renderer] ...` (never includes anything but the error's own
@@ -2096,6 +2188,7 @@ function registerReleaseIpc(): void {
 
 registerCoreIpc();
 registerOnboardingIpc(ipcMain, core.commands);
+registerDoctorIpc(ipcMain, core.commands, doctorFacts);
 registerReleaseIpc();
 registerPtyIpc();
 registerShellIpc();
@@ -2107,6 +2200,7 @@ app.whenReady().then(() => {
   if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) app.dock?.hide();
   installApplicationMenu();
   createWindow();
+  startMainHealthMonitor();
   void startToolSocket();
   ensurePiExtensionInstalled();
   startPresencePolling();

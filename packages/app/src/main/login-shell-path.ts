@@ -97,10 +97,19 @@ export function readLoginShellPath(
   }
 }
 
+/** The login shell's own PATH as `applyLoginShellPath` read it (for `doctor`'s `path.loginShell`). */
+let loginShellPathRead: string | undefined;
+
+/** The login shell PATH read at start, if it was read (never under e2e). */
+export function loginShellPathAtStart(): string | undefined {
+  return loginShellPathRead;
+}
+
 /** Resolve the login shell PATH and write the merged result to `process.env.PATH`. Returns what was applied. */
 export function applyLoginShellPath(): string {
+  loginShellPathRead = readLoginShellPath(process.env.SHELL);
   const merged = mergePath(
-    readLoginShellPath(process.env.SHELL),
+    loginShellPathRead,
     process.env.PATH,
     wellKnownBinDirs(),
   );

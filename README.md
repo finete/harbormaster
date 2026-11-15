@@ -140,6 +140,21 @@ never asks. Signing (and the automatic updater it unlocks) is planned once
 there are more than a handful of users.
 - **Apple Silicon only.**
 
+## Troubleshooting
+
+- **Logs** live in `~/Library/Application Support/Harbormaster/logs/`:
+`main.log` (rotated at 5 MB) records app events, agent launches and
+exits, and a `[health]` line every minute (event-loop lag, memory, process
+and terminal activity). `[health] spike`, `[pass]` and `[ipc] slow` lines
+mark moments the app was busy. An identical line repeated within a minute is
+written once, followed by a `… repeated N times` note.
+- **Export Diagnostics…** (in the Harbormaster menu) zips the logs, a
+redacted config and version info into one file to attach to a bug report.
+- **More detail:** quit the app, then start it from a terminal with
+`HARBORMASTER_LOG=debug /Applications/Harbormaster.app/Contents/MacOS/Harbormaster`
+to also log per-chunk terminal output sizes, every IPC call's timing and
+each presence poll.
+
 ## Future
 
 Harbormaster is about what happens *around* the agent — the review →

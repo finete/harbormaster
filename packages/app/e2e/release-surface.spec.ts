@@ -157,6 +157,7 @@ test("Export Diagnostics in the app menu writes logs, a redacted config and vers
   expect(names).toEqual(
     expect.arrayContaining([
       "config.redacted.json",
+      "doctor.json",
       "logs/wake.log",
       "rules-list.txt",
       "versions.json",

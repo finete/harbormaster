@@ -4,10 +4,13 @@
 // process spawning here (accessor separation is a hard rule — ptys are a
 // frontend resource, see /docs/design-decisions.md "Layering").
 
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { PiModelCatalogAccess } from "../access/pi-model-catalog-access.js";
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
 import type {
   BuildLaunchSpecInput,
+  ExpectedSessionFile,
   HarnessAdapter,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
@@ -53,6 +56,8 @@ export interface PiHarnessAdapterOptions {
    * `HARBORMASTER_CLI` for hooks and shells.
    */
   cliPath?: string;
+  /** Pi's agent dir (sessions live in `<agentDir>/sessions`); defaults to `$PI_CODING_AGENT_DIR` or `~/.pi/agent`, as Pi resolves it. */
+  agentDir?: string;
 }
 
 /** Marker env var every launched Pi session can check to detect it is Harbormaster-hosted. */
@@ -199,6 +204,29 @@ function sessionIdentityEnv(
   }
 }
 
+/** Pi's agent dir as Pi resolves it: `$PI_CODING_AGENT_DIR` (tilde-expanded), else `~/.pi/agent`. */
+export function defaultPiAgentDir(): string {
+  const fromEnv = process.env.PI_CODING_AGENT_DIR;
+  if (fromEnv) {
+    if (fromEnv === "~") return homedir();
+    if (fromEnv.startsWith("~/")) return join(homedir(), fromEnv.slice(2));
+    return fromEnv;
+  }
+  return join(homedir(), ".pi", "agent");
+}
+
+/**
+ * The directory Pi keeps a cwd's sessions in (pi-coding-agent's
+ * `getDefaultSessionDirPath`): `<agentDir>/sessions/--<cwd, separators as
+ * dashes>--`. Session files in it are named `<timestamp>_<sessionId>.jsonl`.
+ */
+export function piSessionDir(cwd: string, agentDir: string): string {
+  const safe = `--${resolve(cwd)
+    .replace(/^[/\\]/, "")
+    .replace(/[/\\:]/g, "-")}--`;
+  return join(resolve(agentDir), "sessions", safe);
+}
+
 /** Pi's in-session extension can receive, steer, follow up, and inline images. */
 export const PI_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
   receive: true,
@@ -219,6 +247,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
   private readonly clock: Clock;
   private readonly livenessOptions: PresenceLivenessOptions;
   private readonly cliPath: string | undefined;
+  private readonly agentDir: string | undefined;
 
   constructor(options: PiHarnessAdapterOptions = {}) {
     this.presenceAccess =
@@ -230,6 +259,14 @@ export class PiHarnessAdapter implements HarnessAdapter {
     this.livenessOptions = { isAlive: options.isAlive ?? defaultIsAlive };
     this.models = options.models ?? new PiModelCatalogAccess();
     this.cliPath = options.cliPath;
+    this.agentDir = options.agentDir;
+  }
+
+  expectedSessionFile(cwd: string, sessionId: string): ExpectedSessionFile {
+    return {
+      dir: piSessionDir(cwd, this.agentDir ?? defaultPiAgentDir()),
+      fileSuffix: `_${sessionId}.jsonl`,
+    };
   }
 
   async defaults(): Promise<

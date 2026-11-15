@@ -9,6 +9,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -194,4 +195,40 @@ test("a launched task's pty leaves a redacted spawn line and an exit line in mai
       );
   expect(finalExitLine, finalLog).toBeTruthy();
   expect(finalExitLine).toContain('"exitCode":0');
+
+  // Core's operation log reaches main.log too (console-backed CoreLogger):
+  // the task's timed worktree create and its session-launch decision.
+  expect(finalLog).toMatch(
+    new RegExp(
+      `\\[core:worktree\\] task\\.provision-worktree ok \\{"op":"task\\.provision-worktree","taskId":"${taskId}".*"ms":\\d+`,
+    ),
+  );
+  expect(finalLog).toContain(`[core:session] launch new for task ${taskId}`);
+  const coreLines = finalLog
+    .split("\n")
+    .filter((line) => line.includes("[core:"));
+  expect(coreLines.join("\n")).not.toContain(PROMPT_TEXT);
+});
+
+// Performance/health logging + crash sentinel (main-health.ts): the one
+// seam unit tests can't reach is that the real app wires them — a
+// `[health]` line right at startup, a timed `[pass] listBoard` once the
+// renderer loads the board, and `running.sentinel` present while running
+// and removed by a clean quit. Runs last: it quits the app.
+test("health and pass lines land in main.log; the run sentinel lives exactly as long as the app", async () => {
+  const sentinelPath = path.join(userDataDir, "logs", "running.sentinel");
+  await expect
+    .poll(() => mainLogText(), { timeout: 20_000 })
+    .toMatch(/\[health\] \{"lagMs":\{"p50":\d+/);
+  await expect
+    .poll(() => mainLogText(), { timeout: 20_000 })
+    .toMatch(/\[pass\] listBoard ms=\d+ items=\d+/);
+  expect(existsSync(sentinelPath)).toBe(true);
+  const sentinel = JSON.parse(readFileSync(sentinelPath, "utf8"));
+  expect(sentinel.pid).toBe(app.process().pid);
+  expect(mainLogText()).not.toContain("previous run did not exit cleanly");
+
+  await app.close();
+  expect(existsSync(sentinelPath)).toBe(false);
+  expect(mainLogText()).toContain("[main] clean exit");
 });

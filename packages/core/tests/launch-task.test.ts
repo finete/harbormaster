@@ -25,6 +25,10 @@ import type {
 } from "../src/contracts/github.js";
 import type { Clock } from "../src/contracts/index.js";
 import { type Core, createCore, isToDoneConfirmation } from "../src/index.js";
+import {
+  type CaptureLogger,
+  captureLogger,
+} from "./fixtures/capture-logger.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -83,6 +87,7 @@ async function fixture(): Promise<{
   checkout: string;
   repositoryId: string;
   core: Core;
+  logger: CaptureLogger;
 }> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "harbormaster-launch-task-")),
@@ -123,18 +128,21 @@ async function fixture(): Promise<{
     }),
   );
   counter = 0;
+  const logger = captureLogger();
   const core = createCore({
     stateDir,
     clock: new FixedClock(),
     ids: sequentialIds,
     pullRequests: noGithub,
     versions: noGithub,
+    logger,
   });
   return {
     stateDir,
     checkout,
     repositoryId: "github.com/acme/harbor-repo",
     core,
+    logger,
   };
 }
 
@@ -435,6 +443,52 @@ describe.skipIf(!gitAvailable)(
       expect(startedAfter?.launch?.interruptedAt).toBeDefined();
       expect(queuedAfter?.launch?.status).toBe("queued");
     });
+
+    it("logs one [core:launch] line per transition: queued, claimed, interrupted (real changes only)", async () => {
+      const f = await fixture();
+      const parent = await f.core.commands.launchTask({
+        relation: "standalone",
+        title: "Parent",
+        prompt: "x",
+        repository: { repositoryId: f.repositoryId },
+      });
+      const child = await f.core.commands.launchTask({
+        relation: "child",
+        fromTaskId: parent.id,
+        title: "Child",
+        prompt: "y",
+        repository: { repositoryId: f.repositoryId },
+      });
+      expect(f.logger.find("queued task").map((line) => line.fields)).toEqual([
+        {
+          taskId: parent.id,
+          relation: "standalone",
+          repository: f.repositoryId,
+          outcome: "queued",
+        },
+        {
+          taskId: child.id,
+          relation: "child",
+          repository: f.repositoryId,
+          outcome: "queued",
+        },
+      ]);
+
+      await f.core.commands.claimPendingLaunches(1);
+      expect(f.logger.find("claimed task")).toEqual([
+        expect.objectContaining({
+          scope: "launch",
+          message: `claimed task ${parent.id}`,
+          fields: expect.objectContaining({ outcome: "claimed" }),
+        }),
+      ]);
+
+      await f.core.commands.markLaunchesInterrupted([parent.id, child.id]);
+      await f.core.commands.markLaunchesInterrupted([parent.id]);
+      expect(
+        f.logger.find("interrupted task").map((line) => line.fields.taskId),
+      ).toEqual([parent.id]);
+    });
   },
 );
 
@@ -627,6 +681,14 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
     // The child is never touched.
     const childAfter = await f.core.commands.getTask(child.id);
     expect(childAfter?.state).toBe("working");
+    // The confirmed Done's forced cleanup ran once, timed.
+    const [cleanup] = f.logger.find("done.forced-cleanup");
+    expect(cleanup).toMatchObject({
+      scope: "done",
+      message: "done.forced-cleanup ok",
+      fields: { taskId: parent.id, outcome: "ok", count: 1 },
+    });
+    expect(cleanup?.fields.ms).toEqual(expect.any(Number));
   });
 
   it("a Done child never blocks the parent", async () => {

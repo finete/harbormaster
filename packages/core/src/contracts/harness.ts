@@ -170,4 +170,20 @@ export interface HarnessAdapter {
 
   /** Attach the caller to an already-running task session. Requires frontend pty cooperation; not implemented until wave 4. */
   attach(taskId: string): Promise<void>;
+
+  /**
+   * Where this harness will write a `new` session's file for `cwd` (the
+   * harness owns that layout), so core can confirm it appeared. Optional:
+   * without it core only logs the launch decision.
+   */
+  expectedSessionFile?(
+    cwd: string,
+    sessionId: string,
+  ): ExpectedSessionFile | undefined;
+}
+
+/** A session file's expected location: some file in `dir` whose name ends with `fileSuffix`. */
+export interface ExpectedSessionFile {
+  dir: string;
+  fileSuffix: string;
 }

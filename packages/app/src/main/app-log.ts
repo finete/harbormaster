@@ -12,6 +12,8 @@
 // throw past the caller (logging must never break the app).
 import { appendFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { LogDedupe } from "./log-dedupe";
+import { redactLogLine } from "./log-redact";
 
 /** Rotate once a log file exceeds this size. */
 export const MAX_LOG_BYTES = 5 * 1024 * 1024;
@@ -109,7 +111,13 @@ export interface AppLog {
 export function createAppLog(
   logPath: string,
   fs: AppLogFs = nodeAppLogFs(),
-  options: { maxBytes?: number; maxBackups?: number } = {},
+  options: {
+    maxBytes?: number;
+    maxBackups?: number;
+    /** Repeat suppression for the file only (see log-dedupe.ts); the console tee is never filtered. */
+    dedupe?: LogDedupe;
+    now?: () => number;
+  } = {},
 ): AppLog {
   const maxBytes = options.maxBytes ?? MAX_LOG_BYTES;
   const maxBackups = options.maxBackups ?? MAX_LOG_BACKUPS;
@@ -135,7 +143,30 @@ export function createAppLog(
   }
 
   function write(level: LogLevel, args: readonly unknown[]): void {
-    const line = formatLogLine(level, args);
+    // Secrets never reach the file (see log-redact.ts); dedupe sees the
+    // redacted line so equal secrets collapse too.
+    const line = redactLogLine(formatLogLine(level, args));
+    const { dedupe } = options;
+    if (!dedupe) {
+      append(line);
+      return;
+    }
+    for (const out of dedupe.filter(line, (options.now ?? Date.now)())) {
+      append(out);
+    }
+  }
+
+  if (options.dedupe) {
+    const { dedupe } = options;
+    // A window that ends with no later write still gets its summary.
+    setInterval(() => {
+      for (const out of dedupe.flushExpired((options.now ?? Date.now)())) {
+        append(out);
+      }
+    }, 5_000).unref?.();
+  }
+
+  function append(line: string): void {
     queue = queue
       .then(async () => {
         if (!dirReady) {

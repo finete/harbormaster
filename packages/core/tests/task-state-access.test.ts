@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JsonTaskStateAccess } from "../src/access/json-task-state-access.js";
 import type { Task } from "../src/contracts/model.js";
+import { captureLogger } from "./fixtures/capture-logger.js";
 
 describe("JsonTaskStateAccess", () => {
   let dir: string;
@@ -128,6 +129,36 @@ describe("JsonTaskStateAccess", () => {
     ]);
     await fresh.createTask(makeTask({ id: "new-1" }));
     expect(await readFile(file, "utf8")).not.toContain('"dev"');
+  });
+
+  it("logs the dev→working migration once per file content, not on every cached read", async () => {
+    const file = join(dir, "tasks.json");
+    const legacy = JSON.stringify({
+      version: 1,
+      tasks: [
+        makeTask({ id: "old-1", state: "dev" as Task["state"] }),
+        makeTask({ id: "old-2", state: "dev" as Task["state"] }),
+        makeTask({ id: "old-3", state: "done" }),
+      ],
+    });
+    await writeFile(file, legacy);
+    const logger = captureLogger();
+    const logged = new JsonTaskStateAccess(file, undefined, logger);
+    await logged.listTasks();
+    await logged.getTask("old-1");
+    await logged.listTasks();
+    expect(logger.lines).toEqual([
+      {
+        level: "info",
+        scope: "state",
+        message: `migrated 2 task(s) dev→working in ${file}`,
+        fields: { file, count: 2 },
+      },
+    ]);
+    // A write persists the rename: later parses have nothing to migrate.
+    await logged.createTask(makeTask({ id: "new-1" }));
+    await logged.listTasks();
+    expect(logger.lines).toHaveLength(1);
   });
 
   it("round-trips the phase-2a fields (repository/branch/pr/issue/awaiting)", async () => {

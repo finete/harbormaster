@@ -121,6 +121,11 @@ export interface PresenceAccess {
  */
 export interface SessionFileAccess {
   exists(sessionPath: string): Promise<boolean>;
+  /** A file in `dir` whose name ends with `fileSuffix`, if any (the session-file check after a `new` launch). */
+  findSessionFile?(
+    dir: string,
+    fileSuffix: string,
+  ): Promise<string | undefined>;
 }
 
 /**

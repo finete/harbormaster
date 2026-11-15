@@ -17,6 +17,7 @@ import type {
   CreateTaskActionInput,
   CreateTaskInput,
   DetectedAgent,
+  DoctorReport,
   GithubAuthStatus,
   HarnessModelCatalog,
   InboxItem,
@@ -78,6 +79,9 @@ export type {
   CreateTaskInput,
   CustomAgentConfig,
   DetectedAgent,
+  DoctorCheck,
+  DoctorReport,
+  DoctorStatus,
   GithubAuthStatus,
   HarnessModel,
   HarnessModelCatalog,
@@ -447,6 +451,8 @@ export interface HarbormasterApi {
     refresh(): Promise<{ warnings: string[] }>;
     /** Unbound directories under the worktrees root, sized, plus a warning past the threshold. Slow; see `CoreCommands.scanOrphanWorktrees`. */
     scanOrphanWorktrees(): Promise<OrphanWorktreeReport>;
+    /** The read-only setup self-check (Setup screen "Check setup"); main adds the app-only facts. See `CoreCommands.doctor`. */
+    doctor(): Promise<DoctorReport>;
     /** Subscribes to the core's board-changed push channel; returns an unsubscribe fn. */
     onBoardChanged(
       listener: (payload: BoardChangedPayload) => void,
@@ -597,6 +603,8 @@ export interface HarbormasterApi {
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
     exportDiagnostics(): Promise<string | null>;
+    /** Copies the last export's plain-text summary (versions + failing/warning doctor checks) to the clipboard; resolves the text. */
+    copyDiagnosticsSummary(): Promise<string>;
     /**
      * The "Open in …" apps installed on this host (editors, terminals, the
      * file manager), in menu order; probed once per app run (see

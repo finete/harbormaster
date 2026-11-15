@@ -25,6 +25,11 @@ import type {
   UpdateTaskInput,
 } from "../contracts/commands.js";
 import type {
+  DoctorInput,
+  DoctorReport,
+  EnvironmentProbeAccess,
+} from "../contracts/doctor.js";
+import type {
   PullRequestAccess,
   PullRequestPreview,
   PullRequestStatus,
@@ -45,6 +50,8 @@ import type {
   ResolveInboxItemOptions,
   ResolveInboxItemResult,
 } from "../contracts/inbox.js";
+import type { CoreLogger, CoreOperation } from "../contracts/logger.js";
+import { noopCoreLogger } from "../contracts/logger.js";
 import type {
   ApproveMessageEdits,
   FindTasksOptions,
@@ -169,6 +176,7 @@ import {
 import { parsePullRequestUrl } from "../engines/pull-request-url.js";
 import type { ResolvedMove } from "../engines/rules/evaluation.js";
 import { effectivePipeline } from "../engines/rules/views.js";
+import { shouldWatchSessionFile } from "../engines/session-file-check.js";
 import {
   assertAllowedTransition,
   assertMayReturnToWorking,
@@ -183,11 +191,14 @@ import {
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
+import { elapsedMs, logErrorMessage, timed } from "../utilities/timed.js";
+import { DoctorRuntime } from "./doctor-runtime.js";
 import {
   type ActionResult,
   type RuleActionExecutor,
   RulesRuntime,
 } from "./rules-runtime.js";
+import { SessionFileWatch } from "./session-file-watch.js";
 
 export interface CoreManagerDependencies {
   tasks: TaskStateAccess;
@@ -248,6 +259,10 @@ export interface CoreManagerDependencies {
   inbox?: InboxAccess;
   /** The first-run wizard's machine probes; onboarding commands throw "onboarding is not configured" without it. */
   onboarding?: OnboardingProbeAccess;
+  /** Operation log (`[core:<scope>]` lines); silent without it. */
+  logger?: CoreLogger;
+  /** `doctor`'s read-only machine probes; `doctor` throws "doctor is not configured" without it. */
+  environment?: EnvironmentProbeAccess;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -304,8 +319,22 @@ export class CoreManager implements CoreCommands {
 
   /** The rules engine's tick/check/list workflow (see manager/rules-runtime.ts). */
   private readonly rules: RulesRuntime | undefined;
+  /** Operation log (see contracts/logger.ts). */
+  private readonly log: CoreLogger;
+  /** `new` session launches waiting for their session file (see session-file-watch.ts). */
+  private readonly sessionFiles: SessionFileWatch;
+  /** Tasks the running refresh observes (for its completion line). */
+  private refreshTaskCount = 0;
+  /** Last logged safe-Done cleanup refusal per task (log dedupe). */
+  private readonly doneCleanupFailures = new Map<string, string>();
 
   constructor(private readonly deps: CoreManagerDependencies) {
+    this.log = deps.logger ?? noopCoreLogger;
+    this.sessionFiles = new SessionFileWatch({
+      sessions: deps.sessions,
+      logger: this.log,
+      nowMs: () => deps.clock.now().getTime(),
+    });
     this.rules = deps.rules
       ? new RulesRuntime({
           rules: deps.rules.files,
@@ -314,6 +343,7 @@ export class CoreManager implements CoreCommands {
           ...(deps.rules.addons ? { addons: deps.rules.addons } : {}),
           config: deps.config,
           now: () => deps.clock.now(),
+          logger: this.log,
           services: {
             github: {
               containsCommit: (repositoryId, ancestor, descendant) =>
@@ -802,7 +832,22 @@ export class CoreManager implements CoreCommands {
    * ever deletes or git-touches it (Done/delete gate every git verb on
    * `task.repositoryId`, which a folder task never has).
    */
-  private async provisionInPlaceWorkspace(
+  private provisionInPlaceWorkspace(
+    taskId: string,
+    folderPath: string,
+    now: string,
+    task: { persist: () => Promise<void>; undo: () => Promise<void> },
+  ): Promise<void> {
+    return timed(
+      this.log,
+      "worktree",
+      "task.provision-in-place",
+      { taskId, worktreePath: folderPath },
+      () => this.provisionInPlaceWorkspaceSteps(taskId, folderPath, now, task),
+    );
+  }
+
+  private async provisionInPlaceWorkspaceSteps(
     taskId: string,
     folderPath: string,
     now: string,
@@ -838,7 +883,20 @@ export class CoreManager implements CoreCommands {
    * write (`undo`) when the binding step fails; the triggering error is
    * rethrown as-is.
    */
-  private async provisionTaskWorkspace(
+  private provisionTaskWorkspace(
+    ...args: Parameters<CoreManager["provisionTaskWorkspaceSteps"]>
+  ): Promise<void> {
+    const [repo, taskId, branch] = args;
+    return timed(
+      this.log,
+      "worktree",
+      "task.provision-worktree",
+      { taskId, repositoryId: repo.id, branch },
+      () => this.provisionTaskWorkspaceSteps(...args),
+    );
+  }
+
+  private async provisionTaskWorkspaceSteps(
     repo: RepositoryInfo,
     taskId: string,
     branch: string,
@@ -916,7 +974,21 @@ export class CoreManager implements CoreCommands {
    * unchanged. `persist` writes the task record; `undo` rolls it back if
    * the binding cannot be attached.
    */
-  private async provisionScratchWorkspace(
+  private provisionScratchWorkspace(
+    taskId: string,
+    now: string,
+    task: { persist: () => Promise<void>; undo: () => Promise<void> },
+  ): Promise<void> {
+    return timed(
+      this.log,
+      "worktree",
+      "task.provision-scratch",
+      { taskId },
+      () => this.provisionScratchWorkspaceSteps(taskId, now, task),
+    );
+  }
+
+  private async provisionScratchWorkspaceSteps(
     taskId: string,
     now: string,
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
@@ -954,6 +1026,68 @@ export class CoreManager implements CoreCommands {
   }
 
   async claimSessionLaunch(taskId: string): Promise<SessionLaunch | undefined> {
+    const launch = await this.decideSessionLaunch(taskId);
+    await this.logSessionLaunch(taskId, launch);
+    return launch;
+  }
+
+  /**
+   * `[core:session]` line for a launch decision; a prompted `new` launch
+   * also names the file the harness should create and arms the follow-up
+   * check (`checkPendingSessionFiles`). Never throws.
+   */
+  private async logSessionLaunch(
+    taskId: string,
+    launch: SessionLaunch | undefined,
+  ): Promise<void> {
+    if (!launch) return;
+    try {
+      const task = await this.deps.tasks.getTask(taskId);
+      let expected: { dir: string; fileSuffix: string } | undefined;
+      if (
+        task &&
+        shouldWatchSessionFile(launch, Boolean(task.initialPrompt.trim()))
+      ) {
+        const binding = await this.deps.bindings.getBindingForTask(taskId);
+        const adapter =
+          this.deps.harness || this.deps.harnesses
+            ? await this.harnessFor(task, await this.deps.config.load())
+            : undefined;
+        expected =
+          binding?.worktreePath && adapter?.expectedSessionFile
+            ? adapter.expectedSessionFile(
+                binding.worktreePath,
+                launch.sessionId,
+              )
+            : undefined;
+        if (expected) {
+          this.sessionFiles.arm({
+            taskId,
+            sessionId: launch.sessionId,
+            dir: expected.dir,
+            fileSuffix: expected.fileSuffix,
+          });
+        }
+      }
+      this.log.info("session", `launch ${launch.mode} for task ${taskId}`, {
+        taskId,
+        mode: launch.mode,
+        ...("sessionId" in launch ? { sessionId: launch.sessionId } : {}),
+        ...("sessionPath" in launch ? { sessionFile: launch.sessionPath } : {}),
+        ...(expected ? { sessionDir: expected.dir } : {}),
+      });
+    } catch {
+      // Logging only: a lookup failure never fails the launch.
+    }
+  }
+
+  async checkPendingSessionFiles(): Promise<number> {
+    return this.sessionFiles.check();
+  }
+
+  private async decideSessionLaunch(
+    taskId: string,
+  ): Promise<SessionLaunch | undefined> {
     let task = await this.requireTask(taskId);
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (!binding?.worktreePath) return undefined;
@@ -1076,6 +1210,27 @@ export class CoreManager implements CoreCommands {
   }
 
   async recordTaskSession(
+    taskId: string,
+    input: RecordTaskSessionInput,
+  ): Promise<boolean> {
+    const recorded = await this.bindReportedSession(taskId, input);
+    if (input.sessionId && input.sessionPath) {
+      this.sessionFiles.reported(taskId, input.sessionId, input.sessionPath);
+    }
+    this.log.info(
+      "session",
+      `${recorded ? "recorded" : "ignored"} session report for task ${taskId}`,
+      {
+        taskId,
+        sessionId: input.sessionId,
+        sessionFile: input.sessionPath,
+        outcome: recorded ? "recorded" : "ignored",
+      },
+    );
+    return recorded;
+  }
+
+  private async bindReportedSession(
     taskId: string,
     input: RecordTaskSessionInput,
   ): Promise<boolean> {
@@ -1353,7 +1508,24 @@ export class CoreManager implements CoreCommands {
     await this.publishBoard();
   }
 
-  async scanOrphanWorktrees(): Promise<OrphanWorktreeReport> {
+  scanOrphanWorktrees(): Promise<OrphanWorktreeReport> {
+    return timed(
+      this.log,
+      "orphans",
+      "orphans.scan",
+      {},
+      () => this.findOrphanWorktrees(),
+      (report) => ({
+        count: report.orphans.length,
+        bytes: report.orphans.reduce(
+          (sum, orphan) => sum + (orphan.sizeBytes ?? 0),
+          0,
+        ),
+      }),
+    );
+  }
+
+  private async findOrphanWorktrees(): Promise<OrphanWorktreeReport> {
     const config = await this.deps.config.load();
     // Legacy (pre-0.1.2) worktrees sit in `.harbormaster-worktrees` next to
     // a checkout: under the code root, or next to any known repository.
@@ -1523,8 +1695,11 @@ export class CoreManager implements CoreCommands {
       return task;
     }
     return (
-      (await this.runForcedCleanup(taskId, options?.protectedPaths ?? [])) ??
-      task
+      (await this.runForcedCleanup(
+        taskId,
+        options?.protectedPaths ?? [],
+        "done.retry-cleanup",
+      )) ?? task
     );
   }
 
@@ -1548,6 +1723,37 @@ export class CoreManager implements CoreCommands {
   }
 
   async launchTask(input: LaunchTaskInput): Promise<Task> {
+    const task = await this.queueLaunchedTask(input);
+    this.logLaunch(task, "queued", input.relation);
+    return task;
+  }
+
+  /** `[core:launch]` state-transition line (the app's `[background-launcher]` lines cover spawning). */
+  private logLaunch(
+    task: Task,
+    outcome: "queued" | "claimed" | "interrupted" | "done" | "blocked",
+    relation?: string,
+  ): void {
+    const message =
+      outcome === "done" || outcome === "blocked"
+        ? `task ${task.id} reported ${outcome}`
+        : `${outcome} task ${task.id}`;
+    this.log.info("launch", message, {
+      taskId: task.id,
+      relation:
+        relation ??
+        (task.parentTaskId
+          ? "child"
+          : task.launchedFromTaskId
+            ? "standalone"
+            : undefined),
+      repository:
+        task.repositoryId ?? (task.folderPath ? "(folder)" : "(no repository)"),
+      outcome,
+    });
+  }
+
+  private async queueLaunchedTask(input: LaunchTaskInput): Promise<Task> {
     const now = this.deps.clock.now().toISOString();
     const id = this.deps.ids.next();
     const config = await this.deps.config.load();
@@ -1732,6 +1938,7 @@ export class CoreManager implements CoreCommands {
     if (limit <= 0) return [];
     const now = this.deps.clock.now().toISOString();
     const claimed = await this.deps.tasks.claimQueuedLaunches(limit, now);
+    for (const task of claimed) this.logLaunch(task, "claimed");
     if (claimed.length > 0) await this.publishBoard();
     return claimed;
   }
@@ -1748,7 +1955,13 @@ export class CoreManager implements CoreCommands {
           updatedAt: now,
         };
       });
-      if (result) changed = true;
+      if (result) {
+        changed = true;
+        // patchTask hands back the unchanged task too: log real transitions only.
+        if (result.launch?.interruptedAt === now) {
+          this.logLaunch(result, "interrupted");
+        }
+      }
     }
     if (changed) await this.publishBoard();
   }
@@ -1782,7 +1995,18 @@ export class CoreManager implements CoreCommands {
     // observations of the same task side by side (each would decide moves
     // off its own reading); a call made mid-run joins the running one.
     if (this.refreshInFlight) return this.refreshInFlight;
-    const run = this.runRefresh(options?.protectedPaths ?? []).finally(() => {
+    const run = timed(
+      this.log,
+      "refresh",
+      "refresh",
+      {},
+      () => this.runRefresh(options?.protectedPaths ?? []),
+      (result) => ({
+        count: this.refreshTaskCount,
+        warnings: result.warnings.length,
+        errors: result.connectivity?.failedChecks ?? 0,
+      }),
+    ).finally(() => {
       this.refreshInFlight = undefined;
     });
     this.refreshInFlight = run;
@@ -1811,6 +2035,7 @@ export class CoreManager implements CoreCommands {
         Boolean(task.repositoryId) &&
         Boolean(task.branch),
     );
+    this.refreshTaskCount = candidates.length;
     // Each observation is dominated by gh latency and independent of the
     // others; writes are lock-serialized field patches, so a few run at
     // once (pi-home's reconcile uses the same 4-worker pool).
@@ -2200,6 +2425,53 @@ export class CoreManager implements CoreCommands {
     warning?: string;
     stayed?: boolean;
   }> {
+    const start = performance.now();
+    const fields = () => ({
+      op: "done.cleanup" as const,
+      taskId: task.id,
+      repositoryId: task.repositoryId,
+      branch: task.branch,
+      ms: elapsedMs(start),
+    });
+    const failed = (error: string) => {
+      // A rule retries a refused Done every tick (e.g. while a pane holds
+      // the worktree): log a refusal once per distinct reason.
+      if (this.doneCleanupFailures.get(task.id) === error) return;
+      this.doneCleanupFailures.set(task.id, error);
+      this.log.warn("done", "done.cleanup failed", {
+        ...fields(),
+        outcome: "failed",
+        error,
+      });
+    };
+    let result: Awaited<ReturnType<CoreManager["executeSafeDoneSteps"]>>;
+    try {
+      result = await this.executeSafeDoneSteps(task, protectedPaths);
+    } catch (error) {
+      failed(logErrorMessage(error));
+      throw error;
+    }
+    if (result.stayed) {
+      failed(result.warning ?? "stayed");
+    } else {
+      this.doneCleanupFailures.delete(task.id);
+      this.log.info("done", "done.cleanup ok", {
+        ...fields(),
+        outcome: "ok",
+        ...(result.warning ? { error: result.warning } : {}),
+      });
+    }
+    return result;
+  }
+
+  private async executeSafeDoneSteps(
+    task: Task,
+    protectedPaths: readonly string[],
+  ): Promise<{
+    task?: Task;
+    warning?: string;
+    stayed?: boolean;
+  }> {
     let warning: string | undefined;
     const addWarning = (text: string) => {
       warning = warning ? `${warning}; ${text}` : text;
@@ -2447,6 +2719,49 @@ export class CoreManager implements CoreCommands {
    * without counting an attempt. Returns the task as persisted afterwards.
    */
   private async runForcedCleanup(
+    taskId: string,
+    protectedPaths: readonly string[],
+    op: CoreOperation = "done.forced-cleanup",
+  ): Promise<Task | undefined> {
+    const before = await this.deps.tasks.getTask(taskId).catch(() => undefined);
+    const start = performance.now();
+    const after = await this.runForcedCleanupAttempt(taskId, protectedPaths);
+    const cleanup = after?.cleanup;
+    const attempted =
+      cleanup !== undefined &&
+      cleanup.attempts !== (before?.cleanup?.attempts ?? 0);
+    const fields = {
+      op,
+      taskId,
+      repositoryId: after?.repositoryId,
+      branch: after?.branch,
+      worktreePath: cleanup?.worktreePath,
+      ms: elapsedMs(start),
+      count: cleanup?.attempts,
+    };
+    if (!attempted) {
+      // Not attempted (a live pane holds the worktree, another attempt is
+      // running, nothing pending): quiet for the sweep, which would
+      // otherwise repeat this every tick while a pane stays open.
+      if (op === "done.retry-cleanup") {
+        this.log.info("done", `${op} skipped`, {
+          ...fields,
+          outcome: "skipped",
+        });
+      }
+    } else if (cleanup.completedAt) {
+      this.log.info("done", `${op} ok`, { ...fields, outcome: "ok" });
+    } else {
+      this.log.warn("done", `${op} failed`, {
+        ...fields,
+        outcome: "failed",
+        error: cleanup.lastError,
+      });
+    }
+    return after;
+  }
+
+  private async runForcedCleanupAttempt(
     taskId: string,
     protectedPaths: readonly string[],
   ): Promise<Task | undefined> {
@@ -2987,6 +3302,10 @@ export class CoreManager implements CoreCommands {
       outcome.note?.trim() || undefined,
       this.deps.clock.now().toISOString(),
     );
+    const reported = await this.deps.tasks
+      .getTask(taskId)
+      .catch(() => undefined);
+    if (reported) this.logLaunch(reported, outcome.status);
   }
 
   async getPresence(taskId: string): Promise<PresenceStatus> {
@@ -3642,6 +3961,23 @@ export class CoreManager implements CoreCommands {
       onboardingCompletedAt: this.deps.clock.now().toISOString(),
     });
     return this.onboardingState(config);
+  }
+
+  // --- Doctor (see manager/doctor-runtime.ts) -----------------------------
+
+  async doctor(input?: DoctorInput): Promise<DoctorReport> {
+    const probes = this.deps.environment;
+    if (!probes) throw new Error("doctor is not configured");
+    return new DoctorRuntime({
+      probes,
+      config: this.deps.config,
+      tasks: this.deps.tasks,
+      bindings: this.deps.bindings,
+      ...(this.deps.rules ? { rules: this.deps.rules.files } : {}),
+      now: () => this.deps.clock.now(),
+      repositories: (config) => this.allRepositories(config),
+      orphans: () => this.scanOrphanWorktrees(),
+    }).run(input ?? {});
   }
 
   private async applySettings(

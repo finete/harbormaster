@@ -13,6 +13,7 @@ import type { InboxItem, InboxPriorityInput } from "../contracts/inbox.js";
 import type { TaskMessage } from "../contracts/messaging.js";
 import type { Task } from "../contracts/model.js";
 import type { AuditEntry, RulesListing } from "../contracts/rules.js";
+import { formatDoctorReport } from "../engines/doctor.js";
 import type { ToolInputSchema, ToolResult } from "./catalog.js";
 
 export interface OpDefinition {
@@ -412,6 +413,30 @@ const addonsList: OpDefinition = {
 };
 
 /** Every operation, in display order. */
+const doctor: OpDefinition = {
+  name: "doctor",
+  title:
+    "Read-only setup self-check: tools, agents, state files, repositories, disk, socket, PATH",
+  inputSchema: {
+    type: "object",
+    properties: {
+      loginShellPath: {
+        type: "string",
+        description:
+          "The caller's shell PATH, compared with the PATH the app resolves commands on",
+      },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, commands) {
+    const loginShellPath = str(args, "loginShellPath");
+    const report = await commands.doctor(
+      loginShellPath ? { loginShellPath } : {},
+    );
+    return { text: formatDoctorReport(report), details: report };
+  },
+};
+
 export const OPS_CATALOG: readonly OpDefinition[] = [
   inboxList,
   inboxResolve,
@@ -420,6 +445,7 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   rulesEnable,
   rulesCheck,
   addonsList,
+  doctor,
 ];
 
 /** Runs one operation against the command API. */

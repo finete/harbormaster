@@ -9,6 +9,8 @@ import { join } from "node:path";
 import {
   type Core,
   createCore,
+  type DoctorReport,
+  doctorExitCode,
   PiHarnessAdapter,
   resolveSocketPath,
   startToolSocketServer,
@@ -21,7 +23,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type CliIo,
   createMcpServer,
+  DOCTOR_WITHOUT_APP_NOTE,
   EXIT_NOT_RUNNING,
+  formatDoctorOutput,
   inboxHookOutput,
   main,
   parseFlags,
@@ -351,6 +355,74 @@ describe("harbormaster inbox list / resolve, events, rules, addons", () => {
     expect(addons.out()).toContain("built-in");
     const usage = io();
     expect(await main(["events", "--bogus", "x"], usage)).toBe(64);
+  });
+});
+
+describe("harbormaster doctor", () => {
+  const canned: DoctorReport = {
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    checks: [
+      {
+        group: "tools",
+        id: "tools.gh-auth",
+        status: "fail",
+        summary: "gh is not logged in",
+        remediation: "Run `gh auth login` in a terminal.",
+      },
+      { group: "disk", id: "disk.free", status: "ok", summary: "9.0 GiB free" },
+    ],
+  };
+
+  it("formats grouped output, with the no-app note when the app was down", () => {
+    const body = [
+      "Tools",
+      "  ✗ tools.gh-auth  gh is not logged in",
+      "      → Run `gh auth login` in a terminal.",
+      "",
+      "Disk",
+      "  ✓ disk.free  9.0 GiB free",
+      "",
+      "1 ok, 0 warnings, 1 failed, 0 skipped",
+    ].join("\n");
+    expect(formatDoctorOutput(canned, { viaApp: true })).toBe(body);
+    expect(formatDoctorOutput(canned, { viaApp: false })).toBe(
+      `${DOCTOR_WITHOUT_APP_NOTE}\n\n${body}`,
+    );
+  });
+
+  it("runs through the app, comparing this shell's PATH with the app's", async () => {
+    const run = io({ PATH: "/only/in/the/shell" });
+    const code = await main(["doctor", "--json"], run);
+    const report = JSON.parse(run.out()) as DoctorReport & { viaApp: boolean };
+    expect(report.viaApp).toBe(true);
+    expect(code).toBe(doctorExitCode(report));
+    const path = report.checks.find((check) => check.id === "path.loginShell");
+    expect(path).toMatchObject({
+      status: "warn",
+      detail: "/only/in/the/shell",
+    });
+    expect(
+      report.checks.find((check) => check.id === "socket.tool")?.status,
+    ).toBe("ok");
+  }, 30_000);
+
+  it("falls back to an in-process core when the app is down; exit 1 on a failure", async () => {
+    await server?.close();
+    server = undefined;
+    const run = io();
+    let called = 0;
+    run.localDoctor = async () => {
+      called++;
+      return canned;
+    };
+    expect(await main(["doctor"], run)).toBe(1);
+    expect(called).toBe(1);
+    expect(run.out().startsWith(DOCTOR_WITHOUT_APP_NOTE)).toBe(true);
+    expect(run.out()).toContain("✗ tools.gh-auth");
+    const json = io();
+    json.localDoctor = async () => ({ ...canned, checks: [] });
+    expect(await main(["doctor", "--json"], json)).toBe(0);
+    expect(JSON.parse(json.out())).toMatchObject({ viaApp: false, checks: [] });
   });
 });
 

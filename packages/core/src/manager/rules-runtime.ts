@@ -11,6 +11,7 @@
 // fresh state on the next tick — the level-triggered behavior the retired
 // movers had ("deployed and ready to land" retries until it lands).
 
+import type { CoreLogger } from "../contracts/logger.js";
 import type { GlobalConfig, Task } from "../contracts/model.js";
 import type {
   AddonAccess,
@@ -128,6 +129,8 @@ export interface RulesRuntimeDependencies {
   addons?: AddonAccess;
   config: ConfigAccess;
   now(): Date;
+  /** Rules-file problems are logged here once per file content (`[core:rules]`). */
+  logger?: CoreLogger;
   /** Source I/O minus the per-tick PR observations (added per tick). */
   services: {
     github: Omit<SourceServices["github"], "observed">;
@@ -604,6 +607,7 @@ export class RulesRuntime {
       if (!parsed) {
         parsed = parseRuleFile(text);
         this.parsedFiles.set(key, parsed);
+        logRuleFileProblems(this.deps.logger, parsed);
         if (this.parsedFiles.size > 200) {
           const oldest = this.parsedFiles.keys().next().value;
           if (oldest !== undefined) this.parsedFiles.delete(oldest);
@@ -906,6 +910,21 @@ export class RulesRuntime {
       this.reported.add(key);
       warnings.push(problem);
     }
+  }
+}
+
+/** One warning line per problem of a freshly parsed rules file, with its file and rule id. */
+function logRuleFileProblems(
+  logger: CoreLogger | undefined,
+  parsed: RuleFile,
+): void {
+  if (!logger) return;
+  for (const problem of parsed.problems) {
+    const ruleId = /rule "([^"]+)"/.exec(problem)?.[1];
+    logger.warn("rules", `rules not loaded: ${problem}`, {
+      file: parsed.path,
+      ...(ruleId ? { ruleId } : {}),
+    });
   }
 }
 

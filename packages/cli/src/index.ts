@@ -14,15 +14,25 @@
 //   harbormaster events [--task <id>] [--rule <id> [--file <f>]] [--since <time>] [--limit <n>] [--json]
 //   harbormaster rules list | rules on | rules off | rules check [--task <id>] [--replay <from>]
 //   harbormaster addons list
+//   harbormaster doctor [--json]
 //
 // The inbox / events / rules / addons verbs are the core's user operations
 // (`OPS_CATALOG`, tools/ops.ts) over the same socket, never hand-rolled here.
+// `doctor` is the one verb that also works with the app down: it is most
+// useful exactly then, so when nothing answers on the socket it runs the
+// same read-only `doctor` command on an in-process core (never while the
+// app runs: one writer per state dir).
 
 import {
   callerFromEnv,
   callOp,
   callTool,
+  createCore,
+  DEFAULT_STATE_DIR,
+  type DoctorReport,
+  doctorExitCode,
   findTool,
+  formatDoctorReport,
   HarbormasterNotRunningError,
   type InboxClaimDetails,
   NOT_RUNNING_MESSAGE,
@@ -45,6 +55,8 @@ export interface CliIo {
   stderr: (text: string) => void;
   /** Starts the MCP stdio server (injectable so tests never grab real stdio). */
   serveMcp?: typeof serveMcpOverStdio;
+  /** `doctor` with the app down (injectable; defaults to an in-process core). */
+  localDoctor?: (env: NodeJS.ProcessEnv) => Promise<DoctorReport>;
 }
 
 class UsageError extends Error {}
@@ -129,6 +141,7 @@ function usage(): string {
     "  rules on | rules off                      Turn the rules on or off",
     "  rules check [--task <id>] [--replay <from>] [--json]  Dry run over recorded events",
     "  addons list [--json]                      Built-in sources and installed addons",
+    "  doctor [--json]                           Check the setup (works with the app down); exit 1 on a failure",
     "",
   ].join("\n");
 }
@@ -233,6 +246,56 @@ async function runOp(
       : `${result.text}\n`,
   );
   return 0;
+}
+
+/** The line `doctor` prints first when the app was not running. */
+export const DOCTOR_WITHOUT_APP_NOTE =
+  "Harbormaster is not running: checked without the app, so app-only facts (the app's PATH vs your login shell) are not compared.";
+
+/** `doctor` with the app down: the same read-only command on an in-process core. */
+async function inProcessDoctor(env: NodeJS.ProcessEnv): Promise<DoctorReport> {
+  const core = createCore({
+    stateDir: env.HARBORMASTER_STATE_DIR || DEFAULT_STATE_DIR,
+  });
+  return core.commands.doctor({});
+}
+
+/** `harbormaster doctor`'s human output. */
+export function formatDoctorOutput(
+  report: DoctorReport,
+  options: { viaApp: boolean },
+): string {
+  const body = formatDoctorReport(report);
+  return options.viaApp ? body : `${DOCTOR_WITHOUT_APP_NOTE}\n\n${body}`;
+}
+
+async function runDoctor(
+  flags: Map<string, string>,
+  socketPath: string,
+  io: CliIo,
+): Promise<number> {
+  pick(flags, []);
+  let report: DoctorReport;
+  let viaApp = true;
+  try {
+    // This shell's PATH is the login-shell PATH the app's is compared with.
+    const result = await callOp(
+      socketPath,
+      "doctor",
+      io.env.PATH ? { loginShellPath: io.env.PATH } : {},
+    );
+    report = result.details as DoctorReport;
+  } catch (error) {
+    if (!(error instanceof HarbormasterNotRunningError)) throw error;
+    viaApp = false;
+    report = await (io.localDoctor ?? inProcessDoctor)(io.env);
+  }
+  io.stdout(
+    flags.get("json") === "true"
+      ? `${JSON.stringify({ ...report, viaApp }, null, 2)}\n`
+      : `${formatDoctorOutput(report, { viaApp })}\n`,
+  );
+  return doctorExitCode(report);
 }
 
 /** Runs one CLI invocation; resolves the exit code. */
@@ -341,6 +404,9 @@ export async function main(
       throw new UsageError(
         "usage: rules list | rules on | rules off | rules check",
       );
+    }
+    if (command === "doctor") {
+      return await runDoctor(parseFlags(rest), socketPath, io);
     }
     if (command === "addons") {
       const [verb, ...flagArgs] = rest;

@@ -18,6 +18,10 @@ import { promisify } from "node:util";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Clock } from "../src/contracts/index.js";
 import { type Core, createCore } from "../src/index.js";
+import {
+  type CaptureLogger,
+  captureLogger,
+} from "./fixtures/capture-logger.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -77,6 +81,7 @@ async function fixture(): Promise<{
   codeRoot: string;
   checkout: string;
   core: Core;
+  logger: CaptureLogger;
 }> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "harbormaster-workspace-mgr-")),
@@ -113,13 +118,15 @@ async function fixture(): Promise<{
   );
 
   counter = 0;
+  const logger = captureLogger();
   const core = createCore({
     stateDir,
     clock: new FixedClock(new Date("2026-01-01T00:00:00.000Z")),
     ids: sequentialIds,
+    logger,
   });
 
-  return { stateDir, codeRoot, checkout, core };
+  return { stateDir, codeRoot, checkout, core, logger };
 }
 
 describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
@@ -504,5 +511,99 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     );
     expect(fromSecond).toContain(binding.worktreePath);
     expect(fromPrimary).not.toContain(binding.worktreePath);
+  });
+  it("logs timed worktree lines: provision + create on start, remove + branch delete on delete, scan and refresh with counts", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    const task = await f.core.commands.createTask({
+      title: "Logged",
+      initialPrompt: "secret prompt text",
+      repositoryId: repo.id,
+      start: true,
+      branch: "task/logged",
+    });
+    const worktreePath = (await f.core.commands.getTaskWorkspace(task.id))
+      ?.worktreePath;
+
+    const [create] = f.logger.find("worktree.create");
+    expect(create).toMatchObject({
+      level: "info",
+      scope: "git",
+      message: "worktree.create ok",
+      fields: {
+        op: "worktree.create",
+        repositoryId: repo.id,
+        branch: "task/logged",
+        worktreePath,
+        outcome: "ok",
+      },
+    });
+    expect(create?.fields.ms).toEqual(expect.any(Number));
+    expect(
+      f.logger.find("task.provision-worktree ok")[0]?.fields,
+    ).toMatchObject({ taskId: task.id, branch: "task/logged", outcome: "ok" });
+
+    await f.core.commands.deleteTask(task.id);
+    expect(f.logger.find("worktree.remove ok")[0]?.fields).toMatchObject({
+      repositoryId: repo.id,
+      worktreePath,
+      outcome: "ok",
+    });
+
+    await f.core.commands.scanOrphanWorktrees();
+    const [scan] = f.logger.find("orphans.scan ok");
+    expect(scan?.fields).toMatchObject({ count: 0, bytes: 0, outcome: "ok" });
+    expect(scan?.fields.ms).toEqual(expect.any(Number));
+
+    await f.core.commands.refresh();
+    const [refresh] = f.logger.find("refresh ok");
+    expect(refresh?.fields).toMatchObject({
+      op: "refresh",
+      count: 0,
+      warnings: expect.any(Number),
+      errors: 0,
+      outcome: "ok",
+    });
+
+    // Never prompt text.
+    expect(JSON.stringify(f.logger.lines)).not.toContain("secret prompt");
+  });
+
+  it("a failing worktree create logs `failed` with the error and still rejects", async () => {
+    const f = await fixture();
+    const [repo] = await f.core.commands.listRepositories();
+    if (!repo) throw new Error("fixture repo not discovered");
+    await f.core.commands.createTask({
+      title: "Existing",
+      initialPrompt: "x",
+      repositoryId: repo.id,
+      start: true,
+      branch: "task/collide",
+    });
+    const attempt = f.core.commands.createTask({
+      title: "Colliding",
+      initialPrompt: "y",
+      repositoryId: repo.id,
+      start: true,
+      branch: "task/collide",
+    });
+    const error = await attempt.then(
+      () => undefined,
+      (reason: unknown) => reason as Error,
+    );
+    expect(error).toBeInstanceOf(Error);
+
+    const [failed] = f.logger.find("worktree.create failed");
+    expect(failed).toMatchObject({
+      level: "warn",
+      scope: "git",
+      fields: { branch: "task/collide", outcome: "failed" },
+    });
+    expect(failed?.fields.ms).toEqual(expect.any(Number));
+    expect(failed?.fields.error).toBeTruthy();
+    expect(failed?.fields.error).toContain("already exists");
+    expect(error?.message).toContain("already exists");
+    expect(f.logger.find("task.provision-worktree failed")).toHaveLength(1);
   });
 });

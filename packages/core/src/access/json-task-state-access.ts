@@ -6,6 +6,7 @@
 // return in later phases alongside Beads/GitHub access).
 
 import { dirname } from "node:path";
+import type { CoreLogger } from "../contracts/logger.js";
 import type { Task } from "../contracts/model.js";
 import type { TaskStateAccess } from "../contracts/services.js";
 import { writeJsonAtomic } from "../utilities/atomic-json.js";
@@ -24,10 +25,13 @@ export class JsonTaskStateAccess implements TaskStateAccess {
   readonly lockPath: string;
   /** Parse cache: unchanged files skip read+parse+validate (see utilities/json-file-cache.ts). */
   private readonly cache: JsonFileCache<TaskStateFile>;
+  /** The last migration reported (task ids), so one file content logs once. */
+  private reportedMigration = "";
 
   constructor(
     statePath: string,
     lockPath: string = `${dirname(statePath)}/tasks.lock`,
+    private readonly logger?: CoreLogger,
   ) {
     this.statePath = statePath;
     this.lockPath = lockPath;
@@ -35,9 +39,26 @@ export class JsonTaskStateAccess implements TaskStateAccess {
       statePath,
       emptyState,
       (value) => {
-        migrateRetiredTaskStates(value);
+        this.reportMigration(migrateRetiredTaskStates(value));
         this.validate(value);
       },
+    );
+  }
+
+  /**
+   * `[core:state] migrated N task(s) dev→working in <file>`, once per file
+   * content: the parse cache only re-parses a changed file, and the first
+   * write persists the new ids, so the same migration is never re-logged.
+   */
+  private reportMigration(migrated: string[]): void {
+    if (migrated.length === 0 || !this.logger) return;
+    const key = migrated.join("\u0000");
+    if (key === this.reportedMigration) return;
+    this.reportedMigration = key;
+    this.logger.info(
+      "state",
+      `migrated ${migrated.length} task(s) dev→working in ${this.statePath}`,
+      { file: this.statePath, count: migrated.length },
     );
   }
 
@@ -191,14 +212,22 @@ const RETIRED_TASK_STATES: Readonly<Record<string, string>> = {
   dev: "working",
 };
 
-/** Rewrites retired `state` ids in a freshly parsed (unshared) task file, in place. */
-export function migrateRetiredTaskStates(value: unknown): void {
-  if (!isRecord(value) || !Array.isArray(value.tasks)) return;
+/**
+ * Rewrites retired `state` ids in a freshly parsed (unshared) task file, in
+ * place; returns the ids of the tasks it rewrote.
+ */
+export function migrateRetiredTaskStates(value: unknown): string[] {
+  const migrated: string[] = [];
+  if (!isRecord(value) || !Array.isArray(value.tasks)) return migrated;
   for (const task of value.tasks) {
     if (!isRecord(task) || typeof task.state !== "string") continue;
     const renamed = RETIRED_TASK_STATES[task.state];
-    if (renamed) task.state = renamed;
+    if (renamed) {
+      task.state = renamed;
+      migrated.push(typeof task.id === "string" ? task.id : "?");
+    }
   }
+  return migrated;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

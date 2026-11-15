@@ -13,6 +13,7 @@ import type {
   ConnectivityState,
   CreateTaskActionInput,
   CreateTaskInput,
+  DoctorReport,
   HarbormasterApi,
   HarnessModelCatalog,
   InboxItem,
@@ -184,6 +185,7 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:refresh"),
     scanOrphanWorktrees: (): Promise<OrphanWorktreeReport> =>
       ipcRenderer.invoke("core:scanOrphanWorktrees"),
+    doctor: (): Promise<DoctorReport> => ipcRenderer.invoke("core:doctor"),
     launchTask: (input: LaunchTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:launchTask", input),
     listChildren: (parentTaskId: string): Promise<Task[]> =>
@@ -362,6 +364,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("app:copyText", text),
     exportDiagnostics: (): Promise<string | null> =>
       ipcRenderer.invoke("app:exportDiagnostics"),
+    copyDiagnosticsSummary: (): Promise<string> =>
+      ipcRenderer.invoke("app:copyDiagnosticsSummary"),
     openInApps: (): Promise<OpenInAppInfo[]> =>
       ipcRenderer.invoke("app:openInApps"),
     openIn: (path: string, appId: string): Promise<OpenInResult> =>

@@ -17,6 +17,7 @@ import {
   JsonTaskStateAccess,
   JsonWorkspaceBindingAccess,
   LocalAddonAccess,
+  LocalEnvironmentProbeAccess,
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
   LocalOnboardingProbeAccess,
@@ -25,11 +26,15 @@ import {
   LocalSessionFileAccess,
   LocalTaskAttachmentAccess,
   SessionPresenceAccess,
+  timedPullRequestAccess,
+  timedWorktreeAccess,
 } from "./access/index.js";
 import type { CoreCommands } from "./contracts/commands.js";
+import type { EnvironmentProbeAccess } from "./contracts/doctor.js";
 import type { CoreEvents } from "./contracts/events.js";
 import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { HarnessAdapter } from "./contracts/harness.js";
+import { type CoreLogger, noopCoreLogger } from "./contracts/logger.js";
 import type { OnboardingProbeAccess } from "./contracts/onboarding.js";
 import type { Clock, IdGenerator } from "./contracts/services.js";
 import { PiHarnessAdapter } from "./harness/pi-adapter.js";
@@ -71,6 +76,17 @@ export interface CoreOptions {
   harnesses?: HarnessRegistry;
   /** Overrides the onboarding wizard's machine probes (home folder, `--version`, `gh auth status`); tests inject fakes. */
   onboarding?: OnboardingProbeAccess;
+  /**
+   * Operation log: timed git/GitHub/worktree spans, session-launch
+   * decisions, state migrations, launch transitions (see
+   * contracts/logger.ts). The app passes `consoleCoreLogger(console)`;
+   * absent, core logs nothing.
+   */
+  logger?: CoreLogger;
+  /** Overrides `doctor`'s machine probes; tests inject fakes. */
+  environment?: EnvironmentProbeAccess;
+  /** The Pi extension source the host bundles, compared by `doctor`'s `agents.pi-extension` check. */
+  piExtensionSource?: string;
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -81,10 +97,12 @@ export interface Core {
 
 export function createCore(options: CoreOptions = {}): Core {
   const paths = resolveStatePaths(options.stateDir ?? DEFAULT_STATE_DIR);
+  const logger = options.logger ?? noopCoreLogger;
 
   const taskState = new JsonTaskStateAccess(
     paths.tasksFile,
     paths.tasksLockFile,
+    logger,
   );
   const workspaceBindings = new JsonWorkspaceBindingAccess(
     paths.workspaceBindingsFile,
@@ -95,9 +113,15 @@ export function createCore(options: CoreOptions = {}): Core {
   const presence = new SessionPresenceAccess(paths.presenceDir);
   const config = new JsonConfigAccess(paths.configFile);
   const repositories = new LocalGitRepositoryAccess();
-  const worktrees = new LocalGitWorktreeAccess(paths.worktreesDir);
+  const worktrees = timedWorktreeAccess(
+    new LocalGitWorktreeAccess(paths.worktreesDir),
+    logger,
+  );
   const scratch = new LocalScratchWorkspaceAccess(paths.scratchDir);
-  const pullRequests = options.pullRequests ?? new GithubPrAccess();
+  const pullRequests = timedPullRequestAccess(
+    options.pullRequests ?? new GithubPrAccess(),
+    logger,
+  );
   const versions = options.versions ?? new HttpVersionAccess();
 
   const clock = options.clock ?? new SystemClock();
@@ -142,6 +166,15 @@ export function createCore(options: CoreOptions = {}): Core {
     },
     inbox: new JsonInboxAccess(paths.inboxFile, paths.inboxLockFile),
     onboarding: options.onboarding ?? new LocalOnboardingProbeAccess(),
+    logger,
+    environment:
+      options.environment ??
+      new LocalEnvironmentProbeAccess({
+        paths,
+        ...(options.piExtensionSource
+          ? { piExtensionSource: options.piExtensionSource }
+          : {}),
+      }),
   });
 
   return { commands, events };

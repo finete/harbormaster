@@ -10,7 +10,10 @@
 // inside the card, Enter in the typed path advances, Esc goes back, the
 // stepper checks off done steps, and the agent step offers exactly Pi and
 // Claude Code (Pi missing, with its install command). A relaunch goes
-// straight to the app; "Welcome / Setup…" reopens the wizard over it.
+// straight to the app; "Welcome / Setup…" reopens the wizard over it, and
+// its "Check setup" runs the doctor: a Pi that answers `--version` reads ok
+// while git may not use https there (GIT_ALLOW_PROTOCOL=file), so both
+// fixture remotes fail `repos.remote`.
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -102,8 +105,21 @@ function readConfig(): Record<string, unknown> & {
   return JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8"));
 }
 
-async function launch(): Promise<{ app: ElectronApplication; window: Page }> {
-  const app = await electron.launch({ args: [mainEntry], env });
+/** A `pi` that only answers `--version` (the relaunch's doctor check). */
+function writeVersionPi(): string {
+  const file = path.join(root, "fake-pi-version");
+  writeFileSync(file, ["#!/bin/sh", "echo 'pi 0.0.9-e2e'", ""].join("\n"));
+  chmodSync(file, 0o755);
+  return file;
+}
+
+async function launch(
+  overrides: Record<string, string> = {},
+): Promise<{ app: ElectronApplication; window: Page }> {
+  const app = await electron.launch({
+    args: [mainEntry],
+    env: { ...env, ...overrides },
+  });
   const child = app.process();
   const onChunk = (chunk: Buffer): void => {
     const text = chunk.toString();
@@ -304,7 +320,10 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
   }
 
   // Relaunch: straight into the app; the menu item reopens the wizard.
-  const second = await launch();
+  const second = await launch({
+    HARBORMASTER_PI_COMMAND: writeVersionPi(),
+    GIT_ALLOW_PROTOCOL: "file",
+  });
   try {
     await expect(second.window.getByTestId("workspace-view")).toBeVisible();
     await expect(second.window.getByTestId("onboarding")).toHaveCount(0);
@@ -315,6 +334,29 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     await expect(second.window.getByTestId("onboarding-code-root")).toHaveValue(
       codeRoot,
     );
+
+    // Setup screen → "Check setup": grouped doctor checks with statuses.
+    for (const step of ["agent", "github", "concepts"]) {
+      await second.window.getByTestId("onboarding-next").click();
+      await expect(second.window.getByTestId("onboarding")).toHaveAttribute(
+        "data-step",
+        step,
+      );
+    }
+    await second.window.getByTestId("onboarding-check-setup").click();
+    const pi = second.window.getByTestId("doctor-check-agents.pi");
+    await expect(pi).toHaveAttribute("data-status", "ok");
+    await expect(pi).toContainText("Pi 0.0.9-e2e");
+    const remote = second.window.getByTestId("doctor-check-repos.remote");
+    await expect(remote).toHaveAttribute("data-status", "fail");
+    await expect(remote).toContainText("github.com/acme/alpha");
+    await expect(remote).toContainText("github.com/acme/beta");
+    await expect(remote).toContainText("→ Check the network");
+    await expect(
+      second.window.getByTestId("setup-check-headline"),
+    ).toContainText("failed");
+    await second.window.getByTestId("setup-check-rerun").click();
+    await expect(pi).toHaveAttribute("data-status", "ok");
     await second.window.getByTestId("onboarding-close").click();
     await expect(second.window.getByTestId("onboarding")).toHaveCount(0);
     await expect(second.window.getByTestId("workspace-view")).toBeVisible();

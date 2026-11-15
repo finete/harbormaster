@@ -18,6 +18,7 @@ import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { app } from "electron";
 import * as pty from "node-pty";
 import { bufferTail } from "../shared/terminal-tail";
+import { debugLog, isDebugLogging } from "./debug-log";
 import {
   createPtyDataBatcher,
   createPtyFlowControl,
@@ -34,6 +35,7 @@ import {
   OutputRingBuffer,
   type PtyKind,
 } from "./pty-log";
+import { ptyTraffic } from "./pty-traffic";
 import {
   createTerminalModeTracker,
   type TerminalModeTracker,
@@ -407,6 +409,7 @@ export function createSession(
       ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
       : undefined;
   const dataDisposable = ptyProcess.onData((data) => {
+    notePtyData(id, options?.taskId, data);
     outputTail.push(data);
     if (statusFilter) statusFilter.feed(data);
     else forward(data);
@@ -572,6 +575,7 @@ export function createBackgroundPrimarySession(
     io.sink(data);
   });
   const dataDisposable = ptyProcess.onData((data) => {
+    notePtyData(id, taskId, data);
     outputTail.push(data);
     statusFilter.feed(data);
   });
@@ -830,6 +834,24 @@ export function primarySessionTail(
   const session = sessionId ? sessions.get(sessionId) : undefined;
   if (!session?.headless) return undefined;
   return bufferTail(session.headless.terminal.buffer.active, count);
+}
+
+/** Output accounting for the `[health]` lines (pty-traffic.ts), plus a per-chunk size under `HARBORMASTER_LOG=debug`. */
+function notePtyData(
+  sessionId: string,
+  taskId: string | undefined,
+  data: string,
+): void {
+  const bytes = Buffer.byteLength(data);
+  ptyTraffic.record(sessionId, taskId, bytes);
+  if (isDebugLogging()) debugLog("pty", `data id=${sessionId} bytes=${bytes}`);
+}
+
+/** Live pty count and how many have a renderer attached (for the `[health]` lines). */
+export function sessionCounts(): { live: number; attached: number } {
+  let attached = 0;
+  for (const session of sessions.values()) if (session.attached) attached++;
+  return { live: sessions.size, attached };
 }
 
 export function getSession(id: string): PtySessionRecord | undefined {

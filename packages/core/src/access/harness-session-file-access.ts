@@ -4,8 +4,11 @@
 // are adapters"); it only checks that a session file the harness reported
 // (`CoreCommands.recordTaskSession`) is still there before asking the
 // harness to resume or fork it. pi-home's PiSessionAccess.exists, ported.
+// `findSessionFile` lists one directory the harness adapter named
+// (`HarnessAdapter.expectedSessionFile`) for the post-launch confirmation.
 
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { SessionFileAccess } from "../contracts/services.js";
 
 export class LocalSessionFileAccess implements SessionFileAccess {
@@ -16,6 +19,21 @@ export class LocalSessionFileAccess implements SessionFileAccess {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async findSessionFile(
+    dir: string,
+    fileSuffix: string,
+  ): Promise<string | undefined> {
+    if (!dir || !fileSuffix) return undefined;
+    try {
+      const name = (await readdir(dir)).find((entry) =>
+        entry.endsWith(fileSuffix),
+      );
+      return name ? join(dir, name) : undefined;
+    } catch {
+      return undefined;
     }
   }
 }

@@ -2,6 +2,7 @@
 // events out". Kept separate from model.ts because these are call-shape
 // contracts, not persisted domain data.
 
+import type { DoctorInput, DoctorReport } from "./doctor.js";
 import type { PullRequestPreview } from "./github.js";
 import type {
   HarnessModelCatalog,
@@ -515,6 +516,13 @@ export interface CoreCommands {
     input: RecordTaskSessionInput,
   ): Promise<boolean>;
   /**
+   * Diagnostics: for each prompted `new` session launch older than ~20 s,
+   * check once that the harness created its session file and log a
+   * `[core:session]` warning when it did not. Cheap and idempotent; the app
+   * calls it once per presence-poll tick. Returns how many were missing.
+   */
+  checkPendingSessionFiles(): Promise<number>;
+  /**
    * Reopen a Done task as a new work cycle (pi-home's `reopenDoneWork`): a
    * fresh branch + worktree off the repository's default branch, with the
    * previous cycle's conversation forked into the new session on its first
@@ -818,6 +826,17 @@ export interface CoreCommands {
   ensureDefaultRules(): Promise<{ created: boolean }>;
   /** Stamp `onboardingCompletedAt`: the wizard does not show again. */
   completeOnboarding(): Promise<OnboardingState>;
+
+  // --- Doctor (`harbormaster doctor`, the Setup screen's "Check setup") ---
+
+  /**
+   * Read-only setup self-check: tools and agents on PATH, `gh` login, the
+   * Pi extension, the state files, the repositories folder and remotes,
+   * disk, orphan worktrees, the tool socket, and (given the frontend's
+   * login-shell PATH) PATH drift. Each probe is time-boxed; nothing throws
+   * per check (an unrunnable probe reports `skip`) and nothing is written.
+   */
+  doctor(input?: DoctorInput): Promise<DoctorReport>;
 }
 
 export interface RefreshResult {

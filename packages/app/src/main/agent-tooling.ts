@@ -14,6 +14,15 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  PI_EXTENSION_FILE,
+  readExtensionVersion,
+  resolvePiExtensionsDir,
+} from "@harbormaster/core";
+
+// The file name and version marker live in core (engines/pi-extension.ts),
+// shared with `harbormaster doctor`'s `agents.pi-extension` check.
+export { PI_EXTENSION_FILE, readExtensionVersion };
 
 export interface ToolingLocations {
   env: NodeJS.ProcessEnv;
@@ -29,9 +38,6 @@ export interface ToolingLocations {
 function packagesDir(mainDir: string): string {
   return join(mainDir, "..", "..", "..");
 }
-
-/** File name of the installed Pi inbox extension (Pi auto-loads `*.ts` in its extensions dir). */
-export const PI_EXTENSION_FILE = "harbormaster-inbox.ts";
 
 /** The bundled Pi inbox extension source. */
 export function resolvePiExtensionSource(
@@ -51,19 +57,7 @@ export function resolvePiExtensionSource(
  * `~/.pi/agent/extensions`.
  */
 export function piExtensionsDir(env: NodeJS.ProcessEnv): string {
-  if (env.HARBORMASTER_PI_EXTENSIONS_DIR) {
-    return env.HARBORMASTER_PI_EXTENSIONS_DIR;
-  }
-  const agentDir = env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-  return join(agentDir, "extensions");
-}
-
-const VERSION_PATTERN = /HARBORMASTER_INBOX_EXTENSION_VERSION\s*=\s*(\d+)/;
-
-/** The integer version an extension source declares (`HARBORMASTER_INBOX_EXTENSION_VERSION = N`). */
-export function readExtensionVersion(source: string): number | undefined {
-  const match = VERSION_PATTERN.exec(source);
-  return match ? Number(match[1]) : undefined;
+  return resolvePiExtensionsDir(env, homedir());
 }
 
 export type PiExtensionInstallOutcome =

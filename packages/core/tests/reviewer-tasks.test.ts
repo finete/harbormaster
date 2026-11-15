@@ -16,6 +16,7 @@ import type {
   PullRequestStatus,
 } from "../src/contracts/github.js";
 import { createCore } from "../src/index.js";
+import { captureLogger } from "./fixtures/capture-logger.js";
 
 const run = promisify(execFile);
 const git = async (args: string[], cwd?: string) =>
@@ -112,15 +113,17 @@ async function fixture() {
   );
   const pullRequests = new FakePullRequests(head);
   let n = 0;
+  const logger = captureLogger();
   const core = createCore({
     stateDir,
     ids: { next: () => `id-${++n}` },
     pullRequests,
     versions: { fetchText: async () => "" },
+    logger,
   });
   const [repo] = await core.commands.listRepositories();
   if (!repo) throw new Error("fixture repo not discovered");
-  return { core, repo, head, checkout, pullRequests };
+  return { core, repo, head, checkout, pullRequests, logger };
 }
 
 describe("reviewer tasks", () => {
@@ -179,6 +182,28 @@ describe("reviewer tasks", () => {
         .filter((entry) => entry.kind === "action")
         .map((entry) => entry.kind === "action" && entry.ruleId),
     ).toEqual(["reviewer-author-activity", "reviewer-pr-closed"]);
+
+    // The operation log: PR-head checkout, every refresh with its task
+    // count, and the rule-driven Done's cleanup, each timed.
+    expect(f.logger.find("worktree.checkout-pr ok")[0]?.fields).toMatchObject({
+      repositoryId: f.repo.id,
+      branch: "bob/feature",
+      worktreePath: worktree,
+    });
+    expect(
+      f.logger.find("task.provision-worktree ok")[0]?.fields,
+    ).toMatchObject({ taskId: task.id, branch: "bob/feature" });
+    const refreshes = f.logger.find("refresh ok");
+    expect(refreshes).toHaveLength(4);
+    expect(refreshes[0]?.fields).toMatchObject({ count: 1, warnings: 0 });
+    expect(f.logger.find("done.cleanup ok")[0]?.fields).toMatchObject({
+      taskId: task.id,
+      outcome: "ok",
+      ms: expect.any(Number),
+    });
+    expect(f.logger.find("worktree.remove ok")[0]?.fields.worktreePath).toBe(
+      worktree,
+    );
   });
 
   it("an explicit author role on an existing local branch checks it out as-is and keeps the branch on rollback paths", async () => {

@@ -47,6 +47,7 @@ import { modKeyLabel } from "../lib/platform";
 import { rulesEditRequest, rulesFolder } from "../lib/rules-format";
 import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
+import { SetupCheckResults, useSetupCheck } from "./SetupCheck";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Kbd } from "./ui/kbd";
@@ -772,6 +773,7 @@ function ConceptsStep({
   onExportDiagnostics: () => void;
   exportingDiagnostics: boolean;
 }): JSX.Element {
+  const setupCheck = useSetupCheck();
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-concepts">
       <StepHeader title={ONBOARDING_STEPS[3].label}>
@@ -839,19 +841,32 @@ function ConceptsStep({
         <div className="min-w-0">
           <p className="text-xs font-semibold">Something not working?</p>
           <p className="text-xs text-muted-foreground">
-            Export logs, config and environment facts for a bug report.
+            Check tools, agents, state and repositories, or export logs, config
+            and environment facts for a bug report.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          data-testid="onboarding-export-diagnostics"
-          disabled={busy || exportingDiagnostics}
-          onClick={onExportDiagnostics}
-        >
-          Export Diagnostics…
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="onboarding-check-setup"
+            disabled={setupCheck.running}
+            onClick={setupCheck.run}
+          >
+            Check setup
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="onboarding-export-diagnostics"
+            disabled={busy || exportingDiagnostics}
+            onClick={onExportDiagnostics}
+          >
+            Export Diagnostics…
+          </Button>
+        </div>
       </div>
+      <SetupCheckResults state={setupCheck} />
     </div>
   );
 }
@@ -1102,7 +1117,13 @@ export function Onboarding({
     try {
       const savedPath = await window.harbormaster.app.exportDiagnostics();
       if (savedPath) {
-        pushToast(`Diagnostics saved to ${savedPath}`, "success");
+        // "Copy summary": versions + failing/warning checks, for Slack.
+        pushToast(`Diagnostics saved to ${savedPath}`, "success", {
+          label: "Copy summary",
+          run: () => {
+            void window.harbormaster.app.copyDiagnosticsSummary();
+          },
+        });
       }
     } catch (cause) {
       pushToast(`Export diagnostics failed: ${describeThrown(cause)}`, "error");
