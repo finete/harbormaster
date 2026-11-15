@@ -22,7 +22,7 @@ const move: AuditActionEntry = {
   eventId: "e1",
   eventType: "github.pr.reviewDecisionChanged",
   action: "move",
-  with: { to: "dev" },
+  with: { to: "working" },
   from: { state: "awaiting", awaitingKind: "review" },
   outcome: "applied",
 };
@@ -30,32 +30,45 @@ const move: AuditActionEntry = {
 describe("audit lines", () => {
   it("says from → to, when, and the rule's tag; the technical why apart", () => {
     expect(describeAuditAction(move, now)).toBe(
-      "Review → Dev · 4m ago · Needs changes",
+      "Review → Working · 4m ago · Needs changes",
     );
     expect(auditActionWhy(move)).toBe(
       "github.pr.reviewDecisionChanged · rule review-changes-requested (rules.yaml:12)",
     );
     expect(
       describeAuditAction({ ...move, at: "2026-11-11T11:59:50.000Z" }, now),
-    ).toBe("Review → Dev · just now · Needs changes");
+    ).toBe("Review → Working · just now · Needs changes");
   });
 
   it("falls back for older entries: no `from`, no label", () => {
     const { from: _from, ruleLabel: _label, ...old } = move;
-    expect(auditActionVerb(old)).toBe("Moved to Dev");
+    expect(auditActionVerb(old)).toBe("Moved to Working");
     expect(auditRuleLabel(old)).toBe("Review changes requested");
     expect(humanize("deploy_land.now")).toBe("Deploy land now");
+  });
+
+  it("shows entries logged before the dev → working rename under their old names", () => {
+    expect(auditActionVerb({ ...move, with: { to: "dev" } })).toBe(
+      "Review → Dev",
+    );
+    expect(
+      auditActionVerb({
+        ...move,
+        from: { state: "dev" as never },
+        with: { to: "done" },
+      }),
+    ).toBe("Dev → Done");
   });
 
   it("names awaiting columns by kind and words other outcomes", () => {
     expect(
       auditActionVerb({
         ...move,
-        from: { state: "dev" },
-        with: { to: "await", kind: "deploy" },
+        from: { state: "working" },
+        with: { to: "awaiting", kind: "deploy" },
       }),
-    ).toBe("Dev → Deploy");
-    expect(auditActionVerb({ ...move, with: { to: "await" } })).toBe(
+    ).toBe("Working → Deploy");
+    expect(auditActionVerb({ ...move, with: { to: "awaiting" } })).toBe(
       "Review → Review",
     );
     expect(
@@ -113,7 +126,7 @@ describe("audit lines", () => {
       }),
       expect.objectContaining({
         kind: "action",
-        text: "Review → Dev",
+        text: "Review → Working",
         label: "Needs changes",
         why: auditActionWhy(move),
         when: "4m ago",

@@ -139,7 +139,7 @@ async function fixture(): Promise<{
 }
 
 describe.skipIf(!gitAvailable)("launchTask", () => {
-  it("standalone: lands in dev, queued, with the kickoff contract appended to the prompt", async () => {
+  it("standalone: lands in working, queued, with the kickoff contract appended to the prompt", async () => {
     const f = await fixture();
     const task = await f.core.commands.launchTask({
       relation: "standalone",
@@ -148,7 +148,7 @@ describe.skipIf(!gitAvailable)("launchTask", () => {
       repository: { repositoryId: f.repositoryId },
     });
 
-    expect(task.state).toBe("dev");
+    expect(task.state).toBe("working");
     expect(task.kind).toBe("task");
     expect(task.parentTaskId).toBeUndefined();
     expect(task.launchedFromTaskId).toBeUndefined();
@@ -615,7 +615,7 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
       expect(result.requiresConfirmation).toBe("activeChildren");
       expect(result.detail).toContain("Active child");
     }
-    expect((await f.core.commands.getTask(parent.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(parent.id))?.state).toBe("working");
 
     const forced = await f.core.commands.toDone(parent.id, {
       force: { leaveChildren: true, confirmed: true },
@@ -626,7 +626,7 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
     }
     // The child is never touched.
     const childAfter = await f.core.commands.getTask(child.id);
-    expect(childAfter?.state).toBe("dev");
+    expect(childAfter?.state).toBe("working");
   });
 
   it("a Done child never blocks the parent", async () => {

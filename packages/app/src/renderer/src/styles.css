@@ -27,7 +27,7 @@
   /* Mint at 60% over the surface, precomputed opaque (#709e94) so
      `ring-ring/NN` modifiers keep working. */
   --ring: 167 19% 53%;
-  --status-working: 48 100% 70%; /* #ffe066 yellow: agent working */
+  --status-running: 48 100% 70%; /* #ffe066 yellow: agent running */
   --status-needs-you: 40 100% 65%; /* #ffc34d amber: blocked, warnings */
   --status-ok: 166 66% 77%; /* #9eebd9 mint: your move, PR ok, done */
   --status-error: 357 82% 66%; /* #f0636b errors, destructive */
@@ -177,21 +177,21 @@ body {
   height: 100%;
 }
 
-/* Working spinner (components/ui/working-spinner.tsx): a ring with a gap
+/* Running spinner (components/ui/running-spinner.tsx): a ring with a gap
    that turns one revolution per second in 12 discrete steps. It animates
    `transform` only, so it runs on the compositor with no layout or paint,
    and steps() caps visible changes at 12/s instead of one per vsync. Every
    instance is phase-aligned in JS so all spinners tick together. */
-@keyframes working-spin {
+@keyframes running-spin {
   to {
     transform: rotate(360deg);
   }
 }
-.working-spinner {
-  animation: working-spin 1s steps(12, end) infinite;
+.running-spinner {
+  animation: running-spin 1s steps(12, end) infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .working-spinner {
+  .running-spinner {
     animation: none;
   }
 }

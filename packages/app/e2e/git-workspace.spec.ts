@@ -151,9 +151,9 @@ test("derived branch subline and pty cwd inside the task worktree checkout", asy
   await window.getByTestId("board-button").click();
   const card = cardLocator("Add git workspace");
   await expect(card).toBeVisible();
-  // Parked in Backlog above: starting it (a drop on Dev — cards carry no
+  // Parked in Backlog above: starting it (a drop on Working — cards carry no
   // buttons) derives the branch + worktree.
-  await dragTo(window, card, window.getByTestId("column-dev"));
+  await dragTo(window, card, window.getByTestId("column-working"));
 
   // TaskCard renders "<branch> → <targetBranch>" in a font-mono subline
   // once task.branch is set (see components/TaskCard.tsx).

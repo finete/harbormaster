@@ -54,7 +54,7 @@ describe("JsonTaskStateAccess", () => {
     const updated = {
       ...task,
       title: "Write more tests",
-      state: "dev" as const,
+      state: "working" as const,
     };
     await access.replaceTask(updated);
 
@@ -66,7 +66,7 @@ describe("JsonTaskStateAccess", () => {
     await access.createTask(task);
     const stale = { ...task };
     // Someone else moved the task after `stale` was read.
-    await access.replaceTask({ ...task, state: "dev" });
+    await access.replaceTask({ ...task, state: "working" });
 
     const patched = await access.patchTask(task.id, (current) => ({
       ...current,
@@ -74,7 +74,7 @@ describe("JsonTaskStateAccess", () => {
     }));
 
     expect(stale.state).toBe("backlog");
-    expect(patched).toMatchObject({ state: "dev", lastError: "boom" });
+    expect(patched).toMatchObject({ state: "working", lastError: "boom" });
     expect(await access.getTask(task.id)).toEqual(patched);
   });
 

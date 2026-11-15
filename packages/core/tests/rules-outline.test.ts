@@ -47,8 +47,8 @@ describe("outlineCel", () => {
   const cases: Array<[string, string, CelOutline]> = [
     [
       "a single comparison is one leaf",
-      'task.state == "dev"',
-      node('task.state == "dev"'),
+      'task.state == "working"',
+      node('task.state == "working"'),
     ],
     [
       "an && chain is flattened into one ALL",
@@ -167,16 +167,16 @@ describe("ruleConditionView", () => {
     label: CEL
     on: a
     if: a && (b || c)
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: js
     label: JS
     on: a
     if: "js:./checks.mjs#fn"
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: always
     label: Always
     on: a
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
 `,
     });
     expect(file.problems).toEqual([]);
@@ -195,7 +195,7 @@ describe("ruleConditionView", () => {
     const file = parseRuleFile({
       file: "rules.yaml",
       path: "/state/rules/rules.yaml",
-      text: "rules:\n  - id: x\n    label: X\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: dev } }]\n",
+      text: "rules:\n  - id: x\n    label: X\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: working } }]\n",
     });
     expect(file.rules).toEqual([]);
     expect(file.problems).toEqual([
@@ -214,7 +214,7 @@ describe("the shipped default rules", () => {
       '"state" in facts.github',
       'facts.github.state == "merged"',
       any(
-        'task.state == "dev"',
+        'task.state == "working"',
         all('task.state == "awaiting"', 'task.awaiting.kind == "review"'),
       ),
     ),
@@ -235,7 +235,7 @@ describe("the shipped default rules", () => {
       ),
     ),
     "review-requested-enter-review": all(
-      'task.state == "dev"',
+      'task.state == "working"',
       "task.pr != null",
       'task.pr.role == "author"',
       '"state" in facts.github',

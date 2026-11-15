@@ -36,10 +36,10 @@ module.exports = {
           foreground: "hsl(var(--accent-foreground))",
         },
         // Semantic status (docs/design-system.md): yellow means an agent is
-        // working; mint doubles as ok and "your move"; amber only ever means
+        // running; mint doubles as ok and "your move"; amber only ever means
         // blocked/warning; error covers failures/destructive.
         status: {
-          working: "hsl(var(--status-working))",
+          running: "hsl(var(--status-running))",
           needsYou: "hsl(var(--status-needs-you))",
           ok: "hsl(var(--status-ok))",
           error: "hsl(var(--status-error))",

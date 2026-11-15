@@ -309,7 +309,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await window.getByTestId("board-button").click();
   await expect(
     window
-      .getByTestId("column-dev-cards")
+      .getByTestId("column-working-cards")
       .locator(`[data-testid="card-${taskId}"]`),
   ).toBeVisible();
   await expect(window.getByTestId("toast-error")).toHaveCount(0);

@@ -94,13 +94,13 @@ async function createTaskWithRepo(window: Page, title: string): Promise<void> {
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   // Parked in Backlog: Start creates the worktree the pi pane runs in.
-  // (a drop on Dev — cards carry no buttons).
+  // (a drop on Working — cards carry no buttons).
   await dragTo(
     window,
     cardLocator(window, title),
-    window.getByTestId("column-dev"),
+    window.getByTestId("column-working"),
   );
-  await expect(window.getByTestId("column-dev-cards")).toContainText(title);
+  await expect(window.getByTestId("column-working-cards")).toContainText(title);
 }
 
 test.describe("a missing pi binary falls back to a plain shell with a dismissible warning", () => {
@@ -242,7 +242,7 @@ test.describe("OSC 7501 program status drives the badges: probe answered, workin
       timeout: 10_000,
     });
     await expect(row.getByTestId("sidebar-row-activity")).toContainText(
-      "working",
+      "running",
     );
     await expect(row.getByTestId("sidebar-row-time")).toHaveText("now");
     await window.getByTestId("board-button").click();
@@ -348,7 +348,7 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
 
   test("a bogus-pid record never shows the working spinner while the pane is open, and killing the pane's real process flips the row idle well under the poll interval", async () => {
     // "Start now" (the dialog's default destination) lands the task
-    // straight in Dev with its worktree created immediately "- no Backlog
+    // straight in Working with its worktree created immediately "- no Backlog
     // detour needed (the sidebar's "Tasks" list only surfaces started
     // tasks, same as `pollPresenceOnce`'s own non-done filter).
     await window.getByTestId("sidebar-new-task-button").click();

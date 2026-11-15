@@ -22,7 +22,7 @@ export function canStart(task: Pick<Task, "state">): boolean {
 
 /** Whether the Await… picker applies (which kinds fit is core's call, per kind). */
 export function canAwait(task: Pick<Task, "state">): boolean {
-  return task.state === "dev" || task.state === "awaiting";
+  return task.state === "working" || task.state === "awaiting";
 }
 
 export function canDone(task: Pick<Task, "state">): boolean {
@@ -46,7 +46,7 @@ export async function moveTaskMutation(
   }
 }
 
-/** Start: create the branch + worktree and move a backlog task to Dev. */
+/** Start: create the branch + worktree and move a backlog task to Working. */
 export async function startTaskMutation(taskId: string): Promise<void> {
   try {
     await window.harbormaster.core.startTask(taskId);
@@ -147,7 +147,7 @@ export async function toDoneMutation(taskId: string): Promise<void> {
 }
 
 /**
- * Reopen a Done task as a new Dev cycle (see `CoreCommands.reopenTask`):
+ * Reopen a Done task as a new work cycle (see `CoreCommands.reopenTask`):
  * failures and the "previous conversation not found" warning both surface
  * as toasts; the board updates from the next `board-changed` push.
  */

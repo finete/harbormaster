@@ -171,7 +171,7 @@ import type { ResolvedMove } from "../engines/rules/evaluation.js";
 import { effectivePipeline } from "../engines/rules/views.js";
 import {
   assertAllowedTransition,
-  assertMayReturnToDev,
+  assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
@@ -274,7 +274,7 @@ function agentFields(
 
 const COLUMN_TITLES: Record<TaskState, string> = {
   backlog: "Backlog",
-  dev: "Dev",
+  working: "Working",
   awaiting: "Awaiting",
   done: "Done",
 };
@@ -650,7 +650,7 @@ export class CoreManager implements CoreCommands {
       // Repository-less work is scratch ("chat") work, same as
       // `launchTask`'s `{ none: true }`.
       kind: input.kind ?? (repo ? "task" : "temp_task"),
-      state: startNow ? "dev" : "backlog",
+      state: startNow ? "working" : "backlog",
       title: input.title,
       initialPrompt: await this.adoptAttachments(
         id,
@@ -744,14 +744,14 @@ export class CoreManager implements CoreCommands {
       );
     }
     const binding = await this.deps.bindings.getBindingForTask(taskId);
-    if (binding?.worktreePath) return this.moveTask(taskId, "dev");
+    if (binding?.worktreePath) return this.moveTask(taskId, "working");
     if (task.folderPath) {
       const now = this.deps.clock.now().toISOString();
       await this.provisionInPlaceWorkspace(taskId, task.folderPath, now, {
         persist: async () => {},
         undo: async () => {},
       });
-      return this.moveTask(taskId, "dev");
+      return this.moveTask(taskId, "working");
     }
     if (!task.repositoryId) {
       // Parked scratch task: give it its scratch directory now, exactly
@@ -761,7 +761,7 @@ export class CoreManager implements CoreCommands {
         persist: async () => {},
         undo: async () => {},
       });
-      return this.moveTask(taskId, "dev");
+      return this.moveTask(taskId, "working");
     }
 
     const config = await this.deps.config.load();
@@ -772,7 +772,7 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const next: Task = {
       ...task,
-      state: "dev",
+      state: "working",
       branch,
       targetBranch: task.targetBranch ?? repo.defaultBranch,
       updatedAt: now,
@@ -1119,7 +1119,7 @@ export class CoreManager implements CoreCommands {
     const objective = input?.objective?.trim();
     const reopened: Task = {
       ...task,
-      state: "dev",
+      state: "working",
       updatedAt: now,
       stateChangedAt: now,
     };
@@ -1273,7 +1273,7 @@ export class CoreManager implements CoreCommands {
     // so a concurrent refresh's PR patch is never overwritten.
     const next = await this.deps.tasks.patchTask(id, (task) => {
       assertAllowedTransition(task.state, state);
-      assertMayReturnToDev(task.state, task.awaiting, state);
+      assertMayReturnToWorking(task.state, task.awaiting, state);
       const stateChanged = task.state !== state;
       const moved: Task = {
         ...task,
@@ -1662,7 +1662,7 @@ export class CoreManager implements CoreCommands {
     const task: Task = {
       id,
       kind: hasRepository ? "task" : "temp_task",
-      state: "dev",
+      state: "working",
       title: input.title,
       initialPrompt,
       ...(repo ? { repositoryId: repo.id } : {}),
@@ -2146,8 +2146,8 @@ export class CoreManager implements CoreCommands {
     warnings: string[],
   ): Promise<ActionResult> {
     switch (move.state) {
-      case "dev":
-        await this.moveTask(task.id, "dev");
+      case "working":
+        await this.moveTask(task.id, "working");
         return { outcome: "applied" };
       case "awaiting":
         if (move.enter && move.kind) {

@@ -57,7 +57,7 @@ function task(id: string, extra: Partial<Task> = {}): Task {
   return {
     id,
     kind: "task",
-    state: "dev",
+    state: "working",
     title: `Task ${id}`,
     initialPrompt: "",
     createdAt: at(0),
@@ -482,7 +482,7 @@ describe("run state and receipts", () => {
       ),
     ).toBe("queued");
     expect(deriveRunState({}, { live: true, runningTurn: true })).toBe(
-      "working",
+      "running",
     );
     expect(deriveRunState({}, { live: true, runningTurn: false })).toBe(
       "your-move",

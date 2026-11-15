@@ -267,16 +267,16 @@ test.describe("toAwait and toDone drive the board through the real core command 
     // pi-home's withLastInteraction; see TaskCard.tsx).
     await expect(card.getByTestId("card-time")).not.toBeEmpty();
 
-    // Await needs a "dev" (or "awaiting") task with a worktree; the task
+    // Await needs a "working" (or "awaiting") task with a worktree; the task
     // was parked in Backlog above, so start it (creates the worktree and
-    // moves it to dev), same as a user dragging the card over.
+    // moves it to working), same as a user dragging the card over.
     await window.evaluate(
       (id) => window.harbormaster.core.startTask(id),
       taskId,
     );
     await expect(
       window
-        .getByTestId("column-dev-cards")
+        .getByTestId("column-working-cards")
         .locator(`[data-testid="card-${taskId}"]`),
     ).toBeVisible();
 
@@ -404,12 +404,12 @@ test.describe("toAwait and toDone drive the board through the real core command 
     const taskId = await cardTaskId(card);
 
     await window.evaluate(
-      (id) => window.harbormaster.core.moveTask(id, "dev"),
+      (id) => window.harbormaster.core.moveTask(id, "working"),
       taskId,
     );
     await expect(
       window
-        .getByTestId("column-dev-cards")
+        .getByTestId("column-working-cards")
         .locator(`[data-testid="card-${taskId}"]`),
     ).toBeVisible();
 
@@ -433,7 +433,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
   });
 
-  test("dragging a branch-backed Dev card to Awaiting opens the Await picker; confirming the preselected review kind pushes the branch and the PR badge appears", async () => {
+  test("dragging a branch-backed Working card to Awaiting opens the Await picker; confirming the preselected review kind pushes the branch and the PR badge appears", async () => {
     await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Review");
@@ -450,7 +450,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
       taskId,
     );
     const devCard = window
-      .getByTestId("column-dev-cards")
+      .getByTestId("column-working-cards")
       .locator(`[data-testid="card-${taskId}"]`);
     await expect(devCard).toBeVisible();
     const branch = await window.evaluate(
@@ -495,7 +495,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
       taskId,
     );
     const devCard = window
-      .getByTestId("column-dev-cards")
+      .getByTestId("column-working-cards")
       .locator(`[data-testid="card-${taskId}"]`);
     await expect(devCard).toBeVisible();
     const worktreePath = await window.evaluate(
@@ -618,7 +618,7 @@ test.describe("Done is final: one small question, then the app owns the worktree
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** A started repo task (worktree on disk) and its Dev card, from the board. */
+  /** A started repo task (worktree on disk) and its Working card, from the board. */
   async function startedRepoTask(
     title: string,
   ): Promise<{ taskId: string; worktreePath: string; devCard: Locator }> {
@@ -640,7 +640,7 @@ test.describe("Done is final: one small question, then the app owns the worktree
       taskId,
     );
     const devCard = window
-      .getByTestId("column-dev-cards")
+      .getByTestId("column-working-cards")
       .locator(`[data-testid="card-${taskId}"]`);
     await expect(devCard).toBeVisible();
     const worktreePath = (await window.evaluate(
@@ -681,7 +681,7 @@ test.describe("Done is final: one small question, then the app owns the worktree
     ]);
     await window.getByTestId("confirm-dialog-cancel").click();
     await expect(confirm).toHaveCount(0);
-    // Cancel changed nothing: still in Dev, the change still on disk.
+    // Cancel changed nothing: still in Working, the change still on disk.
     await expect(devCard).toBeVisible();
     expect(existsSync(dirtyFile)).toBe(true);
 
@@ -809,7 +809,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
 
-    // refresh() only inspects dev/awaiting repo-backed tasks (see
+    // refresh() only inspects working/awaiting repo-backed tasks (see
     // CoreManager.refresh): move it out of backlog so the next tick's PR
     // status check actually calls the (failing) fake gh.
     await window.evaluate(

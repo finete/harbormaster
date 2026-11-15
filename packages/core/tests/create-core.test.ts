@@ -48,7 +48,7 @@ describe("createCore", () => {
     const columns = await core.commands.listBoard();
     expect(columns.map((c) => c.state)).toEqual([
       "backlog",
-      "dev",
+      "working",
       "awaiting",
       "done",
     ]);
@@ -79,15 +79,15 @@ describe("createCore", () => {
     });
     clock.advance(1000);
 
-    const moved = await core.commands.moveTask(task.id, "dev");
-    expect(moved.state).toBe("dev");
+    const moved = await core.commands.moveTask(task.id, "working");
+    expect(moved.state).toBe("working");
     expect(moved.stateChangedAt).not.toBe(task.stateChangedAt);
 
     const columns = await core.commands.listBoard();
     expect(columnTasks(columns.find((c) => c.state === "backlog")!)).toEqual(
       [],
     );
-    expect(columnTasks(columns.find((c) => c.state === "dev")!)).toEqual([
+    expect(columnTasks(columns.find((c) => c.state === "working")!)).toEqual([
       moved,
     ]);
   });
@@ -97,7 +97,7 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    // backlog -> awaiting is the illegal edge (backlog may go to dev or done).
+    // backlog -> awaiting is the illegal edge (backlog may go to working or done).
     await expect(
       core.commands.moveTask(task.id, "awaiting", {
         awaiting: { kind: "review" },
@@ -110,7 +110,7 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "working");
 
     await expect(core.commands.moveTask(task.id, "awaiting")).rejects.toThrow(
       /awaiting reason/,
@@ -122,14 +122,14 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "working");
 
     const awaiting = await core.commands.moveTask(task.id, "awaiting", {
       awaiting: { kind: "review" },
     });
     expect(awaiting.awaiting).toEqual({ kind: "review" });
 
-    const backToDev = await core.commands.moveTask(task.id, "dev");
+    const backToDev = await core.commands.moveTask(task.id, "working");
     expect(backToDev.awaiting).toBeUndefined();
   });
 
@@ -138,7 +138,7 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "working");
     await core.commands.moveTask(task.id, "awaiting", {
       awaiting: { kind: "review" },
     });
@@ -211,7 +211,7 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "working");
     await core.commands.deleteTask(task.id);
 
     expect(events).toHaveLength(3);
@@ -219,7 +219,7 @@ describe("createCore", () => {
       columnTasks(events[0]!.find((c) => c.state === "backlog")!),
     ).toHaveLength(1);
     expect(
-      columnTasks(events[1]!.find((c) => c.state === "dev")!),
+      columnTasks(events[1]!.find((c) => c.state === "working")!),
     ).toHaveLength(1);
     expect(events[2]!.every((c) => columnTasks(c).length === 0)).toBe(true);
 
@@ -236,9 +236,9 @@ describe("createCore", () => {
       title: "Ship phase 1",
       initialPrompt: "Port pi-home core",
     });
-    await core.commands.moveTask(task.id, "dev");
+    await core.commands.moveTask(task.id, "working");
 
-    expect(changes).toEqual([`${task.id}:backlog`, `${task.id}:dev`]);
+    expect(changes).toEqual([`${task.id}:backlog`, `${task.id}:working`]);
   });
 
   it("persists tasks to the injected state directory across core instances", async () => {

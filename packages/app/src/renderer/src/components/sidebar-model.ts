@@ -148,7 +148,7 @@ export function nestChildrenUnderParents(
 }
 
 /** Visual tone of a state chip; mirrors the board's per-column colors. */
-export type StateTone = "backlog" | "dev" | "awaiting" | "done";
+export type StateTone = "backlog" | "working" | "awaiting" | "done";
 
 /**
  * Board-position chip text: the column name, or for awaiting tasks the
@@ -158,8 +158,8 @@ export function stateChipLabel(task: Task, state: TaskState): string {
   switch (state) {
     case "backlog":
       return "Backlog";
-    case "dev":
-      return "Dev";
+    case "working":
+      return "Working";
     case "done":
       return "Done";
     case "awaiting": {

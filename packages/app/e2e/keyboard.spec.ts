@@ -248,7 +248,7 @@ test('"r" opens the Await picker with review preselected; Enter (the fast path) 
   await window.keyboard.press("r");
   await expect(window.getByTestId("await-picker")).toHaveCount(0);
   await window.keyboard.press("s");
-  await expect(window.getByTestId("column-dev-cards")).toContainText(
+  await expect(window.getByTestId("column-working-cards")).toContainText(
     "Keyboard Alpha",
   );
 

@@ -2,6 +2,12 @@
 // before the rules engine replaced it (docs/release-plan.md "Rules engine")
 // so tests/rules-parity.test.ts can replay recorded PR states through both
 // and assert identical moves. Not part of core's source.
+//
+// The fixtures intentionally keep pi-home's vocabulary: the column is
+// `dev` here (`LegacyTaskState`, `{ type: "dev" }`, `return_to_dev`), not
+// Harbormaster's `working`. Translation happens at the two boundaries
+// only: `toLegacyTaskState` where a task enters, and `arbiter.ts`'s
+// `TARGET_STATE` where a move leaves. Don't "fix" the `dev`s in here.
 // The built-in mover/hook registry. No user-addon loading in this phase
 // (see contracts/addons.ts) — just a fixed lookup the manager arbitrates and
 // executes against. Every default board movement below is replaceable later

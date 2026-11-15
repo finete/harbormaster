@@ -1,18 +1,20 @@
 // Pure wording for the rules audit log on a task (docs/release-plan.md
 // "Audit log": shown on the task). The workspace header shows the last
-// rule action ("Review → Dev · 2h ago [Needs changes]"); its History
+// rule action ("Review → Working · 2h ago [Needs changes]"); its History
 // popover lists recent rule actions (raw events on request). The
 // technical "why" (event type, rule id, file:line) stays available as a
 // secondary line / tooltip. Free of React (tests/audit-lines.test.ts).
 import type { AuditActionEntry, AuditEntry } from "../../../preload/api";
 import { relativeTime } from "./time-format";
 
+// Entries logged before the dev → working rename keep their raw `dev` /
+// `await` and read through `humanize` ("Dev", "Await"): that is what the
+// column was called when they happened.
 const STATE: Record<string, string> = {
   backlog: "Backlog",
-  dev: "Dev",
-  done: "Done",
-  await: "Awaiting",
+  working: "Working",
   awaiting: "Awaiting",
+  done: "Done",
 };
 
 const AWAITING_KIND: Record<string, string> = {
@@ -24,10 +26,10 @@ const AWAITING_KIND: Record<string, string> = {
 
 /** A column name; an awaiting column reads as its kind ("Review"). */
 function columnName(state: string, awaitingKind?: string): string {
-  if ((state === "await" || state === "awaiting") && awaitingKind) {
+  if (state === "awaiting" && awaitingKind) {
     return AWAITING_KIND[awaitingKind] ?? humanize(awaitingKind);
   }
-  return STATE[state] ?? (state || "?");
+  return STATE[state] ?? (state ? humanize(state) : "?");
 }
 
 function moveTarget(entry: AuditActionEntry): string {
@@ -35,7 +37,7 @@ function moveTarget(entry: AuditActionEntry): string {
   const kind =
     typeof entry.with?.kind === "string"
       ? entry.with.kind
-      : to === "await"
+      : to === "awaiting"
         ? "review"
         : undefined;
   return columnName(to, kind);
@@ -52,7 +54,7 @@ export function auditRuleLabel(entry: AuditActionEntry): string {
   return entry.ruleLabel ?? humanize(entry.ruleId);
 }
 
-/** What the action did: "Review → Dev", "Moved to Dev", "Added inbox item". */
+/** What the action did: "Review → Working", "Moved to Working", "Added inbox item". */
 export function auditActionVerb(entry: AuditActionEntry): string {
   const detail = entry.detail ? ` (${entry.detail})` : "";
   if (entry.action === "move") {
@@ -96,7 +98,7 @@ export function auditActionWhy(entry: AuditActionEntry): string {
   return `${entry.eventType} · rule ${entry.ruleId} (${entry.file}:${entry.line})`;
 }
 
-/** One-line plain text (tooltips, copy): "Review → Dev · 4m ago · Needs changes". */
+/** One-line plain text (tooltips, copy): "Review → Working · 4m ago · Needs changes". */
 export function describeAuditAction(
   entry: AuditActionEntry,
   now: number,

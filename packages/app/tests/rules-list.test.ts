@@ -20,7 +20,7 @@ const loaded: RuleFile = {
       id: "pr-merged",
       label: "PR merged",
       on: ["github.pr.*", "harbormaster.task.*", "x.y"],
-      do: [{ action: "move", with: { to: "await", kind: "deploy" } }],
+      do: [{ action: "move", with: { to: "awaiting", kind: "deploy" } }],
       file: "rules.yaml",
       line: 3,
       condition: { kind: "always" },
@@ -87,7 +87,7 @@ describe("RulesList", () => {
     expect(plain).toContain("PR merged");
     expect(plain).toContain("2h ago");
     expect(plain).toContain("+1");
-    expect(plain).toContain("move → await:deploy");
+    expect(plain).toContain("move → awaiting:deploy");
     expect(html).toContain('data-dot="ok"');
     expect(html).not.toContain("rules-off-banner");
   });

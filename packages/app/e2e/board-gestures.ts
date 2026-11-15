@@ -93,7 +93,7 @@ export async function probeDrag(
   }, sourceTestId);
 }
 
-const COLUMNS = ["backlog", "dev", "awaiting", "done"] as const;
+const COLUMNS = ["backlog", "working", "awaiting", "done"] as const;
 
 /**
  * Keyboard-select one card on the visible board (arrow keys only, like a

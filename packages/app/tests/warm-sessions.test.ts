@@ -7,14 +7,14 @@ import { WarmSessionCache } from "../src/main/warm-sessions";
 
 function harness(capacity = 2) {
   const warm = new Set<string>();
-  const working = new Set<string>();
+  const running = new Set<string>();
   const disposed: string[] = [];
   // Session "s-x" is the primary of task "t-x".
   const cache = new WarmSessionCache(
     {
       isWarm: (id) => warm.has(id),
       taskIdOf: (id) => id.replace(/^s-/, "t-"),
-      isWorking: (taskId) => working.has(taskId),
+      isRunning: (taskId) => running.has(taskId),
       dispose: (id) => {
         warm.delete(id);
         disposed.push(id);
@@ -26,7 +26,7 @@ function harness(capacity = 2) {
     warm.add(id);
     cache.add(id);
   };
-  return { cache, warm, working, disposed, close };
+  return { cache, warm, running, disposed, close };
 }
 
 describe("WarmSessionCache", () => {
@@ -41,21 +41,21 @@ describe("WarmSessionCache", () => {
 
   it("never evicts a mid-turn agent; trims it once it goes idle", () => {
     const h = harness(1);
-    h.working.add("t-a");
+    h.running.add("t-a");
     h.close("s-a");
-    h.working.add("t-b");
+    h.running.add("t-b");
     h.close("s-b");
     expect(h.disposed).toEqual([]);
     expect(h.cache.ids()).toEqual(["s-a", "s-b"]);
 
-    h.working.delete("t-a");
+    h.running.delete("t-a");
     h.cache.reconcile(new Set(["t-a", "t-b"]));
     expect(h.disposed).toEqual(["s-a"]);
   });
 
-  it("evicts an idle session ahead of an older working one", () => {
+  it("evicts an idle session ahead of an older running one", () => {
     const h = harness(1);
-    h.working.add("t-a");
+    h.running.add("t-a");
     h.close("s-a");
     h.close("s-b");
     expect(h.disposed).toEqual(["s-b"]);

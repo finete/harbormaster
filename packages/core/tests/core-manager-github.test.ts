@@ -267,7 +267,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
 
     f.pullRequests.ensureOpenResult = pr({ reviewRequested: false });
 
@@ -300,7 +300,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
 
     f.pullRequests.ensureOpenError = new Error("gh: network unreachable");
 
@@ -309,7 +309,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
     );
 
     const reloaded = await f.core.commands.getTask(task.id);
-    expect(reloaded?.state).toBe("dev");
+    expect(reloaded?.state).toBe("working");
     expect(reloaded?.pr).toBeUndefined();
   });
 
@@ -320,7 +320,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
       initialPrompt: "x",
       kind: "temp_task",
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
     const result = await f.core.commands.toAwait(task.id, "review");
     expect(result.state).toBe("awaiting");
     expect(result.awaiting).toEqual({ kind: "review" });
@@ -346,7 +346,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: review kind", () => {
       // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid kind id.
       f.core.commands.toAwait(started.id, "carrier-pigeon" as any),
     ).rejects.toThrow("Unknown awaiting kind: carrier-pigeon");
-    expect((await f.core.commands.getTask(started.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(started.id))?.state).toBe("working");
   });
 });
 
@@ -481,7 +481,7 @@ describe.skipIf(!gitAvailable)("CoreManager toAwait: deploy kind", () => {
     await expect(f.core.commands.toAwait(task.id, "deploy")).rejects.toThrow(
       "Task has no pull request to merge",
     );
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
 
     const reviewed = await reviewedTask(f);
     f.pullRequests.squashMergeError = new Error("gh: merge conflict");
@@ -596,7 +596,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       ],
     });
     // Not moved, nothing removed (a cancelled dialog = this state).
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
     expect(
       (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
     ).toBe(worktree);
@@ -654,7 +654,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       ],
     });
     // Untouched after the question.
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
     expect(await git(["status", "--porcelain"], worktree)).toContain(
       "scratch.txt",
     );
@@ -760,7 +760,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
     const binding = await f.core.commands.getTaskWorkspace(task.id);
     // A commit unique to the task branch, never merged into local main —
     // GitHub says merged (remotely), but the safe local delete must refuse.
@@ -793,7 +793,7 @@ describe.skipIf(!gitAvailable)("CoreManager toDone", () => {
 });
 
 describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
-  it("updates task.pr and moves dev work into awaiting/review on a requested review", async () => {
+  it("updates task.pr and moves working tasks into awaiting/review on a requested review", async () => {
     const f = await fixture();
     const [repo] = await f.core.commands.listRepositories();
     if (!repo) throw new Error("fixture repo not discovered");
@@ -803,7 +803,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
     f.pullRequests.statusByBranch.set(
       task.branch!,
       pr({ reviewRequested: true }),
@@ -829,7 +829,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
     f.pullRequests.statusByBranch.set(
       task.branch!,
       pr({ reviewRequested: true }),
@@ -838,7 +838,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
     await f.core.commands.refresh();
 
     const reloaded = await f.core.commands.getTask(task.id);
-    expect(reloaded?.state).toBe("dev");
+    expect(reloaded?.state).toBe("working");
     expect(reloaded?.pr).toMatchObject({ reviewRequested: true });
   });
 
@@ -852,7 +852,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(broken.id, "dev");
+    await f.core.commands.moveTask(broken.id, "working");
     const healthy = await f.core.commands.createTask({
       title: "Healthy",
       initialPrompt: "y",
@@ -860,7 +860,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       start: true,
       branch: "healthy-branch",
     });
-    await f.core.commands.moveTask(healthy.id, "dev");
+    await f.core.commands.moveTask(healthy.id, "working");
 
     f.pullRequests.statusErrorByBranch.set(
       broken.branch!,
@@ -875,7 +875,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
 
     expect(warnings).toEqual([expect.stringContaining("rate limited")]);
     const reloadedBroken = await f.core.commands.getTask(broken.id);
-    expect(reloadedBroken?.state).toBe("dev");
+    expect(reloadedBroken?.state).toBe("working");
     expect(reloadedBroken?.pr).toBeUndefined();
     const reloadedHealthy = await f.core.commands.getTask(healthy.id);
     expect(reloadedHealthy?.state).toBe("awaiting");
@@ -913,7 +913,7 @@ describe.skipIf(!gitAvailable)("CoreManager refresh", () => {
       repositoryId: repo.id,
       start: true,
     });
-    await f.core.commands.moveTask(task.id, "dev");
+    await f.core.commands.moveTask(task.id, "working");
 
     const mergeCommit = { oid: "abcdef0123456", targetBranch: "main" };
     f.pullRequests.statusByBranch.set(

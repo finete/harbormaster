@@ -13,7 +13,7 @@ function baseTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "child-1",
     kind: "task",
-    state: "dev",
+    state: "working",
     title: "Fix the flaky test",
     initialPrompt: "",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -42,11 +42,11 @@ describe("deriveChildRunState", () => {
     ).toBe("interrupted");
   });
 
-  it("is working when live and a turn is running", () => {
+  it("is running when live and a turn is running", () => {
     const task = baseTask({ launch: { status: "started", requestedAt: "t" } });
     expect(
       deriveChildRunState(task, presence({ live: true, runningTurn: true })),
-    ).toBe("working");
+    ).toBe("running");
   });
 
   it('is "your move" when live but idle', () => {
@@ -151,7 +151,7 @@ describe("buildChildStatusEntry / formatChildStatusLine", () => {
     });
     const entry = buildChildStatusEntry(task, presence());
     expect(formatChildStatusLine(entry)).toBe(
-      '"Fix the flaky test" (child-1) · Dev · queued',
+      '"Fix the flaky test" (child-1) · Working · queued',
     );
   });
 });

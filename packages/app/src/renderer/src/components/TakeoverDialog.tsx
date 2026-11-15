@@ -36,7 +36,7 @@ export function TakeoverDialog({
       }}
       title={
         headless
-          ? `An agent is working headless on \u201c${taskTitle}\u201d`
+          ? `An agent is running headless on \u201c${taskTitle}\u201d`
           : `\u201c${taskTitle}\u201d is attached elsewhere`
       }
       testId="takeover-dialog"

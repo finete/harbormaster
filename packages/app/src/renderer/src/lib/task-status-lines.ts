@@ -41,7 +41,7 @@ export function deriveOutcomeLine(
 /**
  * What a live task's agent is doing, for the dot, the activity line and
  * the amber "your move" styling (decision #18):
- * - `working`: a turn is running (spinner);
+ * - `running`: a turn is running (spinner);
  * - `your-move`: it waits on the user: a `blocked` program status, a
  *   self-reported outcome, or a live session with no program status at
  *   all (pre-7501 records keep their old meaning);
@@ -49,7 +49,7 @@ export function deriveOutcomeLine(
  * - `error`: at rest after a failure (`status.message` says why).
  * `undefined` when no agent is attached.
  */
-export type PresenceActivity = "working" | "your-move" | "idle" | "error";
+export type PresenceActivity = "running" | "your-move" | "idle" | "error";
 
 export function derivePresenceActivity(
   presence:
@@ -57,7 +57,7 @@ export function derivePresenceActivity(
     | undefined,
   waitingOnParent = false,
 ): PresenceActivity | undefined {
-  if (presence?.runningTurn) return "working";
+  if (presence?.runningTurn) return "running";
   if (!presence?.live) return undefined;
   if (waitingOnParent) return "idle";
   if (presence.outcome) return "your-move";

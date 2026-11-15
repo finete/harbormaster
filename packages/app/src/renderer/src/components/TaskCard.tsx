@@ -22,7 +22,7 @@ import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { RepoChip } from "./RepoChip";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
-import { WorkingSpinner } from "./ui/working-spinner";
+import { RunningSpinner } from "./ui/running-spinner";
 
 type TaskCardPresence = PresenceBadge | undefined;
 
@@ -264,11 +264,11 @@ function TaskCardFace({
         >
           {running && (
             <Badge
-              variant="working"
+              variant="running"
               className="shrink-0 gap-1"
               data-testid="badge-running"
             >
-              <WorkingSpinner className="h-2.5 w-2.5" />
+              <RunningSpinner className="h-2.5 w-2.5" />
               running
             </Badge>
           )}

@@ -259,7 +259,7 @@ function presenceItem(
   // Waiting on its parent is not the user's move (task-messaging #9).
   if (waitingOnParent) return undefined;
   const activity = derivePresenceActivity(presence);
-  if (!presence || !activity || activity === "working") return undefined;
+  if (!presence || !activity || activity === "running") return undefined;
   const fallbackAt = presence.heartbeatAt ?? task.updatedAt;
   const base = {
     source: "harbormaster",

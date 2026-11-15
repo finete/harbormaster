@@ -129,7 +129,7 @@ export const RULES_SCHEMA = {
       additionalProperties: false,
       required: ["to"],
       properties: {
-        to: { enum: ["dev", "done", "await"] },
+        to: { enum: ["working", "awaiting", "done"] },
         kind: { type: "string", minLength: 1 },
         input: {
           type: "object",

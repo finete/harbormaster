@@ -57,7 +57,7 @@ export const CODE_ROOT_CANDIDATES: readonly string[] = [
   "src",
   "Projects",
   "projects",
-  "dev",
+  "working",
   "Developer",
   "repos",
   "git",

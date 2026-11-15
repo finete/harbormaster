@@ -170,7 +170,7 @@ function untrackSession(webContentsId: number, sessionId: string): void {
 }
 
 /** Task ids whose agent was mid-turn at the last presence tick (eviction skips them). */
-let workingTaskIds = new Set<string>();
+let runningTaskIds = new Set<string>();
 
 /**
  * Closed-tab task primaries kept warm for an instant reopen (see
@@ -184,7 +184,7 @@ const warmSessions = new WarmSessionCache({
     return Boolean(session && !session.attached);
   },
   taskIdOf: (id) => getSession(id)?.taskId,
-  isWorking: (taskId) => workingTaskIds.has(taskId),
+  isRunning: (taskId) => runningTaskIds.has(taskId),
   dispose: (id) => disposeSession(id),
 });
 
@@ -1052,7 +1052,7 @@ async function pollPresenceTick(): Promise<void> {
   // Warm closed-tab sessions: remember who is mid-turn (never evicted), and
   // end any whose task left the active set (Done, deleted) so a merged
   // task's worktree cleanup isn't blocked by a lingering pi.
-  workingTaskIds = new Set(
+  runningTaskIds = new Set(
     entries.filter(([, p]) => p.runningTurn).map(([taskId]) => taskId),
   );
   warmSessions.reconcile(new Set(tasks.map((task) => task.id)));
@@ -1062,7 +1062,7 @@ async function pollPresenceTick(): Promise<void> {
     if (!presencePushDedupe.shouldSend(win.webContents.id, json)) continue;
     safeSend(win.webContents, "core:presence-changed", payload);
   }
-  // Launched tasks' working-ness can only change here between other
+  // Launched tasks' running-ness can only change here between other
   // triggers (a turn started/ended with no board/pty-exit event of its
   // own) "-" see background-launcher.ts's "on each presence poll tick".
   void backgroundLauncher.runPass();
@@ -1412,7 +1412,7 @@ function registerPtyIpc(): void {
   // screen mirror, same path as a window reload's `releaseSessionsFor`) so
   // reopening the tab re-attaches to the SAME pi instead of cold-starting a
   // new one (resume + MCP reconnect took several seconds), and closing the
-  // tab of a working task no longer kills its agent mid-run. It stays
+  // tab of a running task no longer kills its agent mid-run. It stays
   // tracked to this webContents so the window's 'destroyed'/'closed' cleanup
   // (and app quit) still disposes it. Everything that is not a task primary
   // (split shells, shell fallbacks) is disposed as before.

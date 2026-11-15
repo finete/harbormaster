@@ -425,7 +425,7 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
     const cardTestId = await card.getAttribute("data-testid");
     if (!cardTestId) throw new Error("card missing data-testid");
     const taskId = cardTestId.replace("card-", "");
-    await dragTo(window, card, window.getByTestId("column-dev"));
+    await dragTo(window, card, window.getByTestId("column-working"));
     await expect
       .poll(
         async () =>

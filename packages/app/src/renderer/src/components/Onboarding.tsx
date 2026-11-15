@@ -776,9 +776,9 @@ function ConceptsStep({
           icon={<Columns3 className="h-4 w-4" />}
           title="Three columns, three verbs"
         >
-          Dev, Awaiting, Done: move a task <em>to Dev</em>, <em>to Awaiting</em>{" "}
-          or <em>Done</em>. Every task is a worktree, a branch, an agent session
-          and a pane.
+          Working, Awaiting, Done: move a task <em>to Working</em>,{" "}
+          <em>to Awaiting</em> or <em>Done</em>. Every task is a worktree, a
+          branch, an agent session and a pane.
         </Concept>
         <Concept
           icon={<Scale className="h-4 w-4" />}

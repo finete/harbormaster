@@ -437,7 +437,7 @@ export function InboxView({
       {order.length === 0 ? (
         <EmptyState
           tab={tab}
-          workingCount={model.workingCount}
+          runningCount={model.runningCount}
           otherCount={otherGroups.length}
         />
       ) : (
@@ -495,11 +495,11 @@ export function InboxView({
 
 function EmptyState({
   tab,
-  workingCount,
+  runningCount,
   otherCount,
 }: {
   tab: InboxTab;
-  workingCount: number;
+  runningCount: number;
   otherCount: number;
 }): JSX.Element {
   return (
@@ -511,10 +511,10 @@ function EmptyState({
       <p className="text-sm font-medium">
         {tab === "priority" ? "Nothing needs you" : "Nothing else here"}
       </p>
-      <p className="text-xs text-muted-foreground" data-testid="inbox-working">
-        {workingCount === 0
-          ? "No agents working"
-          : `${workingCount} agent${workingCount === 1 ? "" : "s"} working`}
+      <p className="text-xs text-muted-foreground" data-testid="inbox-running">
+        {runningCount === 0
+          ? "No agents running"
+          : `${runningCount} agent${runningCount === 1 ? "" : "s"} running`}
         {tab === "priority" && otherCount > 0 ? " · more in Other (Tab)" : ""}
       </p>
     </div>

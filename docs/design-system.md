@@ -23,17 +23,17 @@ unbroken ground; the sidebar and the board sit one step lighter on
 | `--border` / `--input` | `#333435` (hsl 210 2% 20%) | every hairline, 1px, never thicker |
 | `--foreground` | `#f2f2f2` | primary text |
 | `--muted-foreground` | `#999a9c` | secondary text, labels, icons at rest |
-| `--primary` | `#9eebd9` (hsl 166 66% 77%) | **the brand mint**, softened to sit at the same pastel level as the working yellow: primary buttons, focused input border, active tab edge, selected row border, links on hover |
+| `--primary` | `#9eebd9` (hsl 166 66% 77%) | **the brand mint**, softened to sit at the same pastel level as the running yellow: primary buttons, focused input border, active tab edge, selected row border, links on hover |
 | `--primary-foreground` | `#06231d` | text on mint |
 | `--ring` | `--primary` at 60% | focus rings |
 | `--radius` | `0.5rem` (8px) | buttons, inputs, cards; chips use full pill radius only in the composer chip row |
-| status: working | `#ffe066` (pale yellow) | an agent turn is running: the stepped spinner and the "running" badge; never for buttons |
+| status: running | `#ffe066` (pale yellow) | an agent turn is running: the stepped spinner and the "running" badge; never for buttons |
 | status: ok | `#9eebd9` at 20% fill / 50% stroke, mint text | "your move" (agent finished, waiting on you), PR open/approved pills, "done, wants a look" |
 | status: needs-you | `#ffc34d` (amber, matches the icon's lamp) | blocked, asked, approvals, warnings; never for buttons |
 | status: error | `#f0636b` | errors, failed launches, destructive buttons |
 | status: info / neutral | `--muted-foreground` | idle, waiting on parent |
 
-Each agent state has one color everywhere: yellow = working, mint = your
+Each agent state has one color everywhere: yellow = running, mint = your
 move, amber = something is wrong or blocked.
 
 Terminal panes use the same `#1e1e1e` ground, `#ffffff` foreground and the
@@ -75,8 +75,8 @@ mint token.
   (`text-[11px] font-semibold tracking-wider uppercase text-muted-foreground`)
   plus ghost text buttons; right: `secondary` buttons at `sm`, 8px gaps,
   keyboard hints as `<Kbd>`. No `outline` buttons here.
-- **Working spinner** (`components/ui/working-spinner.tsx`): a 2px
-  `status-working` ring with a transparent top, rotating once per second in
+- **Running spinner** (`components/ui/running-spinner.tsx`): a 2px
+  `status-running` ring with a transparent top, rotating once per second in
   12 steps (`steps(12)`, transform only, phase-aligned across instances);
   still and closed under reduced motion. Never a smooth infinite animation:
   that redraws the window every vsync.
@@ -93,10 +93,10 @@ mint token.
   JetBrains Mono, Menlo`) for branches, paths, PR refs, keys. Titles 18–20px
   semibold; never heavier than 600 except the composer's title field.
 - **Motion**: 120ms ease-out on hover/fill changes only, plus the stepped
-  working spinner; no springs, no glows, no gradients anywhere.
+  running spinner; no springs, no glows, no gradients anywhere.
 
 ## What stays as is
 
 The board (`Board.tsx`, `TaskCard.tsx`) already matches: keep its layout,
 only swap colors to the tokens (selected card border → mint, group header
-text → mint, PR pills → status ok, "running" badge → status working).
+text → mint, PR pills → status ok, "running" badge → status running).

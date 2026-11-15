@@ -23,7 +23,7 @@ const T0 = "2025-01-01T00:00:00.000Z";
 function task(overrides: Partial<Task> & { id: string }): Task {
   return {
     kind: "task",
-    state: "dev",
+    state: "working",
     title: overrides.id,
     initialPrompt: "",
     createdAt: T0,
@@ -90,8 +90,8 @@ describe("sidebarRows", () => {
   it("emits rows in openedTaskIds insertion order, never board order", () => {
     const columns: BoardColumn[] = [
       {
-        state: "dev",
-        title: "Dev",
+        state: "working",
+        title: "Working",
         groups: [
           {
             id: "g",
@@ -102,11 +102,11 @@ describe("sidebarRows", () => {
     ];
     const rows = sidebarRows(columns, {}, new Set(["c", "a", "b"]));
     expect(rows.map((r) => r.task.id)).toEqual(["c", "a", "b"]);
-    // A column move (a -> done, listed after dev) must not move the row.
+    // A column move (a -> done, listed after working) must not move the row.
     const moved: BoardColumn[] = [
       {
-        state: "dev",
-        title: "Dev",
+        state: "working",
+        title: "Working",
         groups: [{ id: "g", tasks: [task({ id: "b" }), task({ id: "c" })] }],
       },
       {
@@ -228,7 +228,7 @@ describe("stateChipLabel", () => {
   it("names the column, or the awaiting reason/stage", () => {
     const t = task({ id: "x" });
     expect(stateChipLabel(t, "backlog")).toBe("Backlog");
-    expect(stateChipLabel(t, "dev")).toBe("Dev");
+    expect(stateChipLabel(t, "working")).toBe("Working");
     expect(stateChipLabel(t, "done")).toBe("Done");
     expect(stateChipLabel(t, "awaiting")).toBe("Awaiting");
     expect(

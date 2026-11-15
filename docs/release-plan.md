@@ -165,14 +165,14 @@ rules:
     if: task.state == "awaiting" && task.awaiting.kind == "review" && event.data.to == "changes_requested"
     do:
       - action: move
-        with: { to: dev }
+        with: { to: working }
 ```
 
 - `if` is CEL (`@marcbachmann/cel-js`). Variables: `event`, `task`
   (MoverTaskView successor: id, state, awaiting, branch, repository, pr incl.
   `role`), `facts`, `repo` (incl. deployment pipeline).
 - JS escape hatch: `if: js:./checks.mjs#isHotfix`, `action: js:./actions.mjs#custom`.
-- Actions at release: `move` (`to: dev | done | await` with `kind` and
+- Actions at release: `move` (`to: working | awaiting | done` with `kind` and
   optional `input`), `inbox` (`title`, `body`, `buttons`), `createTask`
   (`title`, `prompt`, `repository`, `pr`, `role`, `start`), `message` (`text`,
   `mode`). `run` is out.
@@ -185,7 +185,7 @@ rules:
 
 Every event and every action (with rule id, file and line, task, outcome)
 is appended to `~/.harbormaster/events/` (JSONL, rotated). Shown on the
-task ("moved to Dev because …") and via `harbormaster events <task>`.
+task ("moved to Working because …") and via `harbormaster events <task>`.
 `harbormaster rules check [--task <id>] [--replay <from>]` runs the
 current rules over recorded events and prints what would happen without
 executing.
@@ -201,7 +201,7 @@ kind `author-response`. Built-in rules:
   - id: reviewer-author-activity
     on: github.pr.lastAuthorActivityAtChanged
     if: task.pr.role == "reviewer" && task.state == "awaiting"
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: reviewer-pr-closed
     on: github.pr.closedChanged
     if: task.pr.role == "reviewer" && event.data.to == true
@@ -211,7 +211,7 @@ kind `author-response`. Built-in rules:
 ### Built-in rules (replace the two movers)
 
 Ship as `rules.yaml` defaults written on first run: review changes
-requested → dev; PR merged while awaiting review → await deploy stage 1 (or
+requested → working; PR merged while awaiting review → awaiting deploy stage 1 (or
 `__production`); version endpoint contains the merge commit → next stage or
 done (never force-deletes, per the blessed divergence); reviewer rules above.
 Prove parity: record a week of events with the old movers, replay through the
@@ -321,7 +321,7 @@ with the full gate green and the acceptance checked.
 | A | Extension shrunk to inbox delivery; presence reporter, commands, widget, tools removed; auto-install at first run | Steer/followUp messages still arrive in a Pi task session; `packages/extension/src` is one module plus tests | merged 88b43c1 (real-pi smoke only; no e2e inside Pi) |
 | A | Delete migration, adoption commands, TUI board | Code and scripts gone; README updated | merged 88b43c1 (no /totask or TUI existed anymore) |
 | C | Rules engine core: CloudEvents, sources + snapshot diff, CEL, YAML + schema, arbitration, audit log, `rules check`, addon loader | Unit tests; replay parity with the old movers; mover engine deleted | merged 0f68416 (adds a built-in `harbormaster` board source so rules re-evaluate on column changes) |
-| C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → dev, merge → deploy, deploy → done) pass on rules | merged 0f68416 (deploy → done stays a core integration test: https-only version endpoint) |
+| C | `github` and `version-endpoint` sources; default `rules.yaml`; reviewer role + `author-response` kind | Existing e2e flows (review → working, merge → deploy, deploy → done) pass on rules | merged 0f68416 (deploy → done stays a core integration test: https-only version endpoint) |
 | C | Inbox view in app (per "Inbox" above) + `harbormaster inbox`; new-task form PR URL + role label; audit shown on task | Review-requested item → "Create review task" creates a reviewer task; asked/reported/approval items in Priority, idle in Other; keys work; e2e | merged |
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | merged (claude 2.1.322 starts with our flags and probes 7501; report/MCP/trust dialogs unproven without login) |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
@@ -337,7 +337,7 @@ with the full gate green and the acceptance checked.
 - Wave A: presence liveness is pid-based; sweep records whose pid is not one
   of the app's ptys on startup.
 - Wave A: Pi reports `idle` before processing its startup prompt, so a fresh
-  launch can briefly not count as working for the launch slot cap.
+  launch can briefly not count as running for the launch slot cap.
 - Wave A: the real `pi-mcp-adapter` path (`-builtin:mcp`) is untested; the
   user's `~/.pi/agent/settings.json` still lists the old extension package
   path and should drop it (double load is harmless).

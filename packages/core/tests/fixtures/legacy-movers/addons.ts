@@ -14,6 +14,19 @@ import type {
   TaskState,
 } from "../../../src/contracts/model.js";
 
+/** pi-home's column names: Harbormaster's `working` was `dev` (see index.ts). */
+export type LegacyTaskState = "backlog" | "dev" | "awaiting" | "done";
+
+/** A Harbormaster column as the retired movers name it. */
+export function toLegacyTaskState(state: TaskState): LegacyTaskState {
+  return state === "working" ? "dev" : state;
+}
+
+/** A retired-mover column as Harbormaster names it. */
+export function fromLegacyTaskState(state: LegacyTaskState): TaskState {
+  return state === "dev" ? "working" : state;
+}
+
 /** Everything a stage hook may know about the task whose wait it checks. */
 export interface StageHookInput {
   repositoryId: string;
@@ -77,7 +90,7 @@ export type BoardMove =
 export interface MoverTaskView {
   id: string;
   kind: TaskKind;
-  state: TaskState;
+  state: LegacyTaskState;
   awaiting?: AwaitingKind;
   branch?: string;
   repositoryId?: string;

@@ -46,7 +46,10 @@ describe("shouldArchive", () => {
   it("never flags a non-done task, an already-archived task, or one with no completedAt", () => {
     const now = new Date("2026-02-01T00:00:00Z");
     expect(
-      shouldArchive(doneTask({ state: "dev", completedAt: undefined }), now),
+      shouldArchive(
+        doneTask({ state: "working", completedAt: undefined }),
+        now,
+      ),
     ).toBe(false);
     expect(
       shouldArchive(doneTask({ archivedAt: "2026-01-02T00:00:00Z" }), now),
@@ -210,7 +213,9 @@ describe("forced cleanup backoff", () => {
     const abandoned = failing(5);
     if (abandoned.cleanup) abandoned.cleanup.mode = "abandoned";
     expect(cleanupNeedsAttention(abandoned)).toBe(false);
-    expect(cleanupNeedsAttention({ ...failing(5), state: "dev" })).toBe(false);
+    expect(cleanupNeedsAttention({ ...failing(5), state: "working" })).toBe(
+      false,
+    );
   });
 });
 

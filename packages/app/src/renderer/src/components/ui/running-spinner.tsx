@@ -1,7 +1,7 @@
 import type { AnimationEvent, JSX } from "react";
 import { cn } from "../../lib/utils";
 
-const ANIMATION_NAME = "working-spin";
+const ANIMATION_NAME = "running-spin";
 
 /**
  * Pin a freshly started spinner animation to the document timeline origin,
@@ -23,11 +23,11 @@ function alignPhase(event: AnimationEvent<HTMLSpanElement>): void {
 }
 
 /**
- * "Agent working" indicator: a yellow ring with a gap, turning in 12 steps
- * per second (see `.working-spinner` in styles.css for why it is stepped
+ * "Agent running" indicator: a yellow ring with a gap, turning in 12 steps
+ * per second (see `.running-spinner` in styles.css for why it is stepped
  * and compositor-only). Reduced-motion users get a still, closed ring.
  */
-export function WorkingSpinner({
+export function RunningSpinner({
   className,
 }: {
   className?: string;
@@ -37,7 +37,7 @@ export function WorkingSpinner({
       aria-hidden
       onAnimationStart={alignPhase}
       className={cn(
-        "working-spinner block shrink-0 rounded-full border-2 border-status-working border-t-transparent motion-reduce:border-t-status-working",
+        "running-spinner block shrink-0 rounded-full border-2 border-status-running border-t-transparent motion-reduce:border-t-status-running",
         className,
       )}
     />

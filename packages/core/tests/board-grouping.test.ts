@@ -8,7 +8,7 @@ const makeTask = (overrides: Partial<Task> = {}): Task => {
   return {
     id: `task-${counter}`,
     kind: "task",
-    state: "dev",
+    state: "working",
     title: `Task ${counter}`,
     initialPrompt: "do it",
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -22,7 +22,7 @@ describe("groupColumnTasks", () => {
   it("groups non-awaiting columns by repositoryId, alphabetical by short name", () => {
     const zebra = makeTask({ repositoryId: "github.com/org/zebra" });
     const apple = makeTask({ repositoryId: "github.com/org/apple" });
-    const groups = groupColumnTasks("dev", [zebra, apple]);
+    const groups = groupColumnTasks("working", [zebra, apple]);
 
     expect(groups.map((g) => g.repoLabel)).toEqual(["apple", "zebra"]);
     expect(groups.every((g) => g.primaryLabel === undefined)).toBe(true);
@@ -33,7 +33,7 @@ describe("groupColumnTasks", () => {
   it("falls back repository-less tasks into a trailing 'scratch' group", () => {
     const scratchTask = makeTask();
     const repoTask = makeTask({ repositoryId: "github.com/org/apple" });
-    const groups = groupColumnTasks("dev", [scratchTask, repoTask]);
+    const groups = groupColumnTasks("working", [scratchTask, repoTask]);
 
     expect(groups.map((g) => g.repoLabel)).toEqual(["apple", "scratch"]);
     expect(groups[1]!.tasks).toEqual([scratchTask]);
@@ -48,7 +48,7 @@ describe("groupColumnTasks", () => {
       repositoryId: "github.com/org/repo",
       stateChangedAt: "2026-01-01T00:00:00.000Z",
     });
-    const groups = groupColumnTasks("dev", [later, earlier]);
+    const groups = groupColumnTasks("working", [later, earlier]);
 
     expect(groups[0]!.tasks).toEqual([earlier, later]);
   });

@@ -135,7 +135,7 @@ async function harness(
   const task: Task = {
     id: "task-1",
     kind: "task",
-    state: "dev",
+    state: "working",
     title: "Feature",
     initialPrompt: "",
     repositoryId: REPO.id,
@@ -185,7 +185,7 @@ describe("confirmed Done: forced cleanup", () => {
       closesPane: true,
     });
     expect(f.worktrees.removeWorktree).not.toHaveBeenCalled();
-    expect((await f.reload()).state).toBe("dev");
+    expect((await f.reload()).state).toBe("working");
   });
 
   it("removes with force, parks the binding, deletes the branch and records completion", async () => {
@@ -369,7 +369,7 @@ describe("confirmed Done: forced cleanup", () => {
       throw new Error("Device or resource busy");
     });
     await confirmDone(f.manager, f.task.id);
-    const moved = await f.manager.moveTask(f.task.id, "dev");
+    const moved = await f.manager.moveTask(f.task.id, "working");
     expect(moved.cleanup).toBeUndefined();
     f.at(minutes(600));
     await f.manager.refresh();

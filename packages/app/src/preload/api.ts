@@ -319,7 +319,7 @@ export interface HarbormasterApi {
      * Release a pane's pty on an explicit tab close: a task primary detaches
      * back to the background (kept alive, headless screen mirror) so
      * reopening re-attaches to the same pi instead of cold-starting one, and
-     * a working task's agent is not killed by closing its tab. Non-primary
+     * a running task's agent is not killed by closing its tab. Non-primary
      * ptys (split shells, shell fallbacks) are disposed. Prefer this
      * over `dispose` for pane unmount; `dispose` unconditionally kills.
      * `screen` is the pane's serialized last screen, replayed on reopen.
@@ -385,7 +385,7 @@ export interface HarbormasterApi {
     ): Promise<Task>;
     /**
      * Start a parked backlog task: creates its branch + worktree + binding
-     * (repository-backed tasks without one) and moves it to `dev`. See
+     * (repository-backed tasks without one) and moves it to `working`. See
      * `CoreCommands.startTask`.
      */
     startTask(taskId: string): Promise<Task>;
@@ -423,7 +423,7 @@ export interface HarbormasterApi {
     /** The cleanup inbox item's Dismiss: give up on the Done task's cleanup. See `CoreCommands.abandonDoneCleanup`. */
     abandonDoneCleanup(taskId: string): Promise<Task>;
     /**
-     * Reopen a Done task as a new Dev cycle (fresh branch + worktree; the
+     * Reopen a Done task as a new work cycle (fresh branch + worktree; the
      * previous conversation is forked into its next pi pane). A missing
      * previous conversation surfaces as `warning`. See `CoreCommands.reopenTask`.
      */

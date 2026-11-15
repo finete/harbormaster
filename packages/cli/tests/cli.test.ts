@@ -326,7 +326,7 @@ describe("harbormaster inbox list / resolve, events, rules, addons", () => {
     await mkdir(join(stateDir, "rules"), { recursive: true });
     await writeFile(
       join(stateDir, "rules", "rules.yaml"),
-      "rules:\n  - id: r1\n    label: Needs changes\n    on: github.pr.*\n    do: [{ action: move, with: { to: dev } }]\n",
+      "rules:\n  - id: r1\n    label: Needs changes\n    on: github.pr.*\n    do: [{ action: move, with: { to: working } }]\n",
     );
     const text = io();
     expect(await main(["rules", "list"], text)).toBe(0);

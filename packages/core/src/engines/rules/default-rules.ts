@@ -42,16 +42,16 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     if: >-
       task.pr != null && task.pr.role == "author" &&
       "state" in facts.github && facts.github.state == "merged" &&
-      (task.state == "dev" || (task.state == "awaiting" && task.awaiting.kind == "review"))
+      (task.state == "working" || (task.state == "awaiting" && task.awaiting.kind == "review"))
     do:
       - action: move
-        with: { to: await, kind: deploy }
+        with: { to: awaiting, kind: deploy }
 `,
   },
   {
     mover: "github-review",
     yaml: `  # Changes requested (or human feedback) on the current head, or the PR
-  # went back to draft: the work returns to Dev.
+  # went back to draft: the work returns to Working.
   - id: review-changes-requested
     label: Needs changes
     on: [github.pr.*, harbormaster.task.*]
@@ -64,18 +64,18 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
        facts.github.humanFeedbackOnHead == true)
     do:
       - action: move
-        with: { to: dev }
+        with: { to: working }
 `,
   },
   {
     mover: "github-review",
-    yaml: `  # A requested or submitted review moves Dev work into Awaiting review
+    yaml: `  # A requested or submitted review moves Working tasks into Awaiting review
   # (unless that review asked for changes on the current head).
   - id: review-requested-enter-review
     label: Review requested
     on: [github.pr.*, harbormaster.task.*]
     if: >-
-      task.state == "dev" && task.pr != null && task.pr.role == "author" &&
+      task.state == "working" && task.pr != null && task.pr.role == "author" &&
       "state" in facts.github &&
       facts.github.state != "merged" && facts.github.state != "draft" &&
       !(facts.github.reviewDecision == "changes_requested" && facts.github.changesRequestedOnHead != false) &&
@@ -83,7 +83,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
       (facts.github.reviewRequested == true || facts.github.reviewSubmitted == true)
     do:
       - action: move
-        with: { to: await, kind: review }
+        with: { to: awaiting, kind: review }
 `,
   },
   {
@@ -99,7 +99,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
       repo != null && size(repo.deployment.stages) > 0
     do:
       - action: move
-        with: { to: await, kind: deploy }
+        with: { to: awaiting, kind: deploy }
 `,
   },
   {
@@ -116,7 +116,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     do:
       - action: move
         with:
-          to: await
+          to: awaiting
           kind: deploy
           input: { stage: '\${facts["version-endpoint"].next}' }
 `,
@@ -145,7 +145,7 @@ const BLOCKS: readonly DefaultRuleBlock[] = [
     label: Author activity
     on: github.pr.lastAuthorActivityAtChanged
     if: task.pr != null && task.pr.role == "reviewer" && task.state == "awaiting"
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
 `,
   },
   {

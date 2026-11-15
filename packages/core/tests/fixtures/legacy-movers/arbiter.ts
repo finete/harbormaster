@@ -9,11 +9,12 @@
 
 import type { TaskState } from "../../../src/contracts/model.js";
 import { isAllowedTransition } from "../../../src/engines/task-transitions.js";
-import type {
-  BoardMove,
-  MoverHelpers,
-  MoverInput,
-  TaskMover,
+import {
+  type BoardMove,
+  fromLegacyTaskState,
+  type MoverHelpers,
+  type MoverInput,
+  type TaskMover,
 } from "./addons.js";
 
 export interface ArbiterDecision {
@@ -24,8 +25,9 @@ export interface ArbiterDecision {
   warnings: string[];
 }
 
+// The boundary out: a pi-home move type names Harbormaster's column.
 const TARGET_STATE: Record<Exclude<BoardMove["type"], "stay">, TaskState> = {
-  dev: "dev",
+  dev: "working",
   review: "awaiting",
   deploy: "awaiting",
   done: "done",
@@ -49,7 +51,7 @@ export async function arbitrateMove(
     }
     if (move.type === "stay") continue;
     const target = TARGET_STATE[move.type];
-    if (!isAllowedTransition(input.task.state, target)) {
+    if (!isAllowedTransition(fromLegacyTaskState(input.task.state), target)) {
       warnings.push(`Mover ${name} proposed an illegal ${move.type} move`);
       continue;
     }

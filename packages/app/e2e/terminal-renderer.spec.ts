@@ -95,7 +95,7 @@ test("terminal panes render with the DOM renderer; power events reach wake.log",
       "card-",
       "",
     );
-    await dragTo(window, card, window.getByTestId("column-dev"));
+    await dragTo(window, card, window.getByTestId("column-working"));
     await expect
       .poll(
         async () =>

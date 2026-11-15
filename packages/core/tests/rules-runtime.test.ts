@@ -263,7 +263,7 @@ describe("rules runtime through createCore", () => {
   - id: would-move
     label: would-move
     on: harbormaster.task.appeared
-    do: [{ action: move, with: { to: await, kind: slack } }]
+    do: [{ action: move, with: { to: awaiting, kind: slack } }]
 `,
     );
     const check = await core.commands.rulesCheck({ taskId: task.id });
@@ -277,10 +277,10 @@ describe("rules runtime through createCore", () => {
       ]),
     ).toEqual([
       ["would-inbox", "inbox", "would-run", { title: "hi Later" }],
-      ["would-move", "move", "would-move", { to: "await", kind: "slack" }],
+      ["would-move", "move", "would-move", { to: "awaiting", kind: "slack" }],
     ]);
     expect(await core.commands.listInbox()).toEqual([]);
-    expect((await core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await core.commands.getTask(task.id))?.state).toBe("working");
     expect(
       (await core.commands.rulesCheck({ replayFrom: "2026-03-02" })).events,
     ).toBe(0);
@@ -376,7 +376,7 @@ describe("rules runtime through createCore", () => {
     expect(action).toMatchObject({
       ruleId: "finish-scratch",
       ruleLabel: "Scratch finished",
-      from: { state: "dev" },
+      from: { state: "working" },
       outcome: "applied",
     });
     expect(action?.from).not.toHaveProperty("awaitingKind");
@@ -404,18 +404,18 @@ describe("the Rules page data (listRules / listEvents / setRulesEnabled)", () =>
     label: Needs changes
     on: github.pr.*
     if: task.state == "awaiting" && (a || b)
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: r2
     label: Quiet
     on: github.pr.*
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
 `;
   const REPO = `rules:
   - id: r1
     label: Repo override
     on: github.pr.*
     if: "js:./checks.mjs#fn"
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
 `;
   const act = (
     at: string,
@@ -604,14 +604,14 @@ describe("the Rules page data (listRules / listEvents / setRulesEnabled)", () =>
   - id: labelled
     label: Fine
     on: a
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: unlabelled
     on: a
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: empty
     label: ""
     on: a
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
 `,
     });
     const [file] = (await core.commands.listRules()).files;

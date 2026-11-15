@@ -172,7 +172,7 @@
       "required": ["to"],
       "properties": {
         "to": {
-          "enum": ["dev", "done", "await"]
+          "enum": ["working", "awaiting", "done"]
         },
         "kind": {
           "type": "string",

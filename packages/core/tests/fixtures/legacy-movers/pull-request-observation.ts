@@ -8,8 +8,8 @@
 import type {
   AwaitingKind,
   TaskPullRequest,
-  TaskState,
 } from "../../../src/contracts/model.js";
+import type { LegacyTaskState as TaskState } from "./addons.js";
 
 export type PullRequestObservationOutcome =
   | "stay"

@@ -155,7 +155,7 @@ test("fresh state dir renders an empty board and an empty sidebar hint", async (
 
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
-  for (const id of ["backlog", "dev", "awaiting", "done"]) {
+  for (const id of ["backlog", "working", "awaiting", "done"]) {
     await expect(window.getByTestId(`column-${id}`)).toBeVisible();
   }
   await expect(window.locator('[data-testid^="card-"]')).toHaveCount(0);
@@ -401,10 +401,10 @@ test("the rail lists only opened tasks: a parked backlog task stays off the rail
 test("dragging a card into awaiting opens the Await picker; cancel keeps the card in place", async () => {
   await window.getByTestId("board-button").click();
 
-  // "Task Alpha" is still in backlog; move it to dev first (allowed
-  // transition, no dialog) so dev -> awaiting is a legal move to drag next.
-  await dragTo(cardLocator("Task Alpha"), window.getByTestId("column-dev"));
-  await expect(window.getByTestId("column-dev-cards")).toContainText(
+  // "Task Alpha" is still in backlog; move it to working first (allowed
+  // transition, no dialog) so working -> awaiting is a legal move to drag next.
+  await dragTo(cardLocator("Task Alpha"), window.getByTestId("column-working"));
+  await expect(window.getByTestId("column-working-cards")).toContainText(
     "Task Alpha",
   );
 
@@ -417,8 +417,8 @@ test("dragging a card into awaiting opens the Await picker; cancel keeps the car
   await window.getByTestId("await-picker-cancel").click();
   await expect(window.getByTestId("await-picker")).toHaveCount(0);
 
-  // card stayed in dev; it was never moved.
-  await expect(window.getByTestId("column-dev-cards")).toContainText(
+  // card stayed in working; it was never moved.
+  await expect(window.getByTestId("column-working-cards")).toContainText(
     "Task Alpha",
   );
   await expect(window.getByTestId("column-awaiting-cards")).not.toContainText(
@@ -445,7 +445,7 @@ test("confirming the Await picker (review preselected) moves the card and shows 
   await expect(window.getByTestId("column-awaiting-cards")).toContainText(
     "Task Alpha",
   );
-  await expect(window.getByTestId("column-dev-cards")).not.toContainText(
+  await expect(window.getByTestId("column-working-cards")).not.toContainText(
     "Task Alpha",
   );
   await expect(

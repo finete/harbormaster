@@ -200,7 +200,7 @@ describe("version-endpoint source snapshots", () => {
   it("per task: the furthest deployed stage, what comes next, whether it lands; per stage: the deployed commit", async () => {
     const ctx = sourceContext([
       task(),
-      task({ id: "t2", state: "dev", awaiting: undefined }),
+      task({ id: "t2", state: "working", awaiting: undefined }),
     ]);
     const snapshots = (await versionEndpointSource.snapshot?.(ctx)) ?? [];
     expect(snapshots).toEqual([
@@ -303,9 +303,9 @@ describe("github source", () => {
     ]);
     const ctx = sourceContext(
       [
-        task({ id: "a", state: "dev" }),
-        task({ id: "b", state: "dev" }),
-        task({ id: "c", state: "dev" }),
+        task({ id: "a", state: "working" }),
+        task({ id: "b", state: "working" }),
+        task({ id: "c", state: "working" }),
       ],
       {
         previous: [{ subject: "task/c", entity: "pr", facts: { number: 3 } }],

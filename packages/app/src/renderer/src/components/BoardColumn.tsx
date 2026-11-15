@@ -32,8 +32,8 @@ function dropPreviewLabel(state: BoardColumnData["state"]): string {
       return "Drop to choose what it's waiting on";
     case "done":
       return "Drop to mark done (cleans up the worktree)";
-    case "dev":
-      return "Drop to start / move to Dev";
+    case "working":
+      return "Drop to start / move to Working";
     default:
       return `Drop to move to ${state}`;
   }

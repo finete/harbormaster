@@ -12,7 +12,7 @@ import { TASK_STATE_LABELS } from "./child-status.js";
 
 /** Human label for a find result's run state (matches `subtask_status`'s wording). */
 const RUN_LABELS: Record<TaskSearchResult["run"], string> = {
-  working: "working",
+  running: "running",
   "your-move": "your move",
   queued: "queued",
   "not-running": "not running",

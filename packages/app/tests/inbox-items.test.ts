@@ -26,7 +26,7 @@ function task(id: string, patch: Partial<Task> = {}): Task {
   return {
     id,
     kind: "task",
-    state: "dev",
+    state: "working",
     title: `Task ${id}`,
     initialPrompt: "",
     createdAt: "2026-11-11T08:00:00.000Z",
@@ -205,7 +205,7 @@ describe("assembleInbox", () => {
     ).toEqual(["Open", "Retry", "Dismiss"]);
   });
 
-  it("leaves out working agents, Done tasks and tasks waiting on their parent", () => {
+  it("leaves out running agents, Done tasks and tasks waiting on their parent", () => {
     const entries = assembleInbox({
       ...everything,
       waitingOnParent: new Set(["t1"]),
@@ -298,7 +298,7 @@ describe("cleanup-failed items", () => {
     for (const t of [
       completed,
       abandoned,
-      { ...done, state: "dev" as const },
+      { ...done, state: "working" as const },
     ]) {
       expect(
         assembleInbox(sources({ tasks: rows(t) })).filter(

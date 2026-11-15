@@ -32,11 +32,11 @@ import {
   type StateTone,
   stateChipLabel,
 } from "./sidebar-model";
-import { WorkingSpinner } from "./ui/working-spinner";
+import { RunningSpinner } from "./ui/running-spinner";
 
 /**
  * Bordered chip tones from the design system's status tokens only: neutral
- * grey ramp for backlog/dev, needs-you amber for awaiting (blocked), ok mint
+ * grey ramp for backlog/working, needs-you amber for awaiting (blocked), ok mint
  * for done ("done, wants a look").
  */
 const NEUTRAL_CHIP = "border-border bg-muted text-muted-foreground";
@@ -48,7 +48,7 @@ const ERROR_CHIP =
 
 const STATE_CHIP_CLASS: Record<StateTone, string> = {
   backlog: NEUTRAL_CHIP,
-  dev: "border-border bg-muted text-foreground",
+  working: "border-border bg-muted text-foreground",
   awaiting: NEEDS_YOU_CHIP,
   done: OK_CHIP,
 };
@@ -72,9 +72,9 @@ function RunningDot(): JSX.Element {
       data-testid="sidebar-row-spinner"
       data-status="running"
       role="img"
-      aria-label="Agent working"
+      aria-label="Agent running"
     >
-      <WorkingSpinner className="h-2.5 w-2.5" />
+      <RunningSpinner className="h-2.5 w-2.5" />
     </span>
   );
 }
@@ -82,7 +82,7 @@ function RunningDot(): JSX.Element {
 /**
  * Live-presence indicator. Keeps the pre-redesign test ids so e2e coverage
  * carries over: `sidebar-row-spinner` while an agent turn runs (the yellow
- * stepped spinner, see WorkingSpinner), `sidebar-row-attention-dot` for
+ * stepped spinner, see RunningSpinner), `sidebar-row-attention-dot` for
  * live-but-idle — pi-home's ● "your move": the agent finished its loop and
  * waits on you, so it gets the mint call-to-action color with a ring — and
  * `sidebar-row-status-dot` otherwise (muted gray).
@@ -96,7 +96,7 @@ export function StatusDot({
   waitingOnParent?: boolean;
 }): JSX.Element {
   const activity = derivePresenceActivity(presence, waitingOnParent);
-  if (activity === "working") {
+  if (activity === "running") {
     return <RunningDot />;
   }
   if (activity === "error") {
@@ -306,8 +306,8 @@ export function SidebarTaskRow({
   const waiting = messaging.waitingOnParent !== undefined;
   const presenceActivity = derivePresenceActivity(presence, waiting);
   const activity =
-    presenceActivity === "working"
-      ? "working…"
+    presenceActivity === "running"
+      ? "running…"
       : presenceActivity === "your-move"
         ? "your move"
         : presenceActivity === "error"

@@ -2,7 +2,7 @@
 // lost-update safety (patch-under-lock + single-flight), bounded
 // parallelism, auto-done stay-put, the stage-less Production deploy wait,
 // per-repo rules overrides and config warnings, the done-cleanup retry
-// sweep, the awaiting(deploy)→dev block, done→dev bookkeeping, and the
+// sweep, the awaiting(deploy)→working block, done→working bookkeeping, and the
 // no-remote silent skip. Real temp git repos (createCore's real git access)
 // with a fake, gate-able PullRequestAccess: never a real gh/network call.
 
@@ -478,19 +478,19 @@ describe("done-cleanup retry sweep (#6)", () => {
 });
 
 describe("board-transition parity (#16, #17)", () => {
-  it("refuses to send a task awaiting deployment back to Dev", async () => {
+  it("refuses to send a task awaiting deployment back to Working", async () => {
     const f = await fixture();
     const task = await f.startedTask("Deploying");
     await f.core.commands.moveTask(task.id, "awaiting", {
       awaiting: { kind: "deploy", stageId: "prod", stageLabel: "Production" },
     });
-    await expect(f.core.commands.moveTask(task.id, "dev")).rejects.toThrow(
-      /cannot return to Dev/,
+    await expect(f.core.commands.moveTask(task.id, "working")).rejects.toThrow(
+      /cannot return to Working/,
     );
     expect((await f.core.commands.getTask(task.id))?.state).toBe("awaiting");
   });
 
-  it("clears completedAt and archivedAt when a done task moves back to Dev", async () => {
+  it("clears completedAt and archivedAt when a done task moves back to Working", async () => {
     const f = await fixture();
     const task = await f.core.commands.createTask({
       title: "Scratch",
@@ -503,7 +503,7 @@ describe("board-transition parity (#16, #17)", () => {
     await f.core.commands.refresh();
     expect((await f.core.commands.getTask(task.id))?.archivedAt).toBeDefined();
 
-    const moved = await f.core.commands.moveTask(task.id, "dev");
+    const moved = await f.core.commands.moveTask(task.id, "working");
 
     expect(moved.completedAt).toBeUndefined();
     expect(moved.archivedAt).toBeUndefined();
@@ -522,8 +522,8 @@ describe("rules config parity (#12, #13, #14)", () => {
   - id: review-requested-enter-review
     label: review-requested-enter-review
     on: [github.pr.*, harbormaster.task.*]
-    if: task.state == "dev" && "reviewRequested" in facts.github && facts.github.reviewRequested == true
-    do: [{ action: move, with: { to: await, kind: review } }]
+    if: task.state == "working" && "reviewRequested" in facts.github && facts.github.reviewRequested == true
+    do: [{ action: move, with: { to: awaiting, kind: review } }]
 `;
 
   it("a repository rules file replaces the global list ([] disables rules for that repo)", async () => {
@@ -535,7 +535,7 @@ describe("rules config parity (#12, #13, #14)", () => {
       pr({ reviewRequested: true }),
     );
     await f.core.commands.refresh();
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
 
     await writeRules(f, "rules.yaml", "rules: []\n");
     await writeRules(f, repositoryRulesFile(f.repositoryId), REVIEW_RULE);
@@ -559,7 +559,7 @@ describe("rules config parity (#12, #13, #14)", () => {
     );
     await f.core.commands.refresh();
     const reloaded = await f.core.commands.getTask(task.id);
-    expect(reloaded?.state).toBe("dev");
+    expect(reloaded?.state).toBe("working");
     expect(reloaded?.pr).toMatchObject({ reviewRequested: true });
   });
 
@@ -572,7 +572,7 @@ describe("rules config parity (#12, #13, #14)", () => {
       pr({ reviewRequested: true }),
     );
     await f.core.commands.refresh();
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
     const rules = await readFile(
       join(f.stateDir, "rules", "rules.yaml"),
       "utf8",

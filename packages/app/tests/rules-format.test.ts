@@ -39,7 +39,7 @@ function rule(id: string, overrides: Partial<Rule> = {}): Rule {
     id,
     label: id,
     on: ["github.pr.*"],
-    do: [{ action: "move", with: { to: "dev" } }],
+    do: [{ action: "move", with: { to: "working" } }],
     file: "rules.yaml",
     line: 1,
     condition: { kind: "always" },
@@ -141,15 +141,15 @@ describe("row chips", () => {
   });
 
   it("do chip text", () => {
-    expect(doChipText({ action: "move", with: { to: "dev" } })).toBe(
-      "move → dev",
+    expect(doChipText({ action: "move", with: { to: "working" } })).toBe(
+      "move → working",
     );
-    expect(doChipText({ action: "move", with: { to: "await" } })).toBe(
-      "move → await:review",
+    expect(doChipText({ action: "move", with: { to: "awaiting" } })).toBe(
+      "move → awaiting:review",
     );
     expect(
-      doChipText({ action: "move", with: { to: "await", kind: "deploy" } }),
-    ).toBe("move → await:deploy");
+      doChipText({ action: "move", with: { to: "awaiting", kind: "deploy" } }),
+    ).toBe("move → awaiting:deploy");
     expect(doChipText({ action: "inbox", with: { title: "x" } })).toBe("inbox");
     expect(doChipText({ action: "createTask" })).toBe("createTask");
     expect(doChipText({ action: "message" })).toBe("message");
@@ -157,8 +157,8 @@ describe("row chips", () => {
   });
 
   it("with summary flattens values", () => {
-    expect(withSummary({ with: { to: "await", kind: "deploy" } })).toBe(
-      "to: await · kind: deploy",
+    expect(withSummary({ with: { to: "awaiting", kind: "deploy" } })).toBe(
+      "to: awaiting · kind: deploy",
     );
     expect(withSummary({ with: { input: { stage: "prod" } } })).toBe(
       'input: {"stage":"prod"}',

@@ -28,7 +28,7 @@ import {
 } from "../awaiting-kinds.js";
 import { PRODUCTION_STAGE } from "../deployment.js";
 import {
-  assertMayReturnToDev,
+  assertMayReturnToWorking,
   isAllowedTransition,
 } from "../task-transitions.js";
 import { evaluateCondition, renderTemplate } from "./cel.js";
@@ -51,7 +51,7 @@ export interface RuleCandidate {
 export interface ResolvedMove {
   state: TaskState;
   awaiting?: AwaitingKind;
-  /** For `await`: the kind and its inputs, and whether to run its onEnter. */
+  /** For `awaiting`: the kind and its inputs, and whether to run its onEnter. */
   kind?: AwaitingKindId;
   inputs?: Record<string, string>;
   enter: boolean;
@@ -352,11 +352,11 @@ export function resolveMove(
 ): ResolvedMove {
   const enter = input.enter === true;
   switch (input.to) {
-    case "dev":
-      return { state: "dev", enter };
+    case "working":
+      return { state: "working", enter };
     case "done":
       return { state: "done", enter };
-    case "await": {
+    case "awaiting": {
       const kindId = (input.kind ?? "review") as AwaitingKindId;
       const kind = findAwaitingKind(kindId);
       if (!kind) throw new Error(`Unknown awaiting kind: ${kindId}`);
@@ -386,7 +386,7 @@ export function resolveMove(
     }
     default:
       throw new Error(
-        `move.to must be dev, done or await (got ${JSON.stringify((input as { to?: unknown }).to)})`,
+        `move.to must be working, awaiting or done (got ${JSON.stringify((input as { to?: unknown }).to)})`,
       );
   }
 }
@@ -400,7 +400,7 @@ export function moveRefusal(
     return `illegal move from ${task.state} to ${move.state}`;
   }
   try {
-    assertMayReturnToDev(task.state, task.awaiting, move.state);
+    assertMayReturnToWorking(task.state, task.awaiting, move.state);
   } catch (error) {
     return describe(error);
   }

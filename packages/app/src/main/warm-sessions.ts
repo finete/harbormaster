@@ -22,7 +22,7 @@ export interface WarmSessionDeps {
   /** The task a session is the primary of. */
   taskIdOf(sessionId: string): string | undefined;
   /** Whether that task's agent is mid-turn (never evicted while true). */
-  isWorking(taskId: string): boolean;
+  isRunning(taskId: string): boolean;
   /** Kill the session's process and release it. */
   dispose(sessionId: string): void;
 }
@@ -61,7 +61,7 @@ export class WarmSessionCache {
   /**
    * Periodic upkeep: drop dead/reattached entries, dispose sessions whose
    * task is no longer active, then trim to capacity (agents that were
-   * working at close time may be idle now).
+   * running at close time may be idle now).
    */
   reconcile(activeTaskIds: ReadonlySet<string>): void {
     this.prune();
@@ -87,7 +87,7 @@ export class WarmSessionCache {
     while (this.order.length > this.capacity) {
       const victim = this.order.find((id) => {
         const taskId = this.deps.taskIdOf(id);
-        return !taskId || !this.deps.isWorking(taskId);
+        return !taskId || !this.deps.isRunning(taskId);
       });
       if (!victim) return;
       this.evict(victim);

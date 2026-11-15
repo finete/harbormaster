@@ -277,7 +277,7 @@ const deployKind: AwaitingKindDefinition = {
 /**
  * Reviewer tasks: the review is submitted, now the PR author has to push or
  * reply (the default `reviewer-author-activity` rule returns the task to
- * Dev when they do). No side effect.
+ * Working when they do). No side effect.
  */
 const authorResponseKind: AwaitingKindDefinition = {
   id: "author-response",

@@ -177,15 +177,15 @@ export function onChips(on: readonly string[]): {
   return { shown: on.slice(0, 2), more: Math.max(0, on.length - 2) };
 }
 
-/** A `do` chip: `move → dev`, `move → await:review`, `inbox`, `createTask`, `message`, `js:…`. */
+/** A `do` chip: `move → working`, `move → awaiting:review`, `inbox`, `createTask`, `message`, `js:…`. */
 export function doChipText(
   spec: Pick<RuleActionSpec, "action" | "with">,
 ): string {
   if (spec.action !== "move") return spec.action;
   const to = typeof spec.with?.to === "string" ? spec.with.to : "?";
-  if (to !== "await") return `move → ${to}`;
+  if (to !== "awaiting") return `move → ${to}`;
   const kind = typeof spec.with?.kind === "string" ? spec.with.kind : "review";
-  return `move → await:${kind}`;
+  return `move → awaiting:${kind}`;
 }
 
 function shortValue(value: unknown): string {
@@ -194,7 +194,7 @@ function shortValue(value: unknown): string {
   return flat.length > 60 ? `${flat.slice(0, 59)}…` : flat;
 }
 
-/** The sheet's `with` summary: `to: dev · kind: review` (values flattened, long ones cut). */
+/** The sheet's `with` summary: `to: working · kind: review` (values flattened, long ones cut). */
 export function withSummary(spec: Pick<RuleActionSpec, "with">): string {
   if (!spec.with) return "";
   return Object.entries(spec.with)

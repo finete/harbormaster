@@ -5,7 +5,7 @@ import { Dialog, DialogFooter } from "./ui/dialog";
 import { Label } from "./ui/label";
 
 /**
- * Reopening a Done task starts a new Dev cycle (fresh branch + worktree, the
+ * Reopening a Done task starts a new work cycle (fresh branch + worktree, the
  * previous conversation forked into its next pi pane). pi-home asks "What
  * should Pi do now?" before reopening (presentation/flows.ts
  * `chooseFreshObjective`); this is that one optional question — pi-home's

@@ -96,7 +96,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
   );
 
   // Re-resolved whenever the task changes column: a parked backlog task
-  // has no binding yet, and `startTask` creates one as it moves to Dev.
+  // has no binding yet, and `startTask` creates one as it moves to Working.
   const taskState = task?.state;
   // biome-ignore lint/correctness/useExhaustiveDependencies: taskState is a deliberate re-fetch trigger, see comment above.
   useEffect(() => {

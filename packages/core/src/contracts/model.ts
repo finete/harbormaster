@@ -35,7 +35,7 @@ export const DEFAULT_HARNESS_ID = "pi";
 export type TaskKind = "task" | "temp_task";
 
 /** Board column a task currently sits in. */
-export type TaskState = "backlog" | "dev" | "awaiting" | "done";
+export type TaskState = "backlog" | "working" | "awaiting" | "done";
 
 /**
  * Why a task sitting in the "awaiting" column is blocked. Ported from
@@ -152,7 +152,7 @@ export interface CustomAgentConfig {
 /** Ordered list of board columns; the source of truth for board layout. */
 export const TASK_STATES: readonly TaskState[] = [
   "backlog",
-  "dev",
+  "working",
   "awaiting",
   "done",
 ];
@@ -426,6 +426,9 @@ export interface PresenceRecord {
    * The program's last OSC 7501 report (decision #18), as recorded by
    * `CoreCommands.reportPresence`. `runningTurn` is derived from it
    * (`working`); `blocked` is "your move", `error` carries a warning.
+   * These are the protocol's own state names: its `working` is what
+   * Harbormaster calls a *running* agent (decision #19), unrelated to the
+   * Working column.
    */
   status?: {
     state: "idle" | "working" | "blocked" | "done" | "error";
@@ -483,7 +486,7 @@ export interface GlobalConfig {
   onboardingCompletedAt?: string;
 }
 
-/** `launch.maxConcurrent` default when unset: launched tasks that are *working* (see `GlobalConfig.launch`). */
+/** `launch.maxConcurrent` default when unset: launched tasks whose agent is *running* (see `GlobalConfig.launch`). */
 export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
 
 /** `launch.bypassPermissions` default (decision R7): launched tasks skip permission prompts. */

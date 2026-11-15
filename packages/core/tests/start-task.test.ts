@@ -197,7 +197,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     expect(board.flatMap((c) => c.groups.flatMap((g) => g.tasks))).toEqual([]);
   });
 
-  it("starting now lands in dev with branch + worktree + binding", async () => {
+  it("starting now lands in working with branch + worktree + binding", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
 
@@ -208,7 +208,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
       start: true,
     });
 
-    expect(task.state).toBe("dev");
+    expect(task.state).toBe("working");
     expect(task.branch).toMatch(/^ship-it-[a-z0-9]{6}$/);
     const binding = await commands.getTaskWorkspace(task.id);
     expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);
@@ -217,7 +217,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     );
   });
 
-  it("starting a scratch task now lands in dev as a temp_task with a scratch-directory binding", async () => {
+  it("starting a scratch task now lands in working as a temp_task with a scratch-directory binding", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const task = await commands.createTask({
@@ -225,7 +225,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
       initialPrompt: "",
       start: true,
     });
-    expect(task.state).toBe("dev");
+    expect(task.state).toBe("working");
     expect(task.kind).toBe("temp_task");
     const binding = await commands.getTaskWorkspace(task.id);
     expect(binding?.scratch).toBe(true);
@@ -235,7 +235,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
 });
 
 describe.skipIf(!gitAvailable)("startTask", () => {
-  it("creates the branch + worktree + binding for a parked task and moves it to dev", async () => {
+  it("creates the branch + worktree + binding for a parked task and moves it to working", async () => {
     const f = await fixture();
     const commands = core(f.stateDir);
     const parked = await commands.createTask({
@@ -246,10 +246,10 @@ describe.skipIf(!gitAvailable)("startTask", () => {
 
     const started = await commands.startTask(parked.id);
 
-    expect(started.state).toBe("dev");
+    expect(started.state).toBe("working");
     expect(started.branch).toMatch(/^later-work-[a-z0-9]{6}$/);
     expect(started.targetBranch).toBe("main");
-    expect((await commands.getTask(parked.id))?.state).toBe("dev");
+    expect((await commands.getTask(parked.id))?.state).toBe("working");
     const binding = await commands.getTaskWorkspace(parked.id);
     expect(binding?.branch).toBe(started.branch);
     expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);
@@ -268,7 +268,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
     expect(parked.kind).toBe("temp_task");
     expect(await commands.getTaskWorkspace(parked.id)).toBeUndefined();
     const started = await commands.startTask(parked.id);
-    expect(started.state).toBe("dev");
+    expect(started.state).toBe("working");
     const binding = await commands.getTaskWorkspace(parked.id);
     expect(binding?.scratch).toBe(true);
     expect(binding?.worktreePath).toBe(join(f.stateDir, "scratch", parked.id));
@@ -366,7 +366,7 @@ describe.skipIf(!gitAvailable)("startTask", () => {
 
     failAttach = false;
     const retried = await manager.startTask(parked.id);
-    expect(retried.state).toBe("dev");
+    expect(retried.state).toBe("working");
   });
 });
 

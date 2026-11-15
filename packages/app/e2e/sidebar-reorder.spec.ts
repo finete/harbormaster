@@ -603,8 +603,10 @@ test("lineage wins over repo: a cross-repo child nests under its parent's repo g
   const card = window
     .locator('[data-testid^="card-"]')
     .filter({ hasText: "Kid Beta" });
-  const alphaDev = window.getByTestId(`group-dev-github.com/test/${ALPHA}`);
-  await expect(alphaDev.filter({ has: card })).toBeVisible();
+  const alphaWorking = window.getByTestId(
+    `group-working-github.com/test/${ALPHA}`,
+  );
+  await expect(alphaWorking.filter({ has: card })).toBeVisible();
   await expect(card.getByTestId("card-repo-chip")).toHaveText(BETA);
   await expect(card.getByTestId("card-lineage-line")).toHaveCount(0);
 

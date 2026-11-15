@@ -6,8 +6,8 @@
 // ever touches the network or a real GitHub account.
 //
 // `launch.maxConcurrent: 1` plus a "Blocker" standalone launch that starts
-// immediately (and never reports presence, so it counts as "working" for
-// the whole grace window — see background-launcher.ts's `isWorking`) keeps
+// immediately (and never reports presence, so it counts as "running" for
+// the whole grace window — see background-launcher.ts's `isRunning`) keeps
 // the task-under-test's launch deterministically `queued` until the test
 // itself raises the cap and waits for the next presence-poll-driven
 // background-launcher pass (`HARBORMASTER_PRESENCE_POLL_MS` sped up to
@@ -152,8 +152,8 @@ test.beforeAll(async () => {
   // proof of exactly how many times pi actually started for a given
   // worktree — then idles so the pty stays alive. No session/presence file
   // is ever written (a real pi-session concern), which also means a
-  // launched task's grace-window "working" status never expires within
-  // this test's lifetime (see background-launcher.ts's `isWorking`).
+  // launched task's grace-window "running" status never expires within
+  // this test's lifetime (see background-launcher.ts's `isRunning`).
   const fakePi = path.join(root, "fake-pi");
   writeFileSync(
     fakePi,
@@ -213,7 +213,7 @@ test.afterAll(async () => {
 });
 
 test("launching a subtask nests it under its parent, queued, starting in the background into the sidebar rail with no focus or view switch; opening it attaches with exactly one pi process", async () => {
-  // --- Seed: a repo-backed parent task, started now (Dev + its own pi pane). ---
+  // --- Seed: a repo-backed parent task, started now (Working + its own pi pane). ---
   await window.getByTestId("board-new-task-button").click();
   await window.getByTestId("new-task-title-input").fill("Parent Task");
   await chooseWhere(window, REPO_ID);
@@ -229,7 +229,7 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
 
   const parentCard = cardLocator("Parent Task");
   await expect(
-    window.getByTestId("column-dev-cards").filter({ has: parentCard }),
+    window.getByTestId("column-working-cards").filter({ has: parentCard }),
   ).toBeVisible();
   const parentId = await cardTaskId(parentCard);
 

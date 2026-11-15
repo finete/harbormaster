@@ -112,7 +112,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           disabled={busy !== null}
           onClick={handleReopenClick}
           data-testid={`reopen-task-button-${task.id}`}
-          title="Reopen: a new Dev cycle (fresh branch + worktree) that continues the previous conversation"
+          title="Reopen: back to Working with a fresh branch + worktree, continuing the previous conversation"
         >
           {busy === "reopen" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -147,7 +147,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           disabled={busy !== null}
           onClick={handleStart}
           data-testid={`start-task-button-${task.id}`}
-          title="Start: create the branch + worktree and move to Dev (s)"
+          title="Start: create the branch + worktree and move to Working (s)"
         >
           {busy === "start" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

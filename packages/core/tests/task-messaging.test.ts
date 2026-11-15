@@ -119,14 +119,14 @@ afterEach(async () => {
 
 const c = () => core.commands;
 
-/** A started Dev task with a scratch workspace (a messaging target needs a binding to host a session). */
+/** A started Working task with a scratch workspace (a messaging target needs a binding to host a session). */
 async function mk(title: string): Promise<string> {
   return (await c().createTask({ title, initialPrompt: "", start: true })).id;
 }
-/** A Dev task with no workspace binding at all (moved, never started). */
+/** A Working task with no workspace binding at all (moved, never started). */
 async function unbound(title: string): Promise<string> {
   const id = await backlog(title);
-  await c().moveTask(id, "dev");
+  await c().moveTask(id, "working");
   return id;
 }
 async function backlog(title: string): Promise<string> {
@@ -816,9 +816,9 @@ describe("findTasks", () => {
     const byId = Object.fromEntries(found.map((r) => [r.id, r]));
     expect(Object.keys(byId).sort()).toEqual([p, k, sib, queued.id].sort());
     expect(byId[p]).toMatchObject({
-      run: "working",
+      run: "running",
       relation: "parent",
-      state: "dev",
+      state: "working",
       title: "Ship the login fix",
     });
     expect(byId[k]).toMatchObject({ run: "your-move", relation: "self" });

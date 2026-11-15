@@ -7,7 +7,7 @@ import {
   computeCapacity,
   createBackgroundLauncher,
   DEFAULT_STARTUP_GRACE_MS,
-  isWorking,
+  isRunning,
   type LaunchedTaskStatus,
   type LaunchQueueTask,
   selectWakeTargets,
@@ -28,26 +28,26 @@ function status(
   };
 }
 
-describe("isWorking", () => {
-  it("no live pane: never working, regardless of runningTurn", () => {
+describe("isRunning", () => {
+  it("no live pane: never running, regardless of runningTurn", () => {
     expect(
-      isWorking(status({ hasLivePane: false, runningTurn: true }), NOW),
+      isRunning(status({ hasLivePane: false, runningTurn: true }), NOW),
     ).toBe(false);
   });
 
-  it("live pane + runningTurn: working", () => {
-    expect(isWorking(status({ runningTurn: true }), NOW)).toBe(true);
+  it("live pane + runningTurn: running", () => {
+    expect(isRunning(status({ runningTurn: true }), NOW)).toBe(true);
   });
 
-  it("live pane, a presence record exists, but no turn running: idle (your move), never working", () => {
+  it("live pane, a presence record exists, but no turn running: idle (your move), never running", () => {
     expect(
-      isWorking(status({ runningTurn: false, hasPresenceRecord: true }), NOW),
+      isRunning(status({ runningTurn: false, hasPresenceRecord: true }), NOW),
     ).toBe(false);
   });
 
-  it("live pane, no presence record yet, started just now: working (startup grace)", () => {
+  it("live pane, no presence record yet, started just now: running (startup grace)", () => {
     expect(
-      isWorking(
+      isRunning(
         status({
           runningTurn: false,
           hasPresenceRecord: false,
@@ -58,9 +58,9 @@ describe("isWorking", () => {
     ).toBe(true);
   });
 
-  it("live pane, no presence record, started past the grace window: not working", () => {
+  it("live pane, no presence record, started past the grace window: not running", () => {
     expect(
-      isWorking(
+      isRunning(
         status({
           runningTurn: false,
           hasPresenceRecord: false,
@@ -71,9 +71,9 @@ describe("isWorking", () => {
     ).toBe(false);
   });
 
-  it("live pane, no presence record, no startedAt: not working (nothing to grace against)", () => {
+  it("live pane, no presence record, no startedAt: not running (nothing to grace against)", () => {
     expect(
-      isWorking(status({ runningTurn: false, hasPresenceRecord: false }), NOW),
+      isRunning(status({ runningTurn: false, hasPresenceRecord: false }), NOW),
     ).toBe(false);
   });
 
@@ -83,13 +83,13 @@ describe("isWorking", () => {
       hasPresenceRecord: false,
       startedAt: new Date(NOW - 30_000).toISOString(),
     });
-    expect(isWorking(status60s, NOW, 60_000)).toBe(true);
-    expect(isWorking(status60s, NOW, 10_000)).toBe(false);
+    expect(isRunning(status60s, NOW, 60_000)).toBe(true);
+    expect(isRunning(status60s, NOW, 10_000)).toBe(false);
   });
 });
 
 describe("computeCapacity", () => {
-  it("maxConcurrent minus the number of working statuses, floored at 0", () => {
+  it("maxConcurrent minus the number of running statuses, floored at 0", () => {
     const statuses = [
       status({ taskId: "a", runningTurn: true }),
       status({ taskId: "b", runningTurn: false, hasPresenceRecord: true }), // idle, doesn't count
@@ -139,7 +139,7 @@ describe("createBackgroundLauncher", () => {
     expect(started).toEqual(["new-1", "new-2"]);
   });
 
-  it("claims nothing when capacity is zero (every slot working)", async () => {
+  it("claims nothing when capacity is zero (every slot running)", async () => {
     let claimCalls = 0;
     const launcher = createBackgroundLauncher({
       listStartedLaunches: async () => [makeTask("busy-1")],

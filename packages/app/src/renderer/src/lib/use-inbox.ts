@@ -39,7 +39,7 @@ export interface InboxModel {
   /** Visible Priority entries: the sidebar badge. */
   priorityCount: number;
   /** Agents with a turn running right now (the empty state's line). */
-  workingCount: number;
+  runningCount: number;
   dismiss(entry: InboxEntry): Promise<void>;
   snooze(entry: InboxEntry, until: Date): Promise<void>;
   /** Dismiss every dismissable Other entry. */
@@ -147,7 +147,7 @@ export function useInbox(): InboxModel {
     };
   }, [inputsKey]);
 
-  const workingCount = useMemo(
+  const runningCount = useMemo(
     () => Object.values(presence).filter((badge) => badge.runningTurn).length,
     [presence],
   );
@@ -222,7 +222,7 @@ export function useInbox(): InboxModel {
     entries,
     priorities,
     priorityCount: priorityCount(entries, priorities),
-    workingCount,
+    runningCount,
     dismiss,
     snooze,
     clearOther,

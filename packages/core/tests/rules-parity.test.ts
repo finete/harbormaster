@@ -26,7 +26,11 @@ import type {
 } from "../src/contracts/rules.js";
 import { DEFAULT_RULES_YAML } from "../src/engines/rules/default-rules.js";
 import { RulesRuntime } from "../src/manager/rules-runtime.js";
-import type { BoardMove, TaskMover } from "./fixtures/legacy-movers/addons.js";
+import {
+  type BoardMove,
+  type TaskMover,
+  toLegacyTaskState,
+} from "./fixtures/legacy-movers/addons.js";
 import {
   arbitrateMove,
   deploymentPipelineMover,
@@ -179,7 +183,7 @@ class LegacyBoard {
         task: {
           id: task.id,
           kind: task.kind,
-          state: task.state,
+          state: toLegacyTaskState(task.state),
           ...(task.awaiting ? { awaiting: task.awaiting } : {}),
           ...(task.branch ? { branch: task.branch } : {}),
           ...(task.repositoryId ? { repositoryId: task.repositoryId } : {}),
@@ -197,7 +201,7 @@ class LegacyBoard {
       case "stay":
         return null;
       case "dev":
-        apply(this.task, "dev");
+        apply(this.task, "working");
         break;
       case "review":
         apply(this.task, "awaiting", { kind: "review" });
@@ -369,7 +373,7 @@ const SEQUENCES: Array<{
 }> = [
   {
     name: "author happy path: review, changes requested, new head, approval, merge, two stages, refused landing, land",
-    initial: baseTask("dev"),
+    initial: baseTask("working"),
     pipeline: TWO_STAGES,
     steps: [
       {},
@@ -431,7 +435,7 @@ const SEQUENCES: Array<{
   },
   {
     name: "draft flips, human COMMENTED feedback, closed-without-merge quirk",
-    initial: baseTask("dev"),
+    initial: baseTask("working"),
     steps: [
       { pr: { reviewRequested: true } },
       { pr: { reviewRequested: true, isDraft: true } },
@@ -459,7 +463,7 @@ const SEQUENCES: Array<{
         },
       },
       { pr: { state: "CLOSED", reviewRequested: true } },
-      { manual: { state: "dev" } },
+      { manual: { state: "working" } },
     ],
   },
   {
@@ -485,7 +489,7 @@ const SEQUENCES: Array<{
   },
   {
     name: "a later stage deployed first jumps the scan; hotfix cherry-picks are recognized",
-    initial: baseTask("dev"),
+    initial: baseTask("working"),
     pipeline: TWO_STAGES,
     steps: [
       { pr: merged() },
@@ -501,7 +505,7 @@ const SEQUENCES: Array<{
   },
   {
     name: "a manual (hookless) stage is a gate the scan never crosses",
-    initial: baseTask("dev"),
+    initial: baseTask("working"),
     pipeline: {
       stages: [
         TWO_STAGES.stages[0] as never,
@@ -539,7 +543,7 @@ const SEQUENCES: Array<{
     steps: [
       { pr: merged() },
       {},
-      { manual: { state: "dev" } },
+      { manual: { state: "working" } },
       {
         pr: {
           reviewDecision: "CHANGES_REQUESTED",
@@ -568,7 +572,7 @@ describe("rules engine ↔ retired movers parity (recorded sequences)", () => {
 
   it("the audit log names the rule, file and line behind each move", async () => {
     const { rules } = await replay(
-      baseTask("dev"),
+      baseTask("working"),
       [{ pr: { reviewRequested: true } }],
       undefined,
     );
@@ -589,7 +593,7 @@ describe("rules engine ↔ retired movers parity (recorded sequences)", () => {
 
 describe("rules engine ↔ retired movers parity (observePullRequest matrix, first observation)", () => {
   const taskStates: Array<[Task["state"], AwaitingKind?]> = [
-    ["dev"],
+    ["working"],
     ["awaiting", { kind: "review" }],
     ["awaiting", { kind: "slack" }],
     ["awaiting", { kind: "deploy", stageId: "pre", stageLabel: "Preprod" }],

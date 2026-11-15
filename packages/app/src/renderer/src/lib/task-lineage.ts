@@ -24,7 +24,7 @@
 // "↳ <parent title>" line instead (`parentTitle` on its row). This also
 // gives "a Done parent's children stay attached to it" for free: the Done
 // parent still reports its full child count (`children.count`), even
-// though none of them render nested there once they're off in Dev.
+// though none of them render nested there once they're off in Working.
 import type { Task } from "../../../preload/api";
 
 /** One task's lineage neighborhood, indexed once per render from the full (unfiltered) board. */

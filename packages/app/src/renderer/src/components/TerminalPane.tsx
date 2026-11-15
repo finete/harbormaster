@@ -293,7 +293,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       unsubscribeA11y();
       // Tab close / pane unmount: release (detach task primaries to the
       // background, dispose shells) instead of unconditionally killing, so
-      // reopening re-attaches instantly and a working agent survives a tab
+      // reopening re-attaches instantly and a running agent survives a tab
       // close. The xterm instance itself is always disposed.
       if (sessionId) {
         let screen: string | undefined;

@@ -1,7 +1,7 @@
 // New-task flow e2e lane (pi-home parity): the New Task dialog's
 // destination choice ("Start now" vs "Park in Backlog"), worktree timing
 // (parked tasks get no branch/worktree until started), starting a parked
-// card via its Start button or a Backlog -> Dev drag, the initial prompt
+// card via its Start button or a Backlog -> Working drag, the initial prompt
 // reaching the first pi pane as its launch argument, and the manual refresh
 // buttons. Real @harbormaster/core + a real git fixture repo; `pi` and `gh`
 // are tiny fakes (HARBORMASTER_PI_COMMAND / HARBORMASTER_GH_COMMAND), so
@@ -561,7 +561,7 @@ test("the composer layout at 1200px: the prompt box footer holds only the mode s
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Dev", async () => {
+test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Working", async () => {
   const card = cardLocator("Parked Work");
   const taskId = await cardTaskId(card);
   await expect(card.locator("button")).toHaveCount(0);
@@ -570,7 +570,7 @@ test("s on a selected parked card (cards carry no buttons) creates its worktree 
 
   await expect(
     window
-      .getByTestId("column-dev-cards")
+      .getByTestId("column-working-cards")
       .locator(`[data-testid="card-${taskId}"]`),
   ).toBeVisible();
   await expect(card).toContainText(/parked-work-[a-z0-9]{6}/);
@@ -578,13 +578,13 @@ test("s on a selected parked card (cards carry no buttons) creates its worktree 
   expect(taskWorktrees()[0]).toContain("parked-work-");
 });
 
-test("Start now lands in Dev with a worktree, and the prompt reaches the first pi pane as its argument", async () => {
+test("Start now lands in Working with a worktree, and the prompt reaches the first pi pane as its argument", async () => {
   const prompt = "Fix the 'flaky' test\nthen report $HOME";
   await submitNewTask({ title: "Started Work", destination: "start", prompt });
 
   const card = cardLocator("Started Work");
   await expect(
-    window.getByTestId("column-dev-cards").filter({ has: card }),
+    window.getByTestId("column-working-cards").filter({ has: card }),
   ).toBeVisible();
   await expect(card).toContainText(/started-work-[a-z0-9]{6}/);
   expect(
@@ -861,7 +861,7 @@ test("Review mode: a pasted PR URL resolves into a PR card, Repository / Base / 
       branch: "octo/parser",
       number: 7,
       role: "reviewer",
-      state: "dev",
+      state: "working",
     });
   // Started: its worktree is on the PR head.
   const binding = await window.evaluate(
@@ -876,7 +876,7 @@ test("Review mode: a pasted PR URL resolves into a PR card, Repository / Base / 
 });
 
 // Last in this file on purpose: it walks "Started Work" through the board.
-test("the refresh tick runs the default rules: a requested review moves the card to Awaiting, changes requested on the head sends it back to Dev, a merge parks it in Production deploy", async () => {
+test("the refresh tick runs the default rules: a requested review moves the card to Awaiting, changes requested on the head sends it back to Working, a merge parks it in Production deploy", async () => {
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
   const card = cardLocator("Started Work");
@@ -901,7 +901,7 @@ test("the refresh tick runs the default rules: a requested review moves the card
     ],
   });
   await refresh();
-  await expect(inColumn("dev")).toHaveCount(1);
+  await expect(inColumn("working")).toHaveCount(1);
 
   writePr(44, { state: "MERGED", mergeCommit: { oid: "fedcba9876543" } });
   await refresh();

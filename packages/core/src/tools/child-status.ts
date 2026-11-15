@@ -16,7 +16,7 @@ import type {
 /** Board column labels as agents read them. */
 export const TASK_STATE_LABELS: Record<TaskState, string> = {
   backlog: "Backlog",
-  dev: "Dev",
+  working: "Working",
   awaiting: "Awaiting",
   done: "Done",
 };
@@ -33,14 +33,14 @@ export function awaitingReasonLabel(awaiting: AwaitingKind): string {
 export type ChildRunState =
   | "queued"
   | "interrupted"
-  | "working"
+  | "running"
   | "your move"
   | "not running";
 
 /**
  * `queued`/`interrupted` come straight off `task.launch.status` (the
  * background-launch queue/run state, see `TaskLaunch`); otherwise liveness
- * decides: a live, mid-turn session is `working`, live-but-idle is `your
+ * decides: a live, mid-turn session is `running`, live-but-idle is `your
  * move` (a finished/blocked/asking child is exactly as attention-worthy as
  * any task), and no live presence at all is `not running`.
  */
@@ -50,7 +50,7 @@ export function deriveChildRunState(
 ): ChildRunState {
   if (task.launch?.status === "queued") return "queued";
   if (task.launch?.status === "interrupted") return "interrupted";
-  if (presence.live) return presence.runningTurn ? "working" : "your move";
+  if (presence.live) return presence.runningTurn ? "running" : "your move";
   return "not running";
 }
 

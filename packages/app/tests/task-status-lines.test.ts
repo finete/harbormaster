@@ -8,14 +8,14 @@ import {
 
 describe("derivePresenceActivity (OSC 7501 states)", () => {
   const live = { live: true, runningTurn: false } as const;
-  it("working is a spinner, blocked is your move, idle/done are idle, error is error", () => {
+  it("working (OSC 7501) is a running spinner, blocked is your move, idle/done are idle, error is error", () => {
     expect(
       derivePresenceActivity({
         live: true,
         runningTurn: true,
         status: { state: "working" },
       }),
-    ).toBe("working");
+    ).toBe("running");
     expect(
       derivePresenceActivity({ ...live, status: { state: "blocked" } }),
     ).toBe("your-move");

@@ -281,8 +281,8 @@ export interface RuleFile {
 
 /** `move` action input. */
 export interface MoveActionInput {
-  to: "dev" | "done" | "await";
-  /** Awaiting kind for `to: await`; default `review`. */
+  to: "working" | "awaiting" | "done";
+  /** Awaiting kind for `to: awaiting`; default `review`. */
   kind?: AwaitingKindId;
   /** Kind inputs; for `deploy`, `stage` picks a stage id (default: the entry stage). */
   input?: Record<string, string>;

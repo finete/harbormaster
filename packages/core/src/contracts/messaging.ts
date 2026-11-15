@@ -91,7 +91,7 @@ export interface SendTaskMessageResult {
   note: string;
 }
 
-export type TaskRunState = "working" | "your-move" | "queued" | "not-running";
+export type TaskRunState = "running" | "your-move" | "queued" | "not-running";
 
 export interface TaskSearchResult {
   id: string;

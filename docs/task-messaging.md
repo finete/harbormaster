@@ -19,7 +19,7 @@ pi-subagents (`subagent` steer + `contact_supervisor`), Codex multi-agent
 |   | • *anything else* (sibling, standalone, unrelated task, non-task Pi session sender): **user approval in the Harbormaster app**. |
 | 3 | **Child asks parent:** the child sends its question and ends its turn (no blocking tool call). The parent answers by steering the child, or asks the user. Guardrails: sending fails when the parent is not running or is Done (the child then stops and asks the user), and fails when the child's own harness cannot receive (the answer could never arrive). The parent's prompt says: answer only what your brief/context settles; product or scope decisions go to the user. |
 | 4 | **Delivery timing:** the sender requests `steer` (lands after the current assistant turn's tool calls) or `followUp` (lands once the target finished its pending work). Defaults: parent→child `steer`, child→parent `followUp`, approval route `steer` (the approval card can switch it). Each harness adapter declares what it can deliver; an unsupported `steer` falls back to `followUp`; a harness that cannot receive at all makes the send **fail clearly**. Core records requested and actual mode. No hard interrupt. |
-| 5 | **Target states:** working / your move → deliver. Queued launch → held, delivered right after the session starts. Not running / interrupted → **woken** by the app's background launcher (resumes the session without a pane, respects `maxConcurrent`; waits for the app when it is closed). Done → reject. Backlog → reject (no session yet). No workspace binding → reject (it can never host a session). Child→parent is the exception: a not-running parent rejects. |
+| 5 | **Target states:** running / your move → deliver. Queued launch → held, delivered right after the session starts. Not running / interrupted → **woken** by the app's background launcher (resumes the session without a pane, respects `maxConcurrent`; waits for the app when it is closed). Done → reject. Backlog → reject (no session yet). No workspace binding → reject (it can never host a session). Child→parent is the exception: a not-running parent rejects. |
 | 6 | **Addressing:** `find_tasks(query)` then `send_to_task(taskId, …)` which accepts **exact task ids only**. Parents know children ids (launch result, `subtask_status`); children get the parent id in their kickoff. |
 | 7 | **Non-task senders** (a plain Pi session) may send; every such send goes through approval, labelled "Pi session in `<cwd>`". No result is delivered back (no inbox). |
 | 8 | **Approval UI:** an approval is a Priority item in the app's inbox view (docs/release-plan.md "Inbox"; revised from the original header badge + side sheet): its detail pane shows sender → target, the exact text (editable), mode toggle, attachment thumbnails, Approve / Reject. The target's board card and sidebar row show a "message awaiting approval" chip. Nothing pops up or steals focus. The result (approved / edited / rejected) is delivered back to a task sender as a `followUp`. |
@@ -152,7 +152,7 @@ export interface SendTaskMessageResult {
   note: string;
 }
 
-export type TaskRunState = "working" | "your-move" | "queued" | "not-running";
+export type TaskRunState = "running" | "your-move" | "queued" | "not-running";
 
 export interface TaskSearchResult {
   id: string;

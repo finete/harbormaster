@@ -47,10 +47,10 @@ rules:
   - id: one
     label: Needs changes
     on: github.pr.*
-    if: task.state == "dev"
+    if: task.state == "working"
     do:
       - action: move
-        with: { to: dev }
+        with: { to: working }
       - action: inbox
         with: { title: hi }
   - id: two
@@ -64,17 +64,17 @@ rules:
         id: "one",
         label: "Needs changes",
         on: ["github.pr.*"],
-        if: 'task.state == "dev"',
+        if: 'task.state == "working"',
         do: [
-          { action: "move", with: { to: "dev" }, line: 8 },
+          { action: "move", with: { to: "working" }, line: 8 },
           { action: "inbox", with: { title: "hi" }, line: 10 },
         ],
         file: "rules.yaml",
         line: 3,
         condition: {
           kind: "cel",
-          source: 'task.state == "dev"',
-          outline: { kind: "leaf", text: 'task.state == "dev"' },
+          source: 'task.state == "working"',
+          outline: { kind: "leaf", text: 'task.state == "working"' },
         },
       },
       {
@@ -104,11 +104,11 @@ rules:
     ).toBeGreaterThan(0);
     expect(
       parse(
-        "rules:\n  - { id: x, label: x, on: a, do: [{ action: move, with: { to: dev } }] }\n  - { id: x, label: x, on: b, do: [{ action: move, with: { to: dev } }] }\n",
+        "rules:\n  - { id: x, label: x, on: a, do: [{ action: move, with: { to: working } }] }\n  - { id: x, label: x, on: b, do: [{ action: move, with: { to: working } }] }\n",
       ).problems,
     ).toEqual([expect.stringContaining('duplicate rule id "x"')]);
     const cel = parse(
-      "rules:\n  - id: x\n    label: x\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: dev } }]\n",
+      "rules:\n  - id: x\n    label: x\n    on: a\n    if: task.state ==\n    do: [{ action: move, with: { to: working } }]\n",
     );
     expect(cel.rules).toEqual([]);
     expect(cel.problems).toEqual([
@@ -116,9 +116,44 @@ rules:
     ]);
   });
 
+  it('rejects the retired column names: `to: dev`/`to: await` by schema, `.state == "dev"` in CEL by guard', () => {
+    const rule = (body: string) =>
+      parse(`rules:\n  - id: x\n    label: x\n    on: a\n${body}`);
+    expect(
+      rule("    do: [{ action: move, with: { to: dev } }]\n").problems.length,
+    ).toBeGreaterThan(0);
+    expect(
+      rule("    do: [{ action: move, with: { to: await, kind: review } }]\n")
+        .problems.length,
+    ).toBeGreaterThan(0);
+    for (const condition of [
+      'task.state == "dev"',
+      "task.state != 'dev'",
+      '"dev" == task.state',
+      'task.state in ["backlog", "dev"]',
+      'task.state == "await"',
+    ]) {
+      const file = rule(
+        `    if: '${condition.replaceAll("'", "''")}'\n    do: [{ action: move, with: { to: done } }]\n`,
+      );
+      expect(file.rules, condition).toEqual([]);
+      expect(file.problems, condition).toEqual([
+        expect.stringMatching(
+          /rule "x" compares a state with "(dev|await)", which is no longer a column name \(use "(working|awaiting)"\)/,
+        ),
+      ]);
+    }
+    // Other string literals named "dev" (a branch) are fine.
+    expect(
+      rule(
+        `    if: 'task.branch == "dev" && task.state == "working"'\n    do: [{ action: move, with: { to: awaiting } }]\n`,
+      ).problems,
+    ).toEqual([]);
+  });
+
   it("a repository file replaces the global list for that repository, even when empty", () => {
     const global = parse(
-      "rules:\n  - { id: g, label: g, on: a, do: [{ action: move, with: { to: dev } }] }\n",
+      "rules:\n  - { id: g, label: g, on: a, do: [{ action: move, with: { to: working } }] }\n",
     );
     const repo = parse(
       "rules: []\n",
@@ -200,7 +235,7 @@ function task(overrides: Partial<Task> = {}): Task {
   return {
     id: "t1",
     kind: "task",
-    state: "dev",
+    state: "working",
     title: "Widget",
     initialPrompt: "",
     repositoryId: "github.com/acme/widgets",
@@ -224,7 +259,7 @@ describe("CEL conditions and templates", () => {
   it("evaluates conditions over event, task, facts, repo; a non-boolean throws", () => {
     expect(
       evaluateCondition(
-        'task.state == "dev" && facts.github.state == "merged" && event.data.to == true',
+        'task.state == "working" && facts.github.state == "merged" && event.data.to == true',
         variables(),
       ),
     ).toBe(true);
@@ -335,16 +370,16 @@ describe("matching and arbitration", () => {
   - id: illegal-first
     label: illegal-first
     on: github.pr.*
-    do: [{ action: move, with: { to: await, kind: deploy, input: { stage: pre } } }]
+    do: [{ action: move, with: { to: awaiting, kind: deploy, input: { stage: pre } } }]
   - id: noop
     label: noop
     on: github.pr.*
-    do: [{ action: move, with: { to: dev } }]
+    do: [{ action: move, with: { to: working } }]
   - id: winner
     label: winner
     on: github.pr.*
     do:
-      - { action: move, with: { to: await, kind: review } }
+      - { action: move, with: { to: awaiting, kind: review } }
       - { action: inbox, with: { title: "moved \${task.id}" } }
   - id: loser
     label: loser
@@ -403,21 +438,21 @@ describe("matching and arbitration", () => {
     const ctx = context(
       [
         parse(`rules:
-  - { id: noop, label: noop, on: github.pr.*, do: [{ action: move, with: { to: dev } }] }
+  - { id: noop, label: noop, on: github.pr.*, do: [{ action: move, with: { to: working } }] }
   - id: deploy
     label: deploy
     on: github.pr.*
-    do: [{ action: move, with: { to: await, kind: deploy, input: { stage: pre } } }]
+    do: [{ action: move, with: { to: awaiting, kind: deploy, input: { stage: pre } } }]
 `),
       ],
-      [task({ state: "dev" })],
+      [task({ state: "working" })],
     );
     const matched = await matchRules([event()], [], ctx);
     const plan = await planActions(matched.candidates, ctx);
     expect(
       plan.actions.map((a) => [a.candidate.rule.id, a.status, a.detail]),
     ).toEqual([
-      ["noop", "skipped", "already in dev"],
+      ["noop", "skipped", "already in working"],
       ["deploy", "run", undefined],
     ]);
     expect(plan.actions[1]?.move?.awaiting).toEqual({
@@ -457,7 +492,7 @@ describe("matching and arbitration", () => {
         seen.push(input);
         return [
           { action: "inbox", with: { title: "from js" } },
-          { action: "move", with: { to: "await", kind: "slack" } },
+          { action: "move", with: { to: "awaiting", kind: "slack" } },
         ];
       },
     });

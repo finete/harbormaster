@@ -103,7 +103,7 @@ function outcomeFrom(outcome: NonNullable<PresenceRecord["outcome"]>): {
  * - Pane exists AND the pid differs (or there is no record at all): the
  *   pane is physically attached but its reported turn/outcome can't be
  *   trusted — report attached-neutral (`live: true, runningTurn: false`)
- *   instead of a possibly-false "working"/"your move".
+ *   instead of a possibly-false "running"/"your move".
  * - No pane, record's own process alive: an external session beyond this
  *   app's panes — trust it exactly as the harness already does (never
  *   regress this coverage).

@@ -39,9 +39,10 @@ control the other:
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
 | 15 | Internal architecture | Volatility-based layering (Manager / Engine / Resource Access / Utility), carried over from pi-home's `src/` layout. See "Layering" below. Accessor separation and call-chain direction are hard rules; "all rules in Engines" is advisory. |
-| 16 | Workflow verbs | Exactly three invariant verbs — **todev / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
+| 16 | Workflow verbs | Exactly three invariant verbs — **toworking / toawait / todone** (+ **reopen** for Done work). See "Three verbs, awaiting kinds are data" below. |
 | 17 | Terminal renderer | xterm's DOM renderer only; no `@xterm/addon-webgl`. See "Terminal renderer: DOM" below. |
 | 18 | Release re-platforming (2026-11-11) | See `docs/release-plan.md`. Supersedes #13's "extension-driven presence" and the mover engine: agent status via OSC 7501 parsed by the pty owner; one core tool catalog exposed as MCP + `harbormaster` CLI over a local socket; per-agent glue is inbox delivery only; board automation is an event → condition → action rules engine (CloudEvents + CEL + YAML, addon sources); one inbox for everything needing a human; TUI board and pi-home migration deleted. |
+| 19 | Column names | The second column is **Working** (`working`), not Dev; rules `move` targets equal the state ids (`working \| awaiting \| done`); an agent mid-turn is **running**, never "working". See "Column names: Working, and running agents" below. |
 
 ## Layering
 
@@ -79,7 +80,7 @@ ptys; once a launch's pty actually starts, main pushes `app:task-launched`
 and the renderer adds it to the sidebar rail (its pane attaches, never
 takes over) without stealing focus or the view; a message wake is not a
 launch and never adds a row. `launch.maxConcurrent`
-(default 6) counts only *working* launches; quitting the app stops
+(default 6) counts only *running* launches; quitting the app stops
 everything and marks mid-turn launches `interrupted` (no auto-resume;
 queued launches start when the app comes up). Board columns stay with the
 movers: agents never move their own card. A kickoff contract
@@ -93,7 +94,7 @@ each other: see `docs/task-messaging.md`.
 ## Three verbs, awaiting kinds are data
 
 The workflow surface (commands, buttons, keys, IPC names) has exactly three
-invariant verbs — **todev** (`startTask` / `moveTask(…, "dev")`),
+invariant verbs — **toworking** (`startTask` / `moveTask(…, "working")`),
 **toawait** (`toAwait(taskId, kindId, options)`), **todone** (`toDone`) —
 plus **reopen** (`reopenTask`) for Done work. *Why* a task is awaiting is
 not a verb: it is an **awaiting kind**, a record in core's registry
@@ -118,6 +119,38 @@ without new commands; rules already consume kinds purely as data.
   names for controls. Kind-specific *display* (group headings, state chips)
   is fine. Board cards carry no action buttons: the verbs live in the
   workspace header, the board keys, and drag-and-drop.
+
+## Column names: Working, and running agents
+
+The column between Backlog and Awaiting was `dev`. That is too
+code-specific for a board that also holds research, writing and reviewing
+someone else's PR; it is now **`working` / "Working"**: the ball is in our
+(or our agent's) court, and it pairs with Awaiting (someone else's court).
+
+- **One vocabulary for columns.** `TaskState` is
+  `backlog | working | awaiting | done`, and a rule's `move` target is the
+  same id it compares in CEL: `to: working | awaiting | done`. The old
+  `to: await` target (the one name that differed from its state) is gone.
+  The `toAwait` command and the Await… picker keep their verb name: the
+  verb is "await", the column it lands in is `awaiting`.
+- **"Working" is the column; an agent mid-turn is "running".** Our own
+  run-state vocabulary (`TaskRunState`, `ChildRunState`, the presence
+  activity, `isRunning` in the background launcher, `launch.maxConcurrent`
+  counting *running* launches, the yellow `status-running` token) says
+  `running`, so "a Working task whose agent is not running" is never
+  ambiguous. OSC 7501's own `state=working` is an external protocol value
+  and stays as-is at the parser boundary.
+- **Clean break, no aliases.** With a single user at the time, there is no
+  compatibility code: `dev` and `await` are rejected everywhere (task-state
+  validation, the rules schema, the API). CEL compares plain strings, so a
+  leftover `task.state == "dev"` would fail silently by never matching; the
+  rules loader rejects a `.state` compared with `"dev"` or `"await"` with a
+  pointer to the new name.
+- **History is not rewritten.** Audit-log entries written before the
+  rename keep their raw `dev` / `await` and read as "Dev" / "Await".
+- **Legacy-mover fixtures keep pi-home's words.** `tests/fixtures/
+  legacy-movers/` is a verbatim oracle for the rules parity test; it keeps
+  `dev` and translates only at its two boundaries.
 
 ## Verified facts the design rests on
 
@@ -227,7 +260,7 @@ difference not listed here is a bug.
   thing the user ever sees about it. pi-home asked "Discard uncommitted
   changes?" / "Delete unmerged task workspace?" one after the other and
   kept a live pane's worktree with a warning.
-- **Dev → Backlog keeps the worktree.** No parking modes: a task moved back
+- **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at
   `<stateDir>/worktrees/<repo-folder>/<branch-slug>` (default
@@ -264,7 +297,7 @@ difference not listed here is a bug.
   detached back to an app-owned paneless pty (the same path a window reload
   uses), so reopening re-attaches instantly instead of cold-starting pi
   (session resume + MCP reconnect took seconds), and closing never
-  interrupts a working agent. Bounded: only the 6 most recently closed stay
+  interrupts a running agent. Bounded: only the 6 most recently closed stay
   warm; older idle ones are killed (that reopen cold-starts as before), and a
   mid-turn agent is never evicted. A warm session ends when its task goes to
   Done or is deleted, so it never blocks worktree cleanup. "+ terminal"

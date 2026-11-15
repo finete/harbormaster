@@ -103,13 +103,13 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
     const window = await app.firstWindow();
     await window.waitForLoadState("domcontentloaded");
 
-    // Create a task and move it to dev so it gets a worktree + pi pane.
+    // Create a task and move it to working so it gets a worktree + pi pane.
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Resize Hidden Task");
     await chooseWhere(window, "github.com/test/fixture");
     await submitAs(window, "park");
 
-    // Navigate to board and drag card to dev column.
+    // Navigate to board and drag card to working column.
     await window.getByTestId("board-button").click();
     const card = window
       .locator('[data-testid^="card-"]')
@@ -118,7 +118,7 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
       "card-",
       "",
     );
-    await dragTo(window, card, window.getByTestId("column-dev"));
+    await dragTo(window, card, window.getByTestId("column-working"));
 
     // Wait for worktree to be created.
     await expect
@@ -206,7 +206,7 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
       window
         .locator('[data-testid^="card-"]')
         .filter({ hasText: "Other Task" }),
-      window.getByTestId("column-dev"),
+      window.getByTestId("column-working"),
     );
     await window
       .locator('[data-testid^="card-"]')

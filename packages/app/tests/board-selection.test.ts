@@ -16,7 +16,7 @@ const T0 = "2025-01-01T00:00:00.000Z";
 function task(overrides: Partial<Task> & { id: string }): Task {
   return {
     kind: "task",
-    state: "dev",
+    state: "working",
     title: overrides.id,
     initialPrompt: "",
     createdAt: T0,
@@ -28,7 +28,7 @@ function task(overrides: Partial<Task> & { id: string }): Task {
 
 /**
  * backlog: [b1, b2]
- * dev: [] (empty \u2014 left/right must skip it)
+ * working: [] (empty \u2014 left/right must skip it)
  * awaiting: [a1] split across two groups
  * done: [d1 (archived), d2]
  */
@@ -47,7 +47,7 @@ function board(): BoardColumn[] {
         },
       ],
     },
-    { state: "dev", title: "Dev", groups: [] },
+    { state: "working", title: "Working", groups: [] },
     {
       state: "awaiting",
       title: "Awaiting",
@@ -110,7 +110,7 @@ describe("buildSelectionGrid", () => {
     const grid = buildSelectionGrid(board(), false);
     expect(grid).toEqual([
       { state: "backlog", taskIds: ["b1", "b2"] },
-      { state: "dev", taskIds: [] },
+      { state: "working", taskIds: [] },
       { state: "awaiting", taskIds: ["a1", "a2"] },
       { state: "done", taskIds: ["d2"] },
     ]);
@@ -189,9 +189,9 @@ describe("moveSelection", () => {
 
   it("moves right/left, skipping empty columns", () => {
     const grid = buildSelectionGrid(board(), false);
-    // backlog -> dev is empty, lands on awaiting instead.
+    // backlog -> working is empty, lands on awaiting instead.
     expect(moveSelection(grid, "b1", "right")).toBe("a1");
-    // awaiting -> dev is empty, lands back on backlog.
+    // awaiting -> working is empty, lands back on backlog.
     expect(moveSelection(grid, "a1", "left")).toBe("b1");
   });
 
@@ -236,7 +236,7 @@ describe("collapsed board groups", () => {
     );
     expect(grid).toEqual([
       { state: "backlog", taskIds: ["b1", "b2"] },
-      { state: "dev", taskIds: [] },
+      { state: "working", taskIds: [] },
       { state: "awaiting", taskIds: ["a2"] },
       { state: "done", taskIds: ["d2"] },
     ]);
@@ -297,7 +297,7 @@ describe("collapsed columns (slim rail)", () => {
     );
     expect(grid).toEqual([
       { state: "backlog", taskIds: [] },
-      { state: "dev", taskIds: [] },
+      { state: "working", taskIds: [] },
       { state: "awaiting", taskIds: ["a1", "a2"] },
       { state: "done", taskIds: ["d2"] },
     ]);
@@ -310,7 +310,7 @@ describe("collapsed columns (slim rail)", () => {
       undefined,
       new Set(["backlog"]),
     );
-    // dev is empty and backlog is collapsed: right from a1 still only has
+    // working is empty and backlog is collapsed: right from a1 still only has
     // done beyond it; left from a1 skips both and lands nowhere, so it stays.
     expect(moveSelection(grid, "a1", "left")).toBe("a1");
     expect(moveSelection(grid, "a2", "right")).toBe("d2");
@@ -325,7 +325,7 @@ describe("collapsed columns (slim rail)", () => {
     );
     expect(grid).toEqual([
       { state: "backlog", taskIds: [] },
-      { state: "dev", taskIds: [] },
+      { state: "working", taskIds: [] },
       { state: "awaiting", taskIds: ["a2"] },
       { state: "done", taskIds: [] },
     ]);

@@ -73,8 +73,8 @@ unidentified developer, right-click `Harbormaster.app` → Open once, or run
 
 ### Columns and verbs
 
-Tasks live in four columns: **Backlog**, **Dev**, **Awaiting** and **Done**.
-There are exactly three verbs to move them: **to dev**, **to await** and
+Tasks live in four columns: **Backlog**, **Working**, **Awaiting** and **Done**.
+There are exactly three verbs to move them: **to working**, **to awaiting** and
 **to done** (plus **reopen** for finished work). *Why* a task is awaiting is
 data, not a verb: an awaiting kind such as *review* (pushes the branch and
 opens or reuses the PR), *deploy* (merges and follows the deployment
@@ -95,7 +95,7 @@ rules:
     if: task.state == "awaiting" && event.data.to == "changes_requested"
     do:
       - action: move
-        with: { to: dev }
+        with: { to: working }
 ```
 
 Defaults are written on first run; every evaluated event and action is

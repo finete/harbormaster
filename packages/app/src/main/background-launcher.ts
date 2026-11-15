@@ -6,7 +6,7 @@
 // `createBackgroundPrimarySession`).
 //
 // Kept pure where it matters (Engine-layer: see /docs/design-decisions.md "Layering"):
-// `isWorking`/`computeCapacity` take plain data and a clock, no I/O of
+// `isRunning`/`computeCapacity` take plain data and a clock, no I/O of
 // their own, so the concurrency-cap/grace-window/idle-children rules are
 // unit-testable without Electron, node-pty, or core. `createBackgroundLauncher`
 // wires that pure decision to injected async I/O and serializes passes so
@@ -21,7 +21,7 @@
 // woke so they count toward `launch.maxConcurrent` exactly like started
 // launches until they go idle.
 
-/** One launched (`task.launch.status === "started"`) task's working-ness inputs for one pass. */
+/** One launched (`task.launch.status === "started"`) task's running-ness inputs for one pass. */
 export interface LaunchedTaskStatus {
   taskId: string;
   /** Whether this task's primary pane is a live app-owned pty right now (attached or not — see `ptySessions.lookupPanePid`). */
@@ -34,7 +34,7 @@ export interface LaunchedTaskStatus {
   startedAt?: string;
 }
 
-/** Default grace window: a just-started session with no presence record yet still counts as working. */
+/** Default grace window: a just-started session with no presence record yet still counts as running. */
 export const DEFAULT_STARTUP_GRACE_MS = 90_000;
 
 /**
@@ -43,7 +43,7 @@ export const DEFAULT_STARTUP_GRACE_MS = 90_000;
  * running) do NOT count — only a live pane that is actually mid-turn, or a
  * just-started session so new the harness hasn't registered presence yet.
  */
-export function isWorking(
+export function isRunning(
   status: LaunchedTaskStatus,
   nowMs: number,
   graceMs: number = DEFAULT_STARTUP_GRACE_MS,
@@ -52,7 +52,7 @@ export function isWorking(
   if (status.runningTurn) return true;
   // A presence record exists but no turn is running: the harness has
   // reported in and the task is idle (finished a turn, waiting on the
-  // user) — never "working", no matter how recently it started.
+  // user) — never "running", no matter how recently it started.
   if (status.hasPresenceRecord) return false;
   if (!status.startedAt) return false;
   const startedMs = Date.parse(status.startedAt);
@@ -107,17 +107,17 @@ export function selectWakeTargets(input: {
   return picked;
 }
 
-/** `maxConcurrent` minus the number of currently-working launched tasks, floored at 0. */
+/** `maxConcurrent` minus the number of currently-running launched tasks, floored at 0. */
 export function computeCapacity(
   maxConcurrent: number,
   statuses: readonly LaunchedTaskStatus[],
   nowMs: number,
   graceMs?: number,
 ): number {
-  const working = statuses.filter((status) =>
-    isWorking(status, nowMs, graceMs),
+  const running = statuses.filter((status) =>
+    isRunning(status, nowMs, graceMs),
   ).length;
-  return Math.max(0, maxConcurrent - working);
+  return Math.max(0, maxConcurrent - running);
 }
 
 /** Core's launch-queue task shape this module needs — kept structural so this file never imports `@harbormaster/core` itself. */
@@ -127,7 +127,7 @@ export interface LaunchQueueTask {
 }
 
 export interface BackgroundLauncherDeps {
-  /** Every currently-`started` launched task, for the working/capacity computation. */
+  /** Every currently-`started` launched task, for the running/capacity computation. */
   listStartedLaunches: () => Promise<LaunchQueueTask[]>;
   getLaunchSettings: () => Promise<{ maxConcurrent: number }>;
   /** The app's own pane-pid registry (see `ptySessions.lookupPanePid`); sync, no I/O. */
@@ -171,7 +171,7 @@ export function createBackgroundLauncher(
 ): BackgroundLauncher {
   let running = false;
   let rerunRequested = false;
-  /** Tasks this launcher woke: id -> wake time (ms). Counted as working like started launches while their pane lives. */
+  /** Tasks this launcher woke: id -> wake time (ms). Counted as running like started launches while their pane lives. */
   const woken = new Map<string, number>();
   const wakeInFlight = new Set<string>();
 

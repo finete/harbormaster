@@ -16,7 +16,7 @@ const T0 = "2025-01-01T00:00:00.000Z";
 function task(overrides: Partial<Task> & { id: string }): Task {
   return {
     kind: "task",
-    state: "dev",
+    state: "working",
     title: overrides.id,
     initialPrompt: "",
     createdAt: T0,
@@ -92,7 +92,11 @@ describe("layoutLineageRows", () => {
 
   it("shows a flat row with a parent-title lineage line when the parent is elsewhere (different column/group)", () => {
     const parent = task({ id: "parent", state: "done" });
-    const child = task({ id: "child", parentTaskId: "parent", state: "dev" });
+    const child = task({
+      id: "child",
+      parentTaskId: "parent",
+      state: "working",
+    });
     // Only the child is in this rendering group (the parent is in Done).
     const index = buildLineageIndex([parent, child]);
     const items = [{ task: child }];
@@ -104,7 +108,11 @@ describe("layoutLineageRows", () => {
 
   it("a Done parent still reports its total child count even with none nested there", () => {
     const parent = task({ id: "parent", state: "done" });
-    const child = task({ id: "child", parentTaskId: "parent", state: "dev" });
+    const child = task({
+      id: "child",
+      parentTaskId: "parent",
+      state: "working",
+    });
     const index = buildLineageIndex([parent, child]);
     // Only the parent is in this rendering group (the Done column).
     const items = [{ task: parent }];
@@ -230,8 +238,8 @@ describe("lineage wins over repo within a column", () => {
       byRepo.set(id, [...(byRepo.get(id) ?? []), t]);
     }
     return {
-      state: "dev",
-      title: "Dev",
+      state: "working",
+      title: "Working",
       groups: [...byRepo.entries()].map(([id, groupTasks]) => ({
         id,
         repoLabel: id.split("/").pop() ?? id,
@@ -281,7 +289,7 @@ describe("lineage wins over repo within a column", () => {
   });
 
   it("leaves a child whose parent is in another column in its own repo group", () => {
-    // Parent sits in Done; only the child is in this (Dev) column.
+    // Parent sits in Done; only the child is in this (Working) column.
     const groups = visibleGroupsForColumn(
       devColumn([betaChild, betaSolo]),
       false,

@@ -1,5 +1,5 @@
 // The rules audit on a task (docs/release-plan.md "Audit log"): the
-// workspace header shows the task's last rule action ("Review → Dev ·
+// workspace header shows the task's last rule action ("Review → Working ·
 // 4m ago [Needs changes]", the event/rule/file:line in its tooltip) and a
 // History popover with recent rule actions (raw events on request), read
 // through `listEvents({ taskId })`. Re-read whenever the task record

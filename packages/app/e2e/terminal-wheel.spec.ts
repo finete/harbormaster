@@ -120,7 +120,7 @@ test.describe("terminal wheel translation (P0-1)", () => {
       const window = await app.firstWindow();
       await window.waitForLoadState("domcontentloaded");
 
-      // Create task + move to dev.
+      // Create task + move to working.
       await window.getByTestId("sidebar-new-task-button").click();
       await window.getByTestId("new-task-title-input").fill("Wheel Task");
       await chooseWhere(window, "github.com/test/fixture");
@@ -134,7 +134,7 @@ test.describe("terminal wheel translation (P0-1)", () => {
         "card-",
         "",
       );
-      await dragTo(window, card, window.getByTestId("column-dev"));
+      await dragTo(window, card, window.getByTestId("column-working"));
 
       await expect
         .poll(

@@ -1,7 +1,7 @@
 // Reviewer tasks (docs/release-plan.md "Reviewer tasks"): a task bound to
 // someone else's PR checks out the PR head (`pull/<n>/head`), never pushes
 // or opens/merges a PR, waits on the `author-response` kind, and the
-// default reviewer rules move it (author activity → Dev, PR closed → Done).
+// default reviewer rules move it (author activity → Working, PR closed → Done).
 // Real temp git repos; a fake PullRequestAccess, never a real gh.
 
 import { execFile } from "node:child_process";
@@ -160,13 +160,13 @@ describe("reviewer tasks", () => {
       kind: "author-response",
     });
 
-    // The author pushes: back to Dev for another look.
+    // The author pushes: back to Working for another look.
     f.pullRequests.pr = {
       ...f.pullRequests.pr,
       lastAuthorActivityAt: "2026-01-02T00:00:00Z",
     };
     await f.core.commands.refresh();
-    expect((await f.core.commands.getTask(task.id))?.state).toBe("dev");
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("working");
 
     // The PR is closed: the review is over (auto-landing, never forced).
     f.pullRequests.pr = { ...f.pullRequests.pr, state: "CLOSED", closed: true };

@@ -168,14 +168,18 @@ test("dragging between columns renders a portaled overlay (no in-flow transform,
   const taskId = (await card.getAttribute("data-testid"))?.replace("card-", "");
   if (!taskId) throw new Error("card missing data-testid");
 
-  const probe = await dragTo(window, card, window.getByTestId("column-dev"));
+  const probe = await dragTo(
+    window,
+    card,
+    window.getByTestId("column-working"),
+  );
   expect(probe.overlayInBody).toBe(true);
   expect(probe.overlayOutsideBoard).toBe(true);
   expect(probe.overlayTaskId).toBe(taskId);
   expect(probe.sourceTransform).toBe("none");
   expect(probe.horizontallyOverflowingColumns).toEqual([]);
 
-  await expect(window.getByTestId("column-dev-cards")).toContainText(
+  await expect(window.getByTestId("column-working-cards")).toContainText(
     "Drag Mover",
   );
   await expect(window.getByTestId("column-backlog-cards")).not.toContainText(
@@ -188,26 +192,31 @@ test("dragging between columns renders a portaled overlay (no in-flow transform,
 
 test("the target column previews where the card lands, and Escape cancels the drag without leaving the board", async () => {
   const from = await beginDrag(cardLocator("Filler 03"));
-  const dev = await window.getByTestId("column-dev").boundingBox();
-  if (!dev) throw new Error("dev column not visible");
-  await glide(from, { x: dev.x + dev.width / 2, y: dev.y + dev.height / 2 });
-  // Scratch task -> lands last in dev's existing "scratch" group.
+  const working = await window.getByTestId("column-working").boundingBox();
+  if (!working) throw new Error("working column not visible");
+  await glide(from, {
+    x: working.x + working.width / 2,
+    y: working.y + working.height / 2,
+  });
+  // Scratch task -> lands last in working's existing "scratch" group.
   await expect(
-    window.getByTestId("group-dev-scratch").getByTestId("drop-placeholder-dev"),
+    window
+      .getByTestId("group-working-scratch")
+      .getByTestId("drop-placeholder-working"),
   ).toBeVisible();
   // The source column never previews a drop on itself.
   await expect(window.getByTestId("drop-placeholder-backlog")).toHaveCount(0);
 
   await window.keyboard.press("Escape");
   await expect(window.getByTestId("drag-overlay-card")).toHaveCount(0);
-  await expect(window.getByTestId("drop-placeholder-dev")).toHaveCount(0);
+  await expect(window.getByTestId("drop-placeholder-working")).toHaveCount(0);
   await window.mouse.up();
   // Escape went to dnd-kit's cancel, not the board's "back to workspace".
   await expect(window.getByTestId("board-view")).toBeVisible();
   await expect(window.getByTestId("column-backlog-cards")).toContainText(
     "Filler 03",
   );
-  await expect(window.getByTestId("column-dev-cards")).not.toContainText(
+  await expect(window.getByTestId("column-working-cards")).not.toContainText(
     "Filler 03",
   );
 });
@@ -351,14 +360,14 @@ test("collapsing a board group hides its cards, keeps the count, and arrow navig
     String(FILLER_COUNT),
   );
   await expect(toggle.getByTestId("group-repo-label")).toHaveText("scratch");
-  // The dev column's group is independent of backlog's.
-  await expect(window.getByTestId("group-dev-scratch")).toHaveAttribute(
+  // The working column's group is independent of backlog's.
+  await expect(window.getByTestId("group-working-scratch")).toHaveAttribute(
     "data-collapsed",
     "false",
   );
 
   // Backlog's cards are off screen, so the keyboard grid skips them:
-  // selection lands on (and stays on) the only visible card, in dev.
+  // selection lands on (and stays on) the only visible card, in working.
   const mover = cardLocator("Drag Mover");
   await window.keyboard.press("ArrowLeft");
   await expect(mover).toHaveAttribute("data-selected", "true");
@@ -447,15 +456,15 @@ test("the collapsed column state survives an app relaunch, and clicking the rail
 });
 
 test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the task, re-collapsing once the drag ends", async () => {
-  // "Drag Mover" stays put in Dev for the card-anatomy lane below; move a
-  // throwaway filler into Dev first so the rail-drop has a source card that
+  // "Drag Mover" stays put in Working for the card-anatomy lane below; move a
+  // throwaway filler into Working first so the rail-drop has a source card that
   // isn't load-bearing for later tests.
   await dragTo(
     window,
     cardLocator("Filler 02"),
-    window.getByTestId("column-dev"),
+    window.getByTestId("column-working"),
   );
-  await expect(window.getByTestId("column-dev-cards")).toContainText(
+  await expect(window.getByTestId("column-working-cards")).toContainText(
     "Filler 02",
   );
 
@@ -492,8 +501,8 @@ test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the
     String(FILLER_COUNT),
   );
   await expect(window.getByTestId("column-backlog-cards")).toHaveCount(0);
-  // Dev is back to just "Drag Mover".
-  await expect(window.getByTestId("column-dev-cards")).not.toContainText(
+  // Working is back to just "Drag Mover".
+  await expect(window.getByTestId("column-working-cards")).not.toContainText(
     "Filler 02",
   );
   await expect(cardLocator("Drag Mover")).toBeVisible();
@@ -501,7 +510,7 @@ test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the
 
 test("arrow navigation skips a collapsed column, crossing straight to the next expanded one", async () => {
   await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
-  // Backlog (collapsed) holds every filler; Dev holds only "Drag Mover".
+  // Backlog (collapsed) holds every filler; Working holds only "Drag Mover".
   // Left/right from it must skip straight over the collapsed column: there
   // is nothing beyond it in either direction (Awaiting/Done are empty), so
   // it stays selected rather than landing on a hidden card.

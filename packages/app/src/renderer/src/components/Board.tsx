@@ -109,7 +109,7 @@ const boardMeasuring: MeasuringConfiguration = {
  * as returned (columns -> groups -> tasks; see /packages/core/src/engines
  * /board-grouping.ts). The board never holds its own copy of task
  * placement: every drag routes through the same verb its key uses
- * (`startTask` for backlog -> dev, the Await… picker + `toAwait` for
+ * (`startTask` for backlog -> working, the Await… picker + `toAwait` for
  * Awaiting, `toDone` for Done, `moveTask` otherwise) and waits for the
  * "board-changed" push to re-render, so there is nothing to roll back if a
  * move is rejected (e.g. an illegal transition): the UI simply doesn't
@@ -269,11 +269,11 @@ export function Board({
       return;
     }
 
-    // Backlog -> Dev is "start this task" (pi-home's startBacklogIssue):
+    // Backlog -> Working is "start this task" (pi-home's startBacklogIssue):
     // startTask creates the parked task's branch + worktree + binding when
     // it has a repository but no workspace yet, and degrades to a plain
-    // move otherwise — so every backlog->dev drop routes through it.
-    if (row.state === "backlog" && targetState === "dev") {
+    // move otherwise — so every backlog->working drop routes through it.
+    if (row.state === "backlog" && targetState === "working") {
       void startTaskMutation(taskId);
       return;
     }

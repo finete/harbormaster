@@ -99,7 +99,7 @@ test.beforeAll(async () => {
         eventType: "github.pr.stateChanged",
         action: "move",
         with: { to: "done" },
-        from: { state: "dev" },
+        from: { state: "working" },
         outcome: "applied",
       },
     ]
@@ -170,7 +170,7 @@ test("sidebar + shortcut open Rules; list, sheet, Activity and cross-links", asy
   }
   const row = window.getByTestId(`rule-row-${GLOBAL_KEY}`);
   await expect(row.getByTestId("rule-do-chip")).toHaveText(
-    "move → await:deploy",
+    "move → awaiting:deploy",
   );
   if (CORE_READY) {
     // The activity fold marks the seeded applied action.
@@ -185,7 +185,7 @@ test("sidebar + shortcut open Rules; list, sheet, Activity and cross-links", asy
   await expect(sheet.getByTestId("rule-sheet-on")).toContainText("github.pr.*");
   await expect(sheet.getByTestId("rule-sheet-if")).toBeVisible();
   await expect(sheet.getByTestId("rule-sheet-do")).toContainText(
-    "move → await:deploy",
+    "move → awaiting:deploy",
   );
   if (CORE_READY) {
     // `If` is core's ALL/ANY outline of the rule's CEL, leaves verbatim.
@@ -216,7 +216,7 @@ test("sidebar + shortcut open Rules; list, sheet, Activity and cross-links", asy
     .and(window.locator('[data-kind="action"]'));
   await expect(action).toHaveCount(1);
   await expect(action.getByTestId("rules-activity-verb")).toHaveText(
-    "Dev → Done",
+    "Working → Done",
   );
   // Expands to the triggering event's data.
   await action.getByTestId("rules-activity-verb").click();

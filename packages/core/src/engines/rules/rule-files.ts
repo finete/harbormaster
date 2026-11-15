@@ -89,6 +89,14 @@ export function parseRuleFile(source: RuleFileText): RuleFile {
         `${source.file}:${line}: rule "${entry.id}" has an invalid condition: ${condition.error}`,
       );
     }
+    if (condition.kind === "cel") {
+      const retired = retiredStateLiteral(condition.source);
+      if (retired) {
+        problems.push(
+          `${source.file}:${line}: rule "${entry.id}" compares a state with "${retired}", which is no longer a column name (use "${RETIRED_STATE_NAMES[retired]}")`,
+        );
+      }
+    }
     const actions: RuleActionSpec[] = entry.do.map((action, actionIndex) => {
       const actionNode = isSeq(doNodes)
         ? doNodes.items[actionIndex]
@@ -160,6 +168,37 @@ export function matchesEventType(pattern: string, type: string): boolean {
     )
     .join(".*");
   return new RegExp(`^${regex}$`).test(type);
+}
+
+/**
+ * Column names retired by the dev → working rename (and the `await` move
+ * target, now `awaiting`), with their replacement. CEL compares plain
+ * strings, so a leftover `task.state == "dev"` would never error: it would
+ * just never match and the rule would silently stop firing. The schema
+ * catches stale `move` targets; this catches stale conditions.
+ */
+const RETIRED_STATE_NAMES: Record<string, string> = {
+  dev: "working",
+  await: "awaiting",
+};
+
+/**
+ * The retired column name a CEL condition compares a `.state` against
+ * (`x.state == "dev"`, `"dev" != x.state`, `x.state in [..., "dev"]`),
+ * if any. Other string literals (a branch named `dev`) are left alone.
+ */
+export function retiredStateLiteral(source: string): string | undefined {
+  const names = Object.keys(RETIRED_STATE_NAMES).join("|");
+  const patterns = [
+    new RegExp(`\\.state\\s*[!=]=\\s*(["'])(${names})\\1`),
+    new RegExp(`(["'])(${names})\\1\\s*[!=]=\\s*[\\w.?\\[\\]"'-]*\\.state\\b`),
+    new RegExp(`\\.state\\s+in\\s*\\[[^\\]]*(["'])(${names})\\1`),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(source);
+    if (match) return match[2];
+  }
+  return undefined;
 }
 
 /** The rule index a schema error reports a missing (or empty) `label` for. */

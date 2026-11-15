@@ -12,8 +12,8 @@ function result(overrides: Partial<TaskSearchResult> = {}): TaskSearchResult {
   return {
     id: "t-1",
     title: "Fix login",
-    state: "dev",
-    run: "working",
+    state: "working",
+    run: "running",
     relation: "child",
     ...overrides,
   };
@@ -22,7 +22,7 @@ function result(overrides: Partial<TaskSearchResult> = {}): TaskSearchResult {
 describe("formatTaskSearchLine", () => {
   it("names id, title, column, run state and relation", () => {
     expect(formatTaskSearchLine(result())).toBe(
-      '"Fix login" (t-1) · Dev · working · child',
+      '"Fix login" (t-1) · Working · running · child',
     );
   });
 
@@ -38,7 +38,7 @@ describe("formatTaskSearchLine", () => {
         }),
       ),
     ).toBe(
-      '"Fix login" (t-1) · Dev · your move · unrelated · github.com/org/repo@fix-login · PR #412',
+      '"Fix login" (t-1) · Working · your move · unrelated · github.com/org/repo@fix-login · PR #412',
     );
   });
 });

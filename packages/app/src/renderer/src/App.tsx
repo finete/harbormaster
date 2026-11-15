@@ -182,7 +182,7 @@ export function App({
   // but the task's pi keeps running in the background (TerminalPane
   // releases it; main keeps the few most recently closed warm, see
   // main/warm-sessions.ts), so reopening re-attaches instantly and closing
-  // never interrupts a working agent. The task stays on the board. Also
+  // never interrupts a running agent. The task stays on the board. Also
   // drops the task's persisted dockview layout (lib/workspace-persistence)
   // so a later reopen never resurrects a stale one — relaunching after a
   // close must not restore it (restore only replays what was open at exit).

@@ -301,7 +301,7 @@ export function deriveRunState(
   presence: Pick<PresenceStatus, "live" | "runningTurn">,
 ): TaskRunState {
   if (task.launch?.status === "queued") return "queued";
-  if (presence.live) return presence.runningTurn ? "working" : "your-move";
+  if (presence.live) return presence.runningTurn ? "running" : "your-move";
   return "not-running";
 }
 

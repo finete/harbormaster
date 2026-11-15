@@ -292,7 +292,7 @@ export class RulesRuntime {
     let changed = false;
     const nextPending = new Map<string, PendingRuleMove>();
     for (const action of planned.actions) {
-      // Where a move starts, read before it runs (the audit's "Review → Dev").
+      // Where a move starts, read before it runs (the audit's "Review → Working").
       const before =
         action.action === "move" && action.candidate.taskId
           ? tasksById.get(action.candidate.taskId)

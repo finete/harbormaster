@@ -89,9 +89,9 @@ async function createTaskWithRepo(
   const cardTestId = await card.getAttribute("data-testid");
   if (!cardTestId) throw new Error("card missing data-testid");
   const taskId = cardTestId.replace("card-", "");
-  // Start it (a drop on Dev — cards carry no buttons).
-  await dragTo(window, card, window.getByTestId("column-dev"));
-  await expect(window.getByTestId("column-dev-cards")).toContainText(title);
+  // Start it (a drop on Working — cards carry no buttons).
+  await dragTo(window, card, window.getByTestId("column-working"));
+  await expect(window.getByTestId("column-working-cards")).toContainText(title);
   // `startTask` moves the card optimistically; the worktree/workspace
   // binding that gives the primary pane its real cwd finishes slightly
   // later. Opening the workspace before that resolves is a real (and

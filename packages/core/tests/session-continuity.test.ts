@@ -433,7 +433,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     return { done, file, oldWorktree, oldSessionId: launch.sessionId };
   }
 
-  it("starts a new cycle: fresh branch + worktree in Dev, forking the previous conversation exactly once", async () => {
+  it("starts a new cycle: fresh branch + worktree in Working, forking the previous conversation exactly once", async () => {
     const f = await fixture();
     const { done, file, oldSessionId } = await doneTaskWithSession(f);
 
@@ -441,7 +441,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
       objective: "  Now add tests  ",
     });
     expect(result.warning).toBeUndefined();
-    expect(result.task.state).toBe("dev");
+    expect(result.task.state).toBe("working");
     expect(result.task.completedAt).toBeUndefined();
     expect(result.task.branch).not.toBe(done.branch);
     expect(result.task.initialPrompt).toBe("Now add tests");
@@ -486,7 +486,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     const { done, file } = await doneTaskWithSession(f);
     await rm(file);
     const result = await f.manager.reopenTask(done.id);
-    expect(result.task.state).toBe("dev");
+    expect(result.task.state).toBe("working");
     expect(result.warning).toMatch(/previous conversation not found/);
     // A fresh session under the new cycle's pre-assigned id.
     const launch = await f.manager.claimSessionLaunch(done.id);
@@ -511,7 +511,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     expect(done).not.toHaveProperty("warning");
 
     const result = await f.manager.reopenTask(task.id);
-    expect(result.task.state).toBe("dev");
+    expect(result.task.state).toBe("working");
     expect(result.task.branch).toBe(task.branch);
     const after = await f.manager.getTaskWorkspace(task.id);
     expect(after?.worktreePath).toBe(before.worktreePath);
@@ -561,7 +561,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     await expect(f.manager.reopenTask(task.id)).rejects.toThrow(/done task/);
   });
 
-  it("reopens a scratch task straight into Dev", async () => {
+  it("reopens a scratch task straight into Working", async () => {
     const f = await fixture();
     const scratch = await f.manager.createTask({
       title: "Scratch",
@@ -572,7 +572,7 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     const result = await f.manager.reopenTask(scratch.id, {
       objective: "Again",
     });
-    expect(result.task.state).toBe("dev");
+    expect(result.task.state).toBe("working");
     expect(result.task.initialPrompt).toBe("Again");
   });
 });

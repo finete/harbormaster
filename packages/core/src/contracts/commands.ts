@@ -149,7 +149,7 @@ export interface CreateTaskInput extends TaskAgentInput {
   role?: PullRequestRole;
   /**
    * pi-home's "Start a new task" vs "Add to Backlog" choice. `true` starts
-   * the task right away: it lands in `dev` and, when `repositoryId` is set,
+   * the task right away: it lands in `working` and, when `repositoryId` is set,
    * its branch + worktree + binding are created now. Absent/`false` parks it
    * in `backlog` with title/prompt/repository stored but no branch or
    * worktree created yet (see `CoreCommands.startTask`).
@@ -419,7 +419,7 @@ export interface CoreCommands {
    */
   getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
   /**
-   * Create a task. With `input.start` it lands in `dev`; otherwise it is
+   * Create a task. With `input.start` it lands in `working`; otherwise it is
    * parked in `backlog`. When `input.repositoryId` is set the repository is
    * always resolved (unknown ids reject), but the branch/worktree/binding
    * are only created when starting now: derives a branch (`branchPrefix +
@@ -436,7 +436,7 @@ export interface CoreCommands {
   createTask(input: CreateTaskInput): Promise<Task>;
   /**
    * The one launch primitive (see `/docs/design-decisions.md "Launching tasks from an agent"`): create a
-   * task and queue it to start running in the background. Lands in `dev`
+   * task and queue it to start running in the background. Lands in `working`
    * with `launch: { status: "queued" }`; `CoreCommands.claimPendingLaunches`
    * is what actually starts it. Rejects an unknown `fromTaskId`, a `child`
    * relation from a task that already has a `parentTaskId` (one level
@@ -453,7 +453,7 @@ export interface CoreCommands {
   /**
    * Flip up to `limit` queued launches to `started` (FIFO by
    * `requestedAt`), for the app's background launcher to actually start a
-   * pty for. `limit <= 0` returns `[]`. Never returns a task not in `dev`.
+   * pty for. `limit <= 0` returns `[]`. Never returns a task not in `working`.
    */
   claimPendingLaunches(limit: number): Promise<Task[]>;
   /**
@@ -470,8 +470,8 @@ export interface CoreCommands {
    * Start a parked backlog task: for a repository-backed task without a
    * worktree binding, create its branch + worktree + binding now (same
    * derivation and rollback guarantees as `createTask` starting now), then
-   * move it to `dev`. Tasks without a repository (or already bound) simply
-   * move to `dev`. Rejects for tasks not in `backlog`; on any failure the
+   * move it to `working`. Tasks without a repository (or already bound) simply
+   * move to `working`. Rejects for tasks not in `backlog`; on any failure the
    * task stays in `backlog` with no orphan worktree.
    */
   startTask(taskId: string): Promise<Task>;
@@ -515,7 +515,7 @@ export interface CoreCommands {
     input: RecordTaskSessionInput,
   ): Promise<boolean>;
   /**
-   * Reopen a Done task as a new Dev cycle (pi-home's `reopenDoneWork`): a
+   * Reopen a Done task as a new work cycle (pi-home's `reopenDoneWork`): a
    * fresh branch + worktree off the repository's default branch, with the
    * previous cycle's conversation forked into the new session on its first
    * launch. If the old worktree is still on disk (cleanup was refused) it

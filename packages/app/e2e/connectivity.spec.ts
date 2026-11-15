@@ -177,7 +177,7 @@ test.describe("the connectivity banner replaces per-task warning toasts while gh
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
 
-    // refresh() only inspects dev/awaiting repo-backed tasks; move it out of
+    // refresh() only inspects working/awaiting repo-backed tasks; move it out of
     // backlog so the next tick's PR status check actually calls (the
     // failing, connectivity-shaped) fake gh.
     await window.evaluate(

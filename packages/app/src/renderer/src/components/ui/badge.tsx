@@ -18,9 +18,9 @@ export const badgeVariants = cva(
         outline: "border-border text-foreground",
         /** status: ok (your move, PR open/approved, done-wants-a-look). */
         ok: "border-status-ok/50 bg-status-ok/20 text-status-ok",
-        /** status: working (an agent turn is running). */
-        working:
-          "border-status-working/45 bg-status-working/15 text-status-working",
+        /** status: running (an agent turn is running). */
+        running:
+          "border-status-running/45 bg-status-running/15 text-status-running",
         /** status: needs-you (asked, blocked, warnings). */
         needsYou:
           "border-status-needsYou/45 bg-status-needsYou/15 text-status-needsYou",

@@ -29,7 +29,7 @@ const TASK_FIELDS: Record<keyof RuleTaskView, string> = {
   id: "task id",
   title: "task title",
   kind: '`"task"` or `"temp_task"`',
-  state: '`"backlog"` | `"dev"` | `"awaiting"` | `"done"`',
+  state: '`"backlog"` | `"working"` | `"awaiting"` | `"done"`',
   awaiting:
     'the awaiting record (`kind`: `"review"` | `"deploy"` (with `stageId`, `stageLabel`) | `"author-response"` | `"slack"` | an addon kind), `null` outside Awaiting',
   branch: "branch name or `null`",
@@ -41,8 +41,8 @@ const TASK_FIELDS: Record<keyof RuleTaskView, string> = {
 };
 
 const MOVE_FIELDS: Record<keyof MoveActionInput, string> = {
-  to: "`dev` | `done` | `await`",
-  kind: "awaiting kind for `to: await` (default `review`; `deploy`, `author-response`, …)",
+  to: "`working` | `awaiting` | `done` (the target column; same names as `task.state`)",
+  kind: "awaiting kind for `to: awaiting` (default `review`; `deploy`, `author-response`, …)",
   input:
     "kind inputs (strings); for `deploy`, `stage` picks a stage id (default: the entry stage)",
   enter:
@@ -197,10 +197,10 @@ rules:
     label: Short name      # REQUIRED, 1-40 chars: shown on the Rules page and in task history
     description: optional free-form note
     on: [github.pr.*]      # event type(s)
-    if: task.state == "dev"   # optional condition; absent = always
+    if: task.state == "working"   # optional condition; absent = always
     do:                    # one or more actions, in order
       - action: move
-        with: { to: await, kind: review }
+        with: { to: awaiting, kind: review }
 \`\`\`
 
 Required keys: \`${ruleRequired}\`. **\`label\` is required**: a rule without

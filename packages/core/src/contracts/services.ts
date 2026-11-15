@@ -44,7 +44,7 @@ export interface TaskStateAccess {
   removeTask(id: string): Promise<void>;
   /**
    * Atomically flip up to `limit` queued launches (`task.launch.status ===
-   * "queued"`, `task.state === "dev"`) to `started` (`startedAt`), FIFO by
+   * "queued"`, `task.state === "working"`) to `started` (`startedAt`), FIFO by
    * `launch.requestedAt`, under the task-state lock "- so two concurrent
    * callers never both claim the same launch. `limit <= 0` claims nothing.
    * Returns the claimed tasks as persisted, in the order they were started.

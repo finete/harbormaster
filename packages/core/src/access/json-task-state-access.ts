@@ -101,7 +101,8 @@ export class JsonTaskStateAccess implements TaskStateAccess {
       const state = await this.readValidated();
       const queued = state.tasks
         .filter(
-          (task) => task.state === "dev" && task.launch?.status === "queued",
+          (task) =>
+            task.state === "working" && task.launch?.status === "queued",
         )
         .sort((a, b) =>
           (a.launch?.requestedAt ?? "").localeCompare(
@@ -233,7 +234,9 @@ function validTask(value: unknown): value is Task {
   return (
     isString(value.id) &&
     (value.kind === "task" || value.kind === "temp_task") &&
-    ["backlog", "dev", "awaiting", "done"].includes(value.state as string) &&
+    ["backlog", "working", "awaiting", "done"].includes(
+      value.state as string,
+    ) &&
     isString(value.title) &&
     typeof value.initialPrompt === "string" &&
     isOptionalString(value.initialPromptDeliveredAt) &&
