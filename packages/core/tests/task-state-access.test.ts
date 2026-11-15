@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -107,6 +107,27 @@ describe("JsonTaskStateAccess", () => {
     await access.removeTask(task.id);
 
     expect(await access.listTasks()).toEqual([]);
+  });
+
+  it('reads a pre-0.2.3 file whose tasks still say state "dev" as "working", and persists the rename on the next write', async () => {
+    const file = join(dir, "tasks.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        tasks: [
+          makeTask({ id: "old-1", state: "dev" as Task["state"] }),
+          makeTask({ id: "old-2", state: "done" }),
+        ],
+      }),
+    );
+    const fresh = new JsonTaskStateAccess(file);
+    expect((await fresh.listTasks()).map((task) => task.state)).toEqual([
+      "working",
+      "done",
+    ]);
+    await fresh.createTask(makeTask({ id: "new-1" }));
+    expect(await readFile(file, "utf8")).not.toContain('"dev"');
   });
 
   it("round-trips the phase-2a fields (repository/branch/pr/issue/awaiting)", async () => {

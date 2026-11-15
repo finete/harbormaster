@@ -34,7 +34,10 @@ export class JsonTaskStateAccess implements TaskStateAccess {
     this.cache = new JsonFileCache<TaskStateFile>(
       statePath,
       emptyState,
-      (value) => this.validate(value),
+      (value) => {
+        migrateRetiredTaskStates(value);
+        this.validate(value);
+      },
     );
   }
 
@@ -175,6 +178,26 @@ export class JsonTaskStateAccess implements TaskStateAccess {
         );
       ids.add(item.id);
     }
+  }
+}
+
+/**
+ * Column ids retired by the dev → working rename (decision #19). A
+ * `tasks.json` written before it still says `"state": "dev"`; reading it
+ * as `working` keeps the board loading (rejecting the whole file emptied
+ * every board after the upgrade). The next write persists the new id.
+ */
+const RETIRED_TASK_STATES: Readonly<Record<string, string>> = {
+  dev: "working",
+};
+
+/** Rewrites retired `state` ids in a freshly parsed (unshared) task file, in place. */
+export function migrateRetiredTaskStates(value: unknown): void {
+  if (!isRecord(value) || !Array.isArray(value.tasks)) return;
+  for (const task of value.tasks) {
+    if (!isRecord(task) || typeof task.state !== "string") continue;
+    const renamed = RETIRED_TASK_STATES[task.state];
+    if (renamed) task.state = renamed;
   }
 }
 
