@@ -1364,9 +1364,14 @@ export class CoreManager implements CoreCommands {
     });
     // Parked bindings carry no worktreePath, so a Done task's leftover
     // directory counts as an orphan too (its cleanup failed or never ran).
-    const bound = (await this.deps.bindings.listBindings())
-      .map((binding) => binding.worktreePath)
-      .filter((path): path is string => Boolean(path));
+    // Canonicalized like the scanned dirs: a binding recorded as
+    // `~/Code/...` must match a scan under a `~/code` code root.
+    const bound = await Promise.all(
+      (await this.deps.bindings.listBindings())
+        .map((binding) => binding.worktreePath)
+        .filter((path): path is string => Boolean(path))
+        .map((path) => this.deps.worktrees.canonicalPath(path)),
+    );
     let root = roots[0]?.root ?? "";
     let mostOrphans = 0;
     const paths: string[] = [];

@@ -232,4 +232,20 @@ test("opens the task's worktree folder in the chosen app, remembers it, copies t
   expect(stubLines()[3]?.at(-1)?.endsWith(`${path.sep}plain-folder`)).toBe(
     true,
   );
+
+  // A worktree recorded in different letter case than the code root (a
+  // `~/code` root, `~/Code/...` worktrees) is the same folder on a
+  // case-insensitive volume, so it opens too.
+  const worktree = path.join(worktreesDir, worktreeName);
+  const otherCase = worktree.replace(
+    "harbormaster-e2e-open-in-",
+    "HARBORMASTER-E2E-OPEN-IN-",
+  );
+  if (existsSync(otherCase)) {
+    const viaOtherCase = await window.evaluate(
+      (target) => window.harbormaster.app.openIn(target, "cursor"),
+      otherCase,
+    );
+    expect(viaOtherCase).toEqual({ ok: true });
+  }
 });

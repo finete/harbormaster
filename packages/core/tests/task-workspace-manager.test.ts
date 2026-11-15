@@ -4,6 +4,7 @@
 
 import { execFile } from "node:child_process";
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -367,6 +368,57 @@ describe.skipIf(!gitAvailable)("CoreManager git workspace wiring", () => {
     expect(strayEntry?.sizeBytes).toBeGreaterThanOrEqual(4096);
     // Two small orphans stay under both default thresholds.
     expect(report.warning).toBeUndefined();
+  });
+
+  it("scanOrphanWorktrees matches bindings and the code root by on-disk spelling (case-insensitive volume)", async () => {
+    const f = await fixture();
+    const probe = join(f.stateDir, "CaseProbe");
+    await mkdir(probe);
+    const caseInsensitive = await access(probe.toLowerCase()).then(
+      () => true,
+      () => false,
+    );
+    if (!caseInsensitive) return; // only reproducible on a case-insensitive volume
+    const { worktreePath } = await taskWithReviewCheckout(f, "Bound");
+    // A legacy worktree bound under `.../Code/...` while the code root is
+    // configured as `.../code` (the same folder on this volume).
+    const legacyDir = join(
+      f.codeRoot,
+      ".harbormaster-worktrees",
+      "legacy-task",
+    );
+    await mkdir(legacyDir, { recursive: true });
+    const bindingsFile = join(f.stateDir, "workspace-bindings.json");
+    const raw = JSON.parse(await readFile(bindingsFile, "utf8"));
+    const list = Array.isArray(raw) ? raw : raw.bindings;
+    const own = list.find(
+      (binding: { worktreePath?: string }) =>
+        binding.worktreePath === worktreePath,
+    );
+    // Recorded with different letter case than the scan will see.
+    own.worktreePath = worktreePath.replace("/state/", "/STATE/");
+    list.push({
+      ...own,
+      id: "legacy",
+      taskId: "legacy-task",
+      worktreePath: legacyDir,
+    });
+    await writeFile(bindingsFile, JSON.stringify(raw));
+    const lowerRoot = join(dirname(f.codeRoot), "code");
+    const config = JSON.parse(
+      await readFile(join(f.stateDir, "config.json"), "utf8"),
+    );
+    await writeFile(
+      join(f.stateDir, "config.json"),
+      JSON.stringify({ ...config, codeRoot: lowerRoot }),
+    );
+
+    const report = await f.core.commands.scanOrphanWorktrees();
+    const paths = report.orphans.map((orphan) => orphan.path);
+    expect(paths).not.toContain(worktreePath);
+    expect(paths).not.toContain(legacyDir);
+    // Only the agent's review checkout (unbound) is an orphan.
+    expect(paths).toHaveLength(1);
   });
 
   it("listRepositories collapses several checkouts of the same repo into one entry, and createTask always provisions off the primary", async () => {

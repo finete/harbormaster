@@ -129,7 +129,7 @@ import {
   setProgramStatusListener,
   writeToSession,
 } from "./ptySessions";
-import { isAllowedRevealPath } from "./reveal-path";
+import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
 import { createSpawnHostRunner } from "./spawn-host-client";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import {
@@ -1585,7 +1585,10 @@ function registerShellIpc(): void {
     "shell:revealInFolder",
     async (_event, targetPath: unknown): Promise<boolean> => {
       const roots = await allowedLocalPathRoots();
-      if (!isAllowedRevealPath(targetPath, roots)) return false;
+      if (typeof targetPath !== "string" || !targetPath) return false;
+      if (!isAllowedRevealPath(canonicalLocalPath(targetPath), roots)) {
+        return false;
+      }
       shell.showItemInFolder(targetPath);
       return true;
     },
@@ -1622,7 +1625,11 @@ function registerShellIpc(): void {
       const app = getOpenInApp(appId);
       if (!app) return { ok: false, error: "Unknown app" };
       const roots = await allowedLocalPathRoots();
-      if (!isAllowedRevealPath(targetPath, roots)) {
+      if (
+        typeof targetPath !== "string" ||
+        !targetPath ||
+        !isAllowedRevealPath(canonicalLocalPath(targetPath), roots)
+      ) {
         console.warn(
           "[main] open-in refused a path outside the allowlist:",
           targetPath,
@@ -1690,7 +1697,7 @@ async function allowedLocalPathRoots(): Promise<string[]> {
     activeStateDir,
     ...repositories.flatMap((repo) => [repo.root, dirname(repo.root)]),
     ...locations.map((location) => location.path),
-  ];
+  ].map(canonicalLocalPath);
 }
 
 /**

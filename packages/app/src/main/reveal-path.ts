@@ -7,7 +7,23 @@
 // root directories (the discovered-repositories `codeRoot`, or this app's
 // own state dir "-" where task worktrees and session files live) is allowed.
 
+import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
+
+/**
+ * `path`'s on-disk spelling (symlinks and letter case resolved): on a
+ * case-insensitive volume a `~/code` code root and a `~/Code/...` worktree
+ * are the same folder, but `isWithin` compares strings. A path that does
+ * not exist is just resolved.
+ */
+export function canonicalLocalPath(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync.native(absolute);
+  } catch {
+    return absolute;
+  }
+}
 
 /** True once `path` resolves to `root` itself, or somewhere strictly inside it. */
 function isWithin(root: string, path: string): boolean {

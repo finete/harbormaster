@@ -10,6 +10,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rm,
   stat,
 } from "node:fs/promises";
@@ -250,21 +251,32 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       ...(legacy.codeRoot ? [legacy.codeRoot] : []),
       ...(legacy.checkoutRoots ?? []).map((root) => dirname(root)),
     ];
+    // Canonical (on-disk) spellings: on a case-insensitive volume a
+    // `~/code` code root and a `~/Code/...` binding are the same folder, and
+    // the scan compares paths as strings.
+    const worktreesRoot = await this.canonicalPath(this.worktreesRoot);
     const current: string[] = [];
-    for (const repoDir of await subdirectories(this.worktreesRoot)) {
+    for (const repoDir of await subdirectories(worktreesRoot)) {
       current.push(...(await subdirectories(repoDir)));
     }
-    const roots = [{ root: this.worktreesRoot, dirs: current.sort() }];
-    const seen = new Set([resolve(this.worktreesRoot)]);
+    const roots = [{ root: worktreesRoot, dirs: current.sort() }];
+    const seen = new Set([worktreesRoot]);
     for (const parent of legacyParents) {
       if (!parent) continue;
-      const root = resolve(parent, TASK_WORKTREES_DIRNAME);
+      const root = await this.canonicalPath(
+        resolve(parent, TASK_WORKTREES_DIRNAME),
+      );
       if (seen.has(root)) continue;
       seen.add(root);
       const dirs = await subdirectories(root);
       if (dirs.length > 0) roots.push({ root, dirs: dirs.sort() });
     }
     return roots;
+  }
+
+  async canonicalPath(path: string): Promise<string> {
+    const absolute = resolve(path);
+    return realpath(absolute).catch(() => absolute);
   }
 
   async diskUsageBytes(path: string): Promise<number | undefined> {

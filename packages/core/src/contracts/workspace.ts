@@ -178,13 +178,20 @@ export interface GitWorktreeAccess {
    * root itself (always present, `dirs` = `<root>/<repo>/<branch>`), then
    * each legacy `.harbormaster-worktrees/` that has any (`dirs` = its direct
    * children): inside `legacy.codeRoot` and next to each of
-   * `legacy.checkoutRoots`. Absolute paths; files and dotfiles skipped.
+   * `legacy.checkoutRoots`. Canonical paths (see `canonicalPath`); files and
+   * dotfiles skipped.
    * Feeds the orphan-worktree scan; never throws.
    */
   listTaskWorktreeDirs(legacy?: {
     codeRoot?: string;
     checkoutRoots?: readonly string[];
   }): Promise<Array<{ root: string; dirs: string[] }>>;
+  /**
+   * `path`'s on-disk spelling (realpath: symlinks and letter case resolved,
+   * so `~/code/x` and `~/Code/x` on a case-insensitive volume agree);
+   * just resolved when it does not exist. Never throws.
+   */
+  canonicalPath(path: string): Promise<string>;
   /** Apparent on-disk size of `path` in bytes (`du`); `undefined` when it can't be measured. Never throws. */
   diskUsageBytes(path: string): Promise<number | undefined>;
 }
