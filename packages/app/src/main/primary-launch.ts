@@ -30,6 +30,8 @@ export interface PrimaryLaunchHarness {
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec;
   /** The bare command it launches by default, for "<command> not found" messages. */
   readonly command?: string;
+  /** Stable harness id (`HarnessAdapter.id`, e.g. "pi"), for diagnostics. Optional for test fakes. */
+  readonly id?: string;
 }
 
 /**
@@ -76,6 +78,10 @@ export interface PrimaryLaunchResolution {
    * `git worktree add <path> <branch>`.
    */
   worktreeMissing: boolean;
+  /** The harness's stable id (see `PrimaryLaunchHarness.id`), when known — diagnostics only. */
+  harnessId?: string;
+  /** The session mode this launch actually resolved to (new/resume/fork/open/continue), when a session was claimed — diagnostics only. */
+  sessionMode?: SessionLaunch["mode"];
 }
 
 /**
@@ -152,6 +158,8 @@ export async function resolvePrimaryLaunch(
     spec,
     commandMissing: false,
     worktreeMissing: false,
+    ...(harness.id ? { harnessId: harness.id } : {}),
+    ...(session ? { sessionMode: session.mode } : {}),
     ...agent,
   };
 }

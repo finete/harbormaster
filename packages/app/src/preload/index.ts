@@ -366,6 +366,13 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("app:openInApps"),
     openIn: (path: string, appId: string): Promise<OpenInResult> =>
       ipcRenderer.invoke("app:openIn", path, appId),
+    reportError: (error: {
+      message: string;
+      stack?: string | undefined;
+      source?: string | undefined;
+    }): void => {
+      ipcRenderer.send("app:rendererError", error);
+    },
   },
   onboarding: {
     shouldShow: () => ipcRenderer.invoke("onboarding:shouldShow"),

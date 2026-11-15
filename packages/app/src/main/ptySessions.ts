@@ -27,6 +27,14 @@ import {
 import { buildPtyEnv } from "./pty-env";
 import { releasePty, spawnWithFdHygiene } from "./pty-fd-hygiene";
 import {
+  formatPtyExitLine,
+  formatPtyLifecycleLine,
+  formatPtySpawnFailureLine,
+  formatPtySpawnLine,
+  OutputRingBuffer,
+  type PtyKind,
+} from "./pty-log";
+import {
   createTerminalModeTracker,
   type TerminalModeTracker,
 } from "./terminal-mode-tracker";
@@ -214,6 +222,8 @@ export interface PtySessionOptions {
   taskId?: string;
   /** Whether this is the task's primary panel (see `taskId`). */
   primary?: boolean;
+  /** Harness id (see `HarnessAdapter.id`), for the `[pty]` spawn log line only — never used for behavior here. */
+  harness?: string;
 }
 
 /**
@@ -224,6 +234,16 @@ export interface PtySessionOptions {
  * is checked up front instead of relying on a thrown error.
  */
 export function commandExists(command: string): boolean {
+  return resolveCommandPath(command) !== undefined;
+}
+
+/**
+ * The first existing, executable candidate for `command` (an absolute/`~`
+ * path checked as-is, else every `PATH` entry in order), or `undefined`
+ * when none resolves. Used for diagnostics (logging the actual binary a
+ * launch will run, not just "found: yes/no") as well as `commandExists`.
+ */
+export function resolveCommandPath(command: string): string | undefined {
   const candidates =
     command.includes("/") || command.startsWith("~")
       ? [command]
@@ -233,12 +253,12 @@ export function commandExists(command: string): boolean {
   for (const candidate of candidates) {
     try {
       accessSync(candidate, fsConstants.X_OK);
-      return true;
+      return candidate;
     } catch {
       // Not on this PATH entry — keep looking.
     }
   }
-  return false;
+  return undefined;
 }
 
 /**
@@ -279,23 +299,55 @@ export function createSession(
     appVersion,
     hyperlinks: true,
   });
-  const ptyProcess = spawnWithFdHygiene(() =>
-    useSpec
-      ? pty.spawn(spec.command, spec.args, {
-          name: "xterm-256color",
-          cols,
-          rows,
-          cwd: spawnCwd,
-          env: baseEnv,
-        })
-      : pty.spawn(defaultShell(), [], {
-          name: "xterm-256color",
-          cols,
-          rows,
-          cwd: spawnCwd,
-          env: baseEnv,
-        }),
+  const command = useSpec ? spec.command : defaultShell();
+  const argv = useSpec ? spec.args : [];
+  const logKind: PtyKind = useSpec ? "primary" : "shell";
+  const spawnedAtMs = Date.now();
+  let ptyProcess: pty.IPty;
+  try {
+    ptyProcess = spawnWithFdHygiene(() =>
+      useSpec
+        ? pty.spawn(spec.command, spec.args, {
+            name: "xterm-256color",
+            cols,
+            rows,
+            cwd: spawnCwd,
+            env: baseEnv,
+          })
+        : pty.spawn(defaultShell(), [], {
+            name: "xterm-256color",
+            cols,
+            rows,
+            cwd: spawnCwd,
+            env: baseEnv,
+          }),
+    );
+  } catch (error) {
+    console.error(
+      formatPtySpawnFailureLine({
+        sessionId: id,
+        taskId: options?.taskId,
+        kind: logKind,
+        command,
+        error,
+      }),
+    );
+    throw error;
+  }
+  console.log(
+    formatPtySpawnLine({
+      sessionId: id,
+      taskId: options?.taskId,
+      kind: logKind,
+      harness: options?.harness,
+      cwd: spawnCwd,
+      command,
+      resolvedCommand: resolveCommandPath(command) ?? null,
+      argv,
+      env: baseEnv,
+    }),
   );
+  const outputTail = new OutputRingBuffer();
 
   // Subscriptions are owned by the session record so `disposeSession` can
   // unsubscribe them explicitly — killing the process alone doesn't
@@ -355,13 +407,26 @@ export function createSession(
       ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
       : undefined;
   const dataDisposable = ptyProcess.onData((data) => {
+    outputTail.push(data);
     if (statusFilter) statusFilter.feed(data);
     else forward(data);
   });
-  const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+  const exitDisposable = ptyProcess.onExit(({ exitCode, signal }) => {
     // Deliver every byte the process wrote before announcing its exit, so
     // the pane never prints "[process exited]" ahead of its last output.
     batcher.flush();
+    console.log(
+      formatPtyExitLine({
+        sessionId: id,
+        taskId: options?.taskId,
+        kind: logKind,
+        exitCode,
+        signal,
+        spawnedAtMs,
+        exitedAtMs: Date.now(),
+        recentOutput: outputTail.tail(),
+      }),
+    );
     // The OS process is confirmed dead the instant this fires (node-pty's
     // own exit event, independent of whether/when `disposeSession` is ever
     // called) — drop this session's pane-pid-registry entry right here, so
@@ -427,7 +492,7 @@ export function createBackgroundPrimarySession(
   taskId: string,
   spec: LaunchSpecLike,
   onExit: (exitCode: number) => void,
-  options?: { cols?: number; rows?: number },
+  options?: { cols?: number; rows?: number; harness?: string },
 ): { id: string; pid: number } {
   const id = randomUUID();
   const cols = options?.cols ?? BACKGROUND_SESSION_COLS;
@@ -436,15 +501,44 @@ export function createBackgroundPrimarySession(
     appVersion: safeAppVersion(),
     hyperlinks: true,
   });
-  const ptyProcess = spawnWithFdHygiene(() =>
-    pty.spawn(spec.command, spec.args, {
-      name: "xterm-256color",
-      cols,
-      rows,
+  const spawnedAtMs = Date.now();
+  let ptyProcess: pty.IPty;
+  try {
+    ptyProcess = spawnWithFdHygiene(() =>
+      pty.spawn(spec.command, spec.args, {
+        name: "xterm-256color",
+        cols,
+        rows,
+        cwd: spec.cwd,
+        env,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      formatPtySpawnFailureLine({
+        sessionId: id,
+        taskId,
+        kind: "background",
+        command: spec.command,
+        error,
+      }),
+    );
+    throw error;
+  }
+  console.log(
+    formatPtySpawnLine({
+      sessionId: id,
+      taskId,
+      kind: "background",
+      harness: options?.harness,
       cwd: spec.cwd,
+      command: spec.command,
+      resolvedCommand: resolveCommandPath(spec.command) ?? null,
+      argv: spec.args,
       env,
     }),
   );
+  const outputTail = new OutputRingBuffer();
 
   const headlessTerminal = new HeadlessTerminal({
     cols,
@@ -477,11 +571,26 @@ export function createBackgroundPrimarySession(
     modes.feed(data);
     io.sink(data);
   });
-  const dataDisposable = ptyProcess.onData((data) => statusFilter.feed(data));
-  const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+  const dataDisposable = ptyProcess.onData((data) => {
+    outputTail.push(data);
+    statusFilter.feed(data);
+  });
+  const exitDisposable = ptyProcess.onExit(({ exitCode, signal }) => {
     // Attached by now (`attachPrimarySession`)? Deliver its last output
     // ahead of the exit, exactly like a renderer-created session.
     io.batcher?.flush();
+    console.log(
+      formatPtyExitLine({
+        sessionId: id,
+        taskId,
+        kind: "background",
+        exitCode,
+        signal,
+        spawnedAtMs,
+        exitedAtMs: Date.now(),
+        recentOutput: outputTail.tail(),
+      }),
+    );
     if (primaryTaskSessions.get(taskId) === id) {
       primaryTaskSessions.delete(taskId);
     }
@@ -585,6 +694,7 @@ export function attachPrimarySession(
 
   forceRepaint(session, cols, rows);
 
+  console.log(formatPtyLifecycleLine("attach", session.id, taskId));
   return { id: session.id, pid: session.process.pid, snapshot };
 }
 
@@ -695,6 +805,15 @@ export function detachPrimarySession(id: string, screen?: string): boolean {
   };
   session.headless = { terminal: headlessTerminal, serialize };
   session.attached = false;
+  // A `screen` snapshot only ever comes from an explicit tab close
+  // (`pty:release`); a window reload/renderer crash detaches with none.
+  console.log(
+    formatPtyLifecycleLine(
+      screen !== undefined ? "release" : "detach",
+      id,
+      taskId,
+    ),
+  );
   return true;
 }
 
@@ -747,6 +866,10 @@ export function resizeSession(id: string, cols: number, rows: number): void {
 }
 
 export function disposeSession(id: string): void {
+  const session = sessions.get(id);
+  if (session) {
+    console.log(formatPtyLifecycleLine("dispose", id, session.taskId));
+  }
   retireSession(id);
 }
 

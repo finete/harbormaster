@@ -609,6 +609,17 @@ export interface HarbormasterApi {
      * refuses unknown ids; never launches the OS default handler.
      */
     openIn(path: string, appId: string): Promise<OpenInResult>;
+    /**
+     * Forwards an uncaught renderer error or unhandled promise rejection to
+     * main, logged as `[renderer] ...` in `<userData>/logs/main.log` (see
+     * app-log.ts) — a packaged app's renderer devtools are never open, so
+     * without this these are invisible. Fire-and-forget; never throws.
+     */
+    reportError(error: {
+      message: string;
+      stack?: string | undefined;
+      source?: string | undefined;
+    }): void;
   };
   /** The first-run wizard (docs/release-plan.md "Onboarding"); every call is a core command. */
   onboarding: OnboardingApi;

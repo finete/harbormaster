@@ -71,16 +71,23 @@ import type {
 } from "../preload/api";
 import {
   installPiExtension,
+  PI_EXTENSION_FILE,
   piExtensionsDir,
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
+import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import { createBackgroundLauncher } from "./background-launcher";
 import { resolveCliPath } from "./cli-path";
 import type { ConnectivityState } from "./connectivity-loop";
 import { createConnectivityLoop } from "./connectivity-loop";
-import { buildDiagnosticsZip, diagnosticsFileName } from "./diagnostics";
+import {
+  buildDiagnosticsZip,
+  buildEnvironmentInfo,
+  buildTasksSummary,
+  diagnosticsFileName,
+} from "./diagnostics";
 import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
@@ -126,6 +133,7 @@ import {
   lookupPanePid,
   primarySessionTail,
   resizeSession,
+  resolveCommandPath,
   setProgramStatusListener,
   writeToSession,
 } from "./ptySessions";
@@ -225,10 +233,7 @@ function safeSend(
 // macOS's minimal PATH. See login-shell-path.ts. e2e keeps the PATH it was
 // given so fake binaries stay first.
 if (!process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
-  const merged = applyLoginShellPath();
-  console.log(
-    `[main] PATH from login shell: ${merged.split(":").length} entries`,
-  );
+  applyLoginShellPath();
 }
 
 // Headless core command API, hosted in the main process (see
@@ -245,6 +250,32 @@ const activeStateDir = process.env.HARBORMASTER_STATE_DIR ?? DEFAULT_STATE_DIR;
 if (process.env.HARBORMASTER_USER_DATA_DIR) {
   app.setPath("userData", process.env.HARBORMASTER_USER_DATA_DIR);
 }
+
+// Persistent rotating main-process log (`<userData>/logs/main.log`, see
+// app-log.ts): as early as possible so nothing that happens from here on
+// (PATH resolution, core/harness setup, pty spawns) is lost the way a
+// packaged, Dock-launched app's stdout is. Every `console.log/info/warn/
+// error` call is teed here in addition to its normal stdout/stderr
+// destination, so the `[main] uncaughtException` stdout grep e2e relies on
+// keeps working unchanged.
+const appLog = createAppLog(join(app.getPath("userData"), "logs", "main.log"));
+installConsoleTee(appLog);
+console.log(`[main] Harbormaster ${app.getVersion()} starting`);
+// After the tee, so it lands in main.log. Logged once, every run (including e2e, which keeps the PATH it was
+// given so its fake binaries stay first): the actual PATH a launch
+// resolves commands against, and where `pi`/`claude` were found on it (or
+// that they weren't) — exactly the two things "nothing happened, no pi
+// session ever created" needs to rule in or out.
+console.log(`[main] PATH: ${process.env.PATH ?? ""}`);
+console.log(
+  `[main] pi resolved to: ${resolveCommandPath(process.env.HARBORMASTER_PI_COMMAND || "pi") ?? "not found"}`,
+);
+console.log(
+  `[main] claude resolved to: ${resolveCommandPath(process.env.HARBORMASTER_CLAUDE_COMMAND || "claude") ?? "not found"}`,
+);
+process.on("unhandledRejection", (reason) => {
+  console.error("[main] unhandledRejection:", reason);
+});
 // Core's `git`/`gh` child processes spawn in a utility process, never on
 // this event loop (see spawn-host-client.ts). Installed before the core is
 // created; a run issued before app-ready (none today) spawns in-process.
@@ -339,6 +370,13 @@ async function startToolSocket(): Promise<void> {
     toolSocket = await startToolSocketServer({
       socketPath: resolveSocketPath(activeStateDir),
       commands: core.commands,
+      // Never logs call arguments (could carry prompt/message text) — only
+      // the tool name and, on failure, the error message.
+      onCall: (tool, outcome) => {
+        if (!outcome.ok) {
+          console.error(`[tool-socket] ${tool} failed: ${outcome.error}`);
+        }
+      },
     });
   } catch (error) {
     console.error("[main] tool socket failed to start:", error);
@@ -441,10 +479,18 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
       .catch(() => {});
     return false;
   }
-  createBackgroundPrimarySession(taskId, resolution.spec, (_exitCode) => {
-    void pollPresenceOnce();
-    void backgroundLauncher.runPass();
-  });
+  console.log(
+    `[background-launcher] primary-launch resolved for ${taskId}: harness=${resolution.harnessId ?? "-"} sessionMode=${resolution.sessionMode ?? "-"}`,
+  );
+  createBackgroundPrimarySession(
+    taskId,
+    resolution.spec,
+    (_exitCode) => {
+      void pollPresenceOnce();
+      void backgroundLauncher.runPass();
+    },
+    resolution.harnessId ? { harness: resolution.harnessId } : undefined,
+  );
   return true;
 }
 
@@ -502,6 +548,9 @@ const backgroundLauncher = createBackgroundLauncher({
       `[background-launcher] starting task ${task.id} failed:`,
       error,
     );
+  },
+  onEvent: (event, details) => {
+    console.log(`[background-launcher] ${event} ${JSON.stringify(details)}`);
   },
 });
 
@@ -1245,6 +1294,9 @@ function wireWakeLog(): void {
   powerMonitor.on("unlock-screen", () => wakeLog("power: unlock-screen"));
   app.on("child-process-gone", (_event, details) => {
     if (details.type === "GPU") wakeLog(`gpu-process-gone: ${details.reason}`);
+    console.error(
+      `[main] child-process-gone: type=${details.type} reason=${details.reason}`,
+    );
   });
 }
 
@@ -1283,6 +1335,21 @@ function registerPtyIpc(): void {
       // app's own directory and tell the renderer to explain the situation.
       const worktreeMissing = resolution?.worktreeMissing === true;
       const effectiveCwd = worktreeMissing ? undefined : options.cwd;
+      if (options.primary && options.taskId) {
+        if (worktreeMissing) {
+          console.error(
+            `[primary-launch] task ${options.taskId}: worktree missing, opening a shell instead`,
+          );
+        } else if (resolution?.commandMissing) {
+          console.error(
+            `[primary-launch] task ${options.taskId}: harness command not found, falling back to a shell`,
+          );
+        } else if (resolution) {
+          console.log(
+            `[primary-launch] task ${options.taskId}: harness=${resolution.harnessId ?? "-"} sessionMode=${resolution.sessionMode ?? "-"}`,
+          );
+        }
+      }
 
       const { id, fellBackToShell } = createSession(
         options.cols,
@@ -1313,6 +1380,7 @@ function registerPtyIpc(): void {
           ...(spec ? { spec } : {}),
           ...(options.taskId ? { taskId: options.taskId } : {}),
           ...(options.primary ? { primary: options.primary } : {}),
+          ...(resolution?.harnessId ? { harness: resolution.harnessId } : {}),
         },
       );
       // Tracked per webContents: if it is torn down before the renderer
@@ -1532,6 +1600,7 @@ function createWindow(): void {
   });
   win.webContents.on("render-process-gone", (_event, details) => {
     wakeLog(`render-process-gone: ${details.reason}`);
+    console.error(`[main] render-process-gone: reason=${details.reason}`);
     releaseSessionsFor(webContentsId);
   });
   win.webContents.on("console-message", (_event, level, message) => {
@@ -1822,6 +1891,18 @@ function rulesListOutput(): Promise<string> {
   });
 }
 
+/** Best-effort `<command> --version`, short-timeout: for the diagnostics bundle's `environment.json`, never thrown past the caller. */
+function commandVersion(
+  command: string | undefined,
+): Promise<string | undefined> {
+  if (!command) return Promise.resolve(undefined);
+  return new Promise((resolveVersion) => {
+    execFile(command, ["--version"], { timeout: 3_000 }, (error, stdout) => {
+      resolveVersion(error ? undefined : stdout.trim());
+    });
+  });
+}
+
 /**
  * "Export diagnostics" (Harbormaster menu and Help menu): zips
  * <userData>/logs, a redacted config.json and version facts, then asks
@@ -1846,6 +1927,15 @@ async function exportDiagnostics(): Promise<string | null> {
     target = result.filePath;
   }
   const cli = cliPathForTools();
+  const piCommand = process.env.HARBORMASTER_PI_COMMAND || "pi";
+  const claudeCommand = process.env.HARBORMASTER_CLAUDE_COMMAND || "claude";
+  const piResolved = resolveCommandPath(piCommand);
+  const claudeResolved = resolveCommandPath(claudeCommand);
+  const [tasksSummary, piVersion, claudeVersion] = await Promise.all([
+    buildTasksSummary(core.commands).catch(() => undefined),
+    commandVersion(piResolved),
+    commandVersion(claudeResolved),
+  ]);
   const zip = buildDiagnosticsZip({
     logsDir: join(app.getPath("userData"), "logs"),
     configFile: resolveStatePaths(activeStateDir).configFile,
@@ -1861,6 +1951,24 @@ async function exportDiagnostics(): Promise<string | null> {
       cli: cli ?? "not found",
     },
     rulesList: await rulesListOutput(),
+    ...(tasksSummary ? { tasksSummary } : {}),
+    environment: buildEnvironmentInfo({
+      app: app.getVersion(),
+      electron: process.versions.electron,
+      node: process.versions.node,
+      platform: process.platform,
+      path: process.env.PATH ?? "",
+      ...(process.env.SHELL ? { shell: process.env.SHELL } : {}),
+      pi: {
+        ...(piResolved ? { resolved: piResolved } : {}),
+        ...(piVersion ? { version: piVersion } : {}),
+      },
+      claude: {
+        ...(claudeResolved ? { resolved: claudeResolved } : {}),
+        ...(claudeVersion ? { version: claudeVersion } : {}),
+      },
+      piExtensionPath: join(piExtensionsDir(process.env), PI_EXTENSION_FILE),
+    }),
   });
   writeFileSync(target, zip);
   console.log(`[main] diagnostics exported: ${target}`);
@@ -1965,6 +2073,25 @@ function registerReleaseIpc(): void {
     if (typeof text === "string") clipboard.writeText(text);
   });
   ipcMain.handle("app:exportDiagnostics", () => exportDiagnostics());
+
+  // See preload's `reportError`: an uncaught renderer error/rejection,
+  // logged as `[renderer] ...` (never includes anything but the error's own
+  // message/stack — no prompt/message text ever crosses this channel).
+  ipcMain.on(
+    "app:rendererError",
+    (
+      _event,
+      error: {
+        message: string;
+        stack?: string | undefined;
+        source?: string | undefined;
+      },
+    ) => {
+      console.error(
+        `[renderer] ${error.source ? `${error.source}: ` : ""}${error.message}${error.stack ? `\n${error.stack}` : ""}`,
+      );
+    },
+  );
 }
 
 registerCoreIpc();

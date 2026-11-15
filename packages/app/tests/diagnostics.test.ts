@@ -2,14 +2,19 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { BoardColumn, WorkspaceBinding } from "@harbormaster/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildDiagnosticsZip,
+  buildEnvironmentInfo,
+  buildTasksSummary,
   collectLogEntries,
   diagnosticsFileName,
+  extensionFileInfo,
   REDACTED,
   redactConfig,
   redactString,
+  type TasksSummaryCommands,
 } from "../src/main/diagnostics";
 import { crc32, createZip } from "../src/main/zip-writer";
 
@@ -214,5 +219,194 @@ describe("buildDiagnosticsZip", () => {
     const [entry] = collectLogEntries(dir, 4);
     expect(entry.name).toBe("logs/big.log");
     expect(entry.data.toString()).toBe("new!");
+  });
+
+  it("bundles tasks-summary.json and environment.json when provided", () => {
+    const dir = tempDir();
+    const zipPath = path.join(dir, "d.zip");
+    writeFileSync(
+      zipPath,
+      buildDiagnosticsZip({
+        logsDir: path.join(dir, "nope"),
+        configFile: path.join(dir, "missing.json"),
+        versions: {},
+        tasksSummary: [
+          {
+            id: "t1",
+            kind: "standalone",
+            state: "working",
+            title: "Fix it",
+            hasPr: false,
+          },
+        ],
+        environment: buildEnvironmentInfo({
+          app: "1.0.0",
+          electron: "30.0.0",
+          node: "20.0.0",
+          platform: "darwin",
+          path: "/usr/bin",
+          pi: {},
+          claude: {},
+        }),
+      }),
+    );
+    expect(unzipList(zipPath).sort()).toEqual([
+      "config.redacted.json",
+      "environment.json",
+      "tasks-summary.json",
+      "versions.json",
+    ]);
+    expect(JSON.parse(unzipRead(zipPath, "tasks-summary.json"))).toEqual([
+      {
+        id: "t1",
+        kind: "standalone",
+        state: "working",
+        title: "Fix it",
+        hasPr: false,
+      },
+    ]);
+    expect(JSON.parse(unzipRead(zipPath, "environment.json")).app).toBe(
+      "1.0.0",
+    );
+  });
+});
+
+function fakeTask(overrides: Record<string, unknown> = {}): BoardColumn[] {
+  return [
+    {
+      state: "working",
+      title: "Working",
+      groups: [
+        {
+          id: "g1",
+          tasks: [
+            {
+              id: "t1",
+              kind: "standalone",
+              state: "working",
+              title: "Fix the bug",
+              initialPrompt: "do not leak this prompt text",
+              createdAt: "2024-01-01T00:00:00.000Z",
+              updatedAt: "2024-01-01T00:00:00.000Z",
+              stateChangedAt: "2024-01-01T00:00:00.000Z",
+              ...overrides,
+            },
+          ],
+        },
+      ],
+    },
+  ] as unknown as BoardColumn[];
+}
+
+describe("buildTasksSummary", () => {
+  it("summarizes every task with its binding, never prompt text", async () => {
+    const binding: WorkspaceBinding = {
+      id: "b1",
+      taskId: "t1",
+      worktreePath: "/work/t1",
+      sessionId: "sess-1",
+      sessionPath: "/sessions/sess-1.jsonl",
+      detached: false,
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    };
+    const commands: TasksSummaryCommands = {
+      listBoard: async () =>
+        fakeTask({
+          harness: "pi",
+          model: "opus",
+          pr: { url: "https://github.com/x/y/pull/1" },
+          launch: {
+            status: "started",
+            requestedAt: "2024-01-01T00:00:00.000Z",
+          },
+        }),
+      getTaskWorkspace: async (taskId) =>
+        taskId === "t1" ? binding : undefined,
+    };
+    const summary = await buildTasksSummary(commands);
+    expect(summary).toEqual([
+      {
+        id: "t1",
+        kind: "standalone",
+        state: "working",
+        title: "Fix the bug",
+        hasPr: true,
+        harness: "pi",
+        model: "opus",
+        launch: { status: "started", requestedAt: "2024-01-01T00:00:00.000Z" },
+        binding: {
+          worktreePath: "/work/t1",
+          sessionId: "sess-1",
+          hasSessionPath: true,
+        },
+      },
+    ]);
+    expect(JSON.stringify(summary)).not.toContain("leak this prompt");
+  });
+
+  it("tolerates a getTaskWorkspace failure (parked/scratch tasks)", async () => {
+    const commands: TasksSummaryCommands = {
+      listBoard: async () => fakeTask(),
+      getTaskWorkspace: async () => {
+        throw new Error("nope");
+      },
+    };
+    const summary = await buildTasksSummary(commands);
+    expect(summary[0]?.binding).toBeUndefined();
+  });
+});
+
+describe("extensionFileInfo", () => {
+  it("returns name/mtime/size for an existing file", () => {
+    const dir = tempDir();
+    const file = path.join(dir, "harbormaster-inbox.ts");
+    writeFileSync(file, "// extension");
+    const info = extensionFileInfo(file);
+    expect(info?.name).toBe("harbormaster-inbox.ts");
+    expect(info?.size).toBeGreaterThan(0);
+    expect(() => new Date(info?.mtime ?? "")).not.toThrow();
+  });
+
+  it("returns undefined for a missing file", () => {
+    expect(extensionFileInfo("/does/not/exist")).toBeUndefined();
+  });
+});
+
+describe("buildEnvironmentInfo", () => {
+  it("assembles versions, PATH, agent resolution and the extension's stat", () => {
+    const dir = tempDir();
+    const extFile = path.join(dir, "harbormaster-inbox.ts");
+    writeFileSync(extFile, "// v1");
+    const info = buildEnvironmentInfo({
+      app: "1.2.3",
+      electron: "30.0.0",
+      node: "20.0.0",
+      platform: "darwin",
+      path: "/usr/bin:/bin",
+      shell: "/bin/zsh",
+      pi: { resolved: "/usr/local/bin/pi", version: "pi 1.0.0" },
+      claude: { resolved: undefined, version: undefined },
+      piExtensionPath: extFile,
+    });
+    expect(info.app).toBe("1.2.3");
+    expect(info.path).toBe("/usr/bin:/bin");
+    expect(info.shell).toBe("/bin/zsh");
+    expect(info.pi.resolved).toBe("/usr/local/bin/pi");
+    expect(info.piExtension?.name).toBe("harbormaster-inbox.ts");
+  });
+
+  it("omits piExtension when the path doesn't resolve to a file", () => {
+    const info = buildEnvironmentInfo({
+      app: "1.2.3",
+      electron: "30.0.0",
+      node: "20.0.0",
+      platform: "darwin",
+      path: "",
+      pi: {},
+      claude: {},
+      piExtensionPath: "/does/not/exist",
+    });
+    expect(info.piExtension).toBeUndefined();
   });
 });

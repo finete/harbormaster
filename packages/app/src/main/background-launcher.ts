@@ -151,6 +151,13 @@ export interface BackgroundLauncherDeps {
   wakeCooldownMs?: number;
   /** Test/diagnostic hook: called once per failed `startSession`/`wakeSession`. */
   onStartError?: (task: LaunchQueueTask, error: unknown) => void;
+  /**
+   * Diagnostic hook, called at the few points worth a `[background-launcher]`
+   * log line: a capacity skip (nothing claimed this pass), a batch of
+   * claimed launches, and each wake attempt's outcome. Never called with
+   * anything resembling prompt/message text — task ids and counts only.
+   */
+  onEvent?: (event: string, details: Record<string, unknown>) => void;
 }
 
 export interface BackgroundLauncher {
@@ -224,8 +231,17 @@ export function createBackgroundLauncher(
       now,
       deps.graceMs,
     );
-    if (capacity <= 0) return;
+    if (capacity <= 0) {
+      deps.onEvent?.("capacity-skip", {
+        maxConcurrent: settings.maxConcurrent,
+        running: statuses.length,
+      });
+      return;
+    }
     const claimed = await deps.claimPendingLaunches(capacity);
+    if (claimed.length > 0) {
+      deps.onEvent?.("claimed", { taskIds: claimed.map((task) => task.id) });
+    }
     for (const task of claimed) {
       try {
         await deps.startSession(task);
@@ -270,7 +286,9 @@ export function createBackgroundLauncher(
       woken.set(taskId, now);
       try {
         await deps.wakeSession(taskId);
+        deps.onEvent?.("wake-attempt", { taskId, ok: true });
       } catch (error) {
+        deps.onEvent?.("wake-attempt", { taskId, ok: false });
         deps.onStartError?.({ id: taskId }, error);
       } finally {
         wakeInFlight.delete(taskId);

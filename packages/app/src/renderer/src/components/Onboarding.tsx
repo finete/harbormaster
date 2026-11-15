@@ -46,6 +46,7 @@ import {
 import { modKeyLabel } from "../lib/platform";
 import { rulesEditRequest, rulesFolder } from "../lib/rules-format";
 import { cn } from "../lib/utils";
+import { describeThrown, pushToast } from "../toast";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Kbd } from "./ui/kbd";
@@ -761,10 +762,15 @@ function Concept({
 function ConceptsStep({
   busy,
   onWriteRule,
+  onExportDiagnostics,
+  exportingDiagnostics,
 }: {
   busy: boolean;
   /** Finish onboarding into the composer set up to edit the rules (Edit in chat). */
   onWriteRule: () => void;
+  /** "Export Diagnostics…" (see AGENTS.md task brief): zips <userData>/logs, tasks-summary.json, environment.json, the redacted config — for a bug report. */
+  onExportDiagnostics: () => void;
+  exportingDiagnostics: boolean;
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-concepts">
@@ -829,6 +835,23 @@ function ConceptsStep({
       >
         You can reopen this from the Harbormaster menu (Welcome / Setup…).
       </p>
+      <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold">Something not working?</p>
+          <p className="text-xs text-muted-foreground">
+            Export logs, config and environment facts for a bug report.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="onboarding-export-diagnostics"
+          disabled={busy || exportingDiagnostics}
+          onClick={onExportDiagnostics}
+        >
+          Export Diagnostics…
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1069,6 +1092,25 @@ export function Onboarding({
     }
   };
 
+  // "Export Diagnostics…" (see AGENTS.md task brief): same call the app/Help
+  // menu's "Export Diagnostics…" item makes; shows a success toast with the
+  // saved path, or an error toast on failure. Its own busy flag (not the
+  // wizard's `busy`) so it never blocks Back/Next while it runs.
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false);
+  const exportDiagnostics = async (): Promise<void> => {
+    setExportingDiagnostics(true);
+    try {
+      const savedPath = await window.harbormaster.app.exportDiagnostics();
+      if (savedPath) {
+        pushToast(`Diagnostics saved to ${savedPath}`, "success");
+      }
+    } catch (cause) {
+      pushToast(`Export diagnostics failed: ${describeThrown(cause)}`, "error");
+    } finally {
+      setExportingDiagnostics(false);
+    }
+  };
+
   /**
    * The concepts screen's secondary action: finish exactly like Start, but
    * into the composer set up as the Rules page's "Edit in chat" does. The
@@ -1275,6 +1317,8 @@ export function Onboarding({
               <ConceptsStep
                 busy={busy || !state}
                 onWriteRule={() => void writeFirstRule()}
+                onExportDiagnostics={() => void exportDiagnostics()}
+                exportingDiagnostics={exportingDiagnostics}
               />
             )}
             {error && (

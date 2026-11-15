@@ -5,6 +5,7 @@
 // a bug report. Everything here is a read-only copy; nothing is uploaded.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import type { BoardColumn, WorkspaceBinding } from "@harbormaster/core";
 import { createZip, type ZipEntry } from "./zip-writer";
 
 export const REDACTED = "[redacted]";
@@ -127,6 +128,10 @@ export interface DiagnosticsInput {
   versions: Record<string, string | boolean | undefined>;
   /** `harbormaster rules list` output, or why it is missing. */
   rulesList?: string;
+  /** `tasks-summary.json`'s content (see `buildTasksSummary`), already built through the core command API — this module never reads state files directly. */
+  tasksSummary?: TaskSummaryEntry[];
+  /** `environment.json`'s content (see `buildEnvironmentInfo`). */
+  environment?: EnvironmentInfo;
   now?: Date;
 }
 
@@ -153,7 +158,180 @@ export function buildDiagnosticsZip(input: DiagnosticsInput): Buffer {
       mtime: now,
     });
   }
+  if (input.tasksSummary !== undefined) {
+    entries.push({
+      name: "tasks-summary.json",
+      data: `${JSON.stringify(input.tasksSummary, null, 2)}\n`,
+      mtime: now,
+    });
+  }
+  if (input.environment !== undefined) {
+    entries.push({
+      name: "environment.json",
+      data: `${JSON.stringify(input.environment, null, 2)}\n`,
+      mtime: now,
+    });
+  }
   return createZip(entries);
+}
+
+/** The slice of `CoreCommands` `buildTasksSummary` needs — structural so callers (including tests) can pass a minimal fake; never anything that reads a state file directly. */
+export interface TasksSummaryCommands {
+  listBoard(): Promise<BoardColumn[]>;
+  getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
+}
+
+export interface TaskSummaryBinding {
+  worktreePath?: string;
+  scratch?: boolean;
+  inPlace?: boolean;
+  sessionId?: string;
+  hasSessionPath: boolean;
+}
+
+export interface TaskSummaryEntry {
+  id: string;
+  kind: string;
+  state: string;
+  /** Titles are fine in a diagnostics bundle — only prompts/message bodies are excluded. */
+  title: string;
+  harness?: string;
+  model?: string;
+  sessionModel?: string;
+  launch?: { status: string; requestedAt: string; startedAt?: string };
+  parentTaskId?: string;
+  hasPr: boolean;
+  initialPromptDeliveredAt?: string;
+  binding?: TaskSummaryBinding;
+}
+
+/**
+ * `tasks-summary.json`: one entry per task, built entirely through
+ * `listBoard`/`getTaskWorkspace` (the core command API) — never a direct
+ * state-file read. Deliberately excludes `initialPrompt` and anything else
+ * that could carry message text; `title` is the one free-text field kept
+ * (titles, unlike prompts, are expected to be short and non-sensitive).
+ */
+export async function buildTasksSummary(
+  commands: TasksSummaryCommands,
+): Promise<TaskSummaryEntry[]> {
+  const columns = await commands.listBoard();
+  const tasks = columns.flatMap((column) =>
+    column.groups.flatMap((group) => group.tasks),
+  );
+  return Promise.all(
+    tasks.map(async (task) => {
+      const binding = await commands
+        .getTaskWorkspace(task.id)
+        .catch(() => undefined);
+      const entry: TaskSummaryEntry = {
+        id: task.id,
+        kind: task.kind,
+        state: task.state,
+        title: task.title,
+        hasPr: Boolean(task.pr),
+        ...(task.harness ? { harness: task.harness } : {}),
+        ...(task.model ? { model: task.model } : {}),
+        ...(task.sessionModel ? { sessionModel: task.sessionModel } : {}),
+        ...(task.launch
+          ? {
+              launch: {
+                status: task.launch.status,
+                requestedAt: task.launch.requestedAt,
+                ...(task.launch.startedAt
+                  ? { startedAt: task.launch.startedAt }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+        ...(task.initialPromptDeliveredAt
+          ? { initialPromptDeliveredAt: task.initialPromptDeliveredAt }
+          : {}),
+        ...(binding
+          ? {
+              binding: {
+                ...(binding.worktreePath
+                  ? { worktreePath: binding.worktreePath }
+                  : {}),
+                ...(binding.scratch ? { scratch: true } : {}),
+                ...(binding.inPlace ? { inPlace: true } : {}),
+                ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
+                hasSessionPath: Boolean(binding.sessionPath),
+              },
+            }
+          : {}),
+      };
+      return entry;
+    }),
+  );
+}
+
+export interface ExtensionFileInfo {
+  name: string;
+  mtime: string;
+  size: number;
+}
+
+/** `{ name, mtime, size }` for the installed Pi inbox extension file, or `undefined` when it doesn't exist — never its content (that's source code, not a secret, but irrelevant to diagnostics). */
+export function extensionFileInfo(path: string): ExtensionFileInfo | undefined {
+  try {
+    const stats = statSync(path);
+    return {
+      name: path.split(sep).pop() ?? path,
+      mtime: stats.mtime.toISOString(),
+      size: stats.size,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface EnvironmentInfo {
+  app: string;
+  electron: string;
+  node: string;
+  platform: string;
+  arch: string;
+  path: string;
+  shell?: string;
+  pi: { resolved?: string; version?: string };
+  claude: { resolved?: string; version?: string };
+  piExtension?: ExtensionFileInfo;
+}
+
+export interface BuildEnvironmentInfoInput {
+  app: string;
+  electron: string;
+  node: string;
+  platform: string;
+  path: string;
+  shell?: string;
+  pi: { resolved?: string; version?: string };
+  claude: { resolved?: string; version?: string };
+  /** Path to the installed Pi inbox extension file (see agent-tooling.ts's `piExtensionsDir`/`PI_EXTENSION_FILE`); only its stat (name/mtime/size) is read. */
+  piExtensionPath?: string;
+}
+
+/** `environment.json`'s content: versions, PATH, resolved agent commands and their `--version` output (best effort), and the installed Pi extension's stat. */
+export function buildEnvironmentInfo(
+  input: BuildEnvironmentInfoInput,
+): EnvironmentInfo {
+  const piExtension = input.piExtensionPath
+    ? extensionFileInfo(input.piExtensionPath)
+    : undefined;
+  return {
+    app: input.app,
+    electron: input.electron,
+    node: input.node,
+    platform: input.platform,
+    arch: process.arch,
+    path: input.path,
+    ...(input.shell ? { shell: input.shell } : {}),
+    pi: input.pi,
+    claude: input.claude,
+    ...(piExtension ? { piExtension } : {}),
+  };
 }
 
 /** Default file name offered in the save dialog. */
