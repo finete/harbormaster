@@ -1,12 +1,15 @@
 // The Setup screen's "Check setup" (next to Export Diagnostics): runs the
 // core `doctor` command through main (`window.harbormaster.core.doctor`,
 // which adds the app-only facts) and shows the checks grouped, each with a
-// status icon, its detail and remediation, plus Re-run. Read-only: nothing
-// here changes the setup.
+// status icon, its detail and remediation (and per-repository lines for
+// `repos.remote`), plus Re-run. While it runs, each group shows a spinner:
+// the remote probes can take up to 20 s. Read-only: nothing here changes
+// the setup.
 
 import {
   AlertTriangle,
   CheckCircle2,
+  Loader2,
   MinusCircle,
   RefreshCw,
   XCircle,
@@ -14,7 +17,12 @@ import {
 import type { JSX } from "react";
 import { useCallback, useState } from "react";
 import type { DoctorReport, DoctorStatus } from "../../../preload/api";
-import { doctorHeadline, groupDoctorChecks } from "../lib/doctor-view";
+import {
+  doctorHeadline,
+  doctorRunningGroups,
+  formatDoctorMs,
+  groupDoctorChecks,
+} from "../lib/doctor-view";
 import { cn } from "../lib/utils";
 import { describeThrown } from "../toast";
 import { Button } from "./ui/button";
@@ -84,7 +92,7 @@ export function SetupCheckResults({
   state: SetupCheckState;
 }): JSX.Element | null {
   const { report, running, error, run } = state;
-  if (!report && !error) return null;
+  if (!report && !error && !running) return null;
   return (
     <div
       data-testid="setup-check"
@@ -93,11 +101,13 @@ export function SetupCheckResults({
     >
       <div className="flex items-center justify-between gap-2">
         <p data-testid="setup-check-headline" className="text-xs font-semibold">
-          {error
-            ? "Could not check the setup"
-            : report
-              ? doctorHeadline(report)
-              : ""}
+          {running
+            ? "Checking the setup…"
+            : error
+              ? "Could not check the setup"
+              : report
+                ? doctorHeadline(report)
+                : ""}
         </p>
         <Button
           variant="ghost"
@@ -110,8 +120,25 @@ export function SetupCheckResults({
           Re-run
         </Button>
       </div>
-      {error && <p className="text-xs text-status-error">{error}</p>}
-      {report &&
+      {running &&
+        doctorRunningGroups().map((group) => (
+          <div
+            key={group.group}
+            data-testid={`setup-check-running-${group.group}`}
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <span className="font-semibold uppercase tracking-wide text-[11px]">
+              {group.title}
+            </span>
+            <span>{group.note}</span>
+          </div>
+        ))}
+      {!running && error && (
+        <p className="text-xs text-status-error">{error}</p>
+      )}
+      {!running &&
+        report &&
         groupDoctorChecks(report).map((group) => (
           <div key={group.group} className="flex flex-col gap-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -129,7 +156,31 @@ export function SetupCheckResults({
                   <p className="[overflow-wrap:anywhere]">
                     <span className="text-muted-foreground">{check.id}</span>{" "}
                     {check.summary}
+                    {check.ms !== undefined && check.ms >= 1000 && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {formatDoctorMs(check.ms)}
+                      </span>
+                    )}
                   </p>
+                  {check.items?.map((item) => (
+                    <div
+                      key={item.name}
+                      data-testid={`doctor-check-item-${item.name}`}
+                      data-status={item.status}
+                      className="flex items-start gap-1.5"
+                    >
+                      <StatusIcon status={item.status} />
+                      <p className="[overflow-wrap:anywhere]">
+                        {item.name}{" "}
+                        <span className="text-muted-foreground">
+                          {item.summary}
+                          {item.ms !== undefined &&
+                            ` (${formatDoctorMs(item.ms)})`}
+                        </span>
+                      </p>
+                    </div>
+                  ))}
                   {check.detail && check.status !== "ok" && (
                     <p className="whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
                       {check.detail}

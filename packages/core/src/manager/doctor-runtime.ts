@@ -5,15 +5,23 @@
 // config is reported, not created, and rules are parsed without the
 // managed-file / default-rules writes `listRules` does, so the CLI can run
 // this against a state dir while the app is down. Every check is bounded by
-// a timeout and never throws (a probe that fails reports `skip`).
+// a timeout and never throws (a probe that fails reports `skip`), and
+// carries its wall-clock time (`ms`). Local probes get
+// `LOCAL_PROBE_TIMEOUT_MS`, network probes `NETWORK_PROBE_TIMEOUT_MS`, at
+// most `NETWORK_PROBE_CONCURRENCY` `ls-remote`s at once, and only for the
+// repositories `selectRemoteProbes` picks (or every one with
+// `probeAllRemotes`), after `gh auth status` showed api.github.com answers.
 
 import type { OrphanWorktreeReport } from "../contracts/commands.js";
 import {
-  DOCTOR_PROBE_TIMEOUT_MS,
   type DoctorCheck,
   type DoctorInput,
   type DoctorReport,
   type EnvironmentProbeAccess,
+  LOCAL_PROBE_TIMEOUT_MS,
+  NETWORK_PROBE_CONCURRENCY,
+  NETWORK_PROBE_TIMEOUT_MS,
+  type RemoteProbe,
 } from "../contracts/doctor.js";
 import { DEFAULT_HARNESS_ID, type GlobalConfig } from "../contracts/model.js";
 import type { RuleFile, RulesFileAccess } from "../contracts/rules.js";
@@ -30,7 +38,9 @@ import {
   DOCTOR_SCAN_TIMEOUT_MS,
   discoveredCheck,
   diskCheck,
+  type GithubReachability,
   githubAuthCheck,
+  githubReachability,
   loginShellPathCheck,
   orderDoctorChecks,
   orphansCheck,
@@ -38,6 +48,7 @@ import {
   type RemoteResult,
   remoteCheck,
   rulesCheck,
+  selectRemoteProbes,
   skippedCheck,
   socketCheck,
   stateFileCheck,
@@ -45,8 +56,17 @@ import {
 import { parseRuleFile } from "../engines/rules/rule-files.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 
-/** Remote probes in flight at once. */
-const REMOTE_CONCURRENCY = 8;
+/** Slack on top of a probe's own timeout before the doctor gives up on it. */
+const GUARD_SLACK_MS = 1_000;
+/** Backstop for one local check (the probe's own timeout plus slack). */
+const LOCAL_GUARD_MS = LOCAL_PROBE_TIMEOUT_MS + GUARD_SLACK_MS;
+/** Backstop for one network check. */
+const NETWORK_GUARD_MS = NETWORK_PROBE_TIMEOUT_MS + GUARD_SLACK_MS;
+
+/** A repository id on github.com (its `ls-remote` needs api.github.com's host up). */
+function onGithub(repositoryId: string): boolean {
+  return repositoryId.startsWith("github.com/");
+}
 
 export interface DoctorRuntimeDependencies {
   probes: EnvironmentProbeAccess;
@@ -68,30 +88,49 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `work` within `ms`; a throw or a timeout becomes a `skip` check for `id`. */
-async function guarded(
-  id: string,
+/** `work` within `ms`: its value, or the throw / timeout as data (never rejects). */
+async function settle<T>(
   ms: number,
-  work: () => Promise<DoctorCheck>,
-): Promise<DoctorCheck> {
+  work: () => Promise<T>,
+): Promise<{ value: T; ms: number } | { error: string; ms: number }> {
+  const started = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
+    const value = await Promise.race([
       work(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new DoctorTimeout()), ms);
       }),
     ]);
+    return { value, ms: Date.now() - started };
   } catch (error) {
-    return skippedCheck(
-      id,
-      error instanceof DoctorTimeout
-        ? `Timed out after ${Math.round(ms / 1000)} s`
-        : `Could not check: ${describe(error)}`,
-    );
+    return {
+      error:
+        error instanceof DoctorTimeout
+          ? `Timed out after ${Math.round(ms / 1000)} s`
+          : `Could not check: ${describe(error)}`,
+      ms: Date.now() - started,
+    };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** `work` within `ms`, timed (`ms`); a throw or a timeout becomes a `skip` check for `id`. */
+async function guarded(
+  id: string,
+  ms: number,
+  work: () => Promise<DoctorCheck>,
+): Promise<DoctorCheck> {
+  const result = await settle(ms, work);
+  return "value" in result
+    ? { ...result.value, ms: result.ms }
+    : { ...skippedCheck(id, result.error), ms: result.ms };
+}
+
+/** A check computed without probing (no wait). */
+function instant(item: DoctorCheck): Promise<DoctorCheck> {
+  return Promise.resolve({ ...item, ms: 0 });
 }
 
 /** The loaded config, or why it is not available (missing / rejected). */
@@ -111,7 +150,10 @@ export class DoctorRuntime {
     const defaultHarness = config?.launch?.defaultHarness ?? DEFAULT_HARNESS_ID;
     const githubEnabled = config?.sources?.github?.enabled !== false;
     const commands = probes.commands();
-    const probe = DOCTOR_PROBE_TIMEOUT_MS + 1_000;
+    const probe = LOCAL_GUARD_MS;
+    // One `gh auth status`: `tools.gh-auth`'s verdict and the proof that
+    // api.github.com answers, which `repos.remote` waits for.
+    const ghAuth = settle(NETWORK_GUARD_MS, () => probes.githubAuthStatus());
 
     const command = (
       id: string,
@@ -158,8 +200,13 @@ export class DoctorRuntime {
         githubEnabled ? "fail" : "warn",
         "Install the GitHub CLI (`brew install gh`), then run `gh auth login`.",
       ),
-      guarded("tools.gh-auth", probe, async () =>
-        githubAuthCheck(await probes.githubAuthStatus(), githubEnabled),
+      ghAuth.then((result) =>
+        "value" in result
+          ? {
+              ...githubAuthCheck(result.value, githubEnabled, result.ms),
+              ms: result.ms,
+            }
+          : { ...skippedCheck("tools.gh-auth", result.error), ms: result.ms },
       ),
       pi,
       command(
@@ -175,7 +222,7 @@ export class DoctorRuntime {
           (await pi).status === "ok",
         ),
       ),
-      Promise.resolve(configCheck(configCheckInput(configState))),
+      instant(configCheck(configCheckInput(configState))),
       guarded("state.tasks", probe, async () =>
         stateFileCheck(
           "state.tasks",
@@ -199,14 +246,17 @@ export class DoctorRuntime {
         ),
       ),
       guarded("state.rules", probe, () => this.rulesCheck()),
-      ...this.repositoryChecks(config),
+      ...this.repositoryChecks(config, {
+        all: input.probeAllRemotes === true,
+        github: ghAuth.then((result) =>
+          "value" in result ? githubReachability(result.value) : "unknown",
+        ),
+      }),
       config
         ? guarded("worktrees.orphans", DOCTOR_SCAN_TIMEOUT_MS, async () =>
             orphansCheck(await this.deps.orphans()),
           )
-        : Promise.resolve(
-            skippedCheck("worktrees.orphans", "No usable config.json"),
-          ),
+        : instant(skippedCheck("worktrees.orphans", "No usable config.json")),
       guarded("disk.free", probe, async () => {
         const disk = await probes.stateDirFreeBytes();
         return diskCheck(disk.freeBytes, disk.path);
@@ -214,9 +264,7 @@ export class DoctorRuntime {
       guarded("socket.tool", probe, async () =>
         socketCheck(await probes.toolSocket()),
       ),
-      Promise.resolve(
-        loginShellPathCheck(input.loginShellPath, probes.processPath()),
-      ),
+      instant(loginShellPathCheck(input.loginShellPath, probes.processPath())),
     ]);
     return {
       checkedAt,
@@ -253,10 +301,16 @@ export class DoctorRuntime {
   /** `repos.codeRoot`, `repos.discovered`, `repos.remote` (discovery shared by the last two). */
   private repositoryChecks(
     config: GlobalConfig | undefined,
+    remotes: {
+      /** Probe every repository (`probeAllRemotes`). */
+      all: boolean;
+      /** Whether api.github.com answered `gh auth status` (never rejects). */
+      github: Promise<GithubReachability>;
+    },
   ): Array<Promise<DoctorCheck>> {
     if (!config) {
       return ["repos.codeRoot", "repos.discovered", "repos.remote"].map((id) =>
-        Promise.resolve(skippedCheck(id, "No usable config.json")),
+        instant(skippedCheck(id, "No usable config.json")),
       );
     }
     const { probes } = this.deps;
@@ -265,10 +319,14 @@ export class DoctorRuntime {
     // Settled here so a rejected discovery is never an unhandled rejection
     // while one of the checks is still waiting on another probe.
     discovery.catch(() => {});
+    // Discovery, then `gh auth status`, then the `ls-remote` rounds.
     const remoteBudget = (count: number): number =>
-      (Math.ceil(count / REMOTE_CONCURRENCY) + 1) * DOCTOR_PROBE_TIMEOUT_MS;
+      DOCTOR_SCAN_TIMEOUT_MS +
+      NETWORK_GUARD_MS +
+      Math.ceil(count / NETWORK_PROBE_CONCURRENCY) * NETWORK_PROBE_TIMEOUT_MS +
+      GUARD_SLACK_MS;
     return [
-      guarded("repos.codeRoot", DOCTOR_PROBE_TIMEOUT_MS + 1_000, async () =>
+      guarded("repos.codeRoot", LOCAL_GUARD_MS, async () =>
         codeRootCheck(
           codeRoot,
           codeRoot ? await probes.pathFacts(codeRoot) : undefined,
@@ -277,32 +335,73 @@ export class DoctorRuntime {
       guarded("repos.discovered", DOCTOR_SCAN_TIMEOUT_MS, async () =>
         discoveredCheck((await discovery).length, codeRoot),
       ),
-      guarded("repos.remote", DOCTOR_SCAN_TIMEOUT_MS * 3, async () => {
-        const withRemote = (await discovery).filter((repo) => repo.remoteUrl);
-        const results: RemoteResult[] = [];
-        const remotes = forEachConcurrently(
-          withRemote,
-          REMOTE_CONCURRENCY,
-          async (repo) => {
-            results.push({
-              id: repo.id,
-              root: repo.root,
-              probe: await probes.remoteReachable(repo.root),
-            });
-          },
-        );
-        await guardedWait(remotes, remoteBudget(withRemote.length));
-        for (const repo of withRemote) {
-          if (results.some((result) => result.id === repo.id)) continue;
-          results.push({
+      discovery
+        .then(
+          (repositories) =>
+            repositories.filter((repo) => repo.remoteUrl).length,
+          () => 0,
+        )
+        .then((count) =>
+          guarded("repos.remote", remoteBudget(count), () =>
+            this.remoteCheck(discovery, remotes),
+          ),
+        ),
+    ];
+  }
+
+  /** `repos.remote`: the scoped `ls-remote`s, `NETWORK_PROBE_CONCURRENCY` at a time. */
+  private async remoteCheck(
+    discovery: Promise<RepositoryInfo[]>,
+    remotes: { all: boolean; github: Promise<GithubReachability> },
+  ): Promise<DoctorCheck> {
+    const { probes } = this.deps;
+    const withRemote = (await discovery)
+      .filter((repo) => repo.remoteUrl)
+      .sort((a, b) => a.id.localeCompare(b.id));
+    if (withRemote.length === 0) return remoteCheck([]);
+    const tasks = remotes.all
+      ? []
+      : await this.deps.tasks.listTasks().catch(() => []);
+    const scope = selectRemoteProbes(withRemote, tasks, { all: remotes.all });
+    if (scope.probe.length === 0) return remoteCheck([], scope);
+    const github = scope.probe.some((repo) => onGithub(repo.id))
+      ? await remotes.github
+      : "unknown";
+    const results = new Map<string, RemoteResult>();
+    const toProbe = scope.probe.filter((repo) => {
+      if (github !== "unreachable" || !onGithub(repo.id)) return true;
+      results.set(repo.id, {
+        id: repo.id,
+        root: repo.root,
+        skipped: "api.github.com unreachable",
+      });
+      return false;
+    });
+    const rounds = Math.ceil(toProbe.length / NETWORK_PROBE_CONCURRENCY);
+    await guardedWait(
+      forEachConcurrently(toProbe, NETWORK_PROBE_CONCURRENCY, async (repo) => {
+        const probe: RemoteProbe = await probes
+          .remoteReachable(repo.root)
+          .catch((error: unknown) => ({
+            ok: false,
+            timedOut: false,
+            error: describe(error),
+          }));
+        results.set(repo.id, { id: repo.id, root: repo.root, probe });
+      }),
+      rounds * NETWORK_PROBE_TIMEOUT_MS + GUARD_SLACK_MS,
+    );
+    return remoteCheck(
+      scope.probe.map(
+        (repo) =>
+          results.get(repo.id) ?? {
             id: repo.id,
             root: repo.root,
             probe: { ok: false, timedOut: true },
-          });
-        }
-        return remoteCheck(results.sort((a, b) => a.id.localeCompare(b.id)));
-      }),
-    ];
+          },
+      ),
+      scope,
+    );
   }
 }
 

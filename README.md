@@ -148,6 +148,19 @@ exits, and a `[health]` line every minute (event-loop lag, memory, process
 and terminal activity). `[health] spike`, `[pass]` and `[ipc] slow` lines
 mark moments the app was busy. An identical line repeated within a minute is
 written once, followed by a `… repeated N times` note.
+- **`harbormaster doctor`** (or **Check setup** on the Setup screen,
+Harbormaster menu → Welcome / Setup…) checks tools, agents, state files,
+repositories, disk, the tool socket and PATH; it works with the app down and
+exits 1 when a check fails. Local probes time out after 5 s, network probes
+(`gh auth status`, `git ls-remote`) after 20 s, at most 5 at a time.
+`repos.remote` probes only the repositories with a task in Working or
+Awaiting (newest first, at most 5), else the repository of the most recently
+updated task; the rest are listed as "not probed (no active task)".
+`harbormaster doctor --all-remotes` probes every repository. A remote that
+does not answer within 20 s is a warning, not a failure: a remote that
+advertises very many refs makes every `ls-remote`/fetch slow. When
+`gh auth status` shows api.github.com unreachable, github.com remotes are
+not probed. `--json` includes each check's time in `ms`.
 - **Export Diagnostics…** (in the Harbormaster menu) zips the logs, a
 redacted config and version info into one file to attach to a bug report.
 - **More detail:** quit the app, then start it from a terminal with

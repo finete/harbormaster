@@ -175,6 +175,8 @@ export interface RunOutcome {
   /** The command could not be found / executed (`ENOENT`, `EACCES`). */
   notFound: boolean;
   timedOut: boolean;
+  /** The exit status, when the process ran and exited nonzero on its own. */
+  exitCode?: number;
 }
 
 /**
@@ -213,6 +215,7 @@ export async function runOutcome(
       timedOut:
         fields.killed === true &&
         fields.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      ...(typeof fields.code === "number" ? { exitCode: fields.code } : {}),
     };
   }
 }

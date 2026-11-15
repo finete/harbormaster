@@ -2,15 +2,19 @@
 // doctor.ts). Read-only by construction: nothing here creates, migrates or
 // rewrites a file, so the CLI can run the checks against a state dir while
 // the app is down. Every process probe runs through the shared runner with
-// a short timeout and comes back as data; nothing throws.
+// a timeout and comes back as data; nothing throws. Local probes (command
+// lookups, `--version`, files, the socket) get `LOCAL_PROBE_TIMEOUT_MS`;
+// network probes (`gh auth status`, `git ls-remote`) get
+// `NETWORK_PROBE_TIMEOUT_MS`.
 
 import { readFile, realpath, stat, statfs } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
-  DOCTOR_PROBE_TIMEOUT_MS,
   type EnvironmentProbeAccess,
+  LOCAL_PROBE_TIMEOUT_MS,
+  NETWORK_PROBE_TIMEOUT_MS,
   type PathFacts,
   type PiExtensionFacts,
   type RemoteProbe,
@@ -28,7 +32,10 @@ import { LocalOnboardingProbeAccess } from "./local-onboarding-probe-access.js";
 export interface LocalEnvironmentProbeAccessOptions {
   paths: StatePaths;
   env?: NodeJS.ProcessEnv;
+  /** Limit for local probes; default `LOCAL_PROBE_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /** Limit for network probes; default `NETWORK_PROBE_TIMEOUT_MS`. */
+  networkTimeoutMs?: number;
   /** The Pi extension source the host bundles (the app knows it; the CLI does not). */
   piExtensionSource?: string;
 }
@@ -41,14 +48,19 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
   private readonly env: NodeJS.ProcessEnv;
   private readonly paths: StatePaths;
   private readonly timeoutMs: number;
+  private readonly networkTimeoutMs: number;
   private readonly piExtensionSource: string | undefined;
-  /** Same PATH lookup and `--version` / `gh auth status` runs as the wizard's probes, on the doctor's timeout. */
+  /** Same PATH lookup and `--version` runs as the wizard's probes, on the local timeout. */
   private readonly cli: LocalOnboardingProbeAccess;
+  /** `gh auth status` as the wizard runs it, on the network timeout (gh asks api.github.com). */
+  private readonly networkCli: LocalOnboardingProbeAccess;
 
   constructor(options: LocalEnvironmentProbeAccessOptions) {
     this.env = options.env ?? process.env;
     this.paths = options.paths;
-    this.timeoutMs = options.timeoutMs ?? DOCTOR_PROBE_TIMEOUT_MS;
+    this.timeoutMs = options.timeoutMs ?? LOCAL_PROBE_TIMEOUT_MS;
+    this.networkTimeoutMs =
+      options.networkTimeoutMs ?? NETWORK_PROBE_TIMEOUT_MS;
     this.piExtensionSource =
       options.piExtensionSource ||
       this.env.HARBORMASTER_PI_EXTENSION_SOURCE ||
@@ -56,6 +68,10 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
     this.cli = new LocalOnboardingProbeAccess({
       env: this.env,
       timeoutMs: this.timeoutMs,
+    });
+    this.networkCli = new LocalOnboardingProbeAccess({
+      env: this.env,
+      timeoutMs: this.networkTimeoutMs,
     });
   }
 
@@ -85,7 +101,7 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
   }
 
   githubAuthStatus(): Promise<ProbeOutcome> {
-    return this.cli.githubAuthStatus();
+    return this.networkCli.githubAuthStatus();
   }
 
   async piExtension(): Promise<PiExtensionFacts> {
@@ -146,6 +162,7 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
   async remoteReachable(checkout: string): Promise<RemoteProbe> {
     // Through `env` so git never stops to ask for credentials on a
     // terminal (a credential helper still answers as usual).
+    const started = Date.now();
     const outcome = await runOutcome(
       "env",
       [
@@ -159,18 +176,28 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
         "origin",
         "HEAD",
       ],
-      { timeoutMs: this.timeoutMs },
+      { timeoutMs: this.networkTimeoutMs },
     );
-    if (outcome.ok) return { ok: true, timedOut: false };
-    const error = [outcome.stderr, outcome.stdout]
+    const ms = Date.now() - started;
+    if (outcome.ok) return { ok: true, timedOut: false, ms };
+    const lines = [outcome.stderr, outcome.stdout]
       .join("\n")
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .find(Boolean);
+      .filter(Boolean);
+    // The `fatal:` / `ERROR:` / `remote:` / `ssh:` lines name the cause
+    // (`remote: Repository not found.` then `fatal: repository … not found`).
+    const keyLines = lines.filter((line) =>
+      /^(fatal|error|remote|ssh):/i.test(line),
+    );
+    const error =
+      keyLines.length > 0 ? keyLines.slice(0, 3).join(" — ") : lines[0];
     return {
       ok: false,
       timedOut: outcome.timedOut,
+      ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}),
       ...(error ? { error } : {}),
+      ms,
     };
   }
 

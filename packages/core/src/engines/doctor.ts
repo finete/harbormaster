@@ -7,12 +7,15 @@
 import { delimiter, resolve } from "node:path";
 import type { OrphanWorktreeReport } from "../contracts/commands.js";
 import {
-  DOCTOR_PROBE_TIMEOUT_MS,
   type DoctorCheck,
+  type DoctorCheckItem,
   type DoctorReport,
   type DoctorStatus,
+  LOCAL_PROBE_TIMEOUT_MS,
+  NETWORK_PROBE_TIMEOUT_MS,
   type PathFacts,
   type PiExtensionFacts,
+  REMOTE_PROBE_CAP,
   type RemoteProbe,
   type ToolSocketFacts,
 } from "../contracts/doctor.js";
@@ -71,7 +74,11 @@ function check(
   id: string,
   status: DoctorStatus,
   summary: string,
-  extra: { detail?: string | undefined; remediation?: string | undefined } = {},
+  extra: {
+    detail?: string | undefined;
+    remediation?: string | undefined;
+    items?: DoctorCheckItem[] | undefined;
+  } = {},
 ): DoctorCheck {
   return {
     group: id.split(".")[0] as string,
@@ -80,6 +87,7 @@ function check(
     summary,
     ...(extra.detail ? { detail: extra.detail } : {}),
     ...(extra.remediation ? { remediation: extra.remediation } : {}),
+    ...(extra.items && extra.items.length > 0 ? { items: extra.items } : {}),
   };
 }
 
@@ -128,7 +136,7 @@ export function commandCheck(input: CommandCheckInput): DoctorCheck {
     return check(
       id,
       "skip",
-      `${command} --version timed out after ${seconds(DOCTOR_PROBE_TIMEOUT_MS)}`,
+      `${command} --version timed out after ${seconds(LOCAL_PROBE_TIMEOUT_MS)}`,
       { ...(resolved ? { detail: resolved } : {}) },
     );
   }
@@ -153,23 +161,65 @@ export function commandCheck(input: CommandCheckInput): DoctorCheck {
   );
 }
 
+/** gh's wording for "could not reach the API" (as opposed to "not logged in"). */
+const NETWORK_ERROR =
+  /timeout|timed out|no such host|could not resolve|dial tcp|network is unreachable|connection refused|connection reset|i\/o timeout|error connecting to|TLS handshake/i;
+
+/** Whether `gh auth status` reached api.github.com: it validates the token there. */
+export type GithubReachability = "reachable" | "unreachable" | "unknown";
+
 /**
- * `gh auth status` by EXIT CODE only (its wording changes between gh
- * releases): 0 → ok, non-zero → fail (warn when the GitHub source is off).
+ * Exit 0 → reachable; a timeout or a network-error wording → unreachable;
+ * anything else (not installed, not logged in) proves nothing either way.
+ */
+export function githubReachability(outcome: ProbeOutcome): GithubReachability {
+  if (outcome.ok) return "reachable";
+  if (outcome.timedOut) return "unreachable";
+  if (!outcome.notFound && NETWORK_ERROR.test(outcome.output)) {
+    return "unreachable";
+  }
+  return "unknown";
+}
+
+/**
+ * `gh auth status`, which also proves api.github.com answers (gh validates
+ * the token there). Logged in / not by EXIT CODE only (its wording changes
+ * between gh releases): 0 → ok, non-zero → fail (warn when the GitHub
+ * source is off). A timeout or a network error → warn: GitHub is
+ * unreachable, so `repos.remote` skips github.com remotes.
  */
 export function githubAuthCheck(
   outcome: ProbeOutcome,
   githubEnabled: boolean,
+  ms?: number,
 ): DoctorCheck {
   const id = "tools.gh-auth";
   if (outcome.notFound) return skippedCheck(id, "gh is not installed");
+  const network =
+    "Check the network (VPN, proxy, DNS); github.com remotes are not probed until api.github.com answers.";
   if (outcome.timedOut) {
-    return skippedCheck(
+    return check(
       id,
-      `gh auth status timed out after ${seconds(DOCTOR_PROBE_TIMEOUT_MS)}`,
+      "warn",
+      `gh auth status did not answer within ${seconds(NETWORK_PROBE_TIMEOUT_MS)} (api.github.com unreachable)`,
+      { remediation: network },
     );
   }
-  if (outcome.ok) return check(id, "ok", "gh is logged in");
+  if (outcome.ok) {
+    return check(
+      id,
+      "ok",
+      ms === undefined
+        ? "gh is logged in (api.github.com reachable)"
+        : `gh is logged in (api.github.com reachable, ${Math.round(ms)} ms)`,
+    );
+  }
+  if (githubReachability(outcome) === "unreachable") {
+    return check(id, "warn", "gh could not reach api.github.com", {
+      detail: firstLine(outcome.output),
+      remediation: network,
+    });
+  }
   return check(id, githubEnabled ? "fail" : "warn", "gh is not logged in", {
     remediation: "Run `gh auth login` in a terminal.",
     ...(githubEnabled
@@ -404,46 +454,253 @@ export function discoveredCheck(
   return check(id, "ok", `${count} repositor${count === 1 ? "y" : "ies"}`);
 }
 
-/** One repository's `ls-remote` outcome. */
+/** A task as the `repos.remote` scope rule sees it. */
+export interface RemoteScopeTask {
+  state: string;
+  repositoryId?: string | undefined;
+  updatedAt: string;
+}
+
+/** Why a repository's remote was not probed. */
+export const NOT_PROBED_NO_ACTIVE_TASK = "not probed (no active task)";
+
+/** Which repositories `repos.remote` probes, and why the rest are not. */
+export interface RemoteScope<R extends { id: string }> {
+  probe: R[];
+  notProbed: Array<{ id: string; reason: string }>;
+  /** Set when nothing is probed: why. */
+  skipReason?: string;
+}
+
+function newestFirst<T extends { updatedAt: string }>(
+  items: readonly T[],
+): T[] {
+  return [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/**
+ * `repos.remote`'s scope (an `ls-remote` costs seconds on a remote with
+ * many refs, so the doctor does not probe every checkout): the
+ * repositories with a task in `working` / `awaiting`, newest task first,
+ * at most `REMOTE_PROBE_CAP`; with none active, the repository of the most
+ * recently updated task; else nothing (`skipReason`). `all` probes every
+ * repository (`harbormaster doctor --all-remotes`).
+ */
+export function selectRemoteProbes<R extends { id: string }>(
+  repositories: readonly R[],
+  tasks: readonly RemoteScopeTask[],
+  options: { all?: boolean | undefined; cap?: number } = {},
+): RemoteScope<R> {
+  if (options.all) return { probe: [...repositories], notProbed: [] };
+  const cap = options.cap ?? REMOTE_PROBE_CAP;
+  const byId = new Map(repositories.map((repo) => [repo.id, repo]));
+  const known = newestFirst(
+    tasks.filter((task) => task.repositoryId && byId.has(task.repositoryId)),
+  );
+  const active: string[] = [];
+  for (const task of known) {
+    if (task.state !== "working" && task.state !== "awaiting") continue;
+    const id = task.repositoryId as string;
+    if (!active.includes(id)) active.push(id);
+  }
+  let chosen = active.slice(0, cap);
+  const overflow = new Set(active.slice(cap));
+  if (chosen.length === 0 && known[0]) {
+    chosen = [known[0].repositoryId as string];
+  }
+  const notProbed = repositories
+    .filter((repo) => !chosen.includes(repo.id))
+    .map((repo) => ({
+      id: repo.id,
+      reason: overflow.has(repo.id)
+        ? `not probed (more than ${cap} repositories with active tasks)`
+        : NOT_PROBED_NO_ACTIVE_TASK,
+    }));
+  const probe = chosen.map((id) => byId.get(id) as R);
+  if (probe.length > 0) return { probe, notProbed };
+  return {
+    probe,
+    notProbed,
+    skipReason: "Not probed: no repository has a task (active or recent)",
+  };
+}
+
+/** git's wording for a definite failure (the remote said no, or the host does not resolve). */
+const DEFINITE_REMOTE_ERROR = [
+  /repository not found/i,
+  /repository '.*' not found/i,
+  /permission denied/i,
+  /could not read from remote/i,
+  /authentication failed/i,
+  /could not resolve host/i,
+  /could not resolve hostname/i,
+  /nodename nor servname/i,
+  /name or service not known/i,
+  /temporary failure in name resolution/i,
+  // git refuses the remote's protocol (GIT_ALLOW_PROTOCOL / protocol.allow).
+  /transport '.*' not allowed/i,
+];
+
+/** The text for a remote that did not answer in time. */
+export const REMOTE_TIMEOUT_REMEDIATION = `the remote did not answer within ${seconds(NETWORK_PROBE_TIMEOUT_MS)}; a remote that advertises very many refs (~100k refs, ~10+ MB of listing) makes every ls-remote/fetch slow; this is a property of the remote, not of Harbormaster`;
+
+/**
+ * One `ls-remote`'s verdict: `ok` when it answered (exit 0, or 2: reachable
+ * but no HEAD advertised); `fail` only for a definite error (exit 128 with
+ * "Repository not found", "Permission denied", "Could not read from
+ * remote", "Authentication failed", a DNS failure); `warn` for a timeout
+ * or anything unclassified.
+ */
+export function classifyRemoteProbe(probe: RemoteProbe): {
+  status: DoctorStatus;
+  summary: string;
+} {
+  if (probe.ok) return { status: "ok", summary: "reachable" };
+  if (probe.timedOut) {
+    return {
+      status: "warn",
+      summary: `did not answer within ${seconds(NETWORK_PROBE_TIMEOUT_MS)}`,
+    };
+  }
+  if (probe.exitCode === 2) {
+    return { status: "ok", summary: "reachable (no HEAD advertised)" };
+  }
+  const error = probe.error ?? "";
+  if (
+    (probe.exitCode === undefined || probe.exitCode === 128) &&
+    DEFINITE_REMOTE_ERROR.some((pattern) => pattern.test(error))
+  ) {
+    return { status: "fail", summary: error };
+  }
+  return {
+    status: "warn",
+    summary: `failed: ${error || `exit ${probe.exitCode ?? "?"}`}`,
+  };
+}
+
+/** One repository under `repos.remote`: probed, or skipped before probing (`skipped`: why, e.g. `api.github.com unreachable`). */
 export interface RemoteResult {
   id: string;
   root: string;
-  probe: RemoteProbe;
+  probe?: RemoteProbe;
+  skipped?: string;
 }
 
-/** `repos.remote`: every discovered repository's `origin` answers `ls-remote`. */
-export function remoteCheck(results: readonly RemoteResult[]): DoctorCheck {
-  const id = "repos.remote";
-  if (results.length === 0) {
-    return skippedCheck(id, "No repositories with an origin remote");
-  }
-  const failed = results.filter((result) => !result.probe.ok);
-  if (failed.length === 0) {
-    return check(
-      id,
-      "ok",
-      `${results.length} remote${results.length === 1 ? "" : "s"} reachable`,
-    );
-  }
-  return check(
-    id,
-    "fail",
-    `${failed.length} of ${results.length} remote${results.length === 1 ? "" : "s"} unreachable`,
-    {
-      detail: capLines(
-        failed.map(
-          (result) =>
-            `${result.id}: ${
-              result.probe.timedOut
-                ? `timed out after ${seconds(DOCTOR_PROBE_TIMEOUT_MS)}`
-                : (result.probe.error ?? "failed")
-            }`,
-        ),
-        10,
-      ),
-      remediation: `Check the network and your git credentials: \`git -C ${failed[0]?.root} ls-remote origin HEAD\`.`,
-    },
+const STATUS_RANK: Record<DoctorStatus, number> = {
+  skip: 0,
+  ok: 1,
+  warn: 2,
+  fail: 3,
+};
+
+/** The worst status of `statuses` (`skip` when empty). */
+export function worstStatus(statuses: readonly DoctorStatus[]): DoctorStatus {
+  return statuses.reduce<DoctorStatus>(
+    (worst, status) =>
+      STATUS_RANK[status] > STATUS_RANK[worst] ? status : worst,
+    "skip",
   );
+}
+
+/**
+ * `repos.remote`: each probed repository's `origin` answers `ls-remote`,
+ * one item per repository; the check's status is the worst item's. The
+ * repositories outside the scope (`selectRemoteProbes`) are listed in
+ * `detail`.
+ */
+export function remoteCheck(
+  results: readonly RemoteResult[],
+  scope: {
+    notProbed?: ReadonlyArray<{ id: string; reason: string }>;
+    skipReason?: string | undefined;
+  } = {},
+): DoctorCheck {
+  const id = "repos.remote";
+  const notProbed = scope.notProbed ?? [];
+  const notProbedDetail =
+    notProbed.length > 0
+      ? [
+          capLines(
+            notProbed.map((entry) => `${entry.id}: ${entry.reason}`),
+            10,
+          ),
+          "`harbormaster doctor --all-remotes` probes every repository.",
+        ].join("\n")
+      : undefined;
+  if (results.length === 0) {
+    if (notProbed.length === 0) {
+      return skippedCheck(id, "No repositories with an origin remote");
+    }
+    return check(id, "skip", scope.skipReason ?? "No remote probed", {
+      detail: notProbedDetail,
+    });
+  }
+  const items: DoctorCheckItem[] = results.map((result) => {
+    if (!result.probe) {
+      return {
+        name: result.id,
+        status: "skip",
+        summary: `not probed (${result.skipped ?? "skipped"})`,
+      };
+    }
+    const verdict = classifyRemoteProbe(result.probe);
+    return {
+      name: result.id,
+      ...verdict,
+      ...(result.probe.ms !== undefined ? { ms: result.probe.ms } : {}),
+    };
+  });
+  const status = worstStatus(items.map((item) => item.status));
+  const probed = items.filter((item) => item.status !== "skip");
+  const count = (n: number, noun: string): string =>
+    `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const notProbedCount = notProbed.length + (items.length - probed.length);
+  const suffix = notProbedCount > 0 ? `; ${notProbedCount} not probed` : "";
+  if (probed.length === 0) {
+    const reasons = [
+      ...new Set(results.map((result) => result.skipped ?? "skipped")),
+    ];
+    return check(id, "skip", `Not probed: ${reasons.join("; ")}`, {
+      detail: notProbedDetail,
+      items,
+    });
+  }
+  const failed = items.filter((item) => item.status === "fail");
+  const timedOut = results.filter((result) => result.probe?.timedOut);
+  const unclear = items.filter((item) => item.status === "warn").length;
+  const summary =
+    status === "ok"
+      ? `${count(probed.length, "remote")} reachable${suffix}`
+      : `${[
+          failed.length > 0 ? `${failed.length} unreachable` : "",
+          timedOut.length > 0
+            ? `${timedOut.length} did not answer within ${seconds(NETWORK_PROBE_TIMEOUT_MS)}`
+            : "",
+          unclear > timedOut.length
+            ? `${unclear - timedOut.length} failed (unclear why)`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(", ")} (of ${probed.length} probed)${suffix}`;
+  const firstProblem = results.find((result) => {
+    const item = items.find((entry) => entry.name === result.id);
+    return item?.status === "fail" || item?.status === "warn";
+  });
+  const remediation = [
+    failed.length > 0 || unclear > timedOut.length
+      ? `Check the network and your git credentials: \`git -C ${firstProblem?.root} ls-remote origin HEAD\`.`
+      : "",
+    timedOut.length > 0
+      ? `${REMOTE_TIMEOUT_REMEDIATION.charAt(0).toUpperCase()}${REMOTE_TIMEOUT_REMEDIATION.slice(1)}.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return check(id, status, summary, {
+    detail: notProbedDetail,
+    remediation: remediation || undefined,
+    items,
+  });
 }
 
 function gib(bytes: number): string {
@@ -608,6 +865,13 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push(
       `  ${DOCTOR_STATUS_SYMBOLS[item.status]} ${item.id}  ${item.summary}`,
     );
+    for (const entry of item.items ?? []) {
+      lines.push(
+        `      ${DOCTOR_STATUS_SYMBOLS[entry.status]} ${entry.name}  ${entry.summary}${
+          entry.ms !== undefined ? ` (${Math.round(entry.ms)} ms)` : ""
+        }`,
+      );
+    }
     if (item.detail && item.status !== "ok") {
       lines.push(...indent(item.detail, "      "));
     }

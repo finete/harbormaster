@@ -426,6 +426,73 @@ describe("harbormaster doctor", () => {
   });
 });
 
+describe("harbormaster doctor --all-remotes", () => {
+  const remote: DoctorReport = {
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    checks: [
+      {
+        group: "repos",
+        id: "repos.remote",
+        status: "warn",
+        summary: "1 did not answer within 20 s (of 2 probed)",
+        ms: 20_012,
+        items: [
+          {
+            name: "github.com/acme/alpha",
+            status: "ok",
+            summary: "reachable",
+            ms: 412,
+          },
+          {
+            name: "github.com/acme/big",
+            status: "warn",
+            summary: "did not answer within 20 s",
+            ms: 20_000,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("passes probeAllRemotes and prints one line per repository", async () => {
+    await server?.close();
+    server = undefined;
+    const inputs: unknown[] = [];
+    const run = io();
+    run.localDoctor = async (_env, input) => {
+      inputs.push(input);
+      return remote;
+    };
+    expect(await main(["doctor", "--all-remotes"], run)).toBe(0);
+    expect(run.out()).toContain(
+      [
+        "  ! repos.remote  1 did not answer within 20 s (of 2 probed)",
+        "      ✓ github.com/acme/alpha  reachable (412 ms)",
+        "      ! github.com/acme/big  did not answer within 20 s (20000 ms)",
+      ].join("\n"),
+    );
+    const plain = io();
+    plain.localDoctor = async (_env, input) => {
+      inputs.push(input);
+      return remote;
+    };
+    expect(await main(["doctor", "--json"], plain)).toBe(0);
+    expect(inputs).toEqual([{ probeAllRemotes: true }, {}]);
+    expect(JSON.parse(plain.out()).checks[0]).toMatchObject({
+      ms: 20_012,
+      items: [{ ms: 412 }, { ms: 20_000 }],
+    });
+    const both = io();
+    both.localDoctor = async (_env, input) => {
+      inputs.push(input);
+      return remote;
+    };
+    expect(await main(["doctor", "--all-remotes", "--json"], both)).toBe(0);
+    expect(inputs[2]).toEqual({ probeAllRemotes: true });
+    expect(await main(["doctor", "--all-remotes", "yes"], io())).toBe(64);
+  });
+});
+
 describe("parseFlags", () => {
   it("reads --k v, --k=v and bare flags", () => {
     expect([

@@ -15,13 +15,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalEnvironmentProbeAccess } from "../src/access/local-environment-probe-access.js";
-import type {
-  DoctorReport,
-  EnvironmentProbeAccess,
+import {
+  type DoctorReport,
+  type EnvironmentProbeAccess,
+  LOCAL_PROBE_TIMEOUT_MS,
+  NETWORK_PROBE_CONCURRENCY,
+  NETWORK_PROBE_TIMEOUT_MS,
+  type RemoteProbe,
 } from "../src/contracts/doctor.js";
 import type { ProbeOutcome } from "../src/contracts/onboarding.js";
 import type { RuleFile } from "../src/contracts/rules.js";
 import {
+  classifyRemoteProbe,
   codeRootCheck,
   commandCheck,
   DISK_FAIL_BYTES,
@@ -32,21 +37,29 @@ import {
   doctorPlainSummary,
   formatDoctorReport,
   githubAuthCheck,
+  githubReachability,
   loginShellPathCheck,
   missingPathEntries,
   orderDoctorChecks,
   orphansCheck,
   piExtensionCheck,
+  REMOTE_TIMEOUT_REMEDIATION,
   remoteCheck,
   rulesCheck,
+  selectRemoteProbes,
   socketCheck,
   stateFileCheck,
 } from "../src/engines/doctor.js";
 import { createCore } from "../src/index.js";
+import { DoctorRuntime } from "../src/manager/doctor-runtime.js";
 import {
   comparePiExtension,
   resolvePiExtensionsDir,
 } from "../src/utilities/pi-extension.js";
+import {
+  type ProcessRunRequest,
+  setProcessRunner,
+} from "../src/utilities/run.js";
 import { resolveStatePaths } from "../src/utilities/state-paths.js";
 
 const ok = (output = ""): ProbeOutcome => ({
@@ -122,15 +135,40 @@ describe("commandCheck", () => {
   });
 });
 
-describe("githubAuthCheck (exit code only)", () => {
+describe("githubAuthCheck (exit code, plus reachability)", () => {
   it("maps the exit code, whatever gh printed", () => {
-    expect(githubAuthCheck(ok("anything"), true).status).toBe("ok");
+    expect(githubAuthCheck(ok("anything"), true)).toMatchObject({
+      status: "ok",
+      summary: "gh is logged in (api.github.com reachable)",
+    });
+    expect(githubAuthCheck(ok(), true, 412.4).summary).toBe(
+      "gh is logged in (api.github.com reachable, 412 ms)",
+    );
     expect(
       githubAuthCheck(failed("Logged in to github.com account x"), true),
     ).toMatchObject({ status: "fail", summary: "gh is not logged in" });
     expect(githubAuthCheck(failed(), false).status).toBe("warn");
     expect(githubAuthCheck(notFound, true).status).toBe("skip");
-    expect(githubAuthCheck(timedOut, true).status).toBe("skip");
+  });
+
+  it("a timeout or a network error is warn: api.github.com unreachable", () => {
+    expect(githubAuthCheck(timedOut, true)).toMatchObject({
+      status: "warn",
+      summary:
+        "gh auth status did not answer within 20 s (api.github.com unreachable)",
+    });
+    const offline = failed(
+      "X Failed to log in to github.com: dial tcp: lookup api.github.com: no such host",
+    );
+    expect(githubAuthCheck(offline, true)).toMatchObject({
+      status: "warn",
+      summary: "gh could not reach api.github.com",
+    });
+    expect(githubReachability(ok())).toBe("reachable");
+    expect(githubReachability(timedOut)).toBe("unreachable");
+    expect(githubReachability(offline)).toBe("unreachable");
+    expect(githubReachability(failed("not logged in"))).toBe("unknown");
+    expect(githubReachability(notFound)).toBe("unknown");
   });
 });
 
@@ -257,34 +295,216 @@ describe("repository checks", () => {
     expect(discoveredCheck(3, "/u/Code").summary).toBe("3 repositories");
   });
 
-  it("remote: fail lists the unreachable repositories", () => {
+  it("remote: one item per repository, the worst status wins", () => {
     expect(remoteCheck([]).status).toBe("skip");
     const good = {
       id: "github.com/a/ok",
       root: "/c/ok",
-      probe: { ok: true, timedOut: false },
+      probe: { ok: true, timedOut: false, ms: 412 },
     };
-    expect(remoteCheck([good]).status).toBe("ok");
-    const check = remoteCheck([
-      good,
+    expect(remoteCheck([good])).toMatchObject({
+      status: "ok",
+      summary: "1 remote reachable",
+      items: [
+        {
+          name: "github.com/a/ok",
+          status: "ok",
+          summary: "reachable",
+          ms: 412,
+        },
+      ],
+    });
+    const slow = {
+      id: "github.com/a/slow",
+      root: "/c/slow",
+      probe: { ok: false, timedOut: true, ms: 20_000 },
+    };
+    const warned = remoteCheck([good, slow]);
+    expect(warned).toMatchObject({
+      status: "warn",
+      summary: "1 did not answer within 20 s (of 2 probed)",
+    });
+    expect(warned.remediation).toContain("~100k refs");
+    expect(warned.remediation).toContain("not of Harbormaster");
+    const check = remoteCheck(
+      [
+        good,
+        {
+          id: "github.com/a/gone",
+          root: "/c/gone",
+          probe: {
+            ok: false,
+            timedOut: false,
+            exitCode: 128,
+            error: "ERROR: Repository not found.",
+          },
+        },
+        slow,
+      ],
       {
-        id: "github.com/a/gone",
-        root: "/c/gone",
-        probe: { ok: false, timedOut: false, error: "Repository not found." },
+        notProbed: [
+          { id: "github.com/a/idle", reason: "not probed (no active task)" },
+        ],
       },
-      {
-        id: "github.com/a/slow",
-        root: "/c/slow",
-        probe: { ok: false, timedOut: true },
-      },
-    ]);
+    );
     expect(check).toMatchObject({
       status: "fail",
-      summary: "2 of 3 remotes unreachable",
+      summary:
+        "1 unreachable, 1 did not answer within 20 s (of 3 probed); 1 not probed",
     });
-    expect(check.detail).toBe(
-      "github.com/a/gone: Repository not found.\ngithub.com/a/slow: timed out after 3 s",
+    expect(check.items?.map((item) => item.status)).toEqual([
+      "ok",
+      "fail",
+      "warn",
+    ]);
+    expect(check.detail).toContain(
+      "github.com/a/idle: not probed (no active task)",
     );
+    expect(check.detail).toContain("--all-remotes");
+    expect(check.remediation).toContain("git -C /c/gone ls-remote origin HEAD");
+  });
+
+  it("remote: nothing probed is skip with the reason", () => {
+    expect(
+      remoteCheck([], {
+        notProbed: [{ id: "x", reason: "not probed (no active task)" }],
+        skipReason: "Not probed: no repository has a task (active or recent)",
+      }),
+    ).toMatchObject({
+      status: "skip",
+      summary: "Not probed: no repository has a task (active or recent)",
+    });
+    expect(
+      remoteCheck([
+        {
+          id: "github.com/a/x",
+          root: "/x",
+          skipped: "api.github.com unreachable",
+        },
+      ]),
+    ).toMatchObject({
+      status: "skip",
+      summary: "Not probed: api.github.com unreachable",
+      items: [
+        { status: "skip", summary: "not probed (api.github.com unreachable)" },
+      ],
+    });
+  });
+});
+
+describe("classifyRemoteProbe", () => {
+  const failing = (error: string, exitCode = 128): RemoteProbe => ({
+    ok: false,
+    timedOut: false,
+    exitCode,
+    error,
+  });
+
+  it("ok when it answered (exit 0, or 2: no HEAD advertised)", () => {
+    expect(classifyRemoteProbe({ ok: true, timedOut: false }).status).toBe(
+      "ok",
+    );
+    expect(classifyRemoteProbe(failing("", 2))).toEqual({
+      status: "ok",
+      summary: "reachable (no HEAD advertised)",
+    });
+  });
+
+  it("fail only for a definite error on exit 128", () => {
+    for (const error of [
+      "ERROR: Repository not found. — fatal: Could not read from remote repository.",
+      "remote: Repository not found. — fatal: repository 'https://github.com/a/b/' not found",
+      "git@github.com: Permission denied (publickey).",
+      "fatal: Authentication failed for 'https://github.com/a/b/'",
+      "fatal: unable to access 'https://github.com/a/b/': Could not resolve host: github.com",
+      "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known",
+      "fatal: transport 'https' not allowed",
+    ]) {
+      expect(classifyRemoteProbe(failing(error))).toEqual({
+        status: "fail",
+        summary: error,
+      });
+    }
+    // The same words on another exit code are not definite.
+    expect(classifyRemoteProbe(failing("Permission denied", 1)).status).toBe(
+      "warn",
+    );
+  });
+
+  it("warn for a timeout or anything unclassified", () => {
+    expect(classifyRemoteProbe({ ok: false, timedOut: true })).toEqual({
+      status: "warn",
+      summary: "did not answer within 20 s",
+    });
+    expect(
+      classifyRemoteProbe(
+        failing("fatal: unable to access 'https://x/': Operation timed out"),
+      ),
+    ).toMatchObject({ status: "warn" });
+    expect(REMOTE_TIMEOUT_REMEDIATION).toMatch(
+      /^the remote did not answer within 20 s/,
+    );
+  });
+});
+
+describe("selectRemoteProbes", () => {
+  const repos = ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ id }));
+  const task = (
+    repositoryId: string | undefined,
+    state: string,
+    updatedAt: string,
+  ) => ({ repositoryId, state, updatedAt });
+
+  it("active-task repositories, newest task first, capped at 5", () => {
+    const scope = selectRemoteProbes(repos, [
+      task("a", "working", "2026-01-01T00:00:01Z"),
+      task("b", "awaiting", "2026-01-01T00:00:07Z"),
+      task("c", "working", "2026-01-01T00:00:03Z"),
+      task("b", "working", "2026-01-01T00:00:02Z"),
+      task("d", "working", "2026-01-01T00:00:04Z"),
+      task("e", "awaiting", "2026-01-01T00:00:05Z"),
+      task("f", "working", "2026-01-01T00:00:06Z"),
+      task("g", "done", "2026-01-01T00:00:09Z"),
+      task("zz", "working", "2026-01-01T00:00:09Z"),
+    ]);
+    expect(scope.probe.map((repo) => repo.id)).toEqual([
+      "b",
+      "f",
+      "e",
+      "d",
+      "c",
+    ]);
+    expect(scope.notProbed).toEqual([
+      {
+        id: "a",
+        reason: "not probed (more than 5 repositories with active tasks)",
+      },
+      { id: "g", reason: "not probed (no active task)" },
+    ]);
+    expect(scope.skipReason).toBeUndefined();
+  });
+
+  it("falls back to the most recently updated task's repository", () => {
+    const scope = selectRemoteProbes(repos, [
+      task("c", "done", "2026-01-01T00:00:01Z"),
+      task("d", "backlog", "2026-01-01T00:00:05Z"),
+      task(undefined, "working", "2026-01-01T00:00:09Z"),
+    ]);
+    expect(scope.probe.map((repo) => repo.id)).toEqual(["d"]);
+    expect(scope.notProbed).toHaveLength(6);
+  });
+
+  it("no task on a known repository: nothing probed, with the reason", () => {
+    const scope = selectRemoteProbes(repos, []);
+    expect(scope.probe).toEqual([]);
+    expect(scope.notProbed).toHaveLength(7);
+    expect(scope.skipReason).toBe(
+      "Not probed: no repository has a task (active or recent)",
+    );
+  });
+
+  it("all: every repository, no cap", () => {
+    expect(selectRemoteProbes(repos, [], { all: true }).probe).toHaveLength(7);
   });
 });
 
@@ -389,6 +609,25 @@ describe("report rendering", () => {
     );
     expect(doctorExitCode(report)).toBe(1);
     expect(doctorExitCode({ checks: report.checks.slice(1) })).toBe(0);
+  });
+
+  it("renders per-repository lines under repos.remote", () => {
+    const remote = remoteCheck([
+      {
+        id: "github.com/a/ok",
+        root: "/c/ok",
+        probe: { ok: true, timedOut: false, ms: 412 },
+      },
+    ]);
+    expect(formatDoctorReport({ checkedAt: "", checks: [remote] })).toBe(
+      [
+        "Repositories",
+        "  ✓ repos.remote  1 remote reachable",
+        "      ✓ github.com/a/ok  reachable (412 ms)",
+        "",
+        "1 ok, 0 warnings, 0 failed, 0 skipped",
+      ].join("\n"),
+    );
   });
 
   it("plain summary: versions plus failing and warning checks", () => {
@@ -517,7 +756,259 @@ describe("doctor command", () => {
     });
     expect(byId.get("disk.free")).toMatchObject({
       status: "skip",
-      summary: "Timed out after 4 s",
+      summary: "Timed out after 6 s",
     });
   }, 15_000);
+});
+
+describe("probe timeouts per kind", () => {
+  afterEach(() => setProcessRunner(undefined));
+
+  it("local probes get LOCAL_PROBE_TIMEOUT_MS, network probes NETWORK_PROBE_TIMEOUT_MS", async () => {
+    expect(LOCAL_PROBE_TIMEOUT_MS).toBe(5_000);
+    expect(NETWORK_PROBE_TIMEOUT_MS).toBe(20_000);
+    expect(NETWORK_PROBE_CONCURRENCY).toBe(5);
+    const seen: ProcessRunRequest[] = [];
+    setProcessRunner(async (request) => {
+      seen.push(request);
+      if (request.args.includes("ls-remote")) {
+        throw Object.assign(new Error("exit 128"), {
+          code: 128,
+          stdout: "",
+          stderr:
+            "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n",
+        });
+      }
+      return { stdout: "x 1.0.0", stderr: "" };
+    });
+    const probes = new LocalEnvironmentProbeAccess({
+      paths: resolveStatePaths("/nonexistent-state"),
+      env: { PATH: "/usr/bin" },
+    });
+    await probes.commandVersion("git");
+    await probes.githubAuthStatus();
+    const remote = await probes.remoteReachable("/c/repo");
+    const timeoutOf = (match: (request: ProcessRunRequest) => boolean) =>
+      seen.find(match)?.timeoutMs;
+    expect(timeoutOf((r) => r.args[0] === "--version")).toBe(
+      LOCAL_PROBE_TIMEOUT_MS,
+    );
+    expect(timeoutOf((r) => r.args.join(" ") === "auth status")).toBe(
+      NETWORK_PROBE_TIMEOUT_MS,
+    );
+    expect(timeoutOf((r) => r.args.includes("ls-remote"))).toBe(
+      NETWORK_PROBE_TIMEOUT_MS,
+    );
+    expect(remote).toMatchObject({
+      ok: false,
+      timedOut: false,
+      exitCode: 128,
+      error:
+        "ERROR: Repository not found. — fatal: Could not read from remote repository.",
+    });
+    expect(typeof remote.ms).toBe("number");
+    expect(classifyRemoteProbe(remote).status).toBe("fail");
+  });
+});
+
+describe("doctor runtime: repos.remote scope and network probes", () => {
+  const repo = (name: string, host = "github.com") => ({
+    id: `${host}/acme/${name}`,
+    root: `/c/${name}`,
+    defaultBranch: "main",
+    remoteUrl: `https://${host}/acme/${name}.git`,
+    checkouts: [],
+  });
+  const task = (repositoryId: string, state: string, updatedAt: string) => ({
+    id: `t-${repositoryId}-${updatedAt}`,
+    repositoryId,
+    state,
+    updatedAt,
+  });
+
+  function runtime(options: {
+    repositories: ReturnType<typeof repo>[];
+    tasks?: Array<ReturnType<typeof task>>;
+    probes?: Partial<EnvironmentProbeAccess>;
+  }): DoctorRuntime {
+    const probes = {
+      processPath: () => "/usr/bin",
+      platform: () => "darwin",
+      commands: () => ({ git: "git", gh: "gh", pi: "pi", claude: "claude" }),
+      resolveCommand: async (command: string) => `/bin/${command}`,
+      commandVersion: async (command: string) => ok(`${command} 1.0.0`),
+      githubAuthStatus: async () => ok(),
+      piExtension: async () => ({ dir: "/e", installedPath: "/e/x.ts" }),
+      pathFacts: async () => ({
+        exists: true,
+        isDirectory: true,
+        realPath: "/c",
+      }),
+      configFile: async () => ({ path: "/s/config.json", exists: true }),
+      stateDirFreeBytes: async () => ({
+        path: "/s",
+        freeBytes: 100 * 1024 ** 3,
+      }),
+      remoteReachable: async (): Promise<RemoteProbe> => ({
+        ok: true,
+        timedOut: false,
+        ms: 5,
+      }),
+      toolSocket: async () => ({
+        path: "/s/sock",
+        exists: false,
+        responds: false,
+      }),
+      ...options.probes,
+    } as EnvironmentProbeAccess;
+    return new DoctorRuntime({
+      probes,
+      config: { load: async () => ({ codeRoot: "/c" }) } as never,
+      tasks: { listTasks: async () => options.tasks ?? [] } as never,
+      bindings: { listBindings: async () => [] } as never,
+      now: () => new Date("2026-01-01T00:00:00Z"),
+      repositories: async () => options.repositories,
+      orphans: async () => ({ root: "/w", orphans: [] }),
+    });
+  }
+
+  const byId = (report: DoctorReport) =>
+    new Map(report.checks.map((check) => [check.id, check]));
+
+  it("probes only repositories with an active task; every check carries ms", async () => {
+    const probed: string[] = [];
+    const report = await runtime({
+      repositories: [repo("alpha"), repo("beta"), repo("gamma")],
+      tasks: [
+        task("github.com/acme/beta", "working", "2026-01-01T00:00:02Z"),
+        task("github.com/acme/gamma", "done", "2026-01-01T00:00:09Z"),
+      ],
+      probes: {
+        remoteReachable: async (root) => {
+          probed.push(root);
+          return { ok: true, timedOut: false, ms: 7 };
+        },
+      },
+    }).run();
+    expect(probed).toEqual(["/c/beta"]);
+    const remote = byId(report).get("repos.remote");
+    expect(remote).toMatchObject({
+      status: "ok",
+      summary: "1 remote reachable; 2 not probed",
+      items: [{ name: "github.com/acme/beta", status: "ok", ms: 7 }],
+    });
+    expect(remote?.detail).toContain(
+      "github.com/acme/alpha: not probed (no active task)",
+    );
+    for (const check of report.checks) {
+      expect(typeof check.ms, check.id).toBe("number");
+    }
+    expect(byId(report).get("tools.gh-auth")?.summary).toMatch(
+      /^gh is logged in \(api\.github\.com reachable, \d+ ms\)$/,
+    );
+  });
+
+  it("probeAllRemotes probes every repository, at most 5 at a time", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const probed: string[] = [];
+    const repositories = Array.from({ length: 12 }, (_, index) =>
+      repo(`r${String(index).padStart(2, "0")}`),
+    );
+    const report = await runtime({
+      repositories,
+      probes: {
+        remoteReachable: async (root) => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          inFlight--;
+          probed.push(root);
+          return { ok: true, timedOut: false, ms: 10 };
+        },
+      },
+    }).run({ probeAllRemotes: true });
+    expect(probed).toHaveLength(12);
+    expect(maxInFlight).toBe(NETWORK_PROBE_CONCURRENCY);
+    expect(byId(report).get("repos.remote")).toMatchObject({
+      status: "ok",
+      summary: "12 remotes reachable",
+    });
+  });
+
+  it("no task at all: nothing probed, skip with the reason", async () => {
+    let calls = 0;
+    const report = await runtime({
+      repositories: [repo("alpha")],
+      probes: {
+        remoteReachable: async () => {
+          calls++;
+          return { ok: true, timedOut: false };
+        },
+      },
+    }).run();
+    expect(calls).toBe(0);
+    expect(byId(report).get("repos.remote")).toMatchObject({
+      status: "skip",
+      summary: "Not probed: no repository has a task (active or recent)",
+    });
+  });
+
+  it("api.github.com unreachable: github.com remotes are skipped with that reason", async () => {
+    const probed: string[] = [];
+    const report = await runtime({
+      repositories: [repo("alpha"), repo("own", "git.example.com")],
+      tasks: [
+        task("github.com/acme/alpha", "working", "2026-01-01T00:00:01Z"),
+        task("git.example.com/acme/own", "awaiting", "2026-01-01T00:00:02Z"),
+      ],
+      probes: {
+        githubAuthStatus: async () => timedOut,
+        remoteReachable: async (root) => {
+          probed.push(root);
+          return { ok: true, timedOut: false };
+        },
+      },
+    }).run();
+    expect(probed).toEqual(["/c/own"]);
+    expect(byId(report).get("tools.gh-auth")?.status).toBe("warn");
+    expect(byId(report).get("repos.remote")?.items).toEqual([
+      expect.objectContaining({
+        name: "git.example.com/acme/own",
+        status: "ok",
+      }),
+      {
+        name: "github.com/acme/alpha",
+        status: "skip",
+        summary: "not probed (api.github.com unreachable)",
+      },
+    ]);
+  });
+
+  it("a timeout is warn, a definite error fail: the check takes the worst", async () => {
+    const report = await runtime({
+      repositories: [repo("slow"), repo("gone")],
+      tasks: [
+        task("github.com/acme/slow", "working", "2026-01-01T00:00:01Z"),
+        task("github.com/acme/gone", "working", "2026-01-01T00:00:02Z"),
+      ],
+      probes: {
+        remoteReachable: async (root) =>
+          root === "/c/slow"
+            ? { ok: false, timedOut: true, ms: 20_000 }
+            : {
+                ok: false,
+                timedOut: false,
+                exitCode: 128,
+                error: "remote: Repository not found.",
+              },
+      },
+    }).run();
+    const remote = byId(report).get("repos.remote");
+    expect(remote?.status).toBe("fail");
+    expect(remote?.items?.map((item) => [item.name, item.status])).toEqual([
+      ["github.com/acme/gone", "fail"],
+      ["github.com/acme/slow", "warn"],
+    ]);
+  });
 });

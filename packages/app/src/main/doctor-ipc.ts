@@ -29,8 +29,12 @@ export function appDoctorInput(facts: DoctorHostFacts): DoctorInput {
   };
 }
 
-/** How long Export Diagnostics waits for the doctor before zipping without it. */
-export const DIAGNOSTICS_DOCTOR_TIMEOUT_MS = 10_000;
+/**
+ * How long Export Diagnostics waits for the doctor before zipping without
+ * it: `gh auth status` and then one round of `ls-remote`s, each up to core's
+ * 20 s network probe limit, plus slack.
+ */
+export const DIAGNOSTICS_DOCTOR_TIMEOUT_MS = 45_000;
 
 /** The doctor report for a diagnostics bundle, or why it is missing (never throws). */
 export async function doctorForDiagnostics(

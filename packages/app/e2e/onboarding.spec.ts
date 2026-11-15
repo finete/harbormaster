@@ -12,8 +12,10 @@
 // Claude Code (Pi missing, with its install command). A relaunch goes
 // straight to the app; "Welcome / Setup…" reopens the wizard over it, and
 // its "Check setup" runs the doctor: a Pi that answers `--version` reads ok
-// while git may not use https there (GIT_ALLOW_PROTOCOL=file), so both
-// fixture remotes fail `repos.remote`.
+// while git may not use https there (GIT_ALLOW_PROTOCOL=file), so
+// `repos.remote` fails for beta: no task is active, so the doctor probes
+// only the most recently updated task's repository (beta) and lists alpha
+// as not probed.
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -83,6 +85,8 @@ function writeFakeGh(): string {
     [
       "#!/bin/sh",
       'if [ "$1 $2" = "auth status" ]; then',
+      // Holds the doctor in its running state long enough to observe it.
+      '  [ -n "$FAKE_GH_AUTH_DELAY" ] && sleep "$FAKE_GH_AUTH_DELAY"',
       "  echo 'github.com'",
       "  echo '  ✓ Logged in to github.com account octo-e2e (keyring)'",
       "  echo '  - Active account: true'",
@@ -323,6 +327,7 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
   const second = await launch({
     HARBORMASTER_PI_COMMAND: writeVersionPi(),
     GIT_ALLOW_PROTOCOL: "file",
+    FAKE_GH_AUTH_DELAY: "2",
   });
   try {
     await expect(second.window.getByTestId("workspace-view")).toBeVisible();
@@ -349,13 +354,21 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     await expect(pi).toContainText("Pi 0.0.9-e2e");
     const remote = second.window.getByTestId("doctor-check-repos.remote");
     await expect(remote).toHaveAttribute("data-status", "fail");
-    await expect(remote).toContainText("github.com/acme/alpha");
-    await expect(remote).toContainText("github.com/acme/beta");
+    await expect(
+      second.window.getByTestId("doctor-check-item-github.com/acme/beta"),
+    ).toHaveAttribute("data-status", "fail");
+    await expect(remote).toContainText(
+      "github.com/acme/alpha: not probed (no active task)",
+    );
     await expect(remote).toContainText("→ Check the network");
     await expect(
       second.window.getByTestId("setup-check-headline"),
     ).toContainText("failed");
     await second.window.getByTestId("setup-check-rerun").click();
+    // While it runs, each group shows a spinner (the remote probes are slow).
+    await expect(
+      second.window.getByTestId("setup-check-running-repos"),
+    ).toContainText("probing remotes (up to 20 s)");
     await expect(pi).toHaveAttribute("data-status", "ok");
     await second.window.getByTestId("onboarding-close").click();
     await expect(second.window.getByTestId("onboarding")).toHaveCount(0);

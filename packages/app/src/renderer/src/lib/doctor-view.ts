@@ -17,6 +17,35 @@ const GROUP_TITLES: Record<string, string> = {
   path: "PATH",
 };
 
+/**
+ * Seconds one network probe may take (mirrors core's
+ * `NETWORK_PROBE_TIMEOUT_MS`; core is Node-side, so it is not imported here).
+ */
+export const DOCTOR_NETWORK_PROBE_SECONDS = 20;
+
+/** What each group shows while the doctor runs (the remote probes are the slow part). */
+export function doctorRunningGroups(): Array<{
+  group: string;
+  title: string;
+  note: string;
+}> {
+  return Object.entries(GROUP_TITLES).map(([group, title]) => ({
+    group,
+    title,
+    note:
+      group === "repos"
+        ? `probing remotes (up to ${DOCTOR_NETWORK_PROBE_SECONDS} s)…`
+        : group === "tools"
+          ? `checking (gh asks api.github.com, up to ${DOCTOR_NETWORK_PROBE_SECONDS} s)…`
+          : "checking…",
+  }));
+}
+
+/** `412 ms` / `3.2 s` for a check's wall-clock time. */
+export function formatDoctorMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
 export interface DoctorGroupView {
   group: string;
   title: string;

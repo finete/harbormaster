@@ -14,7 +14,7 @@
 //   harbormaster events [--task <id>] [--rule <id> [--file <f>]] [--since <time>] [--limit <n>] [--json]
 //   harbormaster rules list | rules on | rules off | rules check [--task <id>] [--replay <from>]
 //   harbormaster addons list
-//   harbormaster doctor [--json]
+//   harbormaster doctor [--all-remotes] [--json]
 //
 // The inbox / events / rules / addons verbs are the core's user operations
 // (`OPS_CATALOG`, tools/ops.ts) over the same socket, never hand-rolled here.
@@ -29,6 +29,7 @@ import {
   callTool,
   createCore,
   DEFAULT_STATE_DIR,
+  type DoctorInput,
   type DoctorReport,
   doctorExitCode,
   findTool,
@@ -56,7 +57,10 @@ export interface CliIo {
   /** Starts the MCP stdio server (injectable so tests never grab real stdio). */
   serveMcp?: typeof serveMcpOverStdio;
   /** `doctor` with the app down (injectable; defaults to an in-process core). */
-  localDoctor?: (env: NodeJS.ProcessEnv) => Promise<DoctorReport>;
+  localDoctor?: (
+    env: NodeJS.ProcessEnv,
+    input: DoctorInput,
+  ) => Promise<DoctorReport>;
 }
 
 class UsageError extends Error {}
@@ -141,7 +145,8 @@ function usage(): string {
     "  rules on | rules off                      Turn the rules on or off",
     "  rules check [--task <id>] [--replay <from>] [--json]  Dry run over recorded events",
     "  addons list [--json]                      Built-in sources and installed addons",
-    "  doctor [--json]                           Check the setup (works with the app down); exit 1 on a failure",
+    "  doctor [--all-remotes] [--json]           Check the setup (works with the app down); exit 1 on a failure.",
+    "                                            Remotes: only repositories with an active task (max 5), or all with --all-remotes",
     "",
   ].join("\n");
 }
@@ -253,11 +258,14 @@ export const DOCTOR_WITHOUT_APP_NOTE =
   "Harbormaster is not running: checked without the app, so app-only facts (the app's PATH vs your login shell) are not compared.";
 
 /** `doctor` with the app down: the same read-only command on an in-process core. */
-async function inProcessDoctor(env: NodeJS.ProcessEnv): Promise<DoctorReport> {
+async function inProcessDoctor(
+  env: NodeJS.ProcessEnv,
+  input: DoctorInput,
+): Promise<DoctorReport> {
   const core = createCore({
     stateDir: env.HARBORMASTER_STATE_DIR || DEFAULT_STATE_DIR,
   });
-  return core.commands.doctor({});
+  return core.commands.doctor(input);
 }
 
 /** `harbormaster doctor`'s human output. */
@@ -274,21 +282,25 @@ async function runDoctor(
   socketPath: string,
   io: CliIo,
 ): Promise<number> {
-  pick(flags, []);
+  pick(flags, ["all-remotes"]);
+  const allRemotes = flags.get("all-remotes");
+  if (allRemotes !== undefined && allRemotes !== "true") {
+    throw new UsageError("--all-remotes takes no value");
+  }
+  const input: DoctorInput = allRemotes ? { probeAllRemotes: true } : {};
   let report: DoctorReport;
   let viaApp = true;
   try {
     // This shell's PATH is the login-shell PATH the app's is compared with.
-    const result = await callOp(
-      socketPath,
-      "doctor",
-      io.env.PATH ? { loginShellPath: io.env.PATH } : {},
-    );
+    const result = await callOp(socketPath, "doctor", {
+      ...(io.env.PATH ? { loginShellPath: io.env.PATH } : {}),
+      ...input,
+    });
     report = result.details as DoctorReport;
   } catch (error) {
     if (!(error instanceof HarbormasterNotRunningError)) throw error;
     viaApp = false;
-    report = await (io.localDoctor ?? inProcessDoctor)(io.env);
+    report = await (io.localDoctor ?? inProcessDoctor)(io.env, input);
   }
   io.stdout(
     flags.get("json") === "true"

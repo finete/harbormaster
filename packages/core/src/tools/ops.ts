@@ -425,14 +425,24 @@ const doctor: OpDefinition = {
         description:
           "The caller's shell PATH, compared with the PATH the app resolves commands on",
       },
+      probeAllRemotes: {
+        type: "boolean",
+        description:
+          "Probe every repository's remote (default: only repositories with an active task)",
+      },
     },
     additionalProperties: false,
   },
   async handler(args, commands) {
     const loginShellPath = str(args, "loginShellPath");
-    const report = await commands.doctor(
-      loginShellPath ? { loginShellPath } : {},
-    );
+    const probeAllRemotes = args.probeAllRemotes;
+    if (probeAllRemotes !== undefined && typeof probeAllRemotes !== "boolean") {
+      throw new Error("probeAllRemotes must be a boolean");
+    }
+    const report = await commands.doctor({
+      ...(loginShellPath ? { loginShellPath } : {}),
+      ...(probeAllRemotes ? { probeAllRemotes: true } : {}),
+    });
     return { text: formatDoctorReport(report), details: report };
   },
 };
