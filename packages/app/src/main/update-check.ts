@@ -11,6 +11,14 @@
 export const DEFAULT_UPDATE_URL =
   "https://api.github.com/repos/finete/harbormaster/releases/latest";
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * How often the checker wakes to ask "is a check due?". Timers run on
+ * monotonic time, which on macOS stops while the machine sleeps, so a
+ * plain 6h interval on a laptop that sleeps nightly can go days without
+ * firing. Polling briefly and comparing wall-clock age catches up within
+ * one poll after a wake.
+ */
+export const UPDATE_CHECK_POLL_MS = 15 * 60 * 1000;
 export const UPGRADE_COMMAND = "brew upgrade --cask harbormaster";
 
 export interface UpdateInfo {
@@ -119,7 +127,11 @@ export interface UpdateCheckerOptions {
   url: string;
   fetchText: (url: string) => Promise<string>;
   onUpdate: (update: UpdateInfo) => void;
+  /** Wall-clock age after which the next poll re-checks (6h by default). */
   intervalMs?: number;
+  /** How often to poll for a due check (15 min by default, capped at `intervalMs`). */
+  pollMs?: number;
+  now?: () => number;
   setInterval?: (fn: () => void, ms: number) => unknown;
   clearInterval?: (handle: unknown) => void;
 }
@@ -127,7 +139,7 @@ export interface UpdateCheckerOptions {
 export interface UpdateChecker {
   /** Runs one check now; resolves with the newest known update (if any). */
   check(): Promise<UpdateInfo | undefined>;
-  /** Checks now and then every `intervalMs` (6h by default). */
+  /** Checks now and then whenever `intervalMs` of wall-clock time has passed since the last check. */
   start(): void;
   stop(): void;
   /** The newest update seen so far, for a renderer that loads late. */
@@ -138,6 +150,9 @@ export function createUpdateChecker(
   options: UpdateCheckerOptions,
 ): UpdateChecker {
   const every = options.intervalMs ?? UPDATE_CHECK_INTERVAL_MS;
+  const poll = Math.min(options.pollMs ?? UPDATE_CHECK_POLL_MS, every);
+  const now = options.now ?? Date.now;
+  let lastCheckAt = Number.NEGATIVE_INFINITY;
   const schedule =
     options.setInterval ??
     ((fn: () => void, ms: number) => {
@@ -153,6 +168,7 @@ export function createUpdateChecker(
   let known: UpdateInfo | undefined;
 
   async function check(): Promise<UpdateInfo | undefined> {
+    lastCheckAt = now();
     try {
       const body = await options.fetchText(options.url);
       const update = newerVersion(options.currentVersion, body);
@@ -174,7 +190,9 @@ export function createUpdateChecker(
     start() {
       if (timer !== undefined) return;
       void check();
-      timer = schedule(() => void check(), every);
+      timer = schedule(() => {
+        if (now() - lastCheckAt >= every) void check();
+      }, poll);
     },
     stop() {
       if (timer === undefined) return;

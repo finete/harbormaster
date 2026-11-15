@@ -1623,7 +1623,10 @@ function registerShellIpc(): void {
       if (!app) return { ok: false, error: "Unknown app" };
       const roots = await allowedLocalPathRoots();
       if (!isAllowedRevealPath(targetPath, roots)) {
-        console.warn("[main] open-in refused a path outside the allowlist");
+        console.warn(
+          "[main] open-in refused a path outside the allowlist:",
+          targetPath,
+        );
         return { ok: false, error: "Path is outside the allowed folders" };
       }
       let dir = resolvePath(targetPath);
@@ -1676,10 +1679,17 @@ function whichSync(bin: string): boolean {
 async function allowedLocalPathRoots(): Promise<string[]> {
   // No direct `codeRoot` getter on the command API; derive the allowed
   // roots from discovered repositories instead.
-  const repositories = await core.commands.listRepositories().catch(() => []);
+  // Registered folders (the composer's "Open folder…") count too: a
+  // non-git folder task runs in place there, outside every repository and
+  // the state dir, and its workspace must still open.
+  const [repositories, locations] = await Promise.all([
+    core.commands.listRepositories().catch(() => []),
+    core.commands.listLocations().catch(() => []),
+  ]);
   return [
     activeStateDir,
     ...repositories.flatMap((repo) => [repo.root, dirname(repo.root)]),
+    ...locations.map((location) => location.path),
   ];
 }
 

@@ -84,7 +84,7 @@ describe("newerVersion", () => {
 });
 
 describe("createUpdateChecker", () => {
-  it("checks on start, then on every interval, and reports each newer version once", async () => {
+  it("checks on start, then once the wall-clock interval has passed, and reports each newer version once", async () => {
     const bodies = ["v0.1.0", "v0.2.0", "v0.2.0", "boom", "v0.3.0"];
     const fetchText = vi.fn(async () => {
       const body = bodies.shift() ?? "";
@@ -92,6 +92,7 @@ describe("createUpdateChecker", () => {
       return body;
     });
     let tick: (() => void) | undefined;
+    let clock = 0;
     const onUpdate = vi.fn();
     const checker = createUpdateChecker({
       currentVersion: "0.1.0",
@@ -99,8 +100,10 @@ describe("createUpdateChecker", () => {
       fetchText,
       onUpdate,
       intervalMs: 1234,
+      pollMs: 100,
+      now: () => clock,
       setInterval: (fn, ms) => {
-        expect(ms).toBe(1234);
+        expect(ms).toBe(100);
         tick = fn;
         return 1;
       },
@@ -114,6 +117,13 @@ describe("createUpdateChecker", () => {
     expect(fetchText).toHaveBeenCalledWith("https://example.test/latest");
     expect(onUpdate).not.toHaveBeenCalled(); // same version
 
+    // A poll before the interval has passed (in wall-clock time) does not
+    // fetch; the first poll after it does, however long the timer itself
+    // was stalled (a sleeping laptop).
+    clock = 1000;
+    tick?.();
+    expect(fetchText).toHaveBeenCalledTimes(1);
+    clock = 10 * 60 * 60 * 1000;
     tick?.();
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
     expect(onUpdate).toHaveBeenLastCalledWith({

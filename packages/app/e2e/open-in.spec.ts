@@ -219,4 +219,17 @@ test("opens the task's worktree folder in the chosen app, remembers it, copies t
   );
   expect(refused.map((result) => result.ok)).toEqual([false, false, false]);
   expect(stubLines()).toHaveLength(3);
+
+  // A registered non-git folder (a folder task's in-place workspace) lies
+  // outside every repository and the state dir, yet opens.
+  const plainFolder = path.join(root, "plain-folder");
+  mkdirSync(plainFolder);
+  const opened = await window.evaluate(async (folder) => {
+    const location = await window.harbormaster.core.addLocation(folder);
+    return window.harbormaster.app.openIn(location.path, "cursor");
+  }, plainFolder);
+  expect(opened).toEqual({ ok: true });
+  expect(stubLines()[3]?.at(-1)?.endsWith(`${path.sep}plain-folder`)).toBe(
+    true,
+  );
 });
