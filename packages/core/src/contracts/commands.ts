@@ -354,6 +354,15 @@ export interface LaunchTaskInput {
    * place as usual.
    */
   inPlace?: boolean;
+  /**
+   * Bind the task to this existing pull request in `repository` (the
+   * composer's Review mode / "Attach a PR", see `CreateTaskInput`): the
+   * worktree checks out the PR head, and the kickoff contract follows the
+   * role. Excludes `inPlace`, `baseBranch: "parent"` and `baseRef`.
+   */
+  pullRequest?: number;
+  /** With `pullRequest`: `reviewer` never pushes or opens a PR. Default: from GitHub (`viewerIsAuthor`), else `author`. */
+  role?: PullRequestRole;
   /** Falls back to `GlobalConfig.launch.defaultModel`, then the harness default; passed to the harness only on the first launch. */
   model?: string;
   /** Agent (harness id); absent = the launching task's agent for a child, else the repository/global default (decision R8). */

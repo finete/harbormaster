@@ -217,6 +217,67 @@ describe("reviewer tasks", () => {
     expect(await git(["rev-parse", "HEAD"], worktree)).toBe(f.head);
   });
 
+  it("launchTask binds a review to the PR head, queued, with a no-push kickoff; chat runs in place; PR launches reject in-place/base options", async () => {
+    const f = await fixture();
+    const parent = await f.core.commands.createTask({
+      title: "Parent",
+      initialPrompt: "",
+      repositoryId: f.repo.id,
+      start: true,
+    });
+    const review = await f.core.commands.launchTask({
+      relation: "child",
+      fromTaskId: parent.id,
+      title: "Review bob's change",
+      prompt: "Review it.",
+      repository: { repositoryId: f.repo.id },
+      pullRequest: 7,
+    });
+    expect(review.parentTaskId).toBe(parent.id);
+    expect(review.launch?.status).toBe("queued");
+    expect(review.branch).toBe("bob/feature");
+    expect(review.pr).toMatchObject({ number: 7, role: "reviewer" });
+    expect(review.initialPrompt).toContain("never commit, push, or open");
+    expect(review.initialPrompt).not.toContain("gh pr create");
+    const worktree = (await f.core.commands.getTaskWorkspace(review.id))
+      ?.worktreePath as string;
+    expect(await git(["rev-parse", "HEAD"], worktree)).toBe(f.head);
+
+    const chat = await f.core.commands.launchTask({
+      relation: "standalone",
+      title: "Ask about widgets",
+      prompt: "How does it work?",
+      repository: { repositoryId: f.repo.id },
+      inPlace: true,
+    });
+    expect(chat.repositoryId).toBeUndefined();
+    expect(chat.folderPath).toBe(f.checkout);
+    expect(chat.initialPrompt).toContain("directly in the user's folder");
+    expect(
+      (await f.core.commands.getTaskWorkspace(chat.id))?.worktreePath,
+    ).toBe(f.checkout);
+
+    const base = {
+      relation: "standalone" as const,
+      title: "Bad",
+      prompt: "x",
+      repository: { repositoryId: f.repo.id },
+      pullRequest: 7,
+    };
+    await expect(
+      f.core.commands.launchTask({ ...base, inPlace: true }),
+    ).rejects.toThrow(/cannot run in place/);
+    await expect(
+      f.core.commands.launchTask({ ...base, baseRef: "main" }),
+    ).rejects.toThrow(/baseBranch\/baseRef do not apply/);
+    await expect(
+      f.core.commands.launchTask({
+        ...base,
+        repository: { none: true },
+      }),
+    ).rejects.toThrow(/needs a repository/);
+  });
+
   it("previewPullRequest: a pasted PR URL resolves to its card facts; bad URLs and unknown repositories reject readably", async () => {
     const f = await fixture();
     // A GitHub-hosted origin, so the PR URL maps onto the local checkout.

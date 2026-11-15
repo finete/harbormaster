@@ -70,7 +70,9 @@ on Task (Review and Chat are per-draft choices, never sticky):
 - Start / Park create the task through the same path the inbox's "Create
   review task" ends in: `createTask` with `repositoryId`, `pullRequest` and
   an explicit `role`. Starting checks out the PR head; a reviewer never
-  pushes or opens a PR. A PR task never runs in the background.
+  pushes or opens a PR. The composer never starts a PR task in the
+  background; an agent can, with `launch_task`'s `mode: "review"` (see
+  `docs/design-decisions.md` "Launching tasks from an agent").
 
 ## Where
 

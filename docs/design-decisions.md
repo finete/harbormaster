@@ -71,7 +71,10 @@ in Orca): `child` (nested under the launcher, pollable with
 level only) or `standalone` (display-only `launchedFromTaskId`
 provenance). Every launch gets its own task, worktree, branch, and session;
 a same-repository child may opt into `baseBranch: "parent"` (stacked
-work). Launched tasks run as ordinary interactive Pi sessions in app-owned
+work). `mode` mirrors the composer's Task / Review / Chat switch: `review`
+binds the launch to an existing PR (`pullRequest` + `role`, worktree on the
+PR head; a reviewer's kickoff forbids commit/push/PR), `chat` runs in place
+with no worktree (`inPlace`). Launched tasks run as ordinary interactive Pi sessions in app-owned
 ptys; once a launch's pty actually starts, main pushes `app:task-launched`
 and the renderer adds it to the sidebar rail (its pane attaches, never
 takes over) without stealing focus or the view; a message wake is not a

@@ -78,4 +78,30 @@ describe("buildLaunchKickoffPrompt", () => {
     expect(text).toMatch(/based on "feature\/parent-branch"/);
     expect(text).toMatch(/state that dependency/);
   });
+
+  it("a PR author pushes to the existing PR, a reviewer never pushes, a chat skips the worktree points", () => {
+    const author = buildLaunchKickoffPrompt({
+      hasRepository: true,
+      pullRequest: { number: 7, role: "author" },
+    });
+    expect(author).toContain("push to the PR's branch");
+    expect(author).toContain("never open another one");
+    expect(author).not.toContain("gh pr create");
+
+    const reviewer = buildLaunchKickoffPrompt({
+      hasRepository: true,
+      pullRequest: { number: 7, role: "reviewer" },
+    });
+    expect(reviewer).toContain("pull request #7's head branch");
+    expect(reviewer).toContain("never commit, push, or open a pull request");
+    expect(reviewer).not.toMatch(/Commit with|gh pr create/);
+    expect(reviewer).toMatch(/4\. As your FINAL action/);
+
+    const chat = buildLaunchKickoffPrompt({
+      hasRepository: false,
+      inPlace: true,
+    });
+    expect(chat).toContain("directly in the user's folder (no worktree)");
+    expect(chat).not.toMatch(/worktree\.|Run the repository's|Commit with/);
+  });
 });

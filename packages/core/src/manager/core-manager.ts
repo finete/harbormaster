@@ -626,27 +626,13 @@ export class CoreManager implements CoreCommands {
     // branch, and the PR is known from the start.
     let pr: TaskPullRequest | undefined;
     if (input.pullRequest !== undefined) {
-      if (!repo) {
-        throw new Error("A pull-request task needs a repository");
-      }
-      if (!this.deps.pullRequests.view) {
-        throw new Error("Pull-request tasks need GitHub access");
-      }
-      const status = await this.deps.pullRequests.view(
-        repo.id,
+      const bound = await this.resolvePullRequestTask(
+        repo,
         input.pullRequest,
+        input.role,
       );
-      if (!status.headRefName) {
-        throw new Error(
-          `Pull request #${input.pullRequest} has no head branch`,
-        );
-      }
-      branch = status.headRefName;
-      pr = toTaskPullRequest(
-        status,
-        repo.defaultBranch,
-        input.role ?? roleFromViewer(status.viewerIsAuthor) ?? "author",
-      );
+      branch = bound.branch;
+      pr = bound.pr;
     }
 
     if (repo) {
@@ -719,6 +705,35 @@ export class CoreManager implements CoreCommands {
 
     await this.publishTaskChange(task);
     return task;
+  }
+
+  /**
+   * A PR-bound task's branch (the PR head) and PR snapshot; the role
+   * defaults from GitHub (`viewerIsAuthor`), else `author`.
+   */
+  private async resolvePullRequestTask(
+    repo: RepositoryInfo | undefined,
+    pullRequest: number,
+    role: PullRequestRole | undefined,
+  ): Promise<{ branch: string; pr: TaskPullRequest }> {
+    if (!repo) {
+      throw new Error("A pull-request task needs a repository");
+    }
+    if (!this.deps.pullRequests.view) {
+      throw new Error("Pull-request tasks need GitHub access");
+    }
+    const status = await this.deps.pullRequests.view(repo.id, pullRequest);
+    if (!status.headRefName) {
+      throw new Error(`Pull request #${pullRequest} has no head branch`);
+    }
+    return {
+      branch: status.headRefName,
+      pr: toTaskPullRequest(
+        status,
+        repo.defaultBranch,
+        role ?? roleFromViewer(status.viewerIsAuthor) ?? "author",
+      ),
+    };
   }
 
   async startTask(taskId: string): Promise<Task> {
@@ -1559,6 +1574,18 @@ export class CoreManager implements CoreCommands {
     if (input.baseBranch === "parent" && input.baseRef) {
       throw new Error('baseBranch "parent" and baseRef are mutually exclusive');
     }
+    if (input.pullRequest !== undefined) {
+      // A PR task works on the PR's own head branch: nothing to base it on,
+      // and never in place.
+      if (input.inPlace) {
+        throw new Error("A pull-request task cannot run in place (chat)");
+      }
+      if (input.baseBranch === "parent" || input.baseRef) {
+        throw new Error(
+          "A pull-request task works on the PR's head branch: baseBranch/baseRef do not apply",
+        );
+      }
+    }
 
     const where = await this.resolveWhere(
       input.repository,
@@ -1567,6 +1594,10 @@ export class CoreManager implements CoreCommands {
     );
     const repo = where.kind === "repository" ? where.repo : undefined;
     const hasRepository = where.kind === "repository";
+    const bound =
+      input.pullRequest !== undefined
+        ? await this.resolvePullRequestTask(repo, input.pullRequest, input.role)
+        : undefined;
 
     let baseRef: string | undefined = repo
       ? input.baseRef?.trim() || undefined
@@ -1597,6 +1628,15 @@ export class CoreManager implements CoreCommands {
 
     const kickoff = buildLaunchKickoffPrompt({
       hasRepository,
+      ...(where.kind === "folder" ? { inPlace: true } : {}),
+      ...(bound?.pr
+        ? {
+            pullRequest: {
+              number: bound.pr.number,
+              role: bound.pr.role ?? "author",
+            },
+          }
+        : {}),
       ...(parentTask
         ? { parent: { title: parentTask.title, id: parentTask.id } }
         : {}),
@@ -1641,12 +1681,15 @@ export class CoreManager implements CoreCommands {
     };
 
     if (repo) {
-      const branch = deriveTaskBranch(
-        input.title,
-        id,
-        config.branchPrefix ?? "",
-      );
-      const next: Task = { ...task, branch, targetBranch: repo.defaultBranch };
+      const branch =
+        bound?.branch ??
+        deriveTaskBranch(input.title, id, config.branchPrefix ?? "");
+      const next: Task = {
+        ...task,
+        branch,
+        targetBranch: repo.defaultBranch,
+        ...(bound ? { pr: bound.pr } : {}),
+      };
       await this.provisionTaskWorkspace(
         repo,
         id,
@@ -1657,6 +1700,7 @@ export class CoreManager implements CoreCommands {
           undo: () => this.deps.tasks.removeTask(id),
         },
         baseRef ?? repo.defaultBranch,
+        bound?.pr.number,
       );
       await this.publishTaskChange(next);
       return next;

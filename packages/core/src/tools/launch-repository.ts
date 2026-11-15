@@ -7,6 +7,7 @@
 
 import type { KnownLocation, LaunchTaskInput } from "../contracts/commands.js";
 import type { RepositoryInfo } from "../contracts/workspace.js";
+import { parsePullRequestUrl } from "../engines/pull-request-url.js";
 
 /** Recognizes a clone-URL-shaped `repository` value: a URL scheme, or scp-like/`.git`-suffixed git syntax. */
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -125,4 +126,83 @@ export function buildLaunchResultText(input: LaunchResultInput): string {
     `Launched "${input.title}" (${input.id}) as a ${input.relation} task in ${input.repositoryLabel}. ` +
     `QUEUED — it has not started yet; it starts running in the background once the Harbormaster app is running.${followUp}`
   );
+}
+
+/** The `launch_task` tool's `mode`: the composer's Task / Review / Chat switch. */
+export type LaunchMode = "task" | "review" | "chat";
+
+export interface LaunchModeArgs {
+  mode?: LaunchMode | undefined;
+  /** The tool's `repository` string, if given. */
+  repository?: string | undefined;
+  /** A PR URL, or a PR number (then `repository` names its repository). */
+  pullRequest?: string | undefined;
+  role?: "author" | "reviewer" | undefined;
+}
+
+export interface ResolvedLaunchMode {
+  /** The `repository` string to resolve (a PR URL supplies it when omitted). */
+  repository: string;
+  inPlace?: true;
+  pullRequest?: number;
+  role?: "author" | "reviewer";
+}
+
+/**
+ * Map the tool's `mode` / `pullRequest` / `role` onto `LaunchTaskInput`,
+ * the way the composer does (see /docs/new-task-composer.md "Task / Review
+ * / Chat"): `chat` runs in place and takes no PR; `review` needs a PR and
+ * leaves the role to GitHub (`viewerIsAuthor`) unless `role` says;
+ * `task` with a PR continues it as its `author`.
+ */
+export function resolveLaunchMode(args: LaunchModeArgs): ResolvedLaunchMode {
+  const mode = args.mode ?? "task";
+  const repositoryArg = args.repository?.trim() || undefined;
+  const prArg = args.pullRequest?.trim() || undefined;
+  if (args.role && !prArg) {
+    throw new Error("role only applies together with pullRequest");
+  }
+  if (mode === "chat") {
+    if (prArg) {
+      throw new Error(
+        'mode "chat" takes no pullRequest; use mode "review" to work on a pull request',
+      );
+    }
+    if (!repositoryArg) throw new Error("repository is required");
+    return { repository: repositoryArg, inPlace: true };
+  }
+  if (!prArg) {
+    if (mode === "review") {
+      throw new Error(
+        'mode "review" needs pullRequest (a PR URL, or a PR number together with repository)',
+      );
+    }
+    if (!repositoryArg) throw new Error("repository is required");
+    return { repository: repositoryArg };
+  }
+
+  let number: number;
+  let repository = repositoryArg;
+  const fromUrl = parsePullRequestUrl(prArg);
+  if (fromUrl) {
+    number = fromUrl.number;
+    repository ??= fromUrl.repositoryId;
+  } else if (/^#?\d+$/.test(prArg)) {
+    number = Number(prArg.replace(/^#/, ""));
+    if (!repository) {
+      throw new Error(
+        "a pullRequest number needs repository (or pass the PR URL instead)",
+      );
+    }
+  } else {
+    throw new Error(
+      `pullRequest must be a PR URL (…/org/repo/pull/12) or number: ${prArg}`,
+    );
+  }
+  const role = args.role ?? (mode === "task" ? "author" : undefined);
+  return {
+    repository,
+    pullRequest: number,
+    ...(role ? { role } : {}),
+  };
 }

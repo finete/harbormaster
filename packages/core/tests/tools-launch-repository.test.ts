@@ -5,6 +5,7 @@ import {
   launchRepositoryLabel,
   looksLikeCloneUrl,
   repositoryShortName,
+  resolveLaunchMode,
   resolveLaunchRepository,
 } from "../src/tools/launch-repository.js";
 
@@ -147,5 +148,65 @@ describe("buildLaunchResultText", () => {
       repositoryLabel: "no repository",
     });
     expect(text).toContain("subtask_status");
+  });
+});
+
+describe("resolveLaunchMode", () => {
+  it("task by default; chat runs in place", () => {
+    expect(resolveLaunchMode({ repository: "widgets" })).toEqual({
+      repository: "widgets",
+    });
+    expect(resolveLaunchMode({ mode: "chat", repository: "widgets" })).toEqual({
+      repository: "widgets",
+      inPlace: true,
+    });
+  });
+
+  it("review takes a PR URL (supplying the repository) or a number with repository; role from GitHub unless given", () => {
+    expect(
+      resolveLaunchMode({
+        mode: "review",
+        pullRequest: "https://github.com/Acme/Widgets/pull/12",
+      }),
+    ).toEqual({ repository: "github.com/acme/widgets", pullRequest: 12 });
+    expect(
+      resolveLaunchMode({
+        mode: "review",
+        repository: "widgets",
+        pullRequest: "#12",
+        role: "reviewer",
+      }),
+    ).toEqual({ repository: "widgets", pullRequest: 12, role: "reviewer" });
+  });
+
+  it("task with a PR continues it as author", () => {
+    expect(
+      resolveLaunchMode({
+        pullRequest: "https://github.com/acme/widgets/pull/3",
+      }),
+    ).toEqual({
+      repository: "github.com/acme/widgets",
+      pullRequest: 3,
+      role: "author",
+    });
+  });
+
+  it("rejects contradictions readably", () => {
+    expect(() =>
+      resolveLaunchMode({ mode: "review", repository: "w" }),
+    ).toThrow(/needs pullRequest/);
+    expect(() =>
+      resolveLaunchMode({ mode: "chat", repository: "w", pullRequest: "1" }),
+    ).toThrow(/takes no pullRequest/);
+    expect(() =>
+      resolveLaunchMode({ mode: "review", pullRequest: "12" }),
+    ).toThrow(/needs repository/);
+    expect(() =>
+      resolveLaunchMode({ repository: "w", pullRequest: "main" }),
+    ).toThrow(/PR URL .* or number/);
+    expect(() =>
+      resolveLaunchMode({ repository: "w", role: "author" }),
+    ).toThrow(/role only applies/);
+    expect(() => resolveLaunchMode({})).toThrow(/repository is required/);
   });
 });

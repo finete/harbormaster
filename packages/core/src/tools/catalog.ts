@@ -22,6 +22,7 @@ import {
 import {
   buildLaunchResultText,
   launchRepositoryLabel,
+  resolveLaunchMode,
   resolveLaunchRepository,
 } from "./launch-repository.js";
 import {
@@ -190,7 +191,7 @@ const launchTask: ToolDefinition = {
   name: "launch_task",
   title: "Harbormaster launch task",
   description:
-    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
+    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `mode` mirrors the app\'s Task / Review / Chat switch: "review" works on an existing pull request, "chat" runs in place with no worktree. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
   inputSchema: {
     type: "object",
     properties: {
@@ -199,6 +200,23 @@ const launchTask: ToolDefinition = {
         enum: ["child", "standalone"],
         description:
           'No default: "child" only when the work is part of / depends on the current task; "standalone" for independent fixes, other repositories, or unrelated follow-ups.',
+      },
+      mode: {
+        type: "string",
+        enum: ["task", "review", "chat"],
+        description:
+          '"task" (default): its own branch + worktree, ending in a draft PR (or, with pullRequest, pushing to that existing PR as its author). "review": works on an existing pull request (pullRequest required), checked out in its own worktree; as reviewer it never commits, pushes or opens a PR. "chat": no worktree, runs in place in the repository\'s primary checkout or the folder (edits land there directly); no pullRequest.',
+      },
+      pullRequest: {
+        type: "string",
+        description:
+          'For mode "review" (required) or "task" (continue that PR as its author): a PR URL (https://github.com/org/repo/pull/12; it also supplies repository when omitted) or a PR number together with repository.',
+      },
+      role: {
+        type: "string",
+        enum: ["author", "reviewer"],
+        description:
+          'With pullRequest: "reviewer" (review only: never commit, push or open a PR) or "author". Mode "review" defaults from GitHub (whether you authored the PR); mode "task" is always "author".',
       },
       title: { type: "string", description: "Short task title for the board." },
       prompt: {
@@ -209,7 +227,7 @@ const launchTask: ToolDefinition = {
       repository: {
         type: "string",
         description:
-          '"none" for no repository (a scratch task), a discovered repository id (e.g. "github.com/org/repo") or its unique short name, a registered folder\'s name or absolute path (a git folder gets a worktree, a plain folder runs in place), or a git clone URL to clone a new one.',
+          'Required unless pullRequest is a PR URL. "none" for no repository (a scratch task), a discovered repository id (e.g. "github.com/org/repo") or its unique short name, a registered folder\'s name or absolute path (a git folder gets a worktree, a plain folder runs in place), or a git clone URL to clone a new one.',
       },
       baseBranch: {
         type: "string",
@@ -233,7 +251,7 @@ const launchTask: ToolDefinition = {
           "Whether the launched agent skips its permission prompts (background tasks do by default; the repository or app setting decides when omitted). Pass false to keep the prompts.",
       },
     },
-    required: ["relation", "title", "prompt", "repository"],
+    required: ["relation", "title", "prompt"],
     additionalProperties: false,
   },
   async handler(args, { commands, caller }) {
@@ -246,7 +264,12 @@ const launchTask: ToolDefinition = {
     if (!relation) throw new Error("relation is required");
     const title = readString(args, "title", true);
     const prompt = readString(args, "prompt", true);
-    const repositoryArg = readString(args, "repository", true);
+    const resolvedMode = resolveLaunchMode({
+      mode: readEnum(args, "mode", ["task", "review", "chat"] as const, false),
+      repository: readString(args, "repository"),
+      pullRequest: readString(args, "pullRequest"),
+      role: readEnum(args, "role", ["author", "reviewer"] as const, false),
+    });
     const baseBranch = readEnum(
       args,
       "baseBranch",
@@ -267,7 +290,7 @@ const launchTask: ToolDefinition = {
       commands.listLocations(),
     ]);
     const repository = resolveLaunchRepository(
-      repositoryArg,
+      resolvedMode.repository,
       repositories,
       locations,
     );
@@ -277,6 +300,11 @@ const launchTask: ToolDefinition = {
       title,
       prompt,
       repository,
+      ...(resolvedMode.inPlace ? { inPlace: true } : {}),
+      ...(resolvedMode.pullRequest !== undefined
+        ? { pullRequest: resolvedMode.pullRequest }
+        : {}),
+      ...(resolvedMode.role ? { role: resolvedMode.role } : {}),
       ...(baseBranch ? { baseBranch } : {}),
       ...(model ? { model } : {}),
       ...(harness ? { harness } : {}),
