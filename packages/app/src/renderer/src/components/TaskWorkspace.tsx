@@ -60,12 +60,9 @@ const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
  */
 export const TaskWorkspace = memo(function TaskWorkspace({
   taskId,
-  focused = true,
   onCloseTask,
 }: {
   taskId: string;
-  /** Whether this workspace is the visible one (clears the task's "review open" mark once its review tab is seen). */
-  focused?: boolean;
   /**
    * Close a task's workspace: unmounts every pane, ending their
    * ptys. Takes the task id (not a pre-bound closure) so callers can pass one
@@ -204,21 +201,6 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     taskUrls.take(taskId);
     for (const open of pendingOpens) applyUrlOpen(api, taskId, open);
   }, [api, bootstrapped, pendingOpens, taskId]);
-
-  // The "review open" mark lasts until the user actually sees the review
-  // tab: this workspace visible with that tab active.
-  const marked = useTaskUrls().marked.includes(taskId);
-  useEffect(() => {
-    if (!api || !marked) return;
-    const check = (): void => {
-      if (focused && api.activePanel?.id === reviewPanelId(taskId)) {
-        taskUrls.clearMark(taskId);
-      }
-    };
-    check();
-    const disposable = api.onDidActivePanelChange(check);
-    return () => disposable.dispose();
-  }, [api, marked, focused, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
     apiRef.current = event.api;

@@ -12,7 +12,6 @@ import {
   deriveOutcomeLine,
   derivePresenceActivity,
 } from "../lib/task-status-lines";
-import { useTaskUrls } from "../lib/task-urls";
 import {
   lastInteractionTimestamp,
   relativeTime,
@@ -130,9 +129,7 @@ function TaskCardFace({
     derivePresenceActivity(presence, messaging.suppressAttention) ===
     "your-move";
   const outcome = deriveOutcomeLine(presence);
-  const reviewMarked = useTaskUrls().marked.includes(task.id);
-  const readyToReview = useReadyToReview().includes(task.id);
-  const reviewChip = reviewMarked || readyToReview;
+  const reviewChip = useReadyToReview().includes(task.id);
   const launchMarker = deriveLaunchMarker(task);
 
   const isAwaiting = task.state === "awaiting" && !!task.awaiting;

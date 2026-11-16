@@ -181,13 +181,6 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
     "allow-scripts allow-same-origin allow-forms allow-popups",
   );
   const page = workspace.frameLocator('[data-testid="url-pane-frame"]');
-  // The button opened it, so it is seen: no "review open" mark.
-  await expect(
-    window
-      .getByTestId(`sidebar-task-row-${taskId}`)
-      .getByTestId("review-open-chip"),
-  ).toHaveCount(0);
-
   if (!REAL) {
     await expect(page.getByTestId("fake-plannotator-title")).toHaveText(
       "Fake Plannotator review",

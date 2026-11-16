@@ -3,8 +3,8 @@
 // queue an "open" for a task here; the task's `TaskWorkspace` applies its
 // queue once it is mounted (a task whose workspace was never opened keeps
 // its queue until it is). Event-driven opens never take focus or switch
-// view: they only mark the task ("review open") until the user looks at the
-// review tab. Pure state transitions + a tiny module store, so the rules are
+// view; the review tab in the task's workspace is the only indication (no
+// sidebar mark: it outlived closed or never-started reviews). Pure state transitions + a tiny module store, so the rules are
 // unit-testable in node (tests/task-urls.test.ts).
 
 import { useSyncExternalStore } from "react";
@@ -24,11 +24,9 @@ export type TaskUrlOpen =
 export interface TaskUrlState {
   /** Opens not yet applied by the task's workspace, oldest first. */
   pending: Readonly<Record<string, readonly TaskUrlOpen[]>>;
-  /** Tasks with a review that opened while the user was not looking at it. */
-  marked: readonly string[];
 }
 
-export const EMPTY_TASK_URL_STATE: TaskUrlState = { pending: {}, marked: [] };
+export const EMPTY_TASK_URL_STATE: TaskUrlState = { pending: {} };
 
 /** The dockview panel id of a task's one review tab. */
 export function reviewPanelId(taskId: string): string {
@@ -46,7 +44,7 @@ function enqueue(
   };
 }
 
-/** Core's `task-url-opened`: a Plannotator URL navigates the review tab and marks the task; anything else is a preview tab. */
+/** Core's `task-url-opened`: a Plannotator URL navigates the review tab; anything else is a preview tab. */
 export function applyUrlOpened(
   state: TaskUrlState,
   payload: TaskUrlOpenedPayload,
@@ -58,9 +56,6 @@ export function applyUrlOpened(
         url: payload.url,
         focus: false,
       }),
-      marked: state.marked.includes(payload.taskId)
-        ? state.marked
-        : [...state.marked, payload.taskId],
     };
   }
   return {
@@ -88,12 +83,6 @@ export function takePending(state: TaskUrlState, taskId: string): TaskUrlState {
   if (!state.pending[taskId]) return state;
   const { [taskId]: _taken, ...rest } = state.pending;
   return { ...state, pending: rest };
-}
-
-/** The user is looking at the task's review tab. */
-export function clearMark(state: TaskUrlState, taskId: string): TaskUrlState {
-  if (!state.marked.includes(taskId)) return state;
-  return { ...state, marked: state.marked.filter((id) => id !== taskId) };
 }
 
 // --- module store -------------------------------------------------------------
@@ -133,5 +122,4 @@ export const taskUrls = {
   requestReviewTab: (taskId: string): void =>
     set(applyReviewRequested(current, taskId)),
   take: (taskId: string): void => set(takePending(current, taskId)),
-  clearMark: (taskId: string): void => set(clearMark(current, taskId)),
 };
