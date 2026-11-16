@@ -328,6 +328,7 @@ with the full gate green and the acceptance checked.
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
 | E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | merged |
 | F | Rules page (`docs/rules-page.md`): core activity fold + CEL outline + `setRulesEnabled` + mandatory `label`; app list/sheet/Activity/switch; sidebar entry + ⌘⇧R | Units per the doc; one e2e (`rules.spec.ts`) proven to fail with the page reverted | merged |
+| G | Plannotator review (`docs/plannotator.md`): adapter review command, open-url transport, url pane, Review button + hint, review-support detection, rules facts | Units per the doc; `plannotator.spec.ts` with the fake; contract test | in progress |
 
 ## Follow-ups logged during merges
 

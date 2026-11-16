@@ -175,9 +175,10 @@ merge → deploy lifecycle driven by rules, one inbox for everything that
 needs a human, and tasks that coordinate each other. The gaps worth
 closing without abandoning that thesis, roughly in order:
 
-- **Diff view in the task pane** with "send this comment to the agent"
-(line comments routed through task messaging). Today there is nothing
-between "agent finished" and the PR page.
+- **In-app code review via Plannotator** (MIT / Apache-2.0), integrated as
+a product, not a fork: a Review button per task, the review in a pane
+beside the terminal, per-harness install/upgrade detection, and the
+trigger exposed to rules. Design: `docs/plannotator.md`.
 - **Costs pane**: token usage and spend per task, repository and harness,
 so it's clear what each piece of work actually cost.
 - **Worktree setup scripts** (per repository, run on worktree creation:
