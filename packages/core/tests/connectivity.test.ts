@@ -20,6 +20,9 @@ describe("isConnectivityError", () => {
     "TLS handshake timeout",
     "Could not resolve host: api.github.com",
     "socket hang up",
+    "connect ENETUNREACH 10.0.0.1:443",
+    "connect EHOSTUNREACH 10.0.0.1:443",
+    "fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error)",
   ])("classifies %s as a connectivity failure", (message) => {
     expect(isConnectivityError(message)).toBe(true);
   });
