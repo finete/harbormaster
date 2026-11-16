@@ -163,9 +163,16 @@ import {
   resolveCommandPath,
   setProgramStatusListener,
   setReadyUrlListener,
+  writeToPrimarySession,
   writeToSession,
 } from "./ptySessions";
 import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
+import {
+  decideReviewTransport,
+  QueuedReviews,
+  type ReviewDelivery,
+  typeCommand,
+} from "./review-transport";
 import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
@@ -451,6 +458,69 @@ setProgramStatusListener({
       });
   },
 });
+
+// The Review button's transport (docs/plannotator.md "Transport", see
+// review-transport.ts): typed into the task's primary pty when its agent is
+// at its prompt, else queued as a user steer and typed once it settles.
+async function typeReviewCommand(
+  taskId: string,
+  command: string,
+): Promise<boolean> {
+  const typed = await typeCommand(
+    (data) => writeToPrimarySession(taskId, data),
+    command,
+  );
+  // The user's own submit (the button), like Enter in the pane.
+  if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
+  return typed;
+}
+
+const queuedReviews = new QueuedReviews({
+  claim: async (taskId, messageId) =>
+    (
+      await core.commands.claimInboxMessages(taskId, {
+        idle: true,
+        messageIds: [messageId],
+      })
+    ).length > 0,
+  type: typeReviewCommand,
+  onError: (taskId, error) =>
+    console.error(`[review] queued review for ${taskId} failed:`, error),
+});
+
+async function requestReviewFromButton(input: {
+  taskId: string;
+  target?: "local" | "pr";
+}): Promise<{ command: string; delivery: ReviewDelivery }> {
+  const request = {
+    taskId: input.taskId,
+    ...(input.target ? { target: input.target } : {}),
+  };
+  const pane = lookupPanePid(input.taskId);
+  const presence = pane
+    ? corroboratePresence(await harness.presence(input.taskId), pane)
+    : undefined;
+  const transport = decideReviewTransport({ pane: !!pane, presence });
+  if (transport === "type") {
+    const { command } = await core.commands.requestReview({
+      ...request,
+      deliver: "none",
+    });
+    if (await typeReviewCommand(input.taskId, command)) {
+      return { command, delivery: "typed" };
+    }
+    // The pty went away in between: inbox delivery after all.
+  }
+  const result = await core.commands.requestReview({
+    ...request,
+    deliver: "message",
+  });
+  if (transport === "queue" && result.messageId) {
+    queuedReviews.add(input.taskId, result.messageId, result.command);
+    return { command: result.command, delivery: "queued" };
+  }
+  return { command: result.command, delivery: "message" };
+}
 
 // The local tool socket (decision #18, R5): `harbormaster mcp` and the CLI
 // reach core through it. Started once the app is ready; closed on quit.
@@ -976,10 +1046,11 @@ function registerCoreIpc(): void {
       },
     ) => core.commands.openTaskUrl(input),
   );
+  // The Review button / Review again / Try again: main picks the transport.
   ipcMain.handle(
     "core:requestReview",
     (_event, input: { taskId: string; target?: "local" | "pr" }) =>
-      core.commands.requestReview(input),
+      requestReviewFromButton(input),
   );
   ipcMain.handle(
     "core:reviewSupport",
@@ -1260,6 +1331,11 @@ async function pollPresenceTick(): Promise<number> {
     }),
   );
   const payload: PresenceChangedPayload = Object.fromEntries(entries);
+  // A queued Review whose agent is at its prompt again gets typed now.
+  void queuedReviews.retry((taskId) => ({
+    pane: Boolean(lookupPanePid(taskId)),
+    presence: payload[taskId],
+  }));
   // Warm closed-tab sessions: remember who is mid-turn (never evicted), and
   // end any whose task left the active set (Done, deleted) so a merged
   // task's worktree cleanup isn't blocked by a lingering pi.

@@ -1,6 +1,7 @@
 // Code review via Plannotator (docs/plannotator.md), the one integration
-// seam: the Review button asks core to deliver `/plannotator-review` to the
-// task's session; the agent (a fake pi claiming its inbox, fake-pi.ts
+// seam: with the agent idle, the Review button types `/plannotator-review`
+// into the task's primary pty (main's pty owner; "Transport"), as the user
+// would; the agent (a fake pi reading its terminal, fake-pi.ts
 // `writeReviewPi`) runs `plannotator review`; Plannotator runs
 // PLANNOTATOR_BROWSER (the app's `harbormaster-open-url` → `harbormaster
 // open-url` → core `openTaskUrl` → `task-url-opened`) and the task's review
@@ -164,10 +165,11 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
   await expect(review).toHaveAttribute("data-target", "local");
   await review.click();
 
-  // The review tab exists right away, focused, and core delivered the
-  // harness's command to the session.
+  // The review tab exists right away, focused, and the harness's command
+  // was typed into the agent's terminal (not left in its inbox, which an
+  // agent reads as context and never runs as a slash command).
   await expect(workspace.getByTestId("url-tab-title")).toHaveText("Review");
-  await expect.poll(agentReceived).toContain("/plannotator-review");
+  await expect.poll(agentReceived).toContain('typed "/plannotator-review"');
 
   // Plannotator ran PLANNOTATOR_BROWSER: the page shows in the tab's frame.
   const frame = workspace.getByTestId("url-pane-frame");
@@ -204,8 +206,10 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
   } else {
     await expect(page.locator("body")).not.toBeEmpty();
   }
-  // Everything went through the app: the system browser never ran.
+  // Everything went through the app: the system browser never ran, and
+  // both reviews were typed, none queued as an inbox message.
   expect(existsSync(openLog)).toBe(false);
+  expect(agentReceived()).not.toContain("inbox ");
 
   // Settings (the wizard's Agent step): Plannotator reads ready for Pi.
   await app.evaluate(({ Menu }) => {

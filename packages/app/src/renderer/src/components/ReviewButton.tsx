@@ -1,11 +1,12 @@
 // The Review split button (docs/plannotator.md decision 4), beside Await… ·
 // Done: the main half starts a Plannotator review of the default target
 // (the task's PR when it has one, else local changes); the chevron picks
-// Local changes / Pull request #N. It asks core to deliver the harness's
-// review command to the session and opens (or focuses) the task's review
-// tab, which the session's URL then navigates. Disabled, with the reason as
-// its tooltip, when the harness has no review command, Plannotator is not
-// ready for it, or the agent is mid-turn.
+// Local changes / Pull request #N. It opens (or focuses) the task's review
+// tab and asks main to start the review (`startReview`: typed into the
+// agent's terminal when it is at its prompt, else queued until its turn
+// ends; docs/plannotator.md "Transport"); the session's URL then navigates
+// the tab. Disabled, with the reason as its tooltip, when the harness has
+// no review command or Plannotator is not ready for it.
 
 import {
   ChevronDown,
@@ -16,16 +17,14 @@ import {
 import type { JSX } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
-import { usePresenceMap } from "../core-client";
 import {
   defaultReviewTarget,
   type ReviewTargetKind,
   reviewDisabledReason,
+  startReview,
   taskHarness,
   useReviewSupport,
 } from "../lib/review";
-import { taskUrls } from "../lib/task-urls";
-import { describeThrown, pushToast } from "../toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,13 +39,9 @@ import {
 
 export function ReviewButton({ task }: { task: Task }): JSX.Element {
   const support = useReviewSupport();
-  const presence = usePresenceMap();
   const [busy, setBusy] = useState(false);
-  const disabledReason = reviewDisabledReason({
-    support,
-    harness: taskHarness(task),
-    runningTurn: presence[task.id]?.runningTurn === true,
-  });
+  const harness = taskHarness(task);
+  const disabledReason = reviewDisabledReason({ support, harness });
   const disabled = disabledReason !== undefined || busy;
   const target = defaultReviewTarget(task);
   const prNumber = task.pr?.number;
@@ -54,15 +49,9 @@ export function ReviewButton({ task }: { task: Task }): JSX.Element {
   async function review(kind: ReviewTargetKind): Promise<void> {
     if (disabled) return;
     setBusy(true);
-    // Decision 2: the button creates or focuses the review tab right away.
-    taskUrls.requestReviewTab(task.id);
     try {
-      await window.harbormaster.core.requestReview({
-        taskId: task.id,
-        target: kind,
-      });
-    } catch (error) {
-      pushToast(`Review failed: ${describeThrown(error)}`);
+      // Decision 2: creates or focuses the review tab right away.
+      await startReview(task.id, { target: kind, harness });
     } finally {
       setBusy(false);
     }

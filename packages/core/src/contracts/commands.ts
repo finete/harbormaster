@@ -669,7 +669,11 @@ export interface CoreCommands {
    */
   claimInboxMessages(
     taskId: string,
-    options: { idle: boolean },
+    options: {
+      idle: boolean;
+      /** Claim only these messages (the app claiming a queued Review it is about to type). */
+      messageIds?: readonly string[];
+    },
   ): Promise<TaskMessage[]>;
   /** Cross-process doorbell for the task's inbox; returns unsubscribe. */
   subscribeInbox(taskId: string, listener: () => void): () => void;
@@ -869,15 +873,31 @@ export interface CoreCommands {
     url: string;
     source?: "plannotator" | "browser";
   }): Promise<void>;
-  /** Build the adapter's review command for the target (default: pr when the task has one) and deliver it to the session. */
+  /**
+   * Build the adapter's review command for the target (default: pr when the
+   * task has one). `deliver: "message"` (default) records it as a user
+   * `steer` for the session's inbox; `"none"` records nothing and only
+   * returns the command, for a frontend that types it into the session's
+   * own terminal (docs/plannotator.md "Transport"). `messageId` is the
+   * recorded message, when one was.
+   */
   requestReview(input: {
     taskId: string;
     target?: "local" | "pr";
-  }): Promise<{ command: string }>;
+    deliver?: "message" | "none";
+  }): Promise<RequestReviewResult>;
   /** Per-harness Plannotator status (see ReviewSupport). Cheap: version probes, cached 60 s, re-run on demand. */
   reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
   /** Flip `config.captureAgentBrowser` (applies to sessions launched afterwards). */
   setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+}
+
+/** What `requestReview` built and how it was delivered. */
+export interface RequestReviewResult {
+  command: string;
+  delivered: "message" | "none";
+  /** The recorded inbox message (`delivered: "message"` only). */
+  messageId?: string;
 }
 
 export interface RefreshResult {

@@ -911,6 +911,24 @@ export function writeToSession(id: string, data: string): void {
 }
 
 /**
+ * Writes `data` into a task's live primary pty (the agent's own process,
+ * pane showing or not) exactly as a keystroke from its pane would arrive.
+ * The Review button's typed slash command (main/review-transport.ts).
+ * `false` when the task has no live primary or the write failed.
+ */
+export function writeToPrimarySession(taskId: string, data: string): boolean {
+  const sessionId = primaryTaskSessions.get(taskId);
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session) return false;
+  try {
+    session.process.write(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The renderer finished processing `chars` of this session's output (xterm's
  * write callback). Resumes a pty paused by flow control once the backlog
  * drains. Unknown/disposed ids are ignored.

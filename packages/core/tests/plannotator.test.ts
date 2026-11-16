@@ -325,13 +325,18 @@ describe("requestReview", () => {
 
     expect(await core.commands.requestReview({ taskId: local.id })).toEqual({
       command: "/plannotator-review",
+      delivered: "message",
+      messageId: expect.any(String),
     });
-    expect(await core.commands.requestReview({ taskId: withPr.id })).toEqual({
+    expect(
+      await core.commands.requestReview({ taskId: withPr.id }),
+    ).toMatchObject({
       command: `/plannotator-review ${PR_URL}`,
+      delivered: "message",
     });
     expect(
       await core.commands.requestReview({ taskId: withPr.id, target: "local" }),
-    ).toEqual({ command: "/plannotator-review" });
+    ).toMatchObject({ command: "/plannotator-review", delivered: "message" });
     await expect(
       core.commands.requestReview({ taskId: local.id, target: "pr" }),
     ).rejects.toThrow(/no pull request/);
@@ -353,6 +358,47 @@ describe("requestReview", () => {
     expect(claimed.map(buildInboxMessageText)).toEqual([
       "[Message from the user]\n\n/plannotator-review",
     ]);
+  });
+
+  it("deliver none returns the command and records nothing (the app types it)", async () => {
+    const { core } = await boot();
+    const task = await core.commands.createTask({
+      title: "Typed",
+      initialPrompt: "",
+      start: true,
+    });
+    expect(
+      await core.commands.requestReview({ taskId: task.id, deliver: "none" }),
+    ).toEqual({ command: "/plannotator-review", delivered: "none" });
+    expect(await core.commands.listMessages({ taskId: task.id })).toEqual([]);
+  });
+
+  it("claims only the given message ids (a queued Review the app types)", async () => {
+    const { core } = await boot();
+    const task = await core.commands.createTask({
+      title: "Queued",
+      initialPrompt: "",
+      start: true,
+    });
+    await core.commands.sendTaskMessage({
+      from: { kind: "user" },
+      targetTaskId: task.id,
+      text: "something else",
+      mode: "steer",
+    });
+    const review = await core.commands.requestReview({ taskId: task.id });
+    const claimed = await core.commands.claimInboxMessages(task.id, {
+      idle: true,
+      messageIds: [review.messageId ?? ""],
+    });
+    expect(claimed.map((message) => message.text)).toEqual([
+      "/plannotator-review",
+    ]);
+    // Claimed once: a second claim (the agent's own) gets only the other one.
+    const rest = await core.commands.claimInboxMessages(task.id, {
+      idle: true,
+    });
+    expect(rest.map((message) => message.text)).toEqual(["something else"]);
   });
 
   it("rejects a harness without a review capability", async () => {

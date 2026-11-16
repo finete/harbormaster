@@ -541,9 +541,10 @@ describe("harbormaster open-url / review", () => {
     expect(
       await main(["review", "--local", "--task", task, "--json"], local),
     ).toBe(0);
-    expect(JSON.parse(local.out())).toEqual({
+    expect(JSON.parse(local.out())).toMatchObject({
       taskId: task,
       command: "/plannotator-review",
+      delivered: "message",
     });
     const pr = io({ HARBORMASTER_TASK_ID: task });
     expect(await main(["review", "--pr"], pr)).toBe(1);

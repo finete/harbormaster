@@ -182,6 +182,8 @@ export interface ClaimDeliverableInput {
   deliveredAt: string;
   /** Maps a message's requested mode to the mode the harness will actually use (stamped as `deliveredMode`). */
   resolveMode: (requested: MessageMode) => MessageMode;
+  /** Only these message ids (others stay pending). */
+  ids?: readonly string[];
 }
 
 export interface ApproveMessageInput {

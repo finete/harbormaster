@@ -37,6 +37,7 @@ import type {
   ReopenTaskInput,
   RepositoryInfo,
   ResolveInboxItemResult,
+  ReviewRequestResult,
   ReviewSupport,
   RulesListing,
   Task,
@@ -325,7 +326,7 @@ const api: HarbormasterApi = {
     requestReview: (input: {
       taskId: string;
       target?: "local" | "pr";
-    }): Promise<{ command: string }> =>
+    }): Promise<ReviewRequestResult> =>
       ipcRenderer.invoke("core:requestReview", input),
     reviewSupport: (options?: { refresh?: boolean }): Promise<ReviewSupport> =>
       ipcRenderer.invoke("core:reviewSupport", options),

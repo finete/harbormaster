@@ -232,6 +232,12 @@ export interface PresenceBadge {
 }
 
 /** Pushed every poll tick (~5s) for every non-done task; badge-sized only (see Sidebar/TaskCard). */
+/** How the Review button's command went to the session (see `requestReview`). */
+export interface ReviewRequestResult {
+  command: string;
+  delivery: "typed" | "queued" | "message";
+}
+
 export type PresenceChangedPayload = Record<string, PresenceBadge>;
 
 export interface TerminalCreateOptions {
@@ -573,11 +579,17 @@ export interface HarbormasterApi {
       url: string;
       source?: "plannotator" | "browser";
     }): Promise<void>;
-    /** Deliver the harness's Plannotator review command to the task's session. See `CoreCommands.requestReview`. */
+    /**
+     * Start a Plannotator review in the task's session (the Review button;
+     * docs/plannotator.md "Transport"): main types the harness's command
+     * into the task's primary pty when its agent is at its prompt
+     * (`typed`), queues it until the agent finishes its turn (`queued`),
+     * or, with no pty of ours, leaves it to inbox delivery (`message`).
+     */
     requestReview(input: {
       taskId: string;
       target?: "local" | "pr";
-    }): Promise<{ command: string }>;
+    }): Promise<ReviewRequestResult>;
     /** Per-harness Plannotator status; `refresh` re-probes. See `CoreCommands.reviewSupport`. */
     reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
     /** The Settings "Capture agent browser opens" switch. See `CoreCommands.setCaptureAgentBrowser`. */

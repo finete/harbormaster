@@ -182,12 +182,16 @@ writeFileSync(LOG, JSON.stringify(log, null, 2));
 
 /**
  * A stand-in `pi` (a node script) for the code review flow
- * (docs/plannotator.md): reports `idle` over OSC 7501 and claims its inbox
- * through the `harbormaster` CLI (`HARBORMASTER_CLI inbox claim`, like the
- * Pi extension's delivery) every 300 ms. Each delivered text is appended to
- * `logFile`; one containing `/plannotator-review` runs `plannotator
- * review` (whatever is first on PATH) in the session's own pty and env, so
- * PLANNOTATOR_BROWSER and the ready line behave as with the real agent.
+ * (docs/plannotator.md "Transport"): reports `idle` over OSC 7501 and reads
+ * its terminal like the real agent's prompt. A typed line (the pty is in
+ * cooked mode, so Enter ends it) is appended to `logFile` as
+ * `typed "<line>"`; a `/plannotator-review` line runs `plannotator review`
+ * (whatever is first on PATH) in the session's own pty and env, so
+ * PLANNOTATOR_BROWSER and the ready line behave as with the real agent. It
+ * also claims its inbox through the `harbormaster` CLI every 300 ms (like
+ * the Pi extension's delivery) and logs each text as `inbox "<text>"`, but
+ * never runs a command from it: inbox text is context, not a typed slash
+ * command, exactly the gap that made the Review button type instead.
  */
 export function writeReviewPi(dir: string, logFile: string): string {
   const fakePi = path.join(dir, "fake-pi-review.mjs");
@@ -196,20 +200,31 @@ import { execFile, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 const LOG = ${JSON.stringify(logFile)};
 process.stdout.write("\x1b]7501;state=idle\x07fake review pi ready\r\n");
+let line = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  line += chunk;
+  let index;
+  while ((index = line.search(/[\r\n]/)) !== -1) {
+    const typed = line.slice(0, index).trim();
+    line = line.slice(index + 1);
+    if (!typed) continue;
+    appendFileSync(LOG, "typed " + JSON.stringify(typed) + "\n");
+    if (typed.startsWith("/plannotator-review")) {
+      spawn("plannotator", ["review"], { stdio: ["ignore", "inherit", "inherit"] });
+    }
+  }
+});
 const claim = () =>
   execFile(process.env.HARBORMASTER_CLI, ["inbox", "claim"], (error, stdout) => {
     if (!error) {
       for (const message of JSON.parse(stdout).messages ?? []) {
-        appendFileSync(LOG, JSON.stringify(message.text) + "\n");
-        if (message.text.includes("/plannotator-review")) {
-          spawn("plannotator", ["review"], { stdio: "inherit" });
-        }
+        appendFileSync(LOG, "inbox " + JSON.stringify(message.text) + "\n");
       }
     }
     setTimeout(claim, 300);
   });
 claim();
-setInterval(() => {}, 1 << 30);
 `;
   writeFileSync(fakePi, script);
   chmodSync(fakePi, 0o755);

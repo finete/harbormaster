@@ -18,6 +18,7 @@ import type {
   RefreshOptions,
   RefreshResult,
   ReopenTaskInput,
+  RequestReviewResult,
   ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneOptions,
@@ -3367,7 +3368,7 @@ export class CoreManager implements CoreCommands {
 
   async claimInboxMessages(
     taskId: string,
-    options: { idle: boolean },
+    options: { idle: boolean; messageIds?: readonly string[] },
   ): Promise<TaskMessage[]> {
     const { messages } = this.requireMessaging();
     const now = this.deps.clock.now().toISOString();
@@ -3388,6 +3389,7 @@ export class CoreManager implements CoreCommands {
       idle: options.idle,
       deliveredAt: now,
       resolveMode: (requested) => resolveDeliveredMode(requested, capabilities),
+      ...(options.messageIds ? { ids: options.messageIds } : {}),
     });
     if (claimed.length > 0) this.emitMessagesChanged(affectedTaskIds(claimed));
     return claimed;
@@ -4182,7 +4184,8 @@ export class CoreManager implements CoreCommands {
   async requestReview(input: {
     taskId: string;
     target?: "local" | "pr";
-  }): Promise<{ command: string }> {
+    deliver?: "message" | "none";
+  }): Promise<RequestReviewResult> {
     const task = await this.requireTask(input.taskId);
     const harness = await this.harnessFor(task);
     if (!harness.review) {
@@ -4198,13 +4201,16 @@ export class CoreManager implements CoreCommands {
       target = { kind: "local" };
     }
     const command = harness.review.command(target);
-    await this.sendTaskMessage({
+    // The app types it into the session's own terminal (a real slash
+    // command); core never touches a pty, so it records nothing then.
+    if (input.deliver === "none") return { command, delivered: "none" };
+    const { message } = await this.sendTaskMessage({
       from: { kind: "user" },
       targetTaskId: task.id,
       text: command,
       mode: "steer",
     });
-    return { command };
+    return { command, delivered: "message", messageId: message.id };
   }
 
   async reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport> {

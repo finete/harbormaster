@@ -220,7 +220,9 @@ export class JsonMessageAccess implements MessageAccess {
       const candidates = state.messages
         .filter(
           (message) =>
-            message.status === "pending" && message.targetTaskId === taskId,
+            message.status === "pending" &&
+            message.targetTaskId === taskId &&
+            (!input.ids || input.ids.includes(message.id)),
         )
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       for (const message of candidates) {
