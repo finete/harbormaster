@@ -3,6 +3,8 @@
 // pipelines, no terminal-multiplexer integration. Those return in later phases behind the same shapes
 // where it makes sense.
 
+import type { TaskUsage } from "./usage.js";
+
 export const STATE_VERSION = 1 as const;
 
 /**
@@ -258,6 +260,12 @@ export interface Task {
    * the refresh sweep's forced retries, cleared when the task leaves Done.
    */
   cleanup?: TaskCleanup;
+  /**
+   * Token usage summed over the task's harness sessions (docs/costs.md),
+   * kept current by core on session-recorded / agent-finished / Done and a
+   * one-shot backfill. Absent until first computed.
+   */
+  usage?: TaskUsage;
 }
 
 /**

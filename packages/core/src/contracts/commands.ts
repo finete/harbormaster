@@ -56,6 +56,7 @@ import type {
   RulesCheckResult,
   RulesListing,
 } from "./rules.js";
+import type { TaskUsage, TaskUsageQuery, TaskUsageRow } from "./usage.js";
 import type { RepositoryInfo } from "./workspace.js";
 
 export type { PullRequestPreview } from "./github.js";
@@ -890,6 +891,25 @@ export interface CoreCommands {
   reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
   /** Flip `config.captureAgentBrowser` (applies to sessions launched afterwards). */
   setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+
+  // --- Costs: per-task token usage (docs/costs.md) -----------------------
+
+  /**
+   * Every task with computed usage (`Task.usage`), filtered by `query`,
+   * ranked by total tokens (input + output + cache read + cache write),
+   * highest first. Archived tasks only with `includeArchived`. A parent's
+   * row carries `subtaskUsage`: its children's ready usage summed (whatever
+   * the filters), with `cost` only when every counted child had one.
+   * Read-only: never parses a session file.
+   */
+  listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;
+  /**
+   * Recompute one task's usage now from its session files (the popover's
+   * refresh), persist it on the task (emits `task-changed`), and return it.
+   * `undefined` when there is nothing to report yet (no session recorded).
+   * Rejects for an unknown task.
+   */
+  refreshTaskUsage(taskId: string): Promise<TaskUsage | undefined>;
 }
 
 /** What `requestReview` built and how it was delivered. */

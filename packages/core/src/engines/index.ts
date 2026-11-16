@@ -17,4 +17,5 @@ export * from "./session-file-check.js";
 export * from "./sources/index.js";
 export * from "./task-transitions.js";
 export * from "./task-workspace.js";
+export * from "./usage.js";
 export * from "./worktree-status.js";

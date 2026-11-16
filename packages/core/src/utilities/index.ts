@@ -4,6 +4,7 @@ export * from "./core-log.js";
 export * from "./defaults.js";
 export * from "./event-bus.js";
 export * from "./file-lock.js";
+export * from "./format-token-count.js";
 export * from "./pi-extension.js";
 export * from "./program-status.js";
 export * from "./run.js";

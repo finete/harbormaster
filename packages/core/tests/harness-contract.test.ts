@@ -245,6 +245,18 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     else expect(receive).toBe(true);
   });
 
+  it("reads session usage (built-ins) or declares none (custom), never throwing on a missing file", async () => {
+    // docs/costs.md: a harness without a reader makes usage `unavailable`.
+    if (subject.name === "custom") {
+      expect(adapter.readSessionUsage).toBeUndefined();
+      return;
+    }
+    expect(adapter.readSessionUsage).toBeTypeOf("function");
+    await expect(
+      adapter.readSessionUsage?.("/nonexistent/session.jsonl"),
+    ).resolves.toBeUndefined();
+  });
+
   it("never throws from its model catalog, even when the source fails", async () => {
     const failing = subject.make({ cliPath: CLI, models: failingModels });
     const catalog = await failing.listModels();

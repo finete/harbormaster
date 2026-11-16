@@ -71,6 +71,16 @@ export interface TaskUsage {
 - `CoreCommands.refreshTaskUsage(taskId)` recomputes one task (used by the popover's refresh and the backfill).
 - Utility `formatTokenCount(n)` → `"9.8M"`, `"92k"`, `"412"` in `packages/core/src/utilities/`.
 
+Implementation notes (additive to the shapes above; see `contracts/usage.ts`):
+`SessionUsage.forkedFrom.prefix` carries the copied prefix per model so the
+engine can subtract it; `TaskUsage.fingerprint` (size/mtime of the session
+files) makes recomputation cheap; `listTaskUsage(query?)` takes an optional
+`TaskUsageQuery`; `refreshTaskUsage` resolves to `TaskUsage | undefined`;
+`TaskUsageRow.repository` is `repositoryId`, else `folderPath`, else `""`.
+The Claude adapter gained `expectedSessionFile` so core can locate
+transcripts without a `recordTaskSession` call. Socket ops `usage` and
+`usage_refresh` expose both commands to the CLI.
+
 ## Harness file facts (verified on disk 2026-11-16)
 
 - **Pi** `~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.jsonl`: assistant messages carry `usage: { input, output, cacheRead, cacheWrite, totalTokens, cost: { input, output, cacheRead, cacheWrite, total } }` and a `model`. `cost` is Pi's own list-price estimate (`pi-ai` `calculateCost`).

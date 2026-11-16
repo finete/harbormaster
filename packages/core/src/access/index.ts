@@ -1,4 +1,5 @@
 export * from "./claude-code-access.js";
+export * from "./claude-session-usage-access.js";
 export * from "./git-repository-access.js";
 export * from "./git-worktree-access.js";
 export * from "./github-pr-access.js";
@@ -18,6 +19,7 @@ export * from "./local-onboarding-probe-access.js";
 export * from "./local-review-support-probe-access.js";
 export * from "./local-rules-file-access.js";
 export * from "./pi-model-catalog-access.js";
+export * from "./pi-session-usage-access.js";
 export * from "./scratch-workspace-access.js";
 export * from "./session-presence-access.js";
 export * from "./timed-access.js";

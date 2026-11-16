@@ -7,6 +7,7 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { PiModelCatalogAccess } from "../access/pi-model-catalog-access.js";
+import { readPiSessionUsage } from "../access/pi-session-usage-access.js";
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
 import type {
   BuildLaunchSpecInput,
@@ -21,6 +22,7 @@ import type {
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
+import type { SessionUsage } from "../contracts/usage.js";
 import { SystemClock } from "../utilities/defaults.js";
 import {
   resolveSocketPath,
@@ -271,6 +273,11 @@ export class PiHarnessAdapter implements HarnessAdapter {
       dir: piSessionDir(cwd, this.agentDir ?? defaultPiAgentDir()),
       fileSuffix: `_${sessionId}.jsonl`,
     };
+  }
+
+  /** Per-model tokens + Pi's own cost estimate (`usage.cost.total`), fork prefix from the header's `parentSession`. */
+  readSessionUsage(sessionPath: string): Promise<SessionUsage | undefined> {
+    return readPiSessionUsage(sessionPath);
   }
 
   async defaults(): Promise<

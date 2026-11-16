@@ -129,6 +129,11 @@ import type {
   WorkspaceBindingAccess,
 } from "../contracts/services.js";
 import type {
+  TaskUsage,
+  TaskUsageQuery,
+  TaskUsageRow,
+} from "../contracts/usage.js";
+import type {
   GitRepositoryAccess,
   GitWorktreeAccess,
   RepositoryInfo,
@@ -200,6 +205,7 @@ import {
   assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
+import { buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import {
@@ -218,6 +224,7 @@ import {
   RulesRuntime,
 } from "./rules-runtime.js";
 import { SessionFileWatch } from "./session-file-watch.js";
+import { UsageRuntime } from "./usage-runtime.js";
 
 export interface CoreManagerDependencies {
   tasks: TaskStateAccess;
@@ -360,6 +367,8 @@ export class CoreManager implements CoreCommands {
   private readonly log: CoreLogger;
   /** `new` session launches waiting for their session file (see session-file-watch.ts). */
   private readonly sessionFiles: SessionFileWatch;
+  /** Per-task token usage (see usage-runtime.ts, docs/costs.md). */
+  private readonly usage: UsageRuntime;
   /** Tasks the running refresh observes (for its completion line). */
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
@@ -383,6 +392,15 @@ export class CoreManager implements CoreCommands {
       sessions: deps.sessions,
       logger: this.log,
       nowMs: () => deps.clock.now().getTime(),
+    });
+    this.usage = new UsageRuntime({
+      tasks: deps.tasks,
+      sessions: deps.sessions,
+      clock: deps.clock,
+      logger: this.log,
+      adapterFor: (task) => this.usageAdapterFor(task),
+      bindingFor: (taskId) => deps.bindings.getBindingForTask(taskId),
+      publish: (task) => this.publishTaskChange(task),
     });
     this.rules = deps.rules
       ? new RulesRuntime({
@@ -1334,6 +1352,9 @@ export class CoreManager implements CoreCommands {
         outcome: recorded ? "recorded" : "ignored",
       },
     );
+    // Usage snapshot (docs/costs.md): usually `pending` this early, the
+    // agent-finished / Done triggers fill it in.
+    if (recorded) await this.usage.update(taskId);
     return recorded;
   }
 
@@ -1785,9 +1806,17 @@ export class CoreManager implements CoreCommands {
     // Then exactly one "Mark done?" question; once confirmed, Done is final
     // and the housekeeping is the app's (never a second question).
     if (!force.confirmed) return this.doneConfirmation(task, protectedPaths);
+    // The binding as it is now: Done parks it (no worktree path left to
+    // locate the session file by) before the usage snapshot runs.
+    const binding = await this.deps.bindings
+      .getBindingForTask(task.id)
+      .catch(() => undefined);
     const landed = await this.executeConfirmedDone(task, protectedPaths);
     if (!landed) throw new Error(`Task not found: ${taskId}`);
-    return { task: landed };
+    const usage = await this.usage.update(task.id, {
+      ...(binding ? { binding } : {}),
+    });
+    return { task: usage ? { ...landed, usage } : landed };
   }
 
   async retryDoneCleanup(
@@ -2235,6 +2264,14 @@ export class CoreManager implements CoreCommands {
       changed = true;
     }
     if (await this.archiveDoneTasks()) changed = true;
+    // Usage backfill (docs/costs.md): tasks never computed, a batch per
+    // tick, plus still-pending ones; never on a manager without agents.
+    if (this.deps.harness || this.deps.harnesses) {
+      const usageChanged = await this.usage
+        .backfill(await this.deps.tasks.listTasks(), bindingFor)
+        .catch(() => false);
+      if (usageChanged) changed = true;
+    }
     if (changed) await this.publishBoard();
     return {
       warnings,
@@ -2596,6 +2633,9 @@ export class CoreManager implements CoreCommands {
       });
     };
     let result: Awaited<ReturnType<CoreManager["executeSafeDoneSteps"]>>;
+    const binding = await this.deps.bindings
+      .getBindingForTask(task.id)
+      .catch(() => undefined);
     try {
       result = await this.executeSafeDoneSteps(task, protectedPaths);
     } catch (error) {
@@ -2611,6 +2651,12 @@ export class CoreManager implements CoreCommands {
         outcome: "ok",
         ...(result.warning ? { error: result.warning } : {}),
       });
+      if (result.task) {
+        const usage = await this.usage.update(task.id, {
+          ...(binding ? { binding } : {}),
+        });
+        if (usage) result = { ...result, task: { ...result.task, usage } };
+      }
     }
     return result;
   }
@@ -3434,6 +3480,8 @@ export class CoreManager implements CoreCommands {
       input.pid,
       input.at ?? this.deps.clock.now().toISOString(),
     );
+    // The agent finished: snapshot its usage (docs/costs.md).
+    await this.usage.update(taskId);
   }
 
   async reportTaskOutcome(
@@ -3458,6 +3506,7 @@ export class CoreManager implements CoreCommands {
       .getTask(taskId)
       .catch(() => undefined);
     if (reported) this.logLaunch(reported, outcome.status);
+    await this.usage.update(taskId);
   }
 
   async getPresence(taskId: string): Promise<PresenceStatus> {
@@ -4251,6 +4300,36 @@ export class CoreManager implements CoreCommands {
       ),
       checkedAt: entry.checkedAt,
     };
+  }
+
+  // --- Costs: per-task token usage (docs/costs.md) -----------------------
+
+  async listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]> {
+    return buildTaskUsageRows(await this.deps.tasks.listTasks(), query ?? {});
+  }
+
+  async refreshTaskUsage(taskId: string): Promise<TaskUsage | undefined> {
+    await this.requireTask(taskId);
+    return this.usage.update(taskId, { force: true });
+  }
+
+  /** The adapter that reads a task's sessions (see `UsageRuntimeDeps.adapterFor`). */
+  private async usageAdapterFor(
+    task: Task,
+  ): Promise<HarnessAdapter | "unsupported" | undefined> {
+    if (!this.deps.harness && !this.deps.harnesses) return undefined;
+    const config = await this.deps.config.load();
+    // A task on an agent that is no longer registered (a removed custom
+    // CLI) must not have its sessions read by the fallback adapter.
+    if (
+      this.deps.harnesses &&
+      task.harness &&
+      task.harness !== DEFAULT_HARNESS_ID &&
+      !this.deps.harnesses.get(task.harness, config.agents?.custom ?? [])
+    ) {
+      return "unsupported";
+    }
+    return this.harnessFor(task, config);
   }
 
   async setCaptureAgentBrowser(enabled: boolean): Promise<void> {

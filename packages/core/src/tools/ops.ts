@@ -13,7 +13,10 @@ import type { InboxItem, InboxPriorityInput } from "../contracts/inbox.js";
 import type { TaskMessage } from "../contracts/messaging.js";
 import type { Task } from "../contracts/model.js";
 import type { AuditEntry, RulesListing } from "../contracts/rules.js";
+import type { TaskUsageQuery, TaskUsageRow } from "../contracts/usage.js";
 import { formatDoctorReport } from "../engines/doctor.js";
+import { totalTokens } from "../engines/usage.js";
+import { formatTokenCount } from "../utilities/format-token-count.js";
 import type { ToolCaller, ToolInputSchema, ToolResult } from "./catalog.js";
 
 export interface OpDefinition {
@@ -483,6 +486,97 @@ const requestReview: OpDefinition = {
   },
 };
 
+/** One `usage` row as a text line: tokens, `~$` (estimate, labelled), status, task. */
+export function formatUsageLine(row: TaskUsageRow): string {
+  const { usage } = row;
+  const tokens =
+    usage.status === "ready"
+      ? `${formatTokenCount(totalTokens(usage.totals))} tok`
+      : usage.status === "pending"
+        ? "pending"
+        : `unavailable${usage.reason ? ` (${usage.reason})` : ""}`;
+  const cost =
+    usage.cost !== undefined
+      ? `  ~$${usage.cost.toFixed(2)} est. by ${usage.costSource ?? "harness"}`
+      : "";
+  const subtasks = row.subtaskUsage
+    ? `  incl. ${row.subtaskUsage.count} subtask${row.subtaskUsage.count === 1 ? "" : "s"} (${formatTokenCount(totalTokens(row.subtaskUsage))} tok)`
+    : "";
+  return `${tokens}${cost}  ${row.harness}  ${row.taskId}  ${row.title}${subtasks}`;
+}
+
+const usageList: OpDefinition = {
+  name: "usage",
+  title:
+    "Per-task token usage (docs/costs.md), most tokens first; $ only where the agent recorded an estimate",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "ISO time or YYYY-MM-DD" },
+      to: { type: "string", description: "ISO time or YYYY-MM-DD" },
+      repository: { type: "string" },
+      harness: { type: "string" },
+      model: { type: "string" },
+      includeArchived: { type: "boolean" },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, commands) {
+    const raw = args.includeArchived;
+    const includeArchived = raw === true || raw === "true";
+    if (
+      raw !== undefined &&
+      raw !== null &&
+      typeof raw !== "boolean" &&
+      raw !== "true" &&
+      raw !== "false"
+    ) {
+      throw new Error("includeArchived must be a boolean");
+    }
+    const query: TaskUsageQuery = {};
+    for (const key of [
+      "from",
+      "to",
+      "repository",
+      "harness",
+      "model",
+    ] as const) {
+      const value = str(args, key);
+      if (value) query[key] = value;
+    }
+    if (includeArchived) query.includeArchived = true;
+    const rows = await commands.listTaskUsage(query);
+    return {
+      text: rows.length
+        ? rows.map(formatUsageLine).join("\n")
+        : "No task usage recorded.",
+      details: { rows },
+    };
+  },
+};
+
+const usageRefresh: OpDefinition = {
+  name: "usage_refresh",
+  title: "Recompute one task's token usage from its session files",
+  inputSchema: {
+    type: "object",
+    properties: { task: { type: "string" } },
+    required: ["task"],
+    additionalProperties: false,
+  },
+  async handler(args, commands) {
+    const taskId = str(args, "task");
+    if (!taskId) throw new Error("task is required");
+    const usage = await commands.refreshTaskUsage(taskId);
+    return {
+      text: usage
+        ? `Task ${taskId}: ${usage.status === "ready" ? `${formatTokenCount(totalTokens(usage.totals))} tokens` : usage.status}`
+        : `Task ${taskId}: no session recorded yet`,
+      details: { taskId, ...(usage ? { usage } : {}) },
+    };
+  },
+};
+
 /** Every operation, in display order. */
 const doctor: OpDefinition = {
   name: "doctor",
@@ -529,6 +623,8 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   doctor,
   openUrl,
   requestReview,
+  usageList,
+  usageRefresh,
 ];
 
 /** Runs one operation against the command API. */

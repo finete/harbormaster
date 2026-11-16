@@ -126,6 +126,14 @@ export interface SessionFileAccess {
     dir: string,
     fileSuffix: string,
   ): Promise<string | undefined>;
+  /**
+   * Size and modification time of a session file (usage change detection,
+   * see docs/costs.md); `undefined` when it is missing. Optional: without
+   * it core re-reads usage on every trigger.
+   */
+  stat?(
+    sessionPath: string,
+  ): Promise<{ size: number; mtimeMs: number } | undefined>;
 }
 
 /**

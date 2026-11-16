@@ -13,6 +13,7 @@
 
 import type { HarnessMessagingCapabilities } from "./messaging.js";
 import type { PresenceRecord, ThinkingLevel } from "./model.js";
+import type { SessionUsage } from "./usage.js";
 
 /** One model a harness can run, for the composer's Agent · Model picker. */
 export interface HarnessModel {
@@ -196,6 +197,15 @@ export interface HarnessAdapter {
     cwd: string,
     sessionId: string,
   ): ExpectedSessionFile | undefined;
+
+  /**
+   * Token usage recorded in one of this harness's session files (see
+   * docs/costs.md): per model, with the harness's own cost when it wrote
+   * one, and the fork prefix when the session was forked. Resolves
+   * `undefined` when the file is unreadable or missing. Absent = this
+   * harness has no usage reader (the task's usage is `unavailable`).
+   */
+  readSessionUsage?(sessionPath: string): Promise<SessionUsage | undefined>;
 }
 
 /** A session file's expected location: some file in `dir` whose name ends with `fileSuffix`. */

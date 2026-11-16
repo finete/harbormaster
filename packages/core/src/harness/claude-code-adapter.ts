@@ -24,13 +24,17 @@
 //   warning), `--model <alias|name>`.
 // - `--dangerously-skip-permissions` = `--permission-mode bypassPermissions`.
 
+import { join } from "node:path";
 import {
   ClaudeModelCatalogAccess,
   type ClaudeTranscriptAccess,
+  claudeConfigDir,
   LocalClaudeTranscriptAccess,
 } from "../access/claude-code-access.js";
+import { readClaudeSessionUsage } from "../access/claude-session-usage-access.js";
 import type {
   BuildLaunchSpecInput,
+  ExpectedSessionFile,
   HarnessAdapter,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
@@ -41,6 +45,7 @@ import type {
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
+import type { SessionUsage } from "../contracts/usage.js";
 import {
   applyOpenUrlEnv,
   baseLaunchEnv,
@@ -130,6 +135,17 @@ export function claudeSessionArgs(
   }
 }
 
+/**
+ * Claude's project directory name for a cwd (`~/.claude/projects/<slug>`):
+ * every non-alphanumeric character becomes `-` (verified on disk:
+ * `/Users/me/Code/.wt/x` → `-Users-me-Code--wt-x`). Claude shortens very
+ * long slugs with a hash; those are not predicted (`undefined`).
+ */
+export function claudeProjectSlug(cwd: string): string | undefined {
+  const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  return slug.length <= 200 ? slug : undefined;
+}
+
 /** The prompt as Claude's positional argument, always after `--` (see the header). */
 export function claudePromptArgs(prompt: string | undefined): string[] {
   if (!prompt?.trim()) return [];
@@ -196,6 +212,8 @@ export interface ClaudeCodeHarnessAdapterOptions extends PresenceReaderOptions {
   models?: HarnessModelCatalogAccess;
   /** Transcript existence (resume vs. re-create); injectable for tests. */
   transcripts?: ClaudeTranscriptAccess;
+  /** Claude's config directory (transcripts under `<configDir>/projects`); defaults to `$CLAUDE_CONFIG_DIR` or `~/.claude`. */
+  configDir?: string;
 }
 
 export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
@@ -211,12 +229,36 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   private readonly models: HarnessModelCatalogAccess;
   private readonly transcripts: ClaudeTranscriptAccess;
   private readonly cliPath: string | undefined;
+  private readonly configDir: string | undefined;
 
   constructor(options: ClaudeCodeHarnessAdapterOptions = {}) {
     this.readPresence = createPresenceReader(options);
     this.models = options.models ?? new ClaudeModelCatalogAccess();
     this.transcripts = options.transcripts ?? new LocalClaudeTranscriptAccess();
     this.cliPath = options.cliPath;
+    this.configDir = options.configDir;
+  }
+
+  /** `<configDir>/projects/<cwd slug>/<sessionId>.jsonl`. */
+  expectedSessionFile(
+    cwd: string,
+    sessionId: string,
+  ): ExpectedSessionFile | undefined {
+    const slug = claudeProjectSlug(cwd);
+    if (!slug) return undefined;
+    return {
+      dir: join(this.configDir ?? claudeConfigDir(), "projects", slug),
+      fileSuffix: `${sessionId}.jsonl`,
+    };
+  }
+
+  /**
+   * Per-model tokens, each request once (`requestId` / `message.id`),
+   * sidechain turns and subagent transcripts included; no cost (Claude
+   * Code writes none per turn).
+   */
+  readSessionUsage(sessionPath: string): Promise<SessionUsage | undefined> {
+    return readClaudeSessionUsage(sessionPath);
   }
 
   async defaults(): Promise<
