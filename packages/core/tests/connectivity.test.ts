@@ -2,7 +2,10 @@
 // gh/API error (auth, not found, rate limit) must not — refresh() depends
 // on this split to keep offline from ever becoming a wall of warnings.
 import { describe, expect, it } from "vitest";
-import { isConnectivityError } from "../src/engines/connectivity.js";
+import {
+  isConnectivityError,
+  isTransientError,
+} from "../src/engines/connectivity.js";
 
 describe("isConnectivityError", () => {
   it.each([
@@ -31,5 +34,27 @@ describe("isConnectivityError", () => {
     "gh auth login required",
   ])("does not classify %s as a connectivity failure", (message) => {
     expect(isConnectivityError(message)).toBe(false);
+  });
+});
+
+describe("isTransientError", () => {
+  it.each([
+    "gh api graphql -f query=…(4123 chars) failed: timed out after 20000ms",
+    "HTTP 502: Bad Gateway (https://api.github.com/graphql)",
+    "HTTP 504: Gateway Timeout (https://api.github.com/graphql)",
+    "GraphQL: Something went wrong while executing your query. This may be the result of a timeout",
+    "We couldn't respond to your request in time. Sorry about that.",
+  ])("classifies %s as transient", (message) => {
+    expect(isTransientError(message)).toBe(true);
+  });
+
+  it.each([
+    "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+    "HTTP 403: API rate limit exceeded",
+    "HTTP 404: Not Found",
+    "GraphQL: Could not resolve to a Repository with the name 'x/y'.",
+    "Unexpected GitHub GraphQL payload: no repository",
+  ])("does not classify %s as transient", (message) => {
+    expect(isTransientError(message)).toBe(false);
   });
 });

@@ -148,7 +148,10 @@ import {
   shouldArchive,
   shouldDeleteBranch,
 } from "../engines/cleanup.js";
-import { isConnectivityError } from "../engines/connectivity.js";
+import {
+  isConnectivityError,
+  isTransientError,
+} from "../engines/connectivity.js";
 import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
@@ -297,6 +300,14 @@ const COLUMN_TITLES: Record<TaskState, string> = {
 /** How long registered folders' repository lookups are reused. */
 const LOCATION_CACHE_TTL_MS = 30_000;
 
+/**
+ * Consecutive transient failures (timeout, GitHub 5xx) of one repository's
+ * batched PR lookup before it becomes a warning. Earlier ones are only
+ * logged: the next tick is the retry and tasks keep their last PR data. At
+ * the ~30s cadence, 3 means ~1.5 minutes of failing.
+ */
+const TRANSIENT_PR_FAILURES_BEFORE_WARNING = 3;
+
 /** PR observations in flight at once during `refresh()` (pi-home parity). */
 const REFRESH_CONCURRENCY = 4;
 
@@ -312,6 +323,8 @@ type PrefetchedPullRequest =
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
   private refreshInFlight: Promise<RefreshResult> | undefined;
+  /** Consecutive transient batched-PR-lookup failures per repository id (reset on any other outcome). */
+  private readonly transientPrFailures = new Map<string, number>();
   /** Last reported done-cleanup retry failure per task (dedupe). */
   private readonly cleanupWarnings = new Map<string, string>();
   /** Tasks whose forced Done cleanup is running right now (toDone vs the sweep vs Retry). */
@@ -2252,9 +2265,26 @@ export class CoreManager implements CoreCommands {
               status: statuses?.get(task.branch as string),
             });
           }
+          this.transientPrFailures.delete(repositoryId);
         } catch (error) {
           for (const task of group) {
             prefetched.set(task.id, { batchFailed: true });
+          }
+          const message = describeError(error);
+          if (!isConnectivityError(message) && isTransientError(message)) {
+            const streak =
+              (this.transientPrFailures.get(repositoryId) ?? 0) + 1;
+            this.transientPrFailures.set(repositoryId, streak);
+            if (streak < TRANSIENT_PR_FAILURES_BEFORE_WARNING) {
+              this.log.warn("refresh", "PR status lookup failed (transient)", {
+                repositoryId,
+                count: streak,
+                error: logErrorMessage(error),
+              });
+              return;
+            }
+          } else {
+            this.transientPrFailures.delete(repositoryId);
           }
           this.recordFailure(
             `PR status for ${repositoryId} (${group.length} task${group.length === 1 ? "" : "s"})`,

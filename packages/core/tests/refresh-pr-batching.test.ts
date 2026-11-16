@@ -31,7 +31,7 @@ class BatchingPullRequests implements PullRequestAccess {
     private readonly answer: (
       branch: string,
     ) => PullRequestStatus | undefined = () => undefined,
-    private readonly batchError?: Error,
+    public batchError?: Error,
   ) {}
   async status(
     _repositoryId: string,
@@ -192,5 +192,31 @@ describe("refresh() batches PR observation per repository", () => {
       offline: true,
       failedChecks: 1,
     });
+  });
+  it("a transient batch failure (timeout, 5xx) only warns once it persists for 3 ticks", async () => {
+    const timeout = new Error(
+      "gh api graphql -f query=…(4123 chars) failed: timed out after 20000ms",
+    );
+    const pullRequests = new BatchingPullRequests(() => undefined, timeout);
+    const { core, repo } = await fixture(pullRequests);
+    const expected = `PR status for ${repo.id} (3 tasks): ${timeout.message}`;
+
+    // Ticks 1-2: silent (logged only), and never the offline banner.
+    for (let tick = 1; tick <= 2; tick += 1) {
+      const result = await core.commands.refresh();
+      expect(result.warnings).toEqual([]);
+      expect(result.connectivity).toBeUndefined();
+    }
+    // Tick 3 in a row: a real, persistent problem.
+    expect((await core.commands.refresh()).warnings).toEqual([expected]);
+
+    // A success resets the streak: the next two timeouts are silent again.
+    pullRequests.batchError = undefined;
+    expect((await core.commands.refresh()).warnings).toEqual([]);
+    pullRequests.batchError = timeout;
+    expect((await core.commands.refresh()).warnings).toEqual([]);
+    expect((await core.commands.refresh()).warnings).toEqual([]);
+    expect((await core.commands.refresh()).warnings).toEqual([expected]);
+    expect(pullRequests.batchCalls).toHaveLength(7);
   });
 });

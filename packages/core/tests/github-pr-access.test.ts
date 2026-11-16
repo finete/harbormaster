@@ -4,7 +4,11 @@
 // are always faked: this test never touches a network or a real remote.
 
 import { describe, expect, it, vi } from "vitest";
-import { GithubPrAccess } from "../src/access/github-pr-access.js";
+import {
+  GithubPrAccess,
+  STATUS_LOOKUP_TIMEOUT_MS,
+} from "../src/access/github-pr-access.js";
+import type { RunOptions } from "../src/utilities/run.js";
 
 const repositoryId = "github.com/acme/widgets";
 
@@ -146,17 +150,24 @@ describe("GithubPrAccess fixtures", () => {
       mergeCommit: { oid: "fedcba9" },
       baseRefName: "release",
     };
-    const execute = vi.fn(async (_command: string, args: string[]) => {
-      const heads = args.filter((arg) => /^h\d+=/.test(arg));
-      const repository = Object.fromEntries(
-        heads.map((head) => {
-          const [key, branch] = head.split("=") as [string, string];
-          const alias = `b${key.slice(1)}`;
-          return [alias, { nodes: branch === "feature" ? [node] : [] }];
-        }),
-      );
-      return JSON.stringify({ data: { repository } });
-    });
+    const execute = vi.fn(
+      async (
+        _command: string,
+        args: string[],
+        _cwd?: string,
+        _options?: RunOptions,
+      ) => {
+        const heads = args.filter((arg) => /^h\d+=/.test(arg));
+        const repository = Object.fromEntries(
+          heads.map((head) => {
+            const [key, branch] = head.split("=") as [string, string];
+            const alias = `b${key.slice(1)}`;
+            return [alias, { nodes: branch === "feature" ? [node] : [] }];
+          }),
+        );
+        return JSON.stringify({ data: { repository } });
+      },
+    );
     const access = new GithubPrAccess(execute);
     const branches = [
       "feature",
@@ -173,6 +184,10 @@ describe("GithubPrAccess fixtures", () => {
     expect(args).toContain("owner=acme");
     expect(args).toContain("name=widgets");
     expect(args).toContain("h0=feature");
+    // A stalled lookup gives up at the short observation limit, not 60s.
+    expect(execute.mock.calls[0]?.[3]).toEqual({
+      timeoutMs: STATUS_LOOKUP_TIMEOUT_MS,
+    });
     const query = args?.find((arg) => arg.startsWith("query=")) ?? "";
     expect(query).not.toContain("feature");
     expect(query).toContain(

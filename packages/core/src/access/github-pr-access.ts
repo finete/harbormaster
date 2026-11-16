@@ -13,7 +13,7 @@ import type {
   PullRequestStatus,
 } from "../contracts/github.js";
 import { LruMap } from "../utilities/lru-map.js";
-import { LONG_RUN_TIMEOUT_MS, run } from "../utilities/run.js";
+import { LONG_RUN_TIMEOUT_MS, type RunOptions, run } from "../utilities/run.js";
 
 interface GhReview {
   state?: string;
@@ -75,6 +75,7 @@ export type Execute = (
   command: string,
   args: string[],
   cwd?: string,
+  options?: RunOptions,
 ) => Promise<string>;
 
 /** Overrides the `gh` binary (and only `gh`) for e2e: a tiny fake CLI stands in for a real GitHub login. Mirrors `HARBORMASTER_PI_COMMAND` (see `harness/pi-adapter.ts`). */
@@ -82,6 +83,15 @@ const GH_COMMAND_ENV = "HARBORMASTER_GH_COMMAND";
 
 /** Branches per batched GraphQL lookup: keeps one query's node budget small. */
 const STATUS_BATCH_SIZE = 20;
+
+/**
+ * Wall-clock limit for the refresh tick's batched PR lookup. GitHub ends
+ * any request it spends more than ~10s on with an error of its own, so a
+ * `gh` call still silent at 20s is a stalled connection, not slow work;
+ * waiting longer only holds the single-flight refresh (a healthy batch
+ * answers in ~2s). The next tick (~30s later) is the retry.
+ */
+export const STATUS_LOOKUP_TIMEOUT_MS = 20_000;
 
 /** The PR fields `find` asks `gh pr list --json` for, as a GraphQL selection (same order). */
 const PR_GRAPHQL_FIELDS = `number url state isDraft author { login } reviewDecision
@@ -105,7 +115,7 @@ export class GithubPrAccess implements PullRequestAccess {
   );
 
   constructor(
-    private readonly execute: Execute = (command, args, cwd) =>
+    private readonly execute: Execute = (command, args, cwd, options) =>
       run(
         command === "gh" ? process.env[GH_COMMAND_ENV] || "gh" : command,
         args,
@@ -113,7 +123,7 @@ export class GithubPrAccess implements PullRequestAccess {
         // A push runs the user's pre-push hooks: allow it the long limit.
         command === "git" && args[0] === "push"
           ? { timeoutMs: LONG_RUN_TIMEOUT_MS }
-          : undefined,
+          : options,
       ),
   ) {}
 
@@ -348,18 +358,23 @@ export class GithubPrAccess implements PullRequestAccess {
         "}",
         `fragment pr on PullRequest { ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
       ].join("\n");
-      const output = await this.execute("gh", [
-        "api",
-        "graphql",
-        "-f",
-        `query=${query}`,
-        "-f",
-        `owner=${owner}`,
-        "-f",
-        `name=${name}`,
-        ...chunk.flatMap((branch, index) => ["-f", `h${index}=${branch}`]),
-        ...this.hostnameArgs(repositoryId),
-      ]);
+      const output = await this.execute(
+        "gh",
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-f",
+          `owner=${owner}`,
+          "-f",
+          `name=${name}`,
+          ...chunk.flatMap((branch, index) => ["-f", `h${index}=${branch}`]),
+          ...this.hostnameArgs(repositoryId),
+        ],
+        undefined,
+        { timeoutMs: STATUS_LOOKUP_TIMEOUT_MS },
+      );
       const repository = (
         JSON.parse(output) as {
           data?: { repository?: Record<string, { nodes?: GqlPr[] } | null> };
