@@ -723,10 +723,11 @@ describe("buildDiagnosticsZip manifest, limits and home replacement", () => {
     expect(all.get("logs/main.log")).toContain(home);
   });
 
-  it("writes optional doctor, crash reports and last unclean exit only when given", () => {
+  it("writes optional doctor, review support, crash reports and last unclean exit only when given", () => {
     const base = fullInput();
     const without = unzipAll(writeBundle(base));
     expect(without.has("doctor.json")).toBe(false);
+    expect(without.has("review-support.json")).toBe(false);
     expect(without.has("crash-reports.json")).toBe(false);
     const withAll = unzipAll(
       writeBundle({
@@ -734,6 +735,15 @@ describe("buildDiagnosticsZip manifest, limits and home replacement", () => {
         doctor: {
           checks: [{ id: "gh", ok: true, detail: `${home}/x` }],
           token: "abc",
+        },
+        reviewSupport: {
+          harnesses: [
+            {
+              harness: "claude-code",
+              state: "missing",
+              pieces: [{ id: "claude-skill", state: "missing" }],
+            },
+          ],
         },
         crashReports: [
           { name: "Harbormaster-2024-06-01.ips", mtime: iso(HOUR) },
@@ -745,6 +755,9 @@ describe("buildDiagnosticsZip manifest, limits and home replacement", () => {
       checks: [{ id: "gh", ok: true, detail: "~/x" }],
       token: REDACTED,
     });
+    expect(
+      JSON.parse(withAll.get("review-support.json") ?? "").harnesses[0].pieces,
+    ).toEqual([{ id: "claude-skill", state: "missing" }]);
     expect(JSON.parse(withAll.get("crash-reports.json") ?? "")).toEqual([
       { name: "Harbormaster-2024-06-01.ips", mtime: iso(HOUR) },
     ]);

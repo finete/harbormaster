@@ -136,6 +136,8 @@ export interface DiagnosticsInput {
   state?: DiagnosticsState;
   /** `harbormaster doctor` result, written as `doctor.json`. */
   doctor?: unknown;
+  /** Per-harness Plannotator status (`reviewSupport`: each piece, including the Claude `/plannotator-review` skill), written as `review-support.json`. */
+  reviewSupport?: unknown;
   /** The crash sentinel's last unclean exit, recorded in `manifest.json`. */
   lastUncleanExit?: unknown;
   /** OS crash report names (never contents), written as `crash-reports.json`. */
@@ -155,6 +157,7 @@ const FILE_CAPS = {
   tasksSummary: 512 * 1024,
   environment: 64 * 1024,
   doctor: 512 * 1024,
+  reviewSupport: 64 * 1024,
   crashReports: 64 * 1024,
   stateTasks: 1024 * 1024,
   stateLocations: 128 * 1024,
@@ -252,6 +255,13 @@ export function buildDiagnosticsZip(input: DiagnosticsInput): Buffer {
   }
   if (input.doctor !== undefined) {
     addJson("doctor.json", input.doctor, FILE_CAPS.doctor);
+  }
+  if (input.reviewSupport !== undefined) {
+    addJson(
+      "review-support.json",
+      input.reviewSupport,
+      FILE_CAPS.reviewSupport,
+    );
   }
   if (input.crashReports !== undefined) {
     addJson("crash-reports.json", input.crashReports, FILE_CAPS.crashReports);

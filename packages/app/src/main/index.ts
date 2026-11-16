@@ -1394,8 +1394,15 @@ let lastPushedRefreshWarning: string | undefined;
 
 function pushRefreshWarning(warning: string | undefined): void {
   if (warning === lastPushedRefreshWarning) return;
+  const previous = lastPushedRefreshWarning;
   lastPushedRefreshWarning = warning;
-  if (warning === undefined) return;
+  // The toast's text in main.log (once per change, like the push): the
+  // diagnostics bundle otherwise only shows a warning count per tick.
+  if (warning === undefined) {
+    if (previous !== undefined) console.log("[refresh] warning cleared");
+    return;
+  }
+  console.warn(`[refresh] warning: ${truncateLogText(warning, 1000)}`);
   for (const win of BrowserWindow.getAllWindows()) {
     safeSend(win.webContents, "core:refresh-warning", warning);
   }
@@ -2180,13 +2187,14 @@ async function exportDiagnostics(): Promise<string | null> {
   const claudeCommand = process.env.HARBORMASTER_CLAUDE_COMMAND || "claude";
   const piResolved = resolveCommandPath(piCommand);
   const claudeResolved = resolveCommandPath(claudeCommand);
-  const [tasksSummary, state, piVersion, claudeVersion, doctor] =
+  const [tasksSummary, state, piVersion, claudeVersion, doctor, reviewSupport] =
     await Promise.all([
       buildTasksSummary(core.commands).catch(() => undefined),
       buildDiagnosticsState(core.commands).catch(() => undefined),
       commandVersion(piResolved),
       commandVersion(claudeResolved),
       doctorForDiagnostics(core.commands, doctorFacts),
+      core.commands.reviewSupport({ refresh: true }).catch(() => undefined),
     ]);
   lastDiagnosticsSummary = diagnosticsSummary(doctor, {
     appVersion: app.getVersion(),
@@ -2208,6 +2216,7 @@ async function exportDiagnostics(): Promise<string | null> {
     },
     rulesList: await rulesListOutput(),
     doctor,
+    ...(reviewSupport ? { reviewSupport } : {}),
     ...(tasksSummary ? { tasksSummary } : {}),
     ...(state ? { state } : {}),
     // Crash evidence (see run-sentinel.ts): the previous run's unclean exit
@@ -2543,3 +2552,10 @@ app.on("before-quit", (event) => {
       app.quit();
     });
 });
+
+/** `text` cut to `max` characters for a log line, marked when cut. */
+function truncateLogText(text: string, max: number): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}… (${text.length} chars)`;
+}
