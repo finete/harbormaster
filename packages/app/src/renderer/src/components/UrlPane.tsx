@@ -117,6 +117,38 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
     );
   }
   const command = request?.command ?? "/plannotator-review";
+  const commandName = command.trim().split(/\s+/)[0] ?? command;
+  if (state === "rejected") {
+    return (
+      <Placeholder testId="url-pane-rejected">
+        <MessageSquareCode className="h-5 w-5" />
+        <p className="text-foreground">
+          {harnessLabel(harness)} doesn't know{" "}
+          <span className="font-mono">{commandName}</span>
+        </p>
+        <ul className="max-w-sm space-y-1 text-xs">
+          <li>
+            Plannotator's commands aren't installed for {harnessLabel(harness)}.
+            Welcome / Setup… shows the install command.
+          </li>
+          <li>
+            Installed already? Restart the agent: it reads its commands when it
+            starts.
+          </li>
+        </ul>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={requesting}
+          onClick={() => void tryAgain()}
+          data-testid="review-try-again-button"
+        >
+          {requesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Try again
+        </Button>
+      </Placeholder>
+    );
+  }
   return (
     <Placeholder testId="url-pane-no-session">
       <MessageSquareCode className="h-5 w-5" />

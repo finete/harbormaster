@@ -229,6 +229,38 @@ function readyLineWatcher(
  */
 const primaryTaskSessions = new Map<string, string>();
 
+/**
+ * Short-lived listeners on a task's primary pty output (the Review button
+ * watching for the agent rejecting its typed command). Fed raw chunks from
+ * the primary's own `onData`, before any filtering.
+ */
+const primaryOutputTaps = new Map<string, Set<(data: string) => void>>();
+
+function feedPrimaryTaps(taskId: string, data: string): void {
+  const taps = primaryOutputTaps.get(taskId);
+  if (!taps) return;
+  for (const tap of Array.from(taps)) tap(data);
+}
+
+/** Listens to the task's primary pty output; returns the unsubscribe fn. */
+export function tapPrimaryOutput(
+  taskId: string,
+  listener: (data: string) => void,
+): () => void {
+  let taps = primaryOutputTaps.get(taskId);
+  if (!taps) {
+    taps = new Set();
+    primaryOutputTaps.set(taskId, taps);
+  }
+  taps.add(listener);
+  return () => {
+    const current = primaryOutputTaps.get(taskId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) primaryOutputTaps.delete(taskId);
+  };
+}
+
 function defaultShell(): string {
   if (process.platform === "win32") {
     return process.env.COMSPEC ?? "powershell.exe";
@@ -457,6 +489,9 @@ export function createSession(
     notePtyData(id, options?.taskId, data);
     outputTail.push(data);
     readyLine?.(data);
+    if (registerAsPane && options?.taskId) {
+      feedPrimaryTaps(options.taskId, data);
+    }
     if (statusFilter) statusFilter.feed(data);
     else forward(data);
   });
@@ -625,6 +660,7 @@ export function createBackgroundPrimarySession(
     notePtyData(id, taskId, data);
     outputTail.push(data);
     readyLine?.(data);
+    feedPrimaryTaps(taskId, data);
     statusFilter.feed(data);
   });
   const exitDisposable = ptyProcess.onExit(({ exitCode, signal }) => {

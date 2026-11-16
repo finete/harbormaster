@@ -25,6 +25,8 @@ export interface FakeClaudeRecord {
   probeAnswer: string | null;
   /** Each hook the fake ran (on a `stop` control command) and the JSON it printed. */
   hooks: Array<{ event: string; output: unknown; exitCode: number }>;
+  /** Each line typed at its prompt, in order. */
+  typed: string[];
 }
 
 /** Where a task's fake claude records itself / reads control commands. */
@@ -88,13 +90,23 @@ export function controlFakeClaude(
  * - polls `<taskId>.ctl` for commands: `working` / `blocked` / `idle` emit
  *   that 7501 state; `stop` runs the Stop hook command from `--settings`
  *   through `sh -c` with Claude's hook input on stdin and records the JSON
- *   it printed.
+ *   it printed;
+ * - answers `plugin list --json` with Plannotator's plugin (0.28.66,
+ *   enabled), like a machine where the plugin is installed;
+ * - reads typed lines after the probe (recorded in `typed`): a slash
+ *   command `/<name>` runs only when the skill
+ *   `$CLAUDE_CONFIG_DIR/skills/<name>/SKILL.md` existed when this process
+ *   started (`/plannotator-review` then runs `plannotator review` in this
+ *   pty); otherwise it prints Claude Code's own
+ *   `Unknown command: /<name>`. In Claude Code, Plannotator's slash
+ *   commands are such user skills, not part of the plugin.
  */
 export function writeFakeClaude(dir: string): string {
   const file = path.join(dir, "fake-claude.mjs");
   const script = String.raw`#!/usr/bin/env node
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 const args = process.argv.slice(2);
 // Onboarding's agent detection runs "claude --version".
@@ -102,6 +114,26 @@ if (args[0] === "--version") {
   process.stdout.write("2.1.322 (Claude Code)\n");
   process.exit(0);
 }
+// Review support's plugin probe.
+if (args[0] === "plugin" && args[1] === "list") {
+  process.stdout.write(JSON.stringify([
+    { id: "plannotator@plannotator", version: "0.28.66", enabled: true },
+  ]));
+  process.exit(0);
+}
+// Skills are read once, at start: this models a session that cannot see a
+// skill installed after it started (the case the app's "Unknown command"
+// watcher exists for); whether real Claude Code picks one up mid-session is
+// not relied on.
+const skillsDir = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "skills");
+const skillAtStart = new Map();
+const hasSkill = (name) => {
+  if (!skillAtStart.has(name)) {
+    skillAtStart.set(name, existsSync(join(skillsDir, name, "SKILL.md")));
+  }
+  return skillAtStart.get(name);
+};
+hasSkill("plannotator-review");
 const flag = (name) => {
   const index = args.indexOf(name);
   return index === -1 ? null : args[index + 1];
@@ -125,6 +157,7 @@ const record = {
   ),
   probeAnswer: null,
   hooks: [],
+  typed: [],
 };
 const save = () => writeFileSync(recordFile, JSON.stringify(record, null, 2));
 save();
@@ -144,8 +177,32 @@ const runHook = (event, input) => {
 process.stdin.setRawMode?.(true);
 process.stdin.resume();
 let answer = Buffer.alloc(0);
+let line = "";
+const runTyped = (typed) => {
+  record.typed.push(typed);
+  save();
+  if (!typed.startsWith("/")) return;
+  const name = typed.slice(1).split(/\s+/)[0];
+  if (!hasSkill(name)) {
+    process.stdout.write("\x1b[33m●\x1b[39m Unknown command: /" + name + "\r\n");
+    return;
+  }
+  if (name === "plannotator-review") {
+    spawn("plannotator", ["review"], { stdio: ["ignore", "inherit", "inherit"] });
+  }
+};
 process.stdin.on("data", (chunk) => {
-  if (record.probeAnswer !== null) return;
+  if (record.probeAnswer !== null) {
+    // Raw mode: Enter arrives as "\r".
+    line += chunk.toString("utf8");
+    let index;
+    while ((index = line.search(/[\r\n]/)) !== -1) {
+      const typed = line.slice(0, index).trim();
+      line = line.slice(index + 1);
+      if (typed) runTyped(typed);
+    }
+    return;
+  }
   answer = Buffer.concat([answer, chunk]);
   if (answer.length < 9) return;
   record.probeAnswer = answer.subarray(0, 9).toString("hex");

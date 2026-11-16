@@ -37,6 +37,7 @@ import type {
   ReopenTaskInput,
   RepositoryInfo,
   ResolveInboxItemResult,
+  ReviewRejectedPayload,
   ReviewRequestResult,
   ReviewSupport,
   RulesListing,
@@ -343,6 +344,16 @@ const api: HarbormasterApi = {
       ): void => listener(payload);
       ipcRenderer.on("core:task-url-opened", handler);
       return () => ipcRenderer.removeListener("core:task-url-opened", handler);
+    },
+    onReviewRejected: (
+      listener: (payload: ReviewRejectedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: ReviewRejectedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:review-rejected", handler);
+      return () => ipcRenderer.removeListener("core:review-rejected", handler);
     },
     terminalTail: (taskId: string, count?: number): Promise<string | null> =>
       ipcRenderer.invoke("core:terminalTail", taskId, count),

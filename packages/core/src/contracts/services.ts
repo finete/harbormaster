@@ -330,4 +330,11 @@ export interface ReviewSupportProbeAccess {
   claudePluginList(): Promise<string | undefined>;
   /** `claude --version` output. */
   claudeVersion(): Promise<string | undefined>;
+  /**
+   * The `plannotator-review` Claude Code skill's `SKILL.md` text, if
+   * installed. In Claude Code `/plannotator-review` is this user skill
+   * (installed by Plannotator's install script), not part of the plugin:
+   * without it Claude answers "Unknown command".
+   */
+  claudeReviewSkill(): Promise<string | undefined>;
 }

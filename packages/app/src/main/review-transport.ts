@@ -10,6 +10,7 @@
 // Pure decision + a small queue with injected effects (tests/review-transport.test.ts).
 
 import type { CorroboratedPresence } from "./presence-corroboration";
+import { stripAnsi } from "./pty-log";
 
 /**
  * - `type`: write the command into the primary pty now.
@@ -139,4 +140,43 @@ export class QueuedReviews {
     }
     await Promise.all(runs);
   }
+}
+
+// --- did the agent accept the typed command? ---------------------------------
+
+/**
+ * How long after typing the command main watches the pty for the agent
+ * rejecting it. Rejection is printed right after Enter; a review that
+ * starts is reported by `task-url-opened` instead.
+ */
+export const REVIEW_REJECT_WATCH_MS = 15_000;
+
+/** Normalized text kept across chunks so a message split between reads still matches. */
+const REJECT_CARRY = 400;
+
+/**
+ * Feeds raw pty output after the command was typed; true once the agent
+ * said it does not know the command. Observed (Claude Code 2.1.325, no
+ * Plannotator skills): `Unknown command: /plannotator-review` (then `Args
+ * from unknown skill: …`). Matched with whitespace and terminal escapes
+ * removed (TUIs move the cursor instead of printing spaces), case-folded.
+ * Only a slash command can be rejected this way; any other command never
+ * matches.
+ */
+export function createCommandRejectedMatcher(
+  command: string,
+): (chunk: string) => boolean {
+  const name = command.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (!name.startsWith("/")) return () => false;
+  const needles = [
+    `unknowncommand:${name}`,
+    `unknownslashcommand:${name}`,
+    `unknowncommand${name}`,
+  ];
+  let carry = "";
+  return (chunk) => {
+    const text = (carry + stripAnsi(chunk).replace(/\s+/g, "")).toLowerCase();
+    carry = text.slice(-REJECT_CARRY);
+    return needles.some((needle) => text.includes(needle));
+  };
 }

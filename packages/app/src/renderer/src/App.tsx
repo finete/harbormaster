@@ -51,7 +51,10 @@ import {
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
 import { modKeyLabel } from "./lib/platform";
-import { useReadyToReviewEvaluation } from "./lib/review";
+import {
+  startReviewRejectedListener,
+  useReadyToReviewEvaluation,
+} from "./lib/review";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
@@ -156,6 +159,7 @@ export function App({
   // Agent-opened URLs (docs/plannotator.md): queued per task for its
   // workspace; never changes focus or view here.
   useEffect(() => startTaskUrlListener(), []);
+  useEffect(() => startReviewRejectedListener(), []);
   // Sticky composer choices (last Where / agent / model, recent Wheres).
   const [newTaskPrefs, setNewTaskPrefs] = useState<NewTaskPrefs>(() =>
     readPrefs(window.localStorage),

@@ -200,6 +200,7 @@ class FakeProbes implements ReviewSupportProbeAccess {
     public pi?: string,
     public plugin?: string,
     public claude?: string,
+    public skill?: string,
   ) {}
   async plannotatorVersion() {
     this.calls++;
@@ -221,6 +222,9 @@ class FakeProbes implements ReviewSupportProbeAccess {
   }
   async claudeVersion() {
     return this.claude ? `${this.claude} (Claude Code)` : undefined;
+  }
+  async claudeReviewSkill() {
+    return this.skill;
   }
 }
 
@@ -449,6 +453,8 @@ describe("reviewSupport", () => {
         "claude-plugin",
         "claude plugin marketplace add backnotprop/plannotator && claude plugin install plannotator@plannotator",
       ],
+      // The slash command is a user skill from the install script, not the plugin.
+      ["claude-skill", "curl -fsSL https://plannotator.ai/install.sh | bash"],
       ["claude-code", expect.any(String)],
     ]);
     expect(support.harnesses.find((h) => h.harness === "aider")).toEqual({
@@ -459,7 +465,13 @@ describe("reviewSupport", () => {
   });
 
   it("outdated pieces get upgrade commands; the worst piece decides; Claude Code needs 2.1.287", async () => {
-    const probes = new FakeProbes("0.28.1", "0.27.15", "0.28.52", "2.1.286");
+    const probes = new FakeProbes(
+      "0.28.1",
+      "0.27.15",
+      "0.28.52",
+      "2.1.286",
+      "---\nname: plannotator-review\n---",
+    );
     const { core } = await boot({ probes });
     const support = await core.commands.reviewSupport();
     const pi = support.harnesses.find((h) => h.harness === "pi");
@@ -476,6 +488,7 @@ describe("reviewSupport", () => {
     ).toEqual([
       ["binary", "0.28.1", "ready"],
       ["claude-plugin", "0.28.52", "ready"],
+      ["claude-skill", undefined, "ready"],
       ["claude-code", "2.1.286", "outdated"],
     ]);
 
@@ -490,6 +503,23 @@ describe("reviewSupport", () => {
     expect(fresh.harnesses.map((h) => [h.harness, h.state])).toEqual([
       ["pi", "ready"],
       ["claude-code", "ready"],
+    ]);
+  });
+
+  it("Claude Code with every versioned piece current but no /plannotator-review skill is missing, not ready", async () => {
+    const { core } = await boot({
+      probes: new FakeProbes("0.28.66", undefined, "0.28.66", "2.1.325"),
+    });
+    const support = await core.commands.reviewSupport();
+    const claude = support.harnesses.find((h) => h.harness === "claude-code");
+    expect(claude?.state).toBe("missing");
+    expect(claude?.pieces.filter((piece) => piece.state !== "ready")).toEqual([
+      {
+        id: "claude-skill",
+        label: "Plannotator /plannotator-review skill for Claude Code",
+        state: "missing",
+        fix: "curl -fsSL https://plannotator.ai/install.sh | bash",
+      },
     ]);
   });
 

@@ -27,6 +27,7 @@ Settled by grilling, one decision at a time.
 | `plannotator` binary | 0.28.0 | "Ask this session" + non-blocking feedback delivered as a session message (#1668/#1672); subsumes the 0.11.1 `PLANNOTATOR_BROWSER` script hook |
 | `@plannotator/pi-extension` | 0.28.0 | same, for Pi (#1670); subsumes 0.27.15 |
 | Claude plugin `plannotator@plannotator` | 0.28.52 | self-reloading mod (#2356); must match the binary |
+| Claude skill `plannotator-review` | present | in Claude Code `/plannotator-review` is a user skill the binary's install script writes to `$CLAUDE_CONFIG_DIR` or `~/.claude`, under `skills/plannotator-review/SKILL.md`, not part of the plugin. Without it Claude answers `Unknown command: /plannotator-review` (observed 2026-11-16 on a machine whose binary, plugin and Claude Code were all current). Fix: the install script |
 | Claude Code | 2.1.287, interactive | the mod needs function hooks; older CC falls back to the blocking hook with no Ask |
 
 Fix commands: binary `curl -fsSL https://plannotator.ai/install.sh | bash`;
@@ -93,6 +94,15 @@ live, not mid-turn, and its last OSC 7501 state is `idle` / `done` /
 `error`. `blocked` (a permission prompt or a question: typing would answer
 it) and "no status yet" are unsure: queued, never typed. The button is no
 longer disabled mid-turn.
+
+Rejected: for 15 s after typing, main watches the primary pty for the
+agent saying it does not know the command (`Unknown command: /<name>`,
+matched with escapes and whitespace removed; `createCommandRejectedMatcher`
+in `review-transport.ts`). On a match the tab reads "<Agent> doesn't know
+/<name>" with the setup and restart hints and **Try again**, and review
+support is re-probed. Detection (the skill piece above) disables the
+button up front; this catches what detection cannot see, e.g. a session
+started before the skill was installed.
 
 Timeout: 60 s after the request (for a queued one, 60 s after the agent
 stops working) with no `task-url-opened` for the task, the tab reads "No
@@ -164,7 +174,7 @@ listWorktreeStatus(): Promise<Record<string, WorktreeStatus>>;   // WorktreeStat
 
 ```ts
 export interface ReviewSupportPiece {
-  id: "binary" | "pi-extension" | "claude-plugin" | "claude-code";
+  id: "binary" | "pi-extension" | "claude-plugin" | "claude-skill" | "claude-code";
   label: string;
   installed?: string;       // semver when found
   minimum: string;

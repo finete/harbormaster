@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CorroboratedPresence } from "../src/main/presence-corroboration";
 import {
   agentAtPrompt,
+  createCommandRejectedMatcher,
   decideReviewTransport,
   QueuedReviews,
   TYPE_ENTER_DELAY_MS,
@@ -122,5 +123,38 @@ describe("QueuedReviews", () => {
     await queue.retry(() => ({ pane: false, presence: undefined }));
     expect(claim).not.toHaveBeenCalled();
     expect(queue.has("t1")).toBe(false);
+  });
+});
+
+describe("createCommandRejectedMatcher", () => {
+  const command = "/plannotator-review https://github.com/o/r/pull/1";
+
+  it("matches Claude Code's Unknown command line (observed output)", () => {
+    const rejected = createCommandRejectedMatcher(command);
+    expect(
+      rejected(
+        "\u001b[33m●\u001b[39m Unknown command: /plannotator-review\r\n",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches a line split across reads and drawn with cursor moves instead of spaces", () => {
+    const rejected = createCommandRejectedMatcher(command);
+    expect(rejected("● Unknown\u001b[1Ccomm")).toBe(false);
+    expect(rejected("and:\u001b[1C/plannotator-review\r\n")).toBe(true);
+  });
+
+  it("ignores the echoed command, other unknown commands and normal output", () => {
+    const rejected = createCommandRejectedMatcher(command);
+    expect(rejected(`> ${command}\r\n`)).toBe(false);
+    expect(rejected("Unknown command: /other\r\n")).toBe(false);
+    expect(rejected("Plannotator session ready: http://127.0.0.1:1/\r\n")).toBe(
+      false,
+    );
+  });
+
+  it("never matches for a non-slash command", () => {
+    const rejected = createCommandRejectedMatcher("!plannotator review");
+    expect(rejected("Unknown command: !plannotator\r\n")).toBe(false);
   });
 });

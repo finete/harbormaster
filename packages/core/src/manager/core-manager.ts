@@ -4261,15 +4261,16 @@ export class CoreManager implements CoreCommands {
 /** How long `reviewSupport`'s probed versions are reused. */
 const REVIEW_SUPPORT_CACHE_MS = 60_000;
 
-/** Runs the four Plannotator probes in parallel and parses their versions. */
+/** Runs the Plannotator probes in parallel and parses their versions. */
 async function probeReviewVersions(
   probes: ReviewSupportProbeAccess,
 ): Promise<ReviewVersions> {
-  const [binary, manifest, plugins, claude] = await Promise.all([
+  const [binary, manifest, plugins, claude, skill] = await Promise.all([
     probes.plannotatorVersion(),
     probes.piExtensionManifest(),
     probes.claudePluginList(),
     probes.claudeVersion(),
+    probes.claudeReviewSkill(),
   ]);
   const versions: ReviewVersions = {};
   const found = {
@@ -4277,6 +4278,7 @@ async function probeReviewVersions(
     "pi-extension": piExtensionVersion(manifest),
     "claude-plugin": claudePluginVersion(plugins),
     "claude-code": parseSemver(claude),
+    "claude-skill": skill?.trim() ? "found" : undefined,
   } as const;
   for (const [id, version] of Object.entries(found)) {
     if (version) versions[id as keyof ReviewVersions] = version;

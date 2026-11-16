@@ -1,7 +1,9 @@
 // Resource Access: the machine probes behind `reviewSupport`
 // (docs/plannotator.md "Minimum versions"): `plannotator --version`, the
 // installed Pi extension's `package.json` under Pi's npm dir, `claude
-// plugin list --json` and `claude --version`. Raw outputs only, parsed by
+// plugin list --json`, `claude --version` and the `plannotator-review`
+// Claude skill's SKILL.md (`$CLAUDE_CONFIG_DIR` or `~/.claude`, then
+// `skills/`). Raw outputs only, parsed by
 // `engines/review-support.ts`; every probe is time-boxed and never throws.
 
 import { readFile } from "node:fs/promises";
@@ -85,5 +87,12 @@ export class LocalReviewSupportProbeAccess implements ReviewSupportProbeAccess {
 
   claudeVersion(): Promise<string | undefined> {
     return this.probe(this.claude, ["--version"]);
+  }
+
+  async claudeReviewSkill(): Promise<string | undefined> {
+    // Claude Code's config dir as it resolves it: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+    const configDir = this.env.CLAUDE_CONFIG_DIR || join(this.home, ".claude");
+    const path = join(configDir, "skills", "plannotator-review", "SKILL.md");
+    return readFile(path, "utf8").catch(() => undefined);
   }
 }

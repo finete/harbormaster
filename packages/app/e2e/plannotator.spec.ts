@@ -8,6 +8,10 @@
 // tab shows the page in an iframe. Sending the feedback ends the session:
 // the tab shows "Review sent" with Review again, which starts a new one.
 // The wizard's Agent step lists Plannotator as ready for Pi.
+// A Claude Code task (fake-claude.ts) covers the other harness's seam: with
+// no `/plannotator-review` skill the Review button is disabled; a skill
+// installed after the agent started enables it, the agent answers "Unknown
+// command" and the review tab says so instead of spinning.
 //
 // `plannotator` is a fake on PATH (fake-plannotator.ts) unless
 // HARBORMASTER_REAL_PLANNOTATOR=1, which runs the same flow against the
@@ -32,6 +36,11 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import {
+  controlFakeClaude,
+  waitForFakeClaude,
+  writeFakeClaude,
+} from "./fake-claude";
 import { writeReviewPi } from "./fake-pi";
 import { writeFakeOpen, writeFakePlannotator } from "./fake-plannotator";
 
@@ -53,6 +62,9 @@ let app: ElectronApplication;
 let window: Page;
 let root: string;
 let taskId: string;
+let claudeTaskId: string;
+let stateDir: string;
+let claudeConfig: string;
 let agentLog: string;
 let openLog: string;
 const mainProcessErrors: string[] = [];
@@ -63,8 +75,25 @@ function git(args: string[], cwd: string): void {
 
 test.beforeAll(async () => {
   root = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-plannotator-"));
-  const stateDir = path.join(root, "state");
+  stateDir = path.join(root, "state");
   mkdirSync(stateDir, { recursive: true });
+  // Review support probes never read the real ~/.pi or ~/.claude: Pi's
+  // extension and Claude's config (skills) live under the test root.
+  const piAgentDir = path.join(root, "pi-agent");
+  const piExtension = path.join(
+    piAgentDir,
+    "npm",
+    "node_modules",
+    "@plannotator",
+    "pi-extension",
+  );
+  mkdirSync(piExtension, { recursive: true });
+  writeFileSync(
+    path.join(piExtension, "package.json"),
+    JSON.stringify({ name: "@plannotator/pi-extension", version: "0.28.66" }),
+  );
+  claudeConfig = path.join(root, "claude-config");
+  mkdirSync(claudeConfig, { recursive: true });
   agentLog = path.join(root, "agent-received.log");
   openLog = path.join(root, "system-open.log");
 
@@ -103,6 +132,14 @@ test.beforeAll(async () => {
     start: true,
   });
   taskId = task.id;
+  const claudeTask = await seed.commands.createTask({
+    title: "Review me with Claude",
+    initialPrompt: "",
+    repositoryId: REPO_ID,
+    harness: "claude-code",
+    start: true,
+  });
+  claudeTaskId = claudeTask.id;
   const binding = await seed.commands.getTaskWorkspace(taskId);
   if (binding?.worktreePath) {
     writeFileSync(
@@ -130,6 +167,9 @@ test.beforeAll(async () => {
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PRESENCE_POLL_MS: "250",
       HARBORMASTER_PI_COMMAND: writeReviewPi(root, agentLog),
+      HARBORMASTER_CLAUDE_COMMAND: writeFakeClaude(root),
+      PI_CODING_AGENT_DIR: piAgentDir,
+      CLAUDE_CONFIG_DIR: claudeConfig,
       HARBORMASTER_CLI_PATH: cliBin,
     },
   });
@@ -153,11 +193,54 @@ function agentReceived(): string {
   return existsSync(agentLog) ? readFileSync(agentLog, "utf8") : "";
 }
 
+test("Claude Code: no /plannotator-review skill disables Review; a rejected command shows in the tab", async () => {
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${claudeTaskId}`).click();
+  await waitForFakeClaude(stateDir, claudeTaskId);
+  controlFakeClaude(stateDir, claudeTaskId, "idle");
+
+  // Binary, plugin and Claude Code are current, but the slash command
+  // itself (a user skill from Plannotator's install script) is missing.
+  const review = window.getByTestId(`review-button-main-${claudeTaskId}`);
+  await expect(review).toBeDisabled();
+
+  // Installed after the agent started: support reads ready (re-probed on
+  // window focus), but the running session does not know the command.
+  const skill = path.join(claudeConfig, "skills", "plannotator-review");
+  mkdirSync(skill, { recursive: true });
+  writeFileSync(
+    path.join(skill, "SKILL.md"),
+    "---\nname: plannotator-review\n---\n",
+  );
+  await expect
+    .poll(
+      async () => {
+        await window.evaluate(() => window.dispatchEvent(new Event("focus")));
+        return review.isEnabled();
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await review.click();
+
+  await expect
+    .poll(() => waitForFakeClaude(stateDir, claudeTaskId).then((r) => r.typed))
+    .toContainEqual(expect.stringMatching(/^\/plannotator-review/));
+  const workspace = window.getByTestId(`task-workspace-${claudeTaskId}`);
+  await expect(workspace.getByTestId("url-pane-rejected")).toContainText(
+    "Claude Code doesn't know /plannotator-review",
+  );
+});
+
 test("Review runs Plannotator in the task's review tab; sending ends it; Settings shows it ready", async () => {
   await window.getByTestId("board-button").click();
   await window.getByTestId(`card-${taskId}`).click();
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
   await expect(workspace.getByTestId("terminal-tab").first()).toBeVisible();
+  // The agent is up in its pane (else the click is inbox-delivered).
+  await expect(workspace.locator(".xterm-rows")).toContainText(
+    "fake review pi ready",
+  );
 
   // Enabled once core reports Plannotator ready for Pi.
   const review = window.getByTestId(`review-button-main-${taskId}`);

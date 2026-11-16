@@ -81,6 +81,16 @@ describe("reviewWaitState (the review tab before its session's URL)", () => {
       }),
     ).toBe("starting");
   });
+  it("shows rejected at once when the agent did not know the command", () => {
+    expect(
+      reviewWaitState({
+        request: { ...typed, rejected: true },
+        clockFrom: at,
+        now: at + 10,
+        agentWorking: false,
+      }),
+    ).toBe("rejected");
+  });
   it("is queued while the agent works; the clock runs from when it stopped", () => {
     const queued: ReviewRequest = { ...typed, delivery: "queued" };
     expect(

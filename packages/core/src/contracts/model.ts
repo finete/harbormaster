@@ -521,11 +521,17 @@ export const defaultGlobalConfig = (): GlobalConfig => ({
 
 /** One piece of a harness's Plannotator setup (docs/plannotator.md "Minimum versions"). */
 export interface ReviewSupportPiece {
-  id: "binary" | "pi-extension" | "claude-plugin" | "claude-code";
+  id:
+    | "binary"
+    | "pi-extension"
+    | "claude-plugin"
+    | "claude-skill"
+    | "claude-code";
   label: string;
-  /** semver when found */
+  /** semver when found (versioned pieces only) */
   installed?: string;
-  minimum: string;
+  /** Absent for a presence-only piece (`claude-skill`): found = ready. */
+  minimum?: string;
   state: "ready" | "missing" | "outdated";
   /** the exact shell command */
   fix: string;

@@ -78,18 +78,21 @@ export interface ReviewRequest {
   command?: string;
   /** The request itself failed (a toast said why). */
   failed?: boolean;
+  /** The agent answered "Unknown command" to the typed command (main watched its pty). */
+  rejected?: boolean;
 }
 
 /**
  * What a review tab without a session URL shows:
  * - `queued`: main holds the command until the agent finishes its turn;
  * - `starting`: delivered (or in flight), waiting for the session's URL;
+ * - `rejected`: the agent said it does not know the command;
  * - `no-session`: nothing appeared within `REVIEW_WAIT_TIMEOUT_MS` (counted
  *   from `clockFrom`: the click, or when a queued review's agent last
  *   started/stopped working), the request failed, or there is no request
  *   at all (a tab restored without its session).
  */
-export type ReviewWaitState = "queued" | "starting" | "no-session";
+export type ReviewWaitState = "queued" | "starting" | "rejected" | "no-session";
 
 export function reviewWaitState(input: {
   request: ReviewRequest | undefined;
@@ -98,6 +101,7 @@ export function reviewWaitState(input: {
   agentWorking: boolean;
 }): ReviewWaitState {
   const { request } = input;
+  if (request?.rejected) return "rejected";
   if (!request || request.failed) return "no-session";
   if (request.delivery === "queued" && input.agentWorking) return "queued";
   return input.now - Math.max(request.at, input.clockFrom) >=
@@ -122,6 +126,22 @@ export function useReviewRequest(taskId: string): ReviewRequest | undefined {
     },
     () => requests[taskId],
   );
+}
+
+/**
+ * The agent rejected a typed review command (main's `core:review-rejected`):
+ * marks the task's current request, if it is the one that was typed, and
+ * re-probes review support so the Review button and Setup reflect it.
+ * Mounted once for the app's lifetime (App).
+ */
+export function startReviewRejectedListener(): () => void {
+  return window.harbormaster.core.onReviewRejected(({ taskId, command }) => {
+    const request = requests[taskId];
+    if (request && (!request.command || request.command === command)) {
+      setRequest(taskId, { ...request, rejected: true });
+    }
+    recheckReviewSupport();
+  });
 }
 
 /**

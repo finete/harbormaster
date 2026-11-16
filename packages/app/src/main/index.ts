@@ -163,13 +163,16 @@ import {
   resolveCommandPath,
   setProgramStatusListener,
   setReadyUrlListener,
+  tapPrimaryOutput,
   writeToPrimarySession,
   writeToSession,
 } from "./ptySessions";
 import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
 import {
+  createCommandRejectedMatcher,
   decideReviewTransport,
   QueuedReviews,
+  REVIEW_REJECT_WATCH_MS,
   type ReviewDelivery,
   typeCommand,
 } from "./review-transport";
@@ -466,13 +469,40 @@ async function typeReviewCommand(
   taskId: string,
   command: string,
 ): Promise<boolean> {
+  const stopWatching = watchReviewRejection(taskId, command);
   const typed = await typeCommand(
     (data) => writeToPrimarySession(taskId, data),
     command,
   );
   // The user's own submit (the button), like Enter in the pane.
   if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
+  else stopWatching();
   return typed;
+}
+
+/**
+ * Typing is not running: an agent without the command (Claude Code with no
+ * Plannotator skills) answers "Unknown command". Watch the primary pty for
+ * that briefly and tell the review tab, instead of it spinning until the
+ * 60 s "No review session appeared".
+ */
+function watchReviewRejection(taskId: string, command: string): () => void {
+  const rejected = createCommandRejectedMatcher(command);
+  let stop = (): void => {};
+  const untap = tapPrimaryOutput(taskId, (data) => {
+    if (!rejected(data)) return;
+    stop();
+    console.log(`[review] agent rejected the review command for ${taskId}`);
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:review-rejected", { taskId, command });
+    }
+  });
+  const timer = setTimeout(() => stop(), REVIEW_REJECT_WATCH_MS);
+  stop = () => {
+    clearTimeout(timer);
+    untap();
+  };
+  return stop;
 }
 
 const queuedReviews = new QueuedReviews({

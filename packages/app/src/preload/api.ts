@@ -238,6 +238,12 @@ export interface ReviewRequestResult {
   delivery: "typed" | "queued" | "message";
 }
 
+/** The agent did not know the typed review command (see `onReviewRejected`). */
+export interface ReviewRejectedPayload {
+  taskId: string;
+  command: string;
+}
+
 export type PresenceChangedPayload = Record<string, PresenceBadge>;
 
 export interface TerminalCreateOptions {
@@ -599,6 +605,10 @@ export interface HarbormasterApi {
     /** Subscribes to core's `task-url-opened` push channel; returns an unsubscribe fn. */
     onTaskUrlOpened(
       listener: (payload: TaskUrlOpenedPayload) => void,
+    ): () => void;
+    /** The agent answered "Unknown command" to the Review button's typed command (main watches the pty briefly after typing). */
+    onReviewRejected(
+      listener: (payload: ReviewRejectedPayload) => void,
     ): () => void;
   };
   terminalHost: TerminalHostApi;

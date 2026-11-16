@@ -11,11 +11,15 @@ import type {
 
 export type ReviewPieceId = ReviewSupportPiece["id"];
 
-/** Minimum versions (docs/plannotator.md "Minimum versions"). */
-export const REVIEW_MINIMUMS: Record<ReviewPieceId, string> = {
+/**
+ * Minimum versions (docs/plannotator.md "Minimum versions"); `undefined`
+ * for a presence-only piece (found = ready).
+ */
+export const REVIEW_MINIMUMS: Record<ReviewPieceId, string | undefined> = {
   binary: "0.28.0",
   "pi-extension": "0.28.0",
   "claude-plugin": "0.28.52",
+  "claude-skill": undefined,
   "claude-code": "2.1.287",
 };
 
@@ -23,6 +27,7 @@ const LABELS: Record<ReviewPieceId, string> = {
   binary: "Plannotator",
   "pi-extension": "Plannotator Pi extension",
   "claude-plugin": "Plannotator Claude Code plugin",
+  "claude-skill": "Plannotator /plannotator-review skill for Claude Code",
   "claude-code": "Claude Code",
 };
 
@@ -41,6 +46,8 @@ const FIXES: Record<ReviewPieceId, { install: string; upgrade: string }> = {
     upgrade:
       "claude plugin marketplace update plannotator && claude plugin update plannotator@plannotator",
   },
+  // The install script writes the slash-command skills into ~/.claude/skills.
+  "claude-skill": { install: BINARY_INSTALL, upgrade: BINARY_INSTALL },
   // Not in the design record's fix list: Claude Code's own installer/updater.
   "claude-code": {
     install: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -132,14 +139,14 @@ export function reviewPiece(
   const minimum = REVIEW_MINIMUMS[id];
   const state: ReviewSupportPiece["state"] = !installed
     ? "missing"
-    : compareSemver(installed, minimum) < 0
+    : minimum && compareSemver(installed, minimum) < 0
       ? "outdated"
       : "ready";
   return {
     id,
     label: LABELS[id],
-    ...(installed ? { installed } : {}),
-    minimum,
+    ...(installed && minimum ? { installed } : {}),
+    ...(minimum ? { minimum } : {}),
     state,
     fix: state === "missing" ? FIXES[id].install : FIXES[id].upgrade,
   };
@@ -165,18 +172,23 @@ export function reviewHarness(
   return { harness, state: worst.state, pieces };
 }
 
-/** The installed versions the probes found (semver or absent). */
+/**
+ * The installed versions the probes found (semver or absent); a
+ * presence-only piece carries any non-empty marker when found.
+ */
 export interface ReviewVersions {
   binary?: string;
   "pi-extension"?: string;
   "claude-plugin"?: string;
+  "claude-skill"?: string;
   "claude-code"?: string;
 }
 
 /**
  * Which pieces a harness needs for a Plannotator review: Pi runs the Pi
- * extension (its own server), Claude Code the binary + plugin + a recent
- * enough Claude Code; any other harness with a review command runs the
+ * extension (its own server), Claude Code the binary + plugin + the
+ * `/plannotator-review` skill (the command itself) + a recent enough
+ * Claude Code; any other harness with a review command runs the
  * binary. A harness that cannot start a review needs nothing (`unsupported`).
  */
 export function reviewPiecesFor(harness: {
@@ -188,7 +200,7 @@ export function reviewPiecesFor(harness: {
     case "pi":
       return ["pi-extension"];
     case "claude-code":
-      return ["binary", "claude-plugin", "claude-code"];
+      return ["binary", "claude-plugin", "claude-skill", "claude-code"];
     default:
       return ["binary"];
   }
