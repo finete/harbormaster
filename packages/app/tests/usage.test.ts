@@ -4,9 +4,15 @@
 import { describe, expect, it } from "vitest";
 import type { Task, TaskUsage, TaskUsageRow } from "../src/preload/api";
 import {
+  costFigure,
   csvField,
   groupUsageRows,
+  isCountingRow,
+  rowInclusiveTokens,
+  searchUsageRows,
+  sortUsageRows,
   subtaskRollup,
+  tokensFigure,
   topUsageTaskIds,
   usageCsvFileName,
   usageRangeBounds,
@@ -266,5 +272,138 @@ describe("usage summaries and aggregation", () => {
       cost: 3,
     });
     expect(subtaskRollup(tasks, "c1")).toBeUndefined();
+  });
+});
+
+describe("Costs table: subtask roll-up, search, still counting", () => {
+  const subtasks = (tokens: number, cost?: number) => ({
+    input: tokens,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    count: 2,
+    ...(cost !== undefined ? { cost } : {}),
+  });
+
+  it("sorts by own + subtask tokens (and cost), so a parent whose children spent most ranks first", () => {
+    const parent = row({
+      taskId: "parent",
+      usage: ready(68_000_000, { cost: 10 }),
+      subtaskUsage: subtasks(513_000_000, 90),
+    });
+    const solo = row({
+      taskId: "solo",
+      usage: ready(200_000_000, { cost: 50 }),
+    });
+    expect(rowInclusiveTokens(parent)).toBe(581_000_000);
+    expect(rowInclusiveTokens(solo)).toBe(200_000_000);
+    expect(
+      sortUsageRows([solo, parent], "tokens").map((r) => r.taskId),
+    ).toEqual(["parent", "solo"]);
+    expect(sortUsageRows([solo, parent], "cost").map((r) => r.taskId)).toEqual([
+      "parent",
+      "solo",
+    ]);
+    expect(
+      rowInclusiveTokens(
+        row({
+          taskId: "x",
+          usage: { ...ready(5), status: "unavailable" },
+          subtaskUsage: subtasks(9),
+        }),
+      ),
+    ).toBe(0);
+  });
+
+  it("shows the inclusive figure first and own muted only when they differ at the displayed precision", () => {
+    expect(
+      tokensFigure(
+        row({
+          taskId: "p",
+          usage: ready(68_000_000),
+          subtaskUsage: subtasks(513_000_000),
+        }),
+      ),
+    ).toEqual({ primary: "581M", own: "68M" });
+    // 9.80M + 1k reads "9.8M" both ways: one figure.
+    expect(
+      tokensFigure(
+        row({
+          taskId: "p",
+          usage: ready(9_800_000),
+          subtaskUsage: subtasks(1_000),
+        }),
+      ),
+    ).toEqual({ primary: "9.8M" });
+    expect(tokensFigure(row({ taskId: "s", usage: ready(412) }))).toEqual({
+      primary: "412",
+    });
+  });
+
+  it("does the same for $ at 2 decimals, own-only when subtasks are unpriced", () => {
+    expect(
+      costFigure(
+        row({
+          taskId: "p",
+          usage: ready(1, { cost: 3.5 }),
+          subtaskUsage: subtasks(1, 0.75),
+        }),
+      ),
+    ).toEqual({ primary: "~$4.25", own: "~$3.50" });
+    expect(
+      costFigure(
+        row({
+          taskId: "p",
+          usage: ready(1, { cost: 3.5 }),
+          subtaskUsage: subtasks(1, 0.001),
+        }),
+      ),
+    ).toEqual({ primary: "~$3.50" });
+    expect(
+      costFigure(
+        row({
+          taskId: "p",
+          usage: ready(1, { cost: 3.5 }),
+          subtaskUsage: subtasks(1),
+        }),
+      ),
+    ).toEqual({ primary: "~$3.50" });
+    expect(costFigure(row({ taskId: "n", usage: ready(1) }))).toBeUndefined();
+  });
+
+  it("searches title, repository, harness and model ids, case-insensitively", () => {
+    const rows = [
+      row({ taskId: "a", title: "Fix the Login bug", usage: ready(1) }),
+      row({ taskId: "b", repository: "github.com/acme/api", usage: ready(1) }),
+      row({ taskId: "c", harness: "claude-code", usage: ready(1) }),
+      row({
+        taskId: "d",
+        usage: {
+          ...ready(1),
+          byModel: [{ ...ready(1).byModel[0]!, model: "gpt-5" }],
+        },
+      }),
+    ];
+    const ids = (text: string) =>
+      searchUsageRows(rows, text).map((r) => r.taskId);
+    expect(ids("login")).toEqual(["a"]);
+    expect(ids("ACME/API")).toEqual(["b"]);
+    expect(ids("claude")).toEqual(["c"]);
+    expect(ids("gpt-5")).toEqual(["d"]);
+    expect(ids("  ")).toEqual(["a", "b", "c", "d"]);
+    expect(ids("nothing like it")).toEqual([]);
+  });
+
+  it("treats pending rows as still being counted", () => {
+    expect(
+      isCountingRow(
+        row({ taskId: "p", usage: { ...ready(0), status: "pending" } }),
+      ),
+    ).toBe(true);
+    expect(
+      isCountingRow(
+        row({ taskId: "u", usage: { ...ready(0), status: "unavailable" } }),
+      ),
+    ).toBe(false);
   });
 });

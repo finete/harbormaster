@@ -6,7 +6,15 @@
 // no reader. Real JSON state files and session files in a temp dir; the
 // harness is a fake that reads Pi-format files with the real Pi reader.
 
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,8 +31,9 @@ import type {
   PresenceStatus,
 } from "../src/contracts/harness.js";
 import type { Clock, GitRepositoryAccess } from "../src/contracts/index.js";
+import { noopCoreLogger } from "../src/contracts/logger.js";
 import type { Task, WorkspaceBinding } from "../src/contracts/model.js";
-import type { SessionUsage } from "../src/contracts/usage.js";
+import type { SessionUsage, TaskUsage } from "../src/contracts/usage.js";
 import {
   CoreEventBus,
   CoreManager,
@@ -36,6 +45,7 @@ import {
   LocalSessionFileAccess,
   SessionPresenceAccess,
 } from "../src/index.js";
+import { UsageRuntime } from "../src/manager/usage-runtime.js";
 
 class TestClock implements Clock {
   private ms = Date.parse("2026-11-16T00:00:00.000Z");
@@ -219,6 +229,12 @@ async function seed(
   }
 }
 
+/** One refresh tick, then the background backfill drain it started. */
+async function refreshed(): Promise<void> {
+  await manager.refresh();
+  await manager.whenUsageBackfilled();
+}
+
 /** A started task with a pre-assigned session id (as the app's first launch does). */
 async function startedTask(): Promise<{ taskId: string; sessionId: string }> {
   const task = await manager.createTask({
@@ -355,7 +371,7 @@ describe("usage backfill on refresh", () => {
     await seed("waiting", { state: "working" }, { sessionId: "zzz" });
     await seed("parked", { state: "backlog" });
 
-    await manager.refresh();
+    await refreshed();
     const usage = async (id: string) => (await manager.getTask(id))?.usage;
     expect(await usage("gone")).toMatchObject({
       status: "unavailable",
@@ -378,7 +394,7 @@ describe("usage backfill on refresh", () => {
     // The file reappearing does not matter: unavailable is never retried
     // by the backfill; a ready task is not re-read either.
     await writeFile(gone, piSession([["claude-opus-5-5", 1, 0.1]]));
-    await manager.refresh();
+    await refreshed();
     expect(await usage("gone")).toMatchObject({ status: "unavailable" });
     expect(harness.reads).toHaveLength(readsAfterFirst);
 
@@ -396,11 +412,137 @@ describe("usage backfill on refresh", () => {
       createdAt: NOW,
       updatedAt: NOW,
     });
-    await manager.refresh();
+    await refreshed();
     expect(await usage("waiting")).toMatchObject({
       status: "ready",
       totals: { input: 7 },
     });
+  });
+});
+
+describe("usage backfill drain", () => {
+  async function freshTasks(count: number): Promise<string[]> {
+    const paths: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const id = `bulk-${String(index).padStart(2, "0")}`;
+      const path = join(sessionsDir, `${id}.jsonl`);
+      await writeFile(path, piSession([["claude-opus-5-5", index + 1, 0.1]]));
+      await seed(id, {}, { sessionPath: path });
+      paths.push(path);
+    }
+    return paths;
+  }
+
+  it("counts every never-computed task from one refresh, pushing the board per batch, without blocking the tick", async () => {
+    await freshTasks(50);
+    let pushes = 0;
+    events.on("board-changed", () => {
+      pushes += 1;
+    });
+    await manager.refresh();
+    // The tick returned without waiting for the drain.
+    const listed = await manager.listTaskUsage({});
+    expect(listed).toHaveLength(50);
+    expect(listed.some((row) => row.usage.status === "pending")).toBe(true);
+    await manager.whenUsageBackfilled();
+    const rows = await manager.listTaskUsage({});
+    expect(rows).toHaveLength(50);
+    expect(rows.every((row) => row.usage.status === "ready")).toBe(true);
+    expect(harness.reads).toHaveLength(50);
+    // 50 tasks in batches of 16: four batches, at most one push each.
+    expect(pushes).toBeGreaterThan(0);
+    expect(pushes).toBeLessThanOrEqual(4);
+  });
+
+  it("lists not-yet-counted tasks as pending rows until the drain reaches them", async () => {
+    await freshTasks(3);
+    await seed("parked", { state: "backlog" });
+    const before = await manager.listTaskUsage({});
+    expect(before.map((row) => row.usage.status)).toEqual([
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    await refreshed();
+    const after = await manager.listTaskUsage({});
+    expect(after.map((row) => row.usage.status)).toEqual([
+      "ready",
+      "ready",
+      "ready",
+    ]);
+  });
+
+  it("is single-flight: a second drain while one runs is a no-op", async () => {
+    await freshTasks(50);
+    const runtime = new UsageRuntime({
+      tasks,
+      sessions: new LocalSessionFileAccess(),
+      clock: new TestClock(),
+      logger: noopCoreLogger,
+      adapterFor: async () => harness,
+      bindingFor: (taskId) => bindings.getBindingForTask(taskId),
+      publish: async () => {},
+    });
+    const bindingFor = (taskId: string) => bindings.getBindingForTask(taskId);
+    let batches = 0;
+    const onBatch = async () => {
+      batches += 1;
+    };
+    const first = runtime.drain(() => tasks.listTasks(), bindingFor, onBatch);
+    const second = runtime.drain(() => tasks.listTasks(), bindingFor, onBatch);
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(harness.reads).toHaveLength(50);
+    expect(new Set(harness.reads).size).toBe(50);
+    expect(batches).toBe(4);
+    const all = await tasks.listTasks();
+    expect(all.every((task) => task.usage?.status === "ready")).toBe(true);
+    // Done: a new drain finds nothing to do.
+    await runtime.drain(() => tasks.listTasks(), bindingFor, onBatch);
+    expect(harness.reads).toHaveLength(50);
+  });
+
+  it("records the sessions' newest mtime as lastActivityAt, and fills it in once for older usage without re-parsing", async () => {
+    const path = join(sessionsDir, "old.jsonl");
+    await writeFile(path, piSession([["claude-opus-5-5", 9, 0.9]]));
+    const mtime = new Date("2026-10-02T03:04:05.000Z");
+    await utimes(path, mtime, mtime);
+    await seed(
+      "old",
+      { completedAt: "2026-10-03T00:00:00.000Z" },
+      {
+        sessionPath: path,
+      },
+    );
+    await refreshed();
+    const usage = (await manager.getTask("old"))?.usage as TaskUsage;
+    expect(usage.lastActivityAt).toBe(mtime.toISOString());
+    expect(harness.reads).toHaveLength(1);
+
+    // Usage persisted before the field existed: the next drain adds it
+    // from the stats alone (fingerprint unchanged → no re-parse).
+    const { lastActivityAt: _dropped, ...legacy } = usage;
+    await tasks.patchTask("old", (task) => ({ ...task, usage: legacy }));
+    const fresh = build(harness);
+    await fresh.refresh();
+    await fresh.whenUsageBackfilled();
+    expect((await fresh.getTask("old"))?.usage?.lastActivityAt).toBe(
+      mtime.toISOString(),
+    );
+    expect(harness.reads).toHaveLength(1);
+    expect((await stat(path)).mtime.toISOString()).toBe(mtime.toISOString());
+    // The range filter goes by it, not by when it was computed (archived:
+    // the refresh's sweep archived this long-Done task).
+    const ids = async (from: string, to?: string) =>
+      (
+        await fresh.listTaskUsage({
+          includeArchived: true,
+          from,
+          ...(to ? { to } : {}),
+        })
+      ).map((row) => row.taskId);
+    expect(await ids("2026-11-01")).toEqual([]);
+    expect(await ids("2026-10-01", "2026-10-31")).toEqual(["old"]);
   });
 });
 
@@ -425,7 +567,7 @@ describe("listTaskUsage", () => {
       { sessionPath: childSession },
     );
     await seed("archived", { archivedAt: NOW }, {});
-    await manager.refresh();
+    await refreshed();
 
     const rows = await manager.listTaskUsage({});
     expect(rows.map((row) => row.taskId)).toEqual(["parent", "child"]);

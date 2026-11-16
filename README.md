@@ -117,6 +117,16 @@ and the `harbormaster` CLI, both thin clients of the running app). Parent ↔
 child messages are delivered directly; any other cross-task message lands in
 your inbox for approval first.
 
+### Costs
+
+Every task shows what it used: tokens (input, output, cache read, cache
+write) per model and per session, read from the agent's own transcripts,
+with a dollar estimate next to it when the harness recorded one (Pi does),
+labelled *est. at list price · not your bill*. The **Costs** view ranks
+tasks by usage with repository / harness / model / date filters, a group-by,
+search and CSV export; parents include their subtasks' usage. The same
+query is `harbormaster usage --json`. Design notes in `docs/costs.md`.
+
 ## Supported agents
 
 - **Pi** and **Claude Code**: fully supported, including status, tools and
@@ -179,8 +189,6 @@ closing without abandoning that thesis, roughly in order:
 a product, not a fork: a Review button per task, the review in a pane
 beside the terminal, per-harness install/upgrade detection, and the
 trigger exposed to rules. Design: `docs/plannotator.md`.
-- **Costs pane**: token usage and spend per task, repository and harness,
-so it's clear what each piece of work actually cost.
 - **Worktree setup scripts** (per repository, run on worktree creation:
 install deps, copy `.env`, seed data).
 - **More harness adapters**: Codex CLI, Cursor CLI, OpenCode. The adapter

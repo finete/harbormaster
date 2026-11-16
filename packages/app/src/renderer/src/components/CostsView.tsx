@@ -4,22 +4,38 @@
 // tasks ranked by tokens, with a group-by strip that aggregates the same
 // rows client-side. `$` only where the agent recorded an estimate, always
 // labelled. Data: `listTaskUsage` (archived tasks included, the range is a
-// filter, not retention), re-read on every board push. Export CSV hands
-// the table's rows to main, which asks where to save them.
-import { ChevronDown, Download, Gauge } from "lucide-react";
+// filter, not retention), re-read on every board push; rows the backfill
+// has not counted yet (`pending`) are left out of the table and counted on
+// the totals line ("counting N more…"). A parent's figures lead with the
+// total including its subtasks (sorted on), own usage muted beside it. A
+// search box narrows the rows before totals, group-by and CSV. Export CSV
+// hands the table's rows to main, which asks where to save them.
+import { ChevronDown, Download, Gauge, Search, X } from "lucide-react";
 import type { JSX } from "react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { TaskUsageRow } from "../../../preload/api";
 import { isTypingTarget } from "../lib/keyboard-guard";
 import {
+  costFigure,
   filterUsageRows,
   formatCost,
   formatTokenCount,
   groupUsageRows,
+  isCountingRow,
   rowTokens,
+  searchUsageRows,
   sortUsageRows,
-  totalTokens,
+  tokensFigure,
   USAGE_RANGES,
+  USAGE_TOTALS_TITLE,
+  type UsageFigure,
   type UsageFilter,
   type UsageGroupBy,
   type UsageRange,
@@ -76,6 +92,8 @@ export function CostsView({
   const [sort, setSort] = useState<UsageSort>("tokens");
   const [rows, setRows] = useState<TaskUsageRow[] | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // The range is resolved against "now" at each read, so a page left open
   // across midnight still means "this week" on the next push.
@@ -125,10 +143,28 @@ export function CostsView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [active, onBack]);
 
-  const options = useMemo(() => usageFilterOptions(rows ?? []), [rows]);
+  // Not counted yet: off the table, counted on the totals line (the model
+  // filter can't apply to them: their models are not known yet).
+  const counted = useMemo(
+    () => (rows ?? []).filter((row) => !isCountingRow(row)),
+    [rows],
+  );
+  const counting = useMemo(
+    () =>
+      filterUsageRows((rows ?? []).filter(isCountingRow), {
+        ...filter,
+        model: undefined,
+      }).length,
+    [rows, filter],
+  );
+  const options = useMemo(() => usageFilterOptions(counted), [counted]);
+  const filtered = useMemo(
+    () => filterUsageRows(counted, filter),
+    [counted, filter],
+  );
   const shown = useMemo(
-    () => sortUsageRows(filterUsageRows(rows ?? [], filter), sort),
-    [rows, filter, sort],
+    () => sortUsageRows(searchUsageRows(filtered, search), sort),
+    [filtered, search, sort],
   );
   const totals = usageTotals(shown);
   const groups = useMemo(
@@ -226,7 +262,6 @@ export function CostsView({
         <Segmented
           ariaLabel="Group by"
           size="sm"
-          className="ml-auto"
           testId="costs-group-by"
           value={groupBy}
           onValueChange={setGroupBy}
@@ -235,17 +270,62 @@ export function CostsView({
             testId: `costs-group-${option.value}`,
           }))}
         />
+        <div className="relative ml-auto w-56">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+            aria-hidden
+          />
+          <input
+            ref={searchRef}
+            type="text"
+            data-testid="costs-search"
+            aria-label="Filter tasks"
+            placeholder="Filter tasks…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              // Esc here clears the filter (then leaves the box); it never
+              // leaves the page (the page handler skips a handled Esc).
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              if (search) setSearch("");
+              else event.currentTarget.blur();
+            }}
+            spellCheck={false}
+            className="h-8 w-full rounded-lg border border-input bg-background pl-8 pr-7 text-[13px] text-foreground transition-colors duration-[120ms] ease-out placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          {search && (
+            <button
+              type="button"
+              data-testid="costs-search-clear"
+              aria-label="Clear filter"
+              title="Clear (Esc)"
+              onClick={() => {
+                setSearch("");
+                searchRef.current?.focus();
+              }}
+              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-3 w-3" aria-hidden />
+            </button>
+          )}
+        </div>
       </div>
       <div
         className="shrink-0 px-3 py-2 font-mono text-xs text-muted-foreground"
         data-testid="costs-totals"
+        title={USAGE_TOTALS_TITLE}
       >
         {totals.tasks} {totals.tasks === 1 ? "task" : "tasks"} ·{" "}
         {formatTokenCount(totals.tokens)} tokens
         {totals.cost !== undefined ? ` · ${formatCost(totals.cost)} est.` : ""}
+        {counting > 0 && (
+          <span data-testid="costs-counting">{` · counting ${counting} more…`}</span>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        {rows === null ? null : shown.length === 0 ? (
+        {rows === null ? null : shown.length === 0 &&
+          search.trim() ? null : shown.length === 0 ? (
           <p
             className="py-6 text-center text-xs text-muted-foreground"
             data-testid="costs-empty"
@@ -424,21 +504,21 @@ function CostsRow({
 }): JSX.Element {
   const usage = row.usage;
   const tokens = rowTokens(row);
+  const subtasks = row.subtaskUsage
+    ? `${row.subtaskUsage.count} ${row.subtaskUsage.count === 1 ? "subtask" : "subtasks"}`
+    : undefined;
+  const cost = costFigure(row);
   const tokenCell =
     usage.status === "ready" ? (
-      row.subtaskUsage ? (
-        <span
-          title={`Own ${tokens.toLocaleString()} · incl. ${row.subtaskUsage.count} ${row.subtaskUsage.count === 1 ? "subtask" : "subtasks"}`}
-        >
-          {formatTokenCount(tokens)}
-          <span className="text-muted-foreground">
-            {" · incl. "}
-            {formatTokenCount(tokens + totalTokens(row.subtaskUsage))}
-          </span>
-        </span>
-      ) : (
-        formatTokenCount(tokens)
-      )
+      <span
+        title={
+          subtasks
+            ? `Incl. ${subtasks} · own ${tokens.toLocaleString()}`
+            : undefined
+        }
+      >
+        <FigureText figure={tokensFigure(row)} />
+      </span>
     ) : usage.status === "pending" ? (
       <span className="text-muted-foreground" title="Usage is being counted">
         …
@@ -464,6 +544,14 @@ function CostsRow({
         title={row.title}
       >
         {row.title}
+        {subtasks && (
+          <span
+            className="ml-1.5 text-muted-foreground"
+            data-testid="costs-row-subtasks"
+          >
+            ⤷ {subtasks}
+          </span>
+        )}
       </td>
       <td
         className="max-w-0 truncate py-1.5 pr-3 font-mono text-muted-foreground"
@@ -490,8 +578,19 @@ function CostsRow({
         className="whitespace-nowrap py-1.5 text-right font-mono text-muted-foreground"
         data-testid="costs-row-cost"
       >
-        {usage.cost !== undefined ? formatCost(usage.cost) : "—"}
+        {cost ? <FigureText figure={cost} /> : "—"}
       </td>
     </tr>
+  );
+}
+
+/** `"<incl> · own <own>"` (own muted) when they differ at this precision; else the one figure. */
+function FigureText({ figure }: { figure: UsageFigure }): JSX.Element {
+  if (figure.own === undefined) return <>{figure.primary}</>;
+  return (
+    <>
+      <span className="font-semibold">{figure.primary}</span>
+      <span className="text-muted-foreground">{` · own ${figure.own}`}</span>
+    </>
   );
 }

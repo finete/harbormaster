@@ -900,7 +900,10 @@ export interface CoreCommands {
    * highest first. Archived tasks only with `includeArchived`. A parent's
    * row carries `subtaskUsage`: its children's ready usage summed (whatever
    * the filters), with `cost` only when every counted child had one.
-   * Read-only: never parses a session file.
+   * Tasks the usage backfill has not counted yet (never computed, but Done
+   * or bound to a session) are listed too, as `pending` rows with zero
+   * totals, so a frontend can tell the list is still filling ("counting
+   * N more"). Read-only: never parses a session file.
    */
   listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;
   /**

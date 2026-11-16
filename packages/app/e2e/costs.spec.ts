@@ -1,8 +1,12 @@
 // Costs (docs/costs.md): per-task token usage in the app. Seeds Done tasks
 // whose bindings point at Pi-format transcripts with usage + cost (see
-// fake-pi.ts's writePiUsageSession); core's startup backfill counts them
-// and pushes the board, so every assertion below goes through the real
-// seam: adapter → core → IPC → renderer. One launch, three surfaces:
+// fake-pi.ts's writePiUsageSession); core's startup backfill drain counts
+// them all at once and pushes the board, so every assertion below goes
+// through the real seam: adapter → core → IPC → renderer. 40 extra small
+// tasks prove the drain counts the whole board on startup (16 per 30s
+// refresh tick left most of them missing), and a working task whose
+// transcript does not exist yet keeps "counting 1 more…" on the totals
+// line until it shows up. One launch, three surfaces:
 // the Costs page (filters, totals, group-by, open a task), its CSV export
 // (main's save path stubbed by HARBORMASTER_E2E_SAVE_PATH), and the
 // workspace usage chip + popover (with its refresh) plus the board line.
@@ -13,6 +17,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,6 +51,18 @@ let window: Page;
 let root: string;
 let savePath: string;
 let parentSession: string;
+let waitingSession: string;
+
+/** Small extra Done tasks, more than the old 16-per-tick backfill counted. */
+const BULK = 40;
+const bulkId = (index: number) => `bulk-${String(index).padStart(2, "0")}`;
+const bulkTokens = (): Omit<PiUsageTurn, "model"> => ({
+  input: 1_000,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  cost: 0,
+});
 const mainProcessErrors: string[] = [];
 
 function cardLocator(title: string): Locator {
@@ -111,6 +128,17 @@ test.beforeAll(async () => {
       cost: 9,
     },
   ]);
+  // Its spend is 60 days old: the range filter goes by the transcript's
+  // mtime (usage.lastActivityAt), not by when the backfill counted it.
+  utimesSync(archivedSession, new Date(old), new Date(old));
+  const bulkSessions = Array.from({ length: BULK }, (_, index) =>
+    session(`${String(index).padStart(8, "0")}-bulk`, [opus(bulkTokens())]),
+  );
+  // Written later, by the test: until then the task's usage is pending.
+  waitingSession = path.join(
+    sessions,
+    "2026-11-16T10-00-00-000Z_ffffffff-waiting.jsonl",
+  );
 
   const task = (
     id: string,
@@ -145,6 +173,13 @@ test.beforeAll(async () => {
           completedAt: old,
           archivedAt: old,
         }),
+        ...bulkSessions.map((_, index) =>
+          task(bulkId(index), `Bulk task ${String(index).padStart(2, "0")}`),
+        ),
+        task("waiting-task", "Waiting task", {
+          state: "working",
+          completedAt: undefined,
+        }),
       ],
     }),
   );
@@ -166,6 +201,8 @@ test.beforeAll(async () => {
         binding("small-task", smallSession),
         binding("tiny-task", tinySession),
         binding("archived-task", archivedSession),
+        ...bulkSessions.map((file, index) => binding(bulkId(index), file)),
+        binding("waiting-task", waitingSession),
       ],
     }),
   );
@@ -207,17 +244,59 @@ test("the Costs page ranks tasks by tokens, filters by range and groups rows", a
 
   // This week (default): everything but the 60-day-old archived task;
   // the custom agent has no usage reader, so its row is n/a, never 0.
+  // Every one of the 45 counted tasks is there well before the next 30s
+  // refresh tick; the waiting task (transcript not written yet) is not a
+  // row but is still being counted.
   const rows = view.getByTestId("costs-row");
-  await expect(rows).toHaveCount(5, { timeout: 20_000 });
-  await expect(view.getByTestId("costs-totals")).toHaveText(
-    "5 tasks · 1.5M tokens · ~$4.27 est.",
+  const totalsLine = view.getByTestId("costs-totals");
+  await expect(rows).toHaveCount(5 + BULK, { timeout: 15_000 });
+  await expect(totalsLine).toHaveText(
+    "45 tasks · 1.5M tokens · ~$4.27 est. · counting 1 more…",
   );
+  await expect(totalsLine).toHaveAttribute(
+    "title",
+    "own usage per task; subtasks counted once",
+  );
+  await expect(view.locator('[data-task-id="waiting-task"]')).toHaveCount(0);
+  for (let index = 0; index < BULK; index += 1) {
+    await expect(view.locator(`[data-task-id="${bulkId(index)}"]`)).toHaveCount(
+      1,
+    );
+  }
+
+  // The transcript shows up; the next refresh counts it and the hint goes.
+  writePiUsageSession(waitingSession, "ffffffff-waiting", [opus(bulkTokens())]);
+  await window.evaluate(() => window.harbormaster.core.refresh());
+  await expect(totalsLine).toHaveText("46 tasks · 1.5M tokens · ~$4.27 est.");
+  await expect(view.getByTestId("costs-counting")).toHaveCount(0);
+  await expect(rows).toHaveCount(6 + BULK);
+
+  // The parent ranks on its total incl. its subtask, own muted beside it.
   await expect(rows.first()).toHaveAttribute("data-task-id", "costly-parent");
-  // Own tokens · incl. its subtask's.
   await expect(rows.first().getByTestId("costs-row-tokens")).toHaveText(
-    "1.2M · incl. 1.5M",
+    "1.5M · own 1.2M",
   );
-  await expect(rows.first().getByTestId("costs-row-cost")).toHaveText("~$3.50");
+  await expect(rows.first().getByTestId("costs-row-cost")).toHaveText(
+    "~$4.25 · own ~$3.50",
+  );
+  await expect(rows.first().getByTestId("costs-row-subtasks")).toHaveText(
+    "⤷ 1 subtask",
+  );
+
+  // The search box narrows the rows (totals too); Esc in it clears it and
+  // stays on the page.
+  const search = view.getByTestId("costs-search");
+  await search.fill("TIDY");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toHaveAttribute("data-task-id", "small-task");
+  await expect(totalsLine).toHaveText(/^1 task · /);
+  await search.fill("no such task anywhere");
+  await expect(rows).toHaveCount(0);
+  await expect(totalsLine).toHaveText(/^0 tasks · /);
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(view).toBeVisible();
+  await expect(rows).toHaveCount(6 + BULK);
   const custom = view.locator('[data-task-id="custom-task"]');
   await expect(custom.getByTestId("costs-row-tokens")).toHaveText("n/a");
   await expect(custom.getByTestId("costs-row-cost")).toHaveText("—");
@@ -228,7 +307,7 @@ test("the Costs page ranks tasks by tokens, filters by range and groups rows", a
     .getByTestId("costs-filter-range-option")
     .filter({ hasText: "All" })
     .click();
-  await expect(rows).toHaveCount(6);
+  await expect(rows).toHaveCount(7 + BULK);
   await expect(rows.first()).toHaveAttribute("data-task-id", "archived-task");
 
   // Model filter, from the rows' own models.
@@ -244,7 +323,7 @@ test("the Costs page ranks tasks by tokens, filters by range and groups rows", a
     .getByTestId("costs-filter-model-option")
     .filter({ hasText: /^All$/ })
     .click();
-  await expect(rows).toHaveCount(6);
+  await expect(rows).toHaveCount(7 + BULK);
 
   // Group by model aggregates the same rows client-side.
   await view.getByTestId("costs-group-model").click();
@@ -280,7 +359,7 @@ test("the Costs page ranks tasks by tokens, filters by range and groups rows", a
 test("Export CSV saves the table's rows through main", async () => {
   await window.getByTestId("costs-button").click();
   const view = window.getByTestId("costs-view");
-  await expect(view.getByTestId("costs-row")).toHaveCount(5, {
+  await expect(view.getByTestId("costs-row")).toHaveCount(6 + BULK, {
     timeout: 20_000,
   });
   await view.getByTestId("costs-export-csv").click();
@@ -295,13 +374,15 @@ test("Export CSV saves the table's rows through main", async () => {
     "cheap-child",
     "small-task",
     "tiny-task",
+    ...Array.from({ length: BULK }, (_, index) => bulkId(index)),
+    "waiting-task",
     "custom-task",
   ]);
   expect(lines[1]).toMatch(
     /^costly-parent,Costly parent,,pi,done,[^,]+,claude-opus-4-5,150000,30000,1000000,20000,1200000,2,3\.5,pi,1,300000$/,
   );
   expect(lines[3]).toMatch(/^small-task,"Polish, tidy ""docs""",/);
-  expect(lines[5]).toMatch(/^custom-task,Custom agent task,,my-cli,done,/);
+  expect(lines.at(-2)).toMatch(/^custom-task,Custom agent task,,my-cli,done,/);
   expect(lines.at(-1)).toBe("");
   await window.keyboard.press("Escape");
   await expect(view).toHaveCount(0);

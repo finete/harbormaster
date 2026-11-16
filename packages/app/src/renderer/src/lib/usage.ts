@@ -221,14 +221,95 @@ export function usageFilterOptions(rows: readonly TaskUsageRow[]): {
   };
 }
 
-/** Ready tokens of a row (0 when not ready: such rows sort last). */
+/** Ready tokens of a row, own usage only (0 when not ready: such rows sort last). */
 export function rowTokens(row: TaskUsageRow): number {
   return row.usage.status === "ready" ? totalTokens(row.usage.totals) : 0;
 }
 
+/**
+ * A row's tokens including its subtasks' roll-up (`subtaskUsage`): the
+ * Costs table's primary, sorted-on figure. Equals `rowTokens` for a row
+ * without subtasks; 0 when the row's own usage is not ready.
+ */
+export function rowInclusiveTokens(row: TaskUsageRow): number {
+  if (row.usage.status !== "ready") return 0;
+  return (
+    rowTokens(row) + (row.subtaskUsage ? totalTokens(row.subtaskUsage) : 0)
+  );
+}
+
+/** A row's `$` including its subtasks' when both are priced; else its own (possibly absent). */
+export function rowInclusiveCost(row: TaskUsageRow): number | undefined {
+  const own = row.usage.cost;
+  const subtasks = row.subtaskUsage?.cost;
+  return own !== undefined && subtasks !== undefined ? own + subtasks : own;
+}
+
+/**
+ * One table cell's figure: `primary` is the inclusive figure; `own` is set
+ * only when it reads differently at the displayed precision (rendered
+ * `"<incl> · own <own>"`), otherwise the single figure is enough.
+ */
+export interface UsageFigure {
+  primary: string;
+  own?: string;
+}
+
+function figure(inclusive: string, own: string): UsageFigure {
+  return inclusive === own
+    ? { primary: inclusive }
+    : { primary: inclusive, own };
+}
+
+/** The Tokens cell of a ready row (inclusive first, own muted when it differs). */
+export function tokensFigure(row: TaskUsageRow): UsageFigure {
+  return figure(
+    formatTokenCount(rowInclusiveTokens(row)),
+    formatTokenCount(rowTokens(row)),
+  );
+}
+
+/** The Est. $ cell, `undefined` when the row has no own cost (`—`). */
+export function costFigure(row: TaskUsageRow): UsageFigure | undefined {
+  const own = row.usage.cost;
+  if (own === undefined) return undefined;
+  return figure(formatCost(rowInclusiveCost(row) ?? own), formatCost(own));
+}
+
+/**
+ * Rows the backfill has not counted yet (`pending`): hidden from the
+ * table, group-by and CSV; the totals line says "counting N more…".
+ */
+export function isCountingRow(row: TaskUsageRow): boolean {
+  return row.usage.status === "pending";
+}
+
+/**
+ * The Costs search box: case-insensitive substring over the task title,
+ * repository, harness and model ids. Blank text keeps every row.
+ */
+export function searchUsageRows(
+  rows: readonly TaskUsageRow[],
+  text: string,
+): TaskUsageRow[] {
+  const needle = text.trim().toLowerCase();
+  if (!needle) return [...rows];
+  return rows.filter((row) =>
+    [
+      row.title,
+      row.repository,
+      row.harness,
+      ...row.usage.byModel.map((model) => model.model),
+    ].some((value) => value.toLowerCase().includes(needle)),
+  );
+}
+
 export type UsageSort = "tokens" | "cost";
 
-/** Most first; rows without usage (or cost, for `cost`) last, then by title. */
+/**
+ * Most first by the inclusive figure (own + subtasks, what the cell shows
+ * first); rows without usage (or cost, for `cost`) last, then by title.
+ */
 export function sortUsageRows(
   rows: readonly TaskUsageRow[],
   sort: UsageSort,
@@ -236,12 +317,12 @@ export function sortUsageRows(
   const ready = (row: TaskUsageRow) => (row.usage.status === "ready" ? 1 : 0);
   return [...rows].sort((a, b) => {
     if (sort === "cost") {
-      const delta = (b.usage.cost ?? -1) - (a.usage.cost ?? -1);
+      const delta = (rowInclusiveCost(b) ?? -1) - (rowInclusiveCost(a) ?? -1);
       if (delta !== 0) return delta;
     }
     return (
       ready(b) - ready(a) ||
-      rowTokens(b) - rowTokens(a) ||
+      rowInclusiveTokens(b) - rowInclusiveTokens(a) ||
       a.title.localeCompare(b.title)
     );
   });
@@ -254,7 +335,10 @@ export interface UsageTotals {
   cost?: number;
 }
 
-/** The totals line: own usage only (children are rows of their own). */
+/** Tooltip on the Costs totals line. */
+export const USAGE_TOTALS_TITLE = "own usage per task; subtasks counted once";
+
+/** The totals line: own usage only (children are rows of their own), so nothing is counted twice. */
 export function usageTotals(rows: readonly TaskUsageRow[]): UsageTotals {
   let tokens = 0;
   let cost = 0;

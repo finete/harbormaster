@@ -11,7 +11,9 @@ import type {
   TaskUsage,
 } from "../src/contracts/usage.js";
 import {
+  awaitsUsageBackfill,
   buildTaskUsageRows,
+  lastActivityFromStats,
   placeholderUsage,
   summarizeTaskUsage,
   usageFingerprint,
@@ -206,7 +208,13 @@ describe("buildTaskUsageRows", () => {
     task("parent", {
       state: "working",
       folderPath: "/Users/me/notes",
-      usage: { ...ready(10, 1), computedAt: "2026-11-04T00:00:00.000Z" },
+      // Computed today by a backfill, but its spend happened on the 4th:
+      // the range filter goes by `lastActivityAt`, never `computedAt`.
+      usage: {
+        ...ready(10, 1),
+        computedAt: "2026-11-16T00:00:00.000Z",
+        lastActivityAt: "2026-11-04T00:00:00.000Z",
+      },
     }),
     task("child-1", {
       parentTaskId: "parent",
@@ -221,6 +229,7 @@ describe("buildTaskUsageRows", () => {
     }),
     task("child-missing", {
       parentTaskId: "parent",
+      updatedAt: "2026-11-12T00:00:00.000Z",
       usage: placeholderUsage("unavailable", CTX.computedAt, "missing-session"),
     }),
     task("never", {}),
@@ -279,5 +288,80 @@ describe("buildTaskUsageRows", () => {
     expect(ids({ includeArchived: true, to: "2026-10-31" })).toEqual([
       "child-2",
     ]);
+  });
+
+  it("lists tasks the backfill still owes as pending zero rows, last", () => {
+    const rows = buildTaskUsageRows(tasks, {}, new Set(["never", "big"]));
+    expect(rows.map((row) => row.taskId)).toEqual([
+      "big",
+      "parent",
+      "child-1",
+      "small",
+      "child-missing",
+      "never",
+    ]);
+    expect(rows.at(-1)?.usage).toMatchObject({
+      status: "pending",
+      totals: { input: 0, turns: 0 },
+      byModel: [],
+    });
+    // Its activity time is the task's own (updatedAt): in range.
+    expect(
+      buildTaskUsageRows(tasks, { from: "2026-11-01" }, new Set(["never"])).map(
+        (row) => row.taskId,
+      ),
+    ).toContain("never");
+    // A model filter can't match a task not counted yet.
+    expect(
+      buildTaskUsageRows(tasks, { model: "opus" }, new Set(["never"])).map(
+        (row) => row.taskId,
+      ),
+    ).not.toContain("never");
+  });
+});
+
+describe("usage backfill rules", () => {
+  it("owes a first figure to Done tasks and tasks bound to a session", () => {
+    const binding = (patch: Record<string, string>) => ({
+      id: "b",
+      taskId: "t",
+      detached: false,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      ...patch,
+    });
+    expect(awaitsUsageBackfill(task("t", {}), undefined)).toBe(true);
+    expect(
+      awaitsUsageBackfill(task("t", { state: "backlog" }), undefined),
+    ).toBe(false);
+    expect(
+      awaitsUsageBackfill(
+        task("t", { state: "working" }),
+        binding({ sessionId: "s" }),
+      ),
+    ).toBe(true);
+    expect(
+      awaitsUsageBackfill(
+        task("t", { state: "working" }),
+        binding({ worktreePath: "/w" }),
+      ),
+    ).toBe(false);
+    expect(
+      awaitsUsageBackfill(
+        task("t", { usage: placeholderUsage("unavailable", CTX.computedAt) }),
+        undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it("takes the newest session mtime as the last activity", () => {
+    expect(
+      lastActivityFromStats([
+        { stat: { mtimeMs: Date.parse("2026-11-02T00:00:00.000Z") } },
+        { stat: undefined },
+        { stat: { mtimeMs: Date.parse("2026-11-05T00:00:00.000Z") } },
+      ]),
+    ).toBe("2026-11-05T00:00:00.000Z");
+    expect(lastActivityFromStats([{ stat: undefined }])).toBeUndefined();
   });
 });

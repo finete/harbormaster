@@ -4,8 +4,8 @@
 // adapter's `expectedSessionFile`, and sessions already counted), has the
 // task's harness adapter read them, sums them with the pure usage engine
 // and persists `task.usage`. Triggers live in CoreManager (session
-// recorded, agent finished/outcome, Done, the refresh backfill,
-// `refreshTaskUsage`). Never throws into those commands: a failure is
+// recorded, agent finished/outcome, Done, the refresh's pending re-check
+// and backfill drain, `refreshTaskUsage`). Never throws into those commands: a failure is
 // logged and the previous usage stays.
 
 import type { HarnessAdapter } from "../contracts/harness.js";
@@ -18,6 +18,8 @@ import type {
 } from "../contracts/services.js";
 import type { SessionUsage, TaskUsage } from "../contracts/usage.js";
 import {
+  awaitsUsageBackfill,
+  lastActivityFromStats,
   placeholderUsage,
   summarizeTaskUsage,
   usageFingerprint,
@@ -25,9 +27,14 @@ import {
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import { logErrorMessage } from "../utilities/timed.js";
 
-/** Tasks without usage computed per refresh tick (pending ones are always rechecked; they are cheap). */
-const BACKFILL_BATCH = 16;
+/** Tasks per backfill-drain batch: one board push per batch at most. */
+const DRAIN_BATCH = 16;
 const BACKFILL_CONCURRENCY = 4;
+
+/** Let other work (IPC, timers, a refresh) run between drain batches. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 export interface UsageRuntimeDeps {
   tasks: TaskStateAccess;
@@ -71,6 +78,10 @@ function sameUsage(a: TaskUsage | undefined, b: TaskUsage): boolean {
 export class UsageRuntime {
   /** One computation per task at a time (a trigger mid-run joins it). */
   private readonly inFlight = new Map<string, Promise<TaskUsage | undefined>>();
+  /** The backfill drain in flight (single-flight, see `drain`). */
+  private draining: Promise<void> | undefined;
+  /** Ready tasks already queued once for a missing `lastActivityAt` (never retried this process). */
+  private readonly activityChecked = new Set<string>();
 
   constructor(private readonly deps: UsageRuntimeDeps) {}
 
@@ -89,36 +100,89 @@ export class UsageRuntime {
   }
 
   /**
-   * One refresh tick's backfill: tasks whose usage was never computed (a
-   * batch per tick, Done tasks included so missing sessions are marked
-   * `unavailable` exactly once) and tasks still `pending`. `unavailable`
-   * is never retried here. Resolves with whether any task changed.
+   * One refresh tick's re-check of tasks still `pending` (a session being
+   * written; cheap). Awaited by the refresh. Resolves with whether any
+   * task changed. Never-computed tasks are the drain's (see `drain`).
    */
-  async backfill(
+  async recheckPending(
     tasks: readonly Task[],
     bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
   ): Promise<boolean> {
-    const pending: Task[] = [];
-    const fresh: Task[] = [];
-    for (const task of tasks) {
-      if (task.usage?.status === "pending") pending.push(task);
-      else if (!task.usage) {
-        if (task.state === "done") fresh.push(task);
-        else {
-          const binding = await bindingFor(task.id);
-          if (
-            binding?.sessionId ||
-            binding?.sessionPath ||
-            binding?.previousSessionPath
-          ) {
-            fresh.push(task);
-          }
-        }
+    const pending = tasks.filter((task) => task.usage?.status === "pending");
+    return this.computeAll(pending, bindingFor);
+  }
+
+  /**
+   * The backfill drain (docs/costs.md "Backfill"): computes every task the
+   * backfill still owes a first figure (never computed: Done tasks, so
+   * missing sessions are marked `unavailable` exactly once, and tasks bound
+   * to a session) plus, once per process, `ready` usage persisted before
+   * `lastActivityAt` existed. Runs in batches of `DRAIN_BATCH` with
+   * bounded concurrency, yielding to the event loop between batches and
+   * calling `onBatch` (the board push) after a batch that changed a task.
+   * Single-flight: a call while a drain runs returns the running one.
+   * `unavailable` is never retried. Never rejects.
+   */
+  drain(
+    listTasks: () => Promise<Task[]>,
+    bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
+    onBatch: () => Promise<void>,
+  ): Promise<void> {
+    if (this.draining) return this.draining;
+    const run = this.runDrain(listTasks, bindingFor, onBatch)
+      .catch((error: unknown) => {
+        this.deps.logger.warn("usage", "usage backfill failed", {
+          outcome: "failed",
+          error: logErrorMessage(error),
+        });
+      })
+      .finally(() => {
+        if (this.draining === run) this.draining = undefined;
+      });
+    this.draining = run;
+    return run;
+  }
+
+  /** The running drain, or resolved when none runs. */
+  idle(): Promise<void> {
+    return this.draining ?? Promise.resolve();
+  }
+
+  private async runDrain(
+    listTasks: () => Promise<Task[]>,
+    bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
+    onBatch: () => Promise<void>,
+  ): Promise<void> {
+    const queue: Task[] = [];
+    for (const task of await listTasks()) {
+      if (awaitsUsageBackfill(task, await bindingFor(task.id))) {
+        queue.push(task);
+      } else if (
+        task.usage?.status === "ready" &&
+        !task.usage.lastActivityAt &&
+        this.deps.sessions.stat &&
+        !this.activityChecked.has(task.id)
+      ) {
+        this.activityChecked.add(task.id);
+        queue.push(task);
       }
     }
-    const batch = [...pending, ...fresh.slice(0, BACKFILL_BATCH)];
+    for (let start = 0; start < queue.length; start += DRAIN_BATCH) {
+      const batch = queue.slice(start, start + DRAIN_BATCH);
+      if (await this.computeAll(batch, bindingFor)) {
+        await onBatch().catch(() => {});
+      }
+      await yieldToEventLoop();
+    }
+  }
+
+  /** Recompute `tasks` (no per-task publish); resolves with whether any changed. */
+  private async computeAll(
+    tasks: readonly Task[],
+    bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
+  ): Promise<boolean> {
     let changed = false;
-    await forEachConcurrently(batch, BACKFILL_CONCURRENCY, async (task) => {
+    await forEachConcurrently(tasks, BACKFILL_CONCURRENCY, async (task) => {
       const before = task.usage;
       const binding = await bindingFor(task.id);
       const after = await this.update(task.id, {
@@ -202,12 +266,18 @@ export class UsageRuntime {
     const fingerprint = this.deps.sessions.stat
       ? usageFingerprint(stats)
       : undefined;
+    const lastActivityAt = lastActivityFromStats(stats);
     if (
       !options.force &&
       fingerprint !== undefined &&
       task.usage?.status === "ready" &&
       task.usage.fingerprint === fingerprint
     ) {
+      // Unchanged files: no re-parse. Usage persisted before
+      // `lastActivityAt` existed gains it from these stats.
+      if (lastActivityAt && task.usage.lastActivityAt !== lastActivityAt) {
+        return { kind: "usage", usage: { ...task.usage, lastActivityAt } };
+      }
       return { kind: "unchanged" };
     }
 
@@ -246,7 +316,11 @@ export class UsageRuntime {
     });
     return {
       kind: "usage",
-      usage: fingerprint ? { ...usage, fingerprint } : usage,
+      usage: {
+        ...usage,
+        ...(lastActivityAt ? { lastActivityAt } : {}),
+        ...(fingerprint ? { fingerprint } : {}),
+      },
     };
   }
 

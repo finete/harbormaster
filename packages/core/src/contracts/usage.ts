@@ -62,7 +62,17 @@ export interface TaskUsage {
   /** Sum of `cost` across sessions, only if every priced session had one. */
   cost?: number;
   costSource?: string;
+  /** When this figure was computed (not when the spend happened: see `lastActivityAt`). */
   computedAt: string;
+  /**
+   * When the spend last happened: the newest modification time among the
+   * task's session files (ISO), read from the same file stats as
+   * `fingerprint`. The Costs range filter uses it. Absent when the files
+   * could not be stat'ed (or on a placeholder); a `ready` usage persisted
+   * before this field existed gains it on its next recompute (no re-parse
+   * when the files are unchanged).
+   */
+  lastActivityAt?: string;
   /**
    * Core-internal change detector: the session files' size/mtime when this
    * was computed, so an unchanged session is never re-parsed. Opaque to
@@ -73,7 +83,7 @@ export interface TaskUsage {
 
 /** `CoreCommands.listTaskUsage` filters; every field optional. */
 export interface TaskUsageQuery {
-  /** ISO time or `YYYY-MM-DD` (inclusive), compared with the row's activity time (`completedAt`, else `usage.computedAt`). */
+  /** ISO time or `YYYY-MM-DD` (inclusive), compared with the row's activity time (`usage.lastActivityAt`, else `completedAt`, else `updatedAt`). */
   from?: string;
   /** ISO time or `YYYY-MM-DD` (inclusive: a date means the whole day, UTC). */
   to?: string;

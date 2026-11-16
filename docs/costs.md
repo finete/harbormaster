@@ -74,12 +74,58 @@ export interface TaskUsage {
 Implementation notes (additive to the shapes above; see `contracts/usage.ts`):
 `SessionUsage.forkedFrom.prefix` carries the copied prefix per model so the
 engine can subtract it; `TaskUsage.fingerprint` (size/mtime of the session
-files) makes recomputation cheap; `listTaskUsage(query?)` takes an optional
+files) makes recomputation cheap; `TaskUsage.lastActivityAt` (see
+follow-up 2) dates the spend; `listTaskUsage(query?)` takes an optional
 `TaskUsageQuery`; `refreshTaskUsage` resolves to `TaskUsage | undefined`;
 `TaskUsageRow.repository` is `repositoryId`, else `folderPath`, else `""`.
 The Claude adapter gained `expectedSessionFile` so core can locate
 transcripts without a `recordTaskSession` call. Socket ops `usage` and
 `usage_refresh` expose both commands to the CLI.
+
+## Follow-ups (2026-11-16, after shipping on a 229-task board)
+
+1. **Backfill drain.** The refresh no longer counts 16 never-computed
+   tasks per tick (229 tasks took 10+ minutes at the app's 30s cadence).
+   Every refresh tick (the first one runs at startup) starts a background
+   drain, unless one is already running (single-flight): it queues every
+   task the backfill still owes a first figure (Done, or bound to a
+   session: `awaitsUsageBackfill`), computes them in batches of 16 with 4
+   in flight, yields to the event loop between batches and pushes the board
+   at most once per batch. The tick never waits for it
+   (`CoreManager.whenUsageBackfilled()` does, for hosts and tests).
+   `pending` tasks are still re-checked on every tick; `unavailable` is
+   still never retried. Measured: 229 tasks × 268 KB Pi transcripts drain
+   in ~1.3 s (15 board pushes); 40 in ~0.2 s.
+2. **Activity time.** `TaskUsage.lastActivityAt` = the newest mtime among
+   the task's session files (from the stats already taken for the
+   fingerprint; unset when they can't be stat'ed). The Costs range filter
+   (`usageActivityAt`) is `usage.lastActivityAt ?? completedAt ??
+   updatedAt`; `computedAt` is never used for filtering (a backfill
+   counting an old task today put it in "This week"). A `ready` usage
+   persisted without the field is queued once per process by the drain
+   and gains it from the stats alone (unchanged fingerprint: no re-parse).
+3. **"Still counting".** `listTaskUsage` keeps returning `TaskUsageRow[]`
+   (smallest blast radius: the CLI prints such a row as `pending`), but
+   also lists tasks the backfill has not counted yet as `pending` rows
+   with zero totals. The Costs view hides `pending` rows from the table,
+   group-by and CSV and appends "· counting N more…" to the totals line
+   until none remain (`unavailable` rows still show `n/a`). A task whose
+   session is genuinely still pending (bound, transcript not written yet)
+   counts there too until its transcript appears or it is Done.
+4. **Subtask roll-up in the Costs table.** A row with `subtaskUsage` leads
+   with the inclusive figure (own + subtasks, bold, the one the Tokens /
+   Est. $ columns sort on) and shows own usage muted after it: `"581M ·
+   own 68M"`, `"~$4.25 · own ~$3.50"` (the `$` only when both are
+   priced). When the two read the same at the displayed precision
+   (`formatTokenCount`, `$` at 2 decimals) only the single figure shows;
+   the title carries a `⤷ N subtasks` marker either way. The totals line
+   still sums own usage only (tooltip: "own usage per task; subtasks
+   counted once"); the CSV keeps separate own and subtask columns.
+5. **Search.** A "Filter tasks…" box (`costs-search`, right of the filter
+   row) narrows rows by a case-insensitive substring of the title,
+   repository, harness or model ids, before totals, group-by and CSV
+   (what you see is what you export). Esc in the box clears it (Esc
+   elsewhere still leaves the page); no match shows "0 tasks".
 
 ## Harness file facts (verified on disk 2026-11-16)
 

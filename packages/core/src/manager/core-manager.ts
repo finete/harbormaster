@@ -205,7 +205,7 @@ import {
   assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
-import { buildTaskUsageRows } from "../engines/usage.js";
+import { awaitsUsageBackfill, buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import {
@@ -2264,13 +2264,20 @@ export class CoreManager implements CoreCommands {
       changed = true;
     }
     if (await this.archiveDoneTasks()) changed = true;
-    // Usage backfill (docs/costs.md): tasks never computed, a batch per
-    // tick, plus still-pending ones; never on a manager without agents.
+    // Usage (docs/costs.md): still-pending tasks are re-checked on every
+    // tick; tasks never computed are drained in the background (all of
+    // them, in batches, one board push per batch), never blocking the
+    // tick. Never on a manager without agents.
     if (this.deps.harness || this.deps.harnesses) {
       const usageChanged = await this.usage
-        .backfill(await this.deps.tasks.listTasks(), bindingFor)
+        .recheckPending(await this.deps.tasks.listTasks(), bindingFor)
         .catch(() => false);
       if (usageChanged) changed = true;
+      void this.usage.drain(
+        () => this.deps.tasks.listTasks(),
+        bindingFor,
+        () => this.publishBoard(),
+      );
     }
     if (changed) await this.publishBoard();
     return {
@@ -4305,7 +4312,36 @@ export class CoreManager implements CoreCommands {
   // --- Costs: per-task token usage (docs/costs.md) -----------------------
 
   async listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]> {
-    return buildTaskUsageRows(await this.deps.tasks.listTasks(), query ?? {});
+    const tasks = await this.deps.tasks.listTasks();
+    // Tasks the backfill drain has yet to count are listed as `pending`
+    // rows (the Costs view's "counting N more"); only when agents exist,
+    // since otherwise no backfill ever runs.
+    const uncounted = new Set<string>();
+    if (
+      (this.deps.harness || this.deps.harnesses) &&
+      tasks.some((task) => !task.usage)
+    ) {
+      const bindings = new Map(
+        (await this.deps.bindings.listBindings().catch(() => [])).map(
+          (binding) => [binding.taskId, binding],
+        ),
+      );
+      for (const task of tasks) {
+        if (awaitsUsageBackfill(task, bindings.get(task.id))) {
+          uncounted.add(task.id);
+        }
+      }
+    }
+    return buildTaskUsageRows(tasks, query ?? {}, uncounted);
+  }
+
+  /**
+   * Resolves once the background usage backfill drain (started by
+   * `refresh`) has finished; immediately when none runs. Not a
+   * `CoreCommands` member: for hosts and tests that need to wait for it.
+   */
+  whenUsageBackfilled(): Promise<void> {
+    return this.usage.idle();
   }
 
   async refreshTaskUsage(taskId: string): Promise<TaskUsage | undefined> {

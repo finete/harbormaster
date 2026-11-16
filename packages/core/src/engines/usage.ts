@@ -12,7 +12,7 @@
 //   its sessions only when every session with turns had a cost; otherwise
 //   absent (never a partial sum).
 
-import type { Task } from "../contracts/model.js";
+import type { Task, WorkspaceBinding } from "../contracts/model.js";
 import type {
   ModelUsage,
   SessionUsage,
@@ -180,9 +180,43 @@ function boundMs(value: string, edge: "from" | "to"): number | undefined {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
-/** When a row's spend happened, for the range filter. */
+/**
+ * When a row's spend happened, for the range filter: the session files'
+ * newest mtime, else completion, else the last task update. Never
+ * `computedAt` (a backfill computing an old task today is not spend today).
+ */
 export function usageActivityAt(task: Task): string | undefined {
-  return task.completedAt ?? task.usage?.computedAt ?? task.updatedAt;
+  return task.usage?.lastActivityAt ?? task.completedAt ?? task.updatedAt;
+}
+
+/**
+ * Whether the usage backfill still owes this task a first computation: no
+ * usage yet, and either Done (missing sessions are then marked
+ * `unavailable` once) or bound to a session.
+ */
+export function awaitsUsageBackfill(
+  task: Task,
+  binding: WorkspaceBinding | undefined,
+): boolean {
+  if (task.usage) return false;
+  if (task.state === "done") return true;
+  return Boolean(
+    binding?.sessionId || binding?.sessionPath || binding?.previousSessionPath,
+  );
+}
+
+/** The newest mtime among stat'ed session files (ISO), for `TaskUsage.lastActivityAt`. */
+export function lastActivityFromStats(
+  files: ReadonlyArray<{ stat: { mtimeMs: number } | undefined }>,
+): string | undefined {
+  let newest: number | undefined;
+  for (const { stat } of files) {
+    if (stat && Number.isFinite(stat.mtimeMs)) {
+      newest =
+        newest === undefined ? stat.mtimeMs : Math.max(newest, stat.mtimeMs);
+    }
+  }
+  return newest === undefined ? undefined : new Date(newest).toISOString();
 }
 
 function taskRepository(task: Task): string {
@@ -269,12 +303,21 @@ function subtaskRollups(tasks: readonly Task[]): Map<string, SubtaskUsage> {
 /**
  * `listTaskUsage`: tasks with usage matching `query`, most tokens first
  * (ties: newest activity first), parents carrying their children's
- * roll-up (children are counted whatever the filters).
+ * roll-up (children are counted whatever the filters). `uncounted` names
+ * tasks without usage that the backfill will still count: they are listed
+ * as `pending` rows with zero totals (so a frontend can say "counting N
+ * more"); other tasks without usage are left out.
  */
 export function buildTaskUsageRows(
-  tasks: readonly Task[],
+  listed: readonly Task[],
   query: TaskUsageQuery = {},
+  uncounted: ReadonlySet<string> = new Set(),
 ): TaskUsageRow[] {
+  const tasks = listed.map((task) =>
+    !task.usage && uncounted.has(task.id)
+      ? { ...task, usage: placeholderUsage("pending", task.updatedAt) }
+      : task,
+  );
   const rollups = subtaskRollups(tasks);
   const activity = new Map(
     tasks.map((task) => [task.id, usageActivityAt(task) ?? ""]),
