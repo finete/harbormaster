@@ -9,7 +9,9 @@
 // `agent` (what the task's agent is doing, from presence) and
 // `worktree.dirty` (uncommitted changes, Working tasks with a git worktree
 // only) → `harbormaster.task.agentChanged` /
-// `harbormaster.task.worktree.dirtyChanged`. A fact that cannot be read this
+// `harbormaster.task.worktree.dirtyChanged`. Core serves `worktreeDirty` from
+// its once-per-tick worktree pass (engines/worktree-status.ts), not a git run
+// per read. A fact that cannot be read this
 // tick keeps its previous value (no event); both are omitted when core
 // wires no `services.tasks`.
 
@@ -27,7 +29,7 @@ export const HARBORMASTER_SOURCE_ID = "harbormaster";
 /** The fact key behind `harbormaster.task.worktree.dirtyChanged` (read as `facts.harbormaster["worktree.dirty"]`). */
 export const WORKTREE_DIRTY_FACT = "worktree.dirty";
 
-/** Presence reads / `git status` runs in flight at once. */
+/** Presence / worktree-status reads in flight at once. */
 const LIVE_FACT_CONCURRENCY = 6;
 
 type LiveFacts = { agent?: unknown; [WORKTREE_DIRTY_FACT]?: unknown };

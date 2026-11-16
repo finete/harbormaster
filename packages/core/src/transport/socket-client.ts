@@ -13,6 +13,7 @@ import {
 import {
   LineSplitter,
   NOT_RUNNING_MESSAGE,
+  type SocketHostInfo,
   type SocketRequest,
   type SocketResponse,
 } from "./protocol.js";
@@ -124,6 +125,43 @@ export function sendSocketRequest(
       finish(() => reject(new HarbormasterNotRunningError()));
     });
   });
+}
+
+/** Who (if anyone) serves a socket, from a `ping` (see {@link probeSocketOwner}). */
+export type SocketOwner =
+  /** Nothing listens (no socket file, or a stale one from a crashed host). */
+  | { state: "none" }
+  /** A host answered; `version`/`pid` absent for hosts that predate them. */
+  | { state: "live"; version?: string; pid?: number }
+  /** Something accepted the connection but did not answer the ping in time. */
+  | { state: "unresponsive" };
+
+/** Pings `socketPath` and reports its owner. Never rejects. */
+export async function probeSocketOwner(
+  socketPath: string,
+  timeoutMs = 2_000,
+): Promise<SocketOwner> {
+  try {
+    const response = await sendSocketRequest(
+      socketPath,
+      { method: "ping" },
+      timeoutMs,
+    );
+    if ("event" in response || !response.ok) return { state: "live" };
+    const details = response.result.details as
+      | Partial<SocketHostInfo>
+      | undefined;
+    return {
+      state: "live",
+      ...(typeof details?.version === "string"
+        ? { version: details.version }
+        : {}),
+      ...(typeof details?.pid === "number" ? { pid: details.pid } : {}),
+    };
+  } catch (error) {
+    if (error instanceof HarbormasterNotRunningError) return { state: "none" };
+    return { state: "unresponsive" };
+  }
 }
 
 /** Runs one catalog tool through the app; rejects with the tool's own error message. */

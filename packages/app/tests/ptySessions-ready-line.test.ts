@@ -1,13 +1,16 @@
-// The Plannotator pty fallback (docs/plannotator.md "Transport"): a task
-// primary launched WITHOUT the open-url handler in its env reports
-// Plannotator's ready-line URL; one launched with it (the session reports
-// its URL itself) never does. Real `/bin/sh` processes via node-pty.
-import { afterEach, describe, expect, it } from "vitest";
+// The Plannotator pty fallback (docs/plannotator.md "Transport"): every
+// task pty reports Plannotator's ready-line URL unless the app exported the
+// open-url handler into that very pty (the session reports its URL itself).
+// No such record (a launch without a handler, a task shell the user ran an
+// agent in by hand, a primary that fell back to a shell) -> watched. Real
+// `/bin/sh` processes via node-pty.
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   createBackgroundPrimarySession,
   createSession,
   disposeSession,
   setReadyUrlListener,
+  writeToSession,
 } from "../src/main/ptySessions";
 
 const opened: Array<{ taskId: string; url: string }> = [];
@@ -57,6 +60,62 @@ describe("ready-line fallback", () => {
     sessionIds.push(id);
     await expect.poll(() => output, { timeout: 5000 }).toContain("done");
     expect(opened).toEqual([]);
+  });
+
+  describe("a pty with no record of the handler (an agent started by hand)", () => {
+    const shell = process.env.SHELL;
+    beforeAll(() => {
+      process.env.SHELL = "/bin/sh";
+    });
+    afterAll(() => {
+      process.env.SHELL = shell;
+    });
+    // Typed into an interactive shell: the echoed input must not itself
+    // read as a ready line, so the prefix is assembled by the shell.
+    const TYPED =
+      "P='Plannotator session'; printf '%s ready: %s\\n' \"$P\" http://127.0.0.1:4998/; echo do''ne\r";
+
+    it("opens the review tab from a task shell pane", async () => {
+      let output = "";
+      const { id } = createSession(
+        80,
+        24,
+        { onData: (data) => (output += data), onExit: () => {} },
+        { taskId: "task-4", primary: false },
+      );
+      sessionIds.push(id);
+      writeToSession(id, TYPED);
+      await expect.poll(() => output, { timeout: 5000 }).toContain("done");
+      expect(opened).toEqual([
+        { taskId: "task-4", url: "http://127.0.0.1:4998/" },
+      ]);
+    });
+
+    it("opens it from a primary that fell back to a shell, handler in its spec or not", async () => {
+      let output = "";
+      const { id, fellBackToShell } = createSession(
+        80,
+        24,
+        { onData: (data) => (output += data), onExit: () => {} },
+        {
+          spec: {
+            command: "/nonexistent/harbormaster-test-agent",
+            args: [],
+            cwd: process.cwd(),
+            env: { PLANNOTATOR_BROWSER: "/app/bin/harbormaster-open-url" },
+          },
+          taskId: "task-5",
+          primary: true,
+        },
+      );
+      sessionIds.push(id);
+      expect(fellBackToShell).toBe(true);
+      writeToSession(id, TYPED);
+      await expect.poll(() => output, { timeout: 5000 }).toContain("done");
+      expect(opened).toEqual([
+        { taskId: "task-5", url: "http://127.0.0.1:4998/" },
+      ]);
+    });
   });
 
   it("watches a background launch too", async () => {

@@ -181,9 +181,12 @@ function createProgramStatusFilter(
 }
 
 /**
- * Where a task primary's `Plannotator session ready: <url>` goes (the pty
- * fallback of docs/plannotator.md): only for a launch whose env had no
- * open-url handler, since a session with one reports its URL itself.
+ * Where a task pty's `Plannotator session ready: <url>` goes (the pty
+ * fallback of docs/plannotator.md): every task-bound pty is watched unless
+ * this module itself exported the open-url handler into that pty's env (a
+ * session with one reports its URL itself; opening it twice would double
+ * the tab). No such record (a shell pane the user ran `pi` in, a primary
+ * that fell back to a shell, a launch without a handler) → watched.
  */
 let readyUrlListener: ((taskId: string, url: string) => void) | undefined;
 
@@ -193,13 +196,21 @@ export function setReadyUrlListener(
   readyUrlListener = listener;
 }
 
-/** The ready-line watcher for a task primary's launch, or `undefined` when the launch had a handler. */
+/**
+ * Whether this pty provably got the open-url handler from us: it runs the
+ * launch spec (not a shell fallback) and the spec's own env overlay set it.
+ * An inherited `PLANNOTATOR_BROWSER` (the app's own env) proves nothing.
+ */
+function exportedOpenUrlHandler(spec: LaunchSpecLike | undefined): boolean {
+  return !!spec?.env[OPEN_URL_HANDLER_ENV];
+}
+
+/** The ready-line watcher for a task pty, or `undefined` when there is no task or we exported the handler into it. */
 function readyLineWatcher(
-  taskId: string,
-  spec: LaunchSpecLike,
+  taskId: string | undefined,
+  handlerExported: boolean,
 ): ((data: string) => void) | undefined {
-  // The flag on the launch: its env carries the handler or it does not.
-  if (spec.env[OPEN_URL_HANDLER_ENV]) return undefined;
+  if (!taskId || handlerExported) return undefined;
   const match = createReadyLineMatcher();
   return (data) => {
     for (const url of match(data)) readyUrlListener?.(taskId, url);
@@ -438,10 +449,10 @@ export function createSession(
     registerAsPane && options?.taskId
       ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
       : undefined;
-  const readyLine =
-    registerAsPane && options?.taskId && spec
-      ? readyLineWatcher(options.taskId, spec)
-      : undefined;
+  const readyLine = readyLineWatcher(
+    options?.taskId,
+    useSpec && exportedOpenUrlHandler(spec),
+  );
   const dataDisposable = ptyProcess.onData((data) => {
     notePtyData(id, options?.taskId, data);
     outputTail.push(data);
@@ -609,7 +620,7 @@ export function createBackgroundPrimarySession(
     modes.feed(data);
     io.sink(data);
   });
-  const readyLine = readyLineWatcher(taskId, spec);
+  const readyLine = readyLineWatcher(taskId, exportedOpenUrlHandler(spec));
   const dataDisposable = ptyProcess.onData((data) => {
     notePtyData(id, taskId, data);
     outputTail.push(data);

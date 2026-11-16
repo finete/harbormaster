@@ -53,7 +53,7 @@ import type {
   ToAwaitOptions,
   ToDoneResult,
   UpdateTaskInput,
-  WorkspaceBinding,
+  WorktreeStatus,
 } from "@harbormaster/core";
 
 /** Mirrors `main/connectivity-loop.ts`'s `ConnectivityState`; kept local so the renderer never imports main-process code. */
@@ -136,6 +136,7 @@ export type {
   ToDoneResult,
   UpdateTaskInput,
   WorkspaceBinding,
+  WorktreeStatus,
 } from "@harbormaster/core";
 
 /**
@@ -388,7 +389,10 @@ export interface HarbormasterApi {
     listBranches(repositoryId: string): Promise<string[]>;
     /** See `CoreCommands.listModels`. */
     listModels(): Promise<HarnessModelCatalog[]>;
+    /** Runs `git status` (fresh `dirty`): never on a periodic path. See `CoreCommands.getTaskWorkspace`. */
     getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined>;
+    /** Working tasks' dirtiness from the last refresh pass (no git per call). See `CoreCommands.listWorktreeStatus`. */
+    listWorktreeStatus(): Promise<Record<string, WorktreeStatus>>;
     createTask(input: CreateTaskInput): Promise<Task>;
     moveTask(
       id: string,

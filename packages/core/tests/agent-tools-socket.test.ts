@@ -16,6 +16,7 @@ import {
   type InboxClaimDetails,
   NOT_RUNNING_MESSAGE,
   PiHarnessAdapter,
+  probeSocketOwner,
   resolveSocketPath,
   sendSocketRequest,
   startToolSocketServer,
@@ -244,6 +245,23 @@ describe("tool socket", () => {
     server = await startToolSocketServer({
       socketPath,
       commands: core.commands,
+    });
+  });
+
+  it("ping identifies the owner (version + pid when the host says, nothing when gone)", async () => {
+    // The default server here names no host: an older build's answer.
+    expect(await probeSocketOwner(socketPath)).toEqual({ state: "live" });
+    await server.close();
+    expect(await probeSocketOwner(socketPath)).toEqual({ state: "none" });
+    server = await startToolSocketServer({
+      socketPath,
+      commands: core.commands,
+      host: { version: "9.9.9", pid: 4242 },
+    });
+    expect(await probeSocketOwner(socketPath)).toEqual({
+      state: "live",
+      version: "9.9.9",
+      pid: 4242,
     });
   });
 

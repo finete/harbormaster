@@ -11,6 +11,7 @@ import { dispatchToolCall } from "../tools/catalog.js";
 import { dispatchOpCall } from "../tools/ops.js";
 import {
   LineSplitter,
+  type SocketHostInfo,
   type SocketRequest,
   type SocketResponse,
 } from "./protocol.js";
@@ -18,6 +19,8 @@ import {
 export interface ToolSocketServerOptions {
   socketPath: string;
   commands: CoreCommands;
+  /** Answered on `ping` (`details`), so another starting host can identify this one. */
+  host?: SocketHostInfo;
   /** Called after every tool call (success or failure), e.g. to log or nudge a pass. */
   onCall?: (tool: string, outcome: { ok: boolean; error?: string }) => void;
 }
@@ -98,7 +101,14 @@ export async function startToolSocketServer(
     try {
       switch (request?.method) {
         case "ping":
-          write(socket, { id, ok: true, result: { text: "pong" } });
+          write(socket, {
+            id,
+            ok: true,
+            result: {
+              text: "pong",
+              ...(options.host ? { details: options.host } : {}),
+            },
+          });
           return;
         case "watch-inbox": {
           const taskId = request.caller?.taskId;

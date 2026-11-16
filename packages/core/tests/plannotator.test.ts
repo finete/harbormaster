@@ -657,4 +657,69 @@ describe.skipIf(!gitAvailable)("getTaskWorkspace dirty", () => {
     await writeFile(join(clean?.worktreePath as string, "new.txt"), "x");
     expect((await core.commands.getTaskWorkspace(task.id))?.dirty).toBe(true);
   });
+
+  it("listWorktreeStatus serves the refresh pass (no git per call), the same pass the rules' fact reads", async () => {
+    const { core, root } = await boot({ config: { automation: true } });
+    const checkout = join(root, "Code", "widgets");
+    await run("git", ["init", "-q", "-b", "main", checkout]);
+    await run(
+      "git",
+      [
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+      ],
+      { cwd: checkout },
+    );
+    await run(
+      "git",
+      ["remote", "add", "origin", "git@github.com:acme/widgets.git"],
+      { cwd: checkout },
+    );
+    const task = await core.commands.createTask({
+      title: "Dirty me",
+      initialPrompt: "",
+      start: true,
+      repositoryId: "github.com/acme/widgets",
+    });
+    const scratch = await core.commands.createTask({
+      title: "No worktree",
+      initialPrompt: "",
+      start: true,
+    });
+    // Nothing until the first refresh.
+    expect(await core.commands.listWorktreeStatus()).toEqual({});
+    await core.commands.refresh();
+    const first = await core.commands.listWorktreeStatus();
+    expect(first[task.id]?.dirty).toBe(false);
+    expect(first[scratch.id]).toBeUndefined();
+
+    const worktree = (await core.commands.getTaskWorkspace(task.id))
+      ?.worktreePath as string;
+    await writeFile(join(worktree, "new.txt"), "x");
+    // Served from the last pass: still clean until the next tick.
+    expect((await core.commands.listWorktreeStatus())[task.id]?.dirty).toBe(
+      false,
+    );
+    await core.commands.refresh();
+    expect((await core.commands.listWorktreeStatus())[task.id]?.dirty).toBe(
+      true,
+    );
+    const changes = (await core.commands.listEvents({ taskId: task.id }))
+      .flatMap((entry) => (entry.kind === "event" ? [entry.event] : []))
+      .filter(
+        (event) => event.type === "harbormaster.task.worktree.dirtyChanged",
+      );
+    expect(changes.map((event) => event.data)).toEqual([
+      { from: false, to: true },
+    ]);
+  });
 });

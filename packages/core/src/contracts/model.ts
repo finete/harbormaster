@@ -545,6 +545,18 @@ export interface ReviewSupport {
   checkedAt: string;
 }
 
+/**
+ * One Working task's worktree state from the last refresh pass
+ * (`CoreCommands.listWorktreeStatus`). `checkedAt` is when git last
+ * answered: a `git status` that timed out keeps the previous entry.
+ */
+export interface WorktreeStatus {
+  /** Uncommitted changes (`git status --porcelain`: staged, unstaged or untracked). */
+  dirty: boolean;
+  /** ISO time of the `git status` this value came from. */
+  checkedAt: string;
+}
+
 /** A task's workspace binding as `getTaskWorkspace` returns it. */
 export interface TaskWorkspace extends WorkspaceBinding {
   /**

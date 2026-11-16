@@ -1,11 +1,13 @@
 // Review button enablement, default target and the "Ready to review" hint
 // candidates (lib/review.ts, docs/plannotator.md decisions 1/4/5).
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PresenceBadge, ReviewSupport, Task } from "../src/preload/api";
 import {
   defaultReviewTarget,
+  evaluateReadyToReview,
   isAgentIdle,
   REVIEW_SETUP_HINT,
+  readyToReviewIds,
   reviewDisabledReason,
   reviewHintCandidates,
   taskHarness,
@@ -111,5 +113,52 @@ describe("reviewHintCandidates", () => {
     expect(isAgentIdle(undefined)).toBe(false);
     expect(isAgentIdle({ ...idle, live: false })).toBe(false);
     expect(isAgentIdle({ ...idle, status: undefined })).toBe(true);
+  });
+});
+
+describe("evaluateReadyToReview", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubCore(statuses: Record<string, { dirty: boolean }>) {
+    const core = {
+      listWorktreeStatus: vi.fn(async () =>
+        Object.fromEntries(
+          Object.entries(statuses).map(([id, entry]) => [
+            id,
+            { ...entry, checkedAt: "2026-11-14T00:00:00Z" },
+          ]),
+        ),
+      ),
+      getTaskWorkspace: vi.fn(async () => undefined),
+    };
+    vi.stubGlobal("window", { harbormaster: { core } });
+    return core;
+  }
+
+  it("reads core's stored worktree pass once per evaluation, never per candidate (no git over IPC)", async () => {
+    const core = stubCore({
+      a: { dirty: true },
+      b: { dirty: false },
+      c: { dirty: true },
+      z: { dirty: true },
+    });
+    evaluateReadyToReview(["a", "b", "c", "d"]);
+    await vi.waitFor(() => expect(readyToReviewIds()).toEqual(["a", "c"]));
+    expect(core.listWorktreeStatus).toHaveBeenCalledTimes(1);
+    expect(core.getTaskWorkspace).not.toHaveBeenCalled();
+
+    // A candidate that started working drops out right away; still one call.
+    evaluateReadyToReview(["c"]);
+    expect(readyToReviewIds()).toEqual(["c"]);
+    await vi.waitFor(() =>
+      expect(core.listWorktreeStatus).toHaveBeenCalledTimes(2),
+    );
+
+    // No candidates: nothing to ask.
+    evaluateReadyToReview([]);
+    expect(readyToReviewIds()).toEqual([]);
+    expect(core.listWorktreeStatus).toHaveBeenCalledTimes(2);
   });
 });

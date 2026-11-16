@@ -38,6 +38,7 @@ import type {
   TaskState,
   TaskWorkspace,
   ThinkingLevel,
+  WorktreeStatus,
 } from "./model.js";
 import type {
   CodeRootScan,
@@ -422,9 +423,19 @@ export interface CoreCommands {
    * worktree/branch for repository-backed tasks, a scratch directory
    * (`scratch: true`) for started repository-less tasks; `undefined` for
    * parked tasks or tasks whose binding was removed. A git worktree also
-   * reports `dirty` (uncommitted changes) for the "ready to review" hint.
+   * reports `dirty` (uncommitted changes), read fresh with `git status` on
+   * every call: never call this on a periodic path (use
+   * `listWorktreeStatus`).
    */
   getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined>;
+  /**
+   * Every Working task's worktree dirtiness from the last `refresh()` pass,
+   * by task id (tasks without a git worktree are absent). Cheap: no git
+   * runs here; the refresh tick computes it once for every reader (the
+   * rules' `worktree.dirty` fact, the "Ready to review" hint). Empty until
+   * the first refresh.
+   */
+  listWorktreeStatus(): Promise<Record<string, WorktreeStatus>>;
   /**
    * Create a task. With `input.start` it lands in `working`; otherwise it is
    * parked in `backlog`. When `input.repositoryId` is set the repository is

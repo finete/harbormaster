@@ -54,7 +54,7 @@ import type {
   ToDoneResult,
   UpdateInfo,
   UpdateTaskInput,
-  WorkspaceBinding,
+  WorktreeStatus,
 } from "./api";
 import { createIdRouter } from "./pty-bus";
 
@@ -153,6 +153,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:listModels"),
     getTaskWorkspace: (taskId: string): Promise<TaskWorkspace | undefined> =>
       ipcRenderer.invoke("core:getTaskWorkspace", taskId),
+    listWorktreeStatus: (): Promise<Record<string, WorktreeStatus>> =>
+      ipcRenderer.invoke("core:listWorktreeStatus"),
     createTask: (input: CreateTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:createTask", input),
     moveTask: (

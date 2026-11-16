@@ -139,8 +139,15 @@ export interface GitWorktreeAccess {
     path: string,
     force?: boolean,
   ): Promise<void>;
-  /** Whether the worktree at `path` has uncommitted changes (staged, unstaged, or untracked). */
-  isWorktreeDirty(path: string): Promise<boolean>;
+  /**
+   * Whether the worktree at `path` has uncommitted changes (staged,
+   * unstaged, or untracked). `timeoutMs` kills a `git status` that runs
+   * longer (it rejects); the default is the generic run limit.
+   */
+  isWorktreeDirty(
+    path: string,
+    options?: { timeoutMs?: number },
+  ): Promise<boolean>;
   /** How many uncommitted changes (staged, unstaged, untracked paths) the worktree at `path` has. */
   uncommittedChangeCount(path: string): Promise<number>;
   /** `git worktree prune` in every checkout of the repository: drops metadata whose folder is gone. */

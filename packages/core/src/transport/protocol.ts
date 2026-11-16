@@ -38,10 +38,20 @@ export interface WatchInboxRequest {
   caller: ToolCaller;
 }
 
-/** Liveness check: answered with `{ ok: true, result: { text: "pong" } }`. */
+/**
+ * Liveness check: answered with `{ ok: true, result: { text: "pong",
+ * details: SocketHostInfo } }` (older hosts send no details).
+ */
 export interface PingRequest {
   id: RequestId;
   method: "ping";
+}
+
+/** Who serves the socket: the `ping` answer's `details`, so a starting host can tell a stale build from itself. */
+export interface SocketHostInfo {
+  /** The host's own version (the app's `app.getVersion()`). */
+  version: string;
+  pid: number;
 }
 
 export type SocketRequest =

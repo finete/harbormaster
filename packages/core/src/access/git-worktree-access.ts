@@ -295,15 +295,24 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     return { path, head, detached: !branch, ...(branch ? { branch } : {}) };
   }
 
-  async isWorktreeDirty(path: string): Promise<boolean> {
-    return (await this.uncommittedChangeCount(path)) > 0;
+  async isWorktreeDirty(
+    path: string,
+    options?: { timeoutMs?: number },
+  ): Promise<boolean> {
+    return (await this.uncommittedChangeCount(path, options)) > 0;
   }
 
-  async uncommittedChangeCount(path: string): Promise<number> {
+  async uncommittedChangeCount(
+    path: string,
+    options?: { timeoutMs?: number },
+  ): Promise<number> {
     const status = await run(
       "git",
       ["status", "--porcelain=v1", "--untracked-files=all"],
       path,
+      options?.timeoutMs !== undefined
+        ? { timeoutMs: options.timeoutMs }
+        : undefined,
     );
     return status.split("\n").filter((line) => line.trim().length > 0).length;
   }

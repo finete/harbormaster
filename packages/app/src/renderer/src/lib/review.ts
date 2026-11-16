@@ -1,8 +1,9 @@
 // Code review via Plannotator (docs/plannotator.md), renderer side: when
 // the Review button is enabled, which target it defaults to, which tasks
 // get the quiet "Ready to review" hint, and the shared stores behind them
-// (`reviewSupport`, re-checked on window focus; each idle Dev task's
-// worktree dirtiness, re-read on presence pushes and every refresh tick).
+// (`reviewSupport`, re-checked on window focus; idle Dev tasks' worktree
+// dirtiness, read from core's refresh-tick pass on presence pushes and
+// after every refresh tick).
 // The decisions are pure functions (tests/review.test.ts).
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
@@ -116,37 +117,39 @@ function setReady(next: readonly string[]): void {
 }
 
 /**
- * Re-reads `getTaskWorkspace(id).dirty` for every candidate and publishes
- * the "Ready to review" set. A candidate list that changed while a read was
- * in flight wins: only the latest evaluation publishes.
+ * Reads core's stored worktree pass once (`listWorktreeStatus`: the refresh
+ * tick's single `git status` per Working task, the same one the rules'
+ * `worktree.dirty` fact uses) and publishes the "Ready to review" set. One
+ * IPC call per evaluation, never one per candidate, and no git per call.
+ * A candidate list that changed while a read was in flight wins: only the
+ * latest evaluation publishes.
  */
 let evaluation = 0;
 export function evaluateReadyToReview(candidates: readonly string[]): void {
   const run = ++evaluation;
   // Drop non-candidates right away (an agent that started working).
   setReady(readyIds.filter((id) => candidates.includes(id)));
-  void Promise.all(
-    candidates.map((id) =>
-      window.harbormaster.core
-        .getTaskWorkspace(id)
-        .then((binding) => (binding?.dirty === true ? id : undefined))
-        .catch(() => undefined),
-    ),
-  ).then((ids) => {
-    if (run !== evaluation) return;
-    setReady(ids.filter((id): id is string => id !== undefined));
-  });
+  if (candidates.length === 0) return;
+  void window.harbormaster.core
+    .listWorktreeStatus()
+    .then((statuses) => {
+      if (run !== evaluation) return;
+      setReady(candidates.filter((id) => statuses[id]?.dirty === true));
+    })
+    .catch(() => {});
+}
+
+/** The current "Ready to review" set (the store's snapshot). */
+export function readyToReviewIds(): readonly string[] {
+  return readyIds;
 }
 
 /** Task ids showing the "Ready to review" chip. */
 export function useReadyToReview(): readonly string[] {
-  return useSyncExternalStore(
-    (listener) => {
-      readyListeners.add(listener);
-      return () => readyListeners.delete(listener);
-    },
-    () => readyIds,
-  );
+  return useSyncExternalStore((listener) => {
+    readyListeners.add(listener);
+    return () => readyListeners.delete(listener);
+  }, readyToReviewIds);
 }
 
 /**

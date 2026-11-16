@@ -80,6 +80,7 @@ import type {
   TaskWorkspace,
   ThinkingLevel,
   WorkspaceBinding,
+  WorktreeStatus,
 } from "../contracts/model.js";
 import {
   DEFAULT_HARNESS_ID,
@@ -198,6 +199,7 @@ import {
   assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
+import { collectWorktreeStatus } from "../engines/worktree-status.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import {
   type HarnessRegistry,
@@ -361,6 +363,14 @@ export class CoreManager implements CoreCommands {
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
   private readonly doneCleanupFailures = new Map<string, string>();
+  /**
+   * The last refresh pass's worktree state per Working task (see
+   * engines/worktree-status.ts): read by the rules' `worktree.dirty` fact
+   * and `listWorktreeStatus`, so neither runs git per caller.
+   */
+  private worktreeStatus = new Map<string, WorktreeStatus>();
+  /** Working tasks whose worktree git could not answer for in the last pass (and had no previous value). */
+  private worktreeStatusUnreadable = new Set<string>();
   /** `reviewSupport`'s probed versions, reused for `REVIEW_SUPPORT_CACHE_MS`. */
   private reviewVersions:
     | { at: number; checkedAt: string; versions: Promise<ReviewVersions> }
@@ -403,7 +413,7 @@ export class CoreManager implements CoreCommands {
             http: { fetchText: (url) => deps.versions.fetchText(url) },
             tasks: {
               agent: (taskId) => this.agentActivity(taskId),
-              worktreeDirty: (taskId) => this.worktreeDirty(taskId),
+              worktreeDirty: async (taskId) => this.worktreeDirtyFact(taskId),
             },
           },
         })
@@ -678,11 +688,48 @@ export class CoreManager implements CoreCommands {
     return deriveAgentActivity(await harness.presence(taskId));
   }
 
-  /** The rules' `worktree.dirty` fact: `undefined` without a git worktree; throws when git is unreadable. */
-  private async worktreeDirty(taskId: string): Promise<boolean | undefined> {
-    const binding = await this.deps.bindings.getBindingForTask(taskId);
-    if (!binding?.worktreePath || binding.scratch) return undefined;
-    return this.deps.worktrees.isWorktreeDirty(binding.worktreePath);
+  /**
+   * The rules' `worktree.dirty` fact, from this tick's worktree pass (no
+   * git here): `undefined` without a git worktree; throws when git could
+   * not answer (the source keeps the last value).
+   */
+  private worktreeDirtyFact(taskId: string): boolean | undefined {
+    const status = this.worktreeStatus.get(taskId);
+    if (status) return status.dirty;
+    if (this.worktreeStatusUnreadable.has(taskId)) {
+      throw new Error("git status did not answer this tick");
+    }
+    return undefined;
+  }
+
+  async listWorktreeStatus(): Promise<Record<string, WorktreeStatus>> {
+    return Object.fromEntries(this.worktreeStatus);
+  }
+
+  /**
+   * One bounded `git status` pass over every Working task with a git
+   * worktree (see engines/worktree-status.ts), replacing the stored state.
+   */
+  private async refreshWorktreeStatus(
+    tasks: readonly Task[],
+    bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
+  ): Promise<void> {
+    const targets: Array<{ taskId: string; path: string }> = [];
+    for (const task of tasks) {
+      if (task.archivedAt || task.state !== "working") continue;
+      const binding = await bindingFor(task.id);
+      if (!binding?.worktreePath || binding.scratch) continue;
+      targets.push({ taskId: task.id, path: binding.worktreePath });
+    }
+    const pass = await collectWorktreeStatus({
+      targets,
+      previous: this.worktreeStatus,
+      isDirty: (path, timeoutMs) =>
+        this.deps.worktrees.isWorktreeDirty(path, { timeoutMs }),
+      now: () => this.deps.clock.now(),
+    });
+    this.worktreeStatus = pass.statuses;
+    this.worktreeStatusUnreadable = pass.unreadable;
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
@@ -2148,6 +2195,12 @@ export class CoreManager implements CoreCommands {
       if (patched) changed = true;
     });
 
+    // Worktree dirtiness, once per tick for every reader (the rules'
+    // `worktree.dirty` fact, the app's "Ready to review" hint), rules on or
+    // off; bounded so a slow repository cannot stretch the tick.
+    const liveTasks = await this.deps.tasks.listTasks();
+    await this.refreshWorktreeStatus(liveTasks, bindingFor);
+
     // The agent guide in the rules dir is written on every start, rules on
     // or off.
     if (this.rules) warnings.push(...(await this.rules.ensureManagedFiles()));
@@ -2155,7 +2208,7 @@ export class CoreManager implements CoreCommands {
     // actions), only with the kill switch on.
     if (config.automation && this.rules) {
       const result = await this.rules.tick({
-        tasks: await this.deps.tasks.listTasks(),
+        tasks: liveTasks,
         config,
         observed: observations,
         protectedPaths,

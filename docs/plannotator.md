@@ -56,9 +56,15 @@ agent process (env from the adapter)
   → socket op `open_url { url, source? }` (task id from the caller's HARBORMASTER_TASK_ID)
   → core `openTaskUrl` validates loopback, emits `task-url-opened`
   → app: review tab (Plannotator URL) or preview tab (other), per decisions 2/6
-Fallback: the pty owner matches `Plannotator session ready: <url>` on the task's
-stream and calls the same command, only when the launch env had no handler.
+Fallback: the pty owner matches `Plannotator session ready: <url>` on every task
+pty's stream and calls the same command, unless it can prove it exported the
+handler into THAT pty (it ran the launch spec whose env set PLANNOTATOR_BROWSER).
 ```
+
+No record = fallback on: a session started before the handler existed, an
+agent the user ran by hand in a task's shell pane, a primary that fell back
+to a shell. Only a pty we gave the handler is skipped, so a review never
+opens twice.
 
 ## Contract (core API)
 
@@ -104,6 +110,8 @@ requestReview(input: { taskId: string; target?: "local" | "pr" }): Promise<{ com
 /** Per-harness Plannotator status (see ReviewSupport). Cheap: version probes, cached 60 s, re-run on demand. */
 reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
 setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+/** Working tasks' worktree dirtiness from the last refresh pass, by task id (no git per call). */
+listWorktreeStatus(): Promise<Record<string, WorktreeStatus>>;   // WorktreeStatus = { dirty: boolean; checkedAt: string }
 ```
 
 `contracts/model.ts`:
@@ -128,10 +136,15 @@ export interface ReviewSupport { harnesses: ReviewSupportHarness[]; checkedAt: s
 
 Rules surface (`harbormaster` source snapshot, per task): facts
 `agent` (presence status: `working` | `idle` | `your-move` | `stopped` | …)
-and `worktree.dirty` (boolean, Dev tasks with a worktree; `git status
---porcelain` is cheap) → events `harbormaster.task.agentChanged`,
-`harbormaster.task.worktree.dirtyChanged`. The app's "ready to review" hint
-reads the same two facts through `getTaskWorkspace` (`dirty`) and presence.
+and `worktree.dirty` (boolean, Dev tasks with a worktree) → events
+`harbormaster.task.agentChanged`, `harbormaster.task.worktree.dirtyChanged`.
+`worktree.dirty` comes from one `git status --porcelain` pass per refresh
+tick (rules on or off; 6 in flight, 2 s each, a run that fails or times out
+keeps the previous value), stored in core and shared by every reader. The
+app's "ready to review" hint reads that pass through `listWorktreeStatus()`
+(one call per presence push / refresh, no git in the handler) plus presence.
+`getTaskWorkspace().dirty` runs git fresh per call and stays off periodic
+paths.
 
 Socket/CLI: op `open_url { url, source? }`; `harbormaster open-url <url> [--source plannotator|browser]` (task id
 from `HARBORMASTER_TASK_ID`; exit 1 with no app, so the script's `|| open`
@@ -154,8 +167,8 @@ runs). `harbormaster review [--local|--pr]` is the CLI face of
 - Settings: "Code review" section = `reviewSupport()` rows per harness +
   the `captureAgentBrowser` switch. Onboarding agent screen: one line with
   the same three states.
-- Pty fallback: the pane owner greps `Plannotator session ready: ` only when
-  the launch had no handler.
+- Pty fallback: the pane owner greps `Plannotator session ready: ` on every
+  task pty except one it exported the handler into (see Transport).
 
 ## Tests
 

@@ -41,6 +41,7 @@ import {
   HttpVersionAccess,
   isConnectivityError,
   parsePullRequestUrl,
+  probeSocketOwner,
   resolveSocketPath,
   resolveStatePaths,
   setProcessRunner,
@@ -101,6 +102,11 @@ import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
+import {
+  decideStartup,
+  describeStartupDecision,
+  type StartupDecision,
+} from "./instance-guard";
 import { createLogDedupe } from "./log-dedupe";
 import { applyLoginShellPath, loginShellPathAtStart } from "./login-shell-path";
 import {
@@ -289,8 +295,9 @@ const appLog = createAppLog(
 );
 installConsoleTee(appLog);
 console.log(`[main] Harbormaster ${app.getVersion()} starting`);
-// Crash sentinel + IPC timing (see main-health.ts): before any handler registers.
-installRunSentinel();
+// IPC timing (see main-health.ts): before any handler registers. The
+// crash sentinel waits for the single-instance guard (`guardSingleInstance`):
+// it lives in userData, and a duplicate must leave the holder's alone.
 installIpcTiming(ipcMain);
 // After the tee, so it lands in main.log. Logged once, every run (including e2e, which keeps the PATH it was
 // given so its fake binaries stay first): the actual PATH a launch
@@ -453,6 +460,8 @@ async function startToolSocket(): Promise<void> {
     toolSocket = await startToolSocketServer({
       socketPath: resolveSocketPath(activeStateDir),
       commands: core.commands,
+      // Answered on `ping`: lets another starting build name this one.
+      host: { version: app.getVersion(), pid: process.pid },
       // Never logs call arguments (could carry prompt/message text) — only
       // the tool name and, on failure, the error message.
       onCall: (tool, outcome) => {
@@ -691,6 +700,10 @@ function registerCoreIpc(): void {
   });
   ipcMain.handle("core:getTaskWorkspace", (_event, taskId: string) =>
     core.commands.getTaskWorkspace(taskId),
+  );
+  // The refresh tick's stored worktree pass: no git runs here.
+  ipcMain.handle("core:listWorktreeStatus", () =>
+    core.commands.listWorktreeStatus(),
   );
   ipcMain.handle(
     "core:moveTask",
@@ -989,7 +1002,7 @@ function registerCoreIpc(): void {
       safeSend(win.webContents, "core:task-url-opened", payload);
     }
   });
-  // Pty fallback: a session launched without the handler printed
+  // Pty fallback: a task pty we did not export the handler into printed
   // Plannotator's ready line (see ptySessions.ts `readyLineWatcher`).
   setReadyUrlListener((taskId, url) => {
     void core.commands
@@ -2280,7 +2293,71 @@ registerShellIpc();
 registerAppIpc();
 registerTerminalHostIpc();
 
-app.whenReady().then(() => {
+/**
+ * Single-instance guard, part 2 (see instance-guard.ts): never run beside
+ * another host on this state dir. Resolves `true` to start; otherwise the
+ * app is already exiting. A different build owning the socket gets a
+ * blocking Quit / Retry dialog (a test instance never shows one: it logs
+ * and exits).
+ */
+async function guardSingleInstance(): Promise<boolean> {
+  const socketPath = resolveSocketPath(activeStateDir);
+  for (;;) {
+    // Socket first, then Electron's lock (keyed by userData): asked after
+    // ready, a lost lock still lets this instance explain itself.
+    const owner = await probeSocketOwner(socketPath);
+    const gotLock = app.requestSingleInstanceLock();
+    const decision: StartupDecision = decideStartup({
+      gotLock,
+      owner,
+      ownVersion: app.getVersion(),
+    });
+    console.log(describeStartupDecision(decision, { gotLock, owner }));
+    if (decision.action === "start") {
+      installRunSentinel();
+      return true;
+    }
+    if (decision.action === "quit-duplicate") {
+      app.exit(0);
+      return false;
+    }
+    if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
+      console.error(`[instance] ${decision.message} Exiting (test instance).`);
+      app.exit(1);
+      return false;
+    }
+    const choice = dialog.showMessageBoxSync({
+      type: "warning",
+      message: decision.message,
+      detail: `Both would share ${activeStateDir}, but only one can serve the agents' CLI and hooks.`,
+      buttons: ["Quit", "Retry"],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice !== 1) {
+      console.log("[instance] quit chosen at the already-running dialog");
+      app.exit(0);
+      return false;
+    }
+    // Retry: a lock we got is released so the next pass asks afresh.
+    if (gotLock) app.releaseSingleInstanceLock();
+  }
+}
+
+// A duplicate of this app started (it quits itself): bring ours forward.
+app.on("second-instance", () => {
+  console.log("[instance] another copy started; focusing this one");
+  if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
+app.whenReady().then(async () => {
+  if (!(await guardSingleInstance())) return;
   // Test mode: no dock icon per e2e instance (see createWindow).
   if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) app.dock?.hide();
   installApplicationMenu();
