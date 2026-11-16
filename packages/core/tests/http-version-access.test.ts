@@ -1,7 +1,8 @@
 // Ported from pi-home's http-version-access coverage: a fake fetch never
 // touches the network, cache behavior is exercised against a fake clock.
 
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type Server, type Socket } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpVersionAccess } from "../src/access/http-version-access.js";
 import { isConnectivityError } from "../src/engines/connectivity.js";
 
@@ -161,5 +162,75 @@ describe("HttpVersionAccess", () => {
       "GET https://example.com/version failed: fetch failed (CERT_HAS_EXPIRED: certificate has expired)",
     );
     expect(isConnectivityError(failure?.message ?? "")).toBe(false);
+  });
+});
+
+// The same failures through Node's REAL fetch (no mock): local sockets that
+// refuse, reset or stall, and a name that never resolves. A mock only
+// encodes what we believe fetch throws; this pins what it actually throws
+// (the mock above once threw a shape Node never produces).
+describe("HttpVersionAccess against real sockets", () => {
+  const servers: Server[] = [];
+  const sockets: Socket[] = [];
+  afterEach(async () => {
+    for (const socket of sockets.splice(0)) socket.destroy();
+    await Promise.all(
+      servers
+        .splice(0)
+        .map((server) => new Promise((resolve) => server.close(resolve))),
+    );
+  });
+
+  async function listen(
+    onConnection: (socket: Socket) => void,
+  ): Promise<number> {
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      onConnection(socket);
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve()),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no port");
+    return address.port;
+  }
+
+  async function failure(url: string, timeoutMs = 2_000): Promise<string> {
+    const access = new HttpVersionAccess(1, timeoutMs);
+    return access.fetchText(url).then(
+      () => "resolved",
+      (error: unknown) => (error as Error).message,
+    );
+  }
+
+  it("connection refused", async () => {
+    // Bind then close: the port is known-free, nothing listens.
+    const port = await listen(() => {});
+    await new Promise((resolve) => servers.pop()?.close(resolve));
+    const message = await failure(`http://127.0.0.1:${port}/version`);
+    expect(message).toMatch(/ECONNREFUSED/);
+    expect(isConnectivityError(message)).toBe(true);
+  });
+
+  it("connection reset mid-request", async () => {
+    const port = await listen((socket) => socket.resetAndDestroy());
+    const message = await failure(`http://127.0.0.1:${port}/version`);
+    expect(message).toMatch(/ECONNRESET|socket hang up|other side closed/i);
+    expect(isConnectivityError(message)).toBe(true);
+  });
+
+  it("a server that accepts and never answers times out", async () => {
+    const port = await listen(() => {});
+    const message = await failure(`http://127.0.0.1:${port}/version`, 300);
+    expect(message).toContain("timed out after 300ms");
+    expect(isConnectivityError(message)).toBe(true);
+  });
+
+  it("a name that never resolves", async () => {
+    const message = await failure("https://harbormaster-test.invalid/version");
+    expect(message).toMatch(/ENOTFOUND|EAI_AGAIN/);
+    expect(isConnectivityError(message)).toBe(true);
   });
 });
