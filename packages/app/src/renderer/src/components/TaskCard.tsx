@@ -16,6 +16,7 @@ import {
   relativeTime,
   waitingDurationText,
 } from "../lib/time-format";
+import { cardUsageLine } from "../lib/usage";
 import { useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
@@ -71,6 +72,12 @@ interface TaskCardProps {
   parentTitle?: string;
   /** A standalone launch's display-only provenance line (lib/task-status-lines.ts). */
   provenanceTitle?: string;
+  /**
+   * One of the most expensive cards on the board (lib/usage.ts's
+   * `topUsageTaskIds`): its usage line is always shown, not only on
+   * hover / focus.
+   */
+  usagePinned?: boolean;
 }
 
 function DraggableTaskCard(props: TaskCardProps): JSX.Element {
@@ -98,6 +105,7 @@ function TaskCardFace({
   nested,
   parentTitle,
   provenanceTitle,
+  usagePinned,
   variant,
   cardRef,
   dragProps,
@@ -127,6 +135,10 @@ function TaskCardFace({
 
   const isAwaiting = task.state === "awaiting" && !!task.awaiting;
   const isOverlay = variant === "overlay";
+  // Usage line (docs/costs.md decision 7b): in flow for the board's top
+  // cards; otherwise revealed on hover / focus over the time slot, so a
+  // card at rest is laid out exactly as without it.
+  const usageLine = isOverlay ? undefined : cardUsageLine(task.usage);
 
   return (
     <Card
@@ -144,7 +156,7 @@ function TaskCardFace({
         // absent slot rendering nothing (no empty padded wrapper; the
         // subline always holds the repo chip), so a card without badges is
         // simply shorter, never differently aligned.
-        "flex select-none flex-col gap-1 p-3",
+        "group/card relative flex select-none flex-col gap-1 p-3",
         isOverlay
           ? // "Lifted" pick-up (Trello/Linear convention), overlay only.
             "scale-[1.02] cursor-grabbing border-primary"
@@ -182,6 +194,15 @@ function TaskCardFace({
         >
           {relativeTime(lastInteractionTimestamp(task, presence), now)}
         </span>
+        {usageLine && !usagePinned && (
+          <span
+            data-testid="card-usage-line"
+            data-pinned="false"
+            className="pointer-events-none invisible absolute right-3 top-3 max-w-[calc(100%-1.5rem)] truncate bg-card pl-2 font-mono text-[10px] leading-[1.125rem] text-muted-foreground group-focus-within/card:visible group-hover/card:visible"
+          >
+            {usageLine}
+          </span>
+        )}
       </div>
       {/* Mono sub-line: branch → target / waiting duration, plus the quiet
         repo chip, always shown (a lineage-hosted child can sit under its
@@ -238,6 +259,16 @@ function TaskCardFace({
           title={outcome.note}
         >
           {outcome.note}
+        </p>
+      )}
+      {usageLine && usagePinned && (
+        <p
+          className="truncate font-mono text-[10px] text-muted-foreground"
+          data-slot="usage"
+          data-testid="card-usage-line"
+          data-pinned="true"
+        >
+          {usageLine}
         </p>
       )}
       {messaging.waitingOnParent && (

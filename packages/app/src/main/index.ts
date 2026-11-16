@@ -10,7 +10,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import {
+  basename,
+  dirname,
+  extname,
+  join,
+  resolve as resolvePath,
+} from "node:path";
 import { is } from "@electron-toolkit/utils";
 import type {
   AwaitingKindId,
@@ -28,6 +34,7 @@ import type {
   RulesCheckInput,
   Task,
   TaskState,
+  TaskUsageQuery,
   ToAwaitOptions,
   UpdateTaskInput,
 } from "@harbormaster/core";
@@ -899,6 +906,16 @@ function registerCoreIpc(): void {
   });
   ipcMain.handle("core:listChildren", (_event, parentTaskId: string) =>
     core.commands.listChildren(parentTaskId),
+  );
+  // Costs (docs/costs.md): read-only usage rows and the popover's
+  // one-task recompute (which persists and pushes board-changed itself).
+  ipcMain.handle(
+    "core:listTaskUsage",
+    (_event, query: TaskUsageQuery | undefined) =>
+      core.commands.listTaskUsage(query),
+  );
+  ipcMain.handle("core:refreshTaskUsage", (_event, taskId: string) =>
+    core.commands.refreshTaskUsage(taskId),
   );
   ipcMain.handle("core:getLaunchSettings", (_event, repositoryId?: string) =>
     core.commands.getLaunchSettings(
@@ -2277,6 +2294,41 @@ async function exportDiagnostics(): Promise<string | null> {
   return target;
 }
 
+/**
+ * Save renderer-produced text (the Costs view's CSV export) where the user
+ * picks: the renderer never writes files. e2e sets
+ * HARBORMASTER_E2E_SAVE_PATH to skip the native dialog, same as
+ * `exportDiagnostics`. Resolves the saved path, or null when cancelled.
+ */
+async function saveTextFile(
+  defaultName: string,
+  text: string,
+): Promise<string | null> {
+  const name = basename(defaultName) || "export.txt";
+  let target = process.env.HARBORMASTER_E2E_SAVE_PATH;
+  if (!target) {
+    const extension = extname(name).slice(1);
+    const win = BrowserWindow.getFocusedWindow();
+    const options = {
+      defaultPath: join(app.getPath("downloads"), name),
+      ...(extension
+        ? {
+            filters: [
+              { name: extension.toUpperCase(), extensions: [extension] },
+            ],
+          }
+        : {}),
+    };
+    const result = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options);
+    if (result.canceled || !result.filePath) return null;
+    target = result.filePath;
+  }
+  writeFileSync(target, text, "utf8");
+  return target;
+}
+
 function exportDiagnosticsFromMenu(): void {
   exportDiagnostics().catch((error) => {
     console.error("[main] export diagnostics failed:", error);
@@ -2374,6 +2426,15 @@ function registerReleaseIpc(): void {
     if (typeof text === "string") clipboard.writeText(text);
   });
   ipcMain.handle("app:exportDiagnostics", () => exportDiagnostics());
+  ipcMain.handle(
+    "app:saveTextFile",
+    (_event, defaultName: unknown, text: unknown): Promise<string | null> => {
+      if (typeof defaultName !== "string" || typeof text !== "string") {
+        return Promise.resolve(null);
+      }
+      return saveTextFile(defaultName, text);
+    },
+  );
   ipcMain.handle("app:copyDiagnosticsSummary", (): string => {
     clipboard.writeText(lastDiagnosticsSummary);
     return lastDiagnosticsSummary;

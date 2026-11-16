@@ -24,6 +24,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Gauge,
   Inbox,
   LayoutGrid,
   ListChecks,
@@ -330,6 +331,9 @@ function SortableGroupSection({
  * also works, see App.tsx). Archived tasks are always excluded (the Done
  * column's "show archived" toggle is board-only; see BoardColumn.tsx).
  */
+/** The Costs row's tooltip (docs/costs.md). */
+const COSTS_TITLE = "Costs: token usage per task (est. at list price)";
+
 export function Sidebar({
   focusedTaskId,
   openedTaskIds,
@@ -345,6 +349,8 @@ export function Sidebar({
   inboxActive,
   onOpenRules,
   rulesActive,
+  onOpenCosts,
+  costsActive,
   onNewTask,
   draftLabel,
   draftFocused,
@@ -372,6 +378,10 @@ export function Sidebar({
   onOpenRules: () => void;
   /** The Rules page is showing. */
   rulesActive: boolean;
+  /** Toggle the Costs page (docs/costs.md; App owns it). */
+  onOpenCosts: () => void;
+  /** The Costs page is showing. */
+  costsActive: boolean;
   /** Open/focus THE new-task draft (same path as Cmd/Ctrl+N). */
   onNewTask: () => void;
   /** Live label of the new-task draft row; `null` = no draft exists. */
@@ -1148,6 +1158,15 @@ export function Sidebar({
             onClick={onOpenInbox}
             testId="inbox-button-compact"
           />
+          <SidebarNavItem
+            compact
+            icon={<Gauge aria-hidden />}
+            label="Costs"
+            active={costsActive}
+            title={COSTS_TITLE}
+            onClick={onOpenCosts}
+            testId="costs-button-compact"
+          />
         </nav>
         <div className="mt-1 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
           {draftLabel !== null && (
@@ -1241,6 +1260,14 @@ export function Sidebar({
           title={inboxTitle}
           onClick={onOpenInbox}
           testId="inbox-button"
+        />
+        <SidebarNavItem
+          icon={<Gauge aria-hidden />}
+          label="Costs"
+          active={costsActive}
+          title={COSTS_TITLE}
+          onClick={onOpenCosts}
+          testId="costs-button"
         />
       </nav>
       <div className="flex items-center gap-2 px-3 pb-2 pt-3">

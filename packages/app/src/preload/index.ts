@@ -46,6 +46,9 @@ import type {
   TaskMessagingState,
   TaskState,
   TaskUrlOpenedPayload,
+  TaskUsage,
+  TaskUsageQuery,
+  TaskUsageRow,
   TaskWorkspace,
   TerminalCreateOptions,
   TerminalCreateResult,
@@ -197,6 +200,10 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:launchTask", input),
     listChildren: (parentTaskId: string): Promise<Task[]> =>
       ipcRenderer.invoke("core:listChildren", parentTaskId),
+    listTaskUsage: (query?: TaskUsageQuery): Promise<TaskUsageRow[]> =>
+      ipcRenderer.invoke("core:listTaskUsage", query),
+    refreshTaskUsage: (taskId: string): Promise<TaskUsage | undefined> =>
+      ipcRenderer.invoke("core:refreshTaskUsage", taskId),
     getLaunchSettings: (repositoryId?: string): Promise<LaunchSettings> =>
       ipcRenderer.invoke("core:getLaunchSettings", repositoryId),
     onBoardChanged: (
@@ -407,6 +414,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("app:copyText", text),
     exportDiagnostics: (): Promise<string | null> =>
       ipcRenderer.invoke("app:exportDiagnostics"),
+    saveTextFile: (defaultName: string, text: string): Promise<string | null> =>
+      ipcRenderer.invoke("app:saveTextFile", defaultName, text),
     copyDiagnosticsSummary: (): Promise<string> =>
       ipcRenderer.invoke("app:copyDiagnosticsSummary"),
     openInApps: (): Promise<OpenInAppInfo[]> =>

@@ -27,6 +27,7 @@ import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { OpenInButton } from "./OpenInButton";
 import { TaskActions } from "./TaskActions";
 import { TaskAudit } from "./TaskAudit";
+import { TaskUsageChip } from "./TaskUsageChip";
 import { TerminalPane } from "./TerminalPane";
 import { TerminalTab } from "./TerminalTab";
 import { UrlPane, type UrlPanelParams } from "./UrlPane";
@@ -309,6 +310,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
+          {task && <TaskUsageChip task={task} />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <OpenInButton path={cwd} />

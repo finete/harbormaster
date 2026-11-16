@@ -5,6 +5,7 @@ import type { PresenceSnapshot } from "../../preload/api";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
+import { CostsView } from "./components/CostsView";
 import { InboxHeaderButton, InboxView } from "./components/InboxView";
 import {
   NewTaskComposer,
@@ -65,7 +66,13 @@ import {
 } from "./lib/workspace-persistence";
 import { pushToast } from "./toast";
 
-type View = "board" | "workspace" | "inbox" | "rules";
+type View = "board" | "workspace" | "inbox" | "rules" | "costs";
+/** The pages shown in place of the task workspace (the sidebar stays). */
+type Page = "inbox" | "rules" | "costs";
+
+function isPage(view: View): view is Page {
+  return view === "inbox" || view === "rules" || view === "costs";
+}
 
 /**
  * Three top-level views, switched instantly (no router, see AGENTS.md):
@@ -81,6 +88,8 @@ type View = "board" | "workspace" | "inbox" | "rules";
  * - "rules": the Rules page (docs/rules-page.md), like the inbox: in place
  *   of the task workspace, sidebar Rules row or Cmd/Ctrl+Shift+R; Esc (with
  *   no rule sheet open) goes back to the previous view.
+ * - "costs": per-task token usage (docs/costs.md), like the Rules page:
+ *   sidebar Costs row; Esc goes back to the previous view.
  */
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -102,11 +111,11 @@ export function App({
 } = {}): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   // The view the inbox / Rules page returns to (Esc, or its shortcut again).
-  const viewBeforePage = useRef<Exclude<View, "inbox" | "rules">>("workspace");
-  const togglePage = useCallback((page: "inbox" | "rules") => {
+  const viewBeforePage = useRef<Exclude<View, Page>>("workspace");
+  const togglePage = useCallback((page: Page) => {
     setView((current) => {
       if (current === page) return viewBeforePage.current;
-      if (current !== "inbox" && current !== "rules") {
+      if (!isPage(current)) {
         viewBeforePage.current = current;
       }
       return page;
@@ -114,12 +123,9 @@ export function App({
   }, []);
   const openInbox = useCallback(() => togglePage("inbox"), [togglePage]);
   const openRules = useCallback(() => togglePage("rules"), [togglePage]);
+  const openCosts = useCallback(() => togglePage("costs"), [togglePage]);
   const leavePage = useCallback(() => {
-    setView((current) =>
-      current === "inbox" || current === "rules"
-        ? viewBeforePage.current
-        : current,
-    );
+    setView((current) => (isPage(current) ? viewBeforePage.current : current));
   }, []);
   // The Rules page's tab / selected rule / filters, kept across visits.
   const [rulesPage, setRulesPage] =
@@ -669,7 +675,7 @@ export function App({
           <div
             data-testid="workspace-view"
             className={
-              view === "workspace" || view === "inbox" || view === "rules"
+              view === "workspace" || isPage(view)
                 ? "flex h-full w-full"
                 : "hidden"
             }
@@ -689,6 +695,8 @@ export function App({
               inboxActive={view === "inbox"}
               onOpenRules={openRules}
               rulesActive={view === "rules"}
+              onOpenCosts={openCosts}
+              costsActive={view === "costs"}
               onNewTask={openDraft}
               draftLabel={draft ? draftLabel(draft) : null}
               draftFocused={draftFocused}
@@ -722,12 +730,18 @@ export function App({
                 onEditInChat={openComposer}
               />
             )}
+            {view === "costs" && (
+              <CostsView
+                active={view === "costs" && takeover === null}
+                onOpenTask={(taskId) => {
+                  selectTask(taskId);
+                  setView("workspace");
+                }}
+                onBack={leavePage}
+              />
+            )}
             <div
-              className={
-                view === "inbox" || view === "rules"
-                  ? "hidden"
-                  : "flex h-full min-w-0 flex-1"
-              }
+              className={isPage(view) ? "hidden" : "flex h-full min-w-0 flex-1"}
             >
               <WorkspaceView
                 focusedTaskId={visibleTaskId}

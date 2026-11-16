@@ -50,6 +50,7 @@ import {
   toAwaitMutation,
   toDoneMutation,
 } from "../lib/task-mutations";
+import { topUsageTaskIds } from "../lib/usage";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { BoardColumn } from "./BoardColumn";
@@ -340,6 +341,32 @@ export function Board({
     return () => row.removeEventListener("wheel", onWheel);
   }, []);
 
+  // The board's top cards by tokens among those actually rendered
+  // (decision 7b): their usage line stays visible, the rest show it on
+  // hover. Same visibility rules as the keyboard grid.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: collapsedColumns/peekedColumns stand in for the per-render effectiveCollapsedColumns Set (see the selection effect above).
+  const pinnedUsageTaskIds = useMemo(
+    () =>
+      topUsageTaskIds(
+        flattenBoard(columns).map((row) => row.task),
+        buildSelectionGrid(
+          columns,
+          showArchived,
+          collapsedGroups,
+          effectiveCollapsedColumns,
+          collapsedLineageParents,
+        ).flatMap((column) => column.taskIds),
+      ),
+    [
+      columns,
+      showArchived,
+      collapsedGroups,
+      collapsedColumns,
+      peekedColumns,
+      collapsedLineageParents,
+    ],
+  );
+
   const selectedTask = flattenBoard(columns).find(
     (row) => row.task.id === selectedTaskId,
   )?.task;
@@ -515,6 +542,7 @@ export function Board({
               lineageIndex={lineageIndex}
               collapsedLineageParents={collapsedLineageParents}
               onToggleLineageChildren={toggleLineageChildren}
+              pinnedUsageTaskIds={pinnedUsageTaskIds}
             />
           ))}
         </div>

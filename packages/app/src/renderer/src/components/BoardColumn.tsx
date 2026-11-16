@@ -67,6 +67,7 @@ export function BoardColumn({
   lineageIndex,
   collapsedLineageParents,
   onToggleLineageChildren,
+  pinnedUsageTaskIds,
 }: {
   column: BoardColumnData;
   presence: PresenceChangedPayload;
@@ -93,6 +94,8 @@ export function BoardColumn({
   /** Saved "N children" chip collapse state (lib/sidebar-persistence.ts's `LINEAGE_COLLAPSED_PARENTS_KEY`), shared with the sidebar. */
   collapsedLineageParents: ReadonlySet<string>;
   onToggleLineageChildren: (parentTaskId: string) => void;
+  /** The board's most expensive visible cards (Board.tsx): their usage line is always shown. */
+  pinnedUsageTaskIds?: ReadonlySet<string>;
 }): JSX.Element {
   // The droppable's *node* is the content wrapper inside the cards scroller
   // (so dnd-kit's auto-scroller, which walks the hovered droppable's
@@ -324,6 +327,9 @@ export function BoardColumn({
                             selected={selectedTaskId === task.id}
                             unread={unreadTaskIds?.has(task.id)}
                             nested={nested}
+                            usagePinned={
+                              pinnedUsageTaskIds?.has(task.id) ?? false
+                            }
                             {...(parentTitle ? { parentTitle } : {})}
                             {...(provenanceTitle ? { provenanceTitle } : {})}
                           />

@@ -230,3 +230,67 @@ claim();
   chmodSync(fakePi, 0o755);
   return fakePi;
 }
+
+/** One assistant turn of a {@link writePiUsageSession} transcript. */
+export interface PiUsageTurn {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Pi's own list-price estimate (`usage.cost.total`, USD). */
+  cost: number;
+}
+
+/** A Pi-format assistant entry carrying `usage` + `cost`, exactly as Pi writes it (docs/costs.md "Harness file facts"). */
+export function piUsageEntry(turn: PiUsageTurn, timestamp: string): string {
+  const { model, cost, ...buckets } = turn;
+  return JSON.stringify({
+    type: "message",
+    timestamp,
+    message: {
+      role: "assistant",
+      provider: "anthropic",
+      model,
+      usage: {
+        ...buckets,
+        totalTokens:
+          buckets.input +
+          buckets.output +
+          buckets.cacheRead +
+          buckets.cacheWrite,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+      },
+    },
+  });
+}
+
+/**
+ * Writes the transcript a Pi session leaves behind
+ * (`~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.jsonl`): the session
+ * header, a user turn, then one assistant entry with usage + cost per
+ * `turns` entry. Append more with {@link piUsageEntry}.
+ */
+export function writePiUsageSession(
+  file: string,
+  sessionId: string,
+  turns: PiUsageTurn[],
+): void {
+  const at = (index: number) =>
+    new Date(Date.now() - 60_000 + index * 1_000).toISOString();
+  const lines = [
+    JSON.stringify({
+      type: "session",
+      id: sessionId,
+      timestamp: at(0),
+      cwd: path.dirname(file),
+    }),
+    JSON.stringify({
+      type: "message",
+      timestamp: at(1),
+      message: { role: "user", content: "do the work" },
+    }),
+    ...turns.map((turn, index) => piUsageEntry(turn, at(index + 2))),
+  ];
+  writeFileSync(file, `${lines.join("\n")}\n`);
+}

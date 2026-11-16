@@ -49,6 +49,9 @@ import type {
   TaskMessagingState,
   TaskState,
   TaskUrlOpenedPayload,
+  TaskUsage,
+  TaskUsageQuery,
+  TaskUsageRow,
   TaskWorkspace,
   ToAwaitOptions,
   ToDoneResult,
@@ -129,11 +132,15 @@ export type {
   TaskMessagingState,
   TaskState,
   TaskUrlOpenedPayload,
+  TaskUsage,
+  TaskUsageQuery,
+  TaskUsageRow,
   TaskWorkspace,
   ThinkingLevel,
   ToAwaitOptions,
   ToDoneConfirmation,
   ToDoneResult,
+  TokenBuckets,
   UpdateTaskInput,
   WorkspaceBinding,
   WorktreeStatus,
@@ -469,6 +476,10 @@ export interface HarbormasterApi {
     launchTask(input: LaunchTaskInput): Promise<Task>;
     /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
     listChildren(parentTaskId: string): Promise<Task[]>;
+    /** Every task with computed usage, filtered by `query`, most tokens first; parents carry their children's roll-up (docs/costs.md). See `CoreCommands.listTaskUsage`. */
+    listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;
+    /** Recompute one task's usage from its session files now (the usage popover's refresh). See `CoreCommands.refreshTaskUsage`. */
+    refreshTaskUsage(taskId: string): Promise<TaskUsage | undefined>;
     /** Current effective launch settings (concurrency cap, default model, default agent, permission bypass; repository-aware when given one), for the composer without touching config files. See `CoreCommands.getLaunchSettings`. */
     getLaunchSettings(repositoryId?: string): Promise<LaunchSettings>;
     /** Re-fetch PR status, run movers, and sweep archive flags; same command the app's 30s refresh loop calls. See `CoreCommands.refresh`. */
@@ -658,6 +669,13 @@ export interface HarbormasterApi {
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
     exportDiagnostics(): Promise<string | null>;
+    /**
+     * Asks where to save `text` (a native save dialog defaulting to
+     * `defaultName` in Downloads; filter by its extension) and writes it
+     * there; resolves the saved path, or `null` when cancelled. The
+     * renderer never writes files itself (the Costs view's Export CSV).
+     */
+    saveTextFile(defaultName: string, text: string): Promise<string | null>;
     /** Copies the last export's plain-text summary (versions + failing/warning doctor checks) to the clipboard; resolves the text. */
     copyDiagnosticsSummary(): Promise<string>;
     /**
