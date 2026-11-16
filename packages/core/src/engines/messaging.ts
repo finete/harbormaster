@@ -28,14 +28,15 @@ export type LineageTask = Pick<Task, "id" | "parentTaskId">;
 /**
  * The route of a new message, from lineage (never from the agent):
  * `target.parentTaskId === sender` → parent-to-child; `sender.parentTaskId ===
- * target` → child-to-parent; everything else, and every non-task sender,
- * needs approval. `senderTask` is the sender's task when the sender is one.
+ * target` → child-to-parent; the user themself → user (no approval);
+ * everything else, and every other non-task sender, needs approval. `senderTask` is the sender's task when the sender is one.
  */
 export function classifyRoute(
   sender: MessageSender,
   senderTask: LineageTask | undefined,
   target: LineageTask,
 ): Exclude<MessageRoute, "receipt"> {
+  if (sender.kind === "user") return "user";
   if (sender.kind !== "task" || !senderTask) return "approval";
   if (target.parentTaskId === senderTask.id) return "parent-to-child";
   if (senderTask.parentTaskId === target.id) return "child-to-parent";
@@ -50,6 +51,7 @@ export function defaultMode(route: MessageRoute): MessageMode {
     case "child-to-parent":
       return "followUp";
     case "approval":
+    case "user":
       return "steer";
     case "receipt":
       return "followUp";
@@ -303,6 +305,35 @@ export function deriveRunState(
   if (task.launch?.status === "queued") return "queued";
   if (presence.live) return presence.runningTurn ? "running" : "your-move";
   return "not-running";
+}
+
+/**
+ * The rules' `agent` fact (docs/plannotator.md "Rules surface"): what a
+ * task's agent is doing, from harness presence. `working` while a turn
+ * runs; `your-move` for a self-reported outcome, a `blocked` program status
+ * or a live session that reports no status; `idle` at rest (`idle` /
+ * `done`); `error` at rest after a failure; `stopped` with no live session.
+ */
+export type AgentActivity =
+  | "working"
+  | "idle"
+  | "your-move"
+  | "error"
+  | "stopped";
+
+export function deriveAgentActivity(presence: PresenceStatus): AgentActivity {
+  if (!presence.live) return "stopped";
+  if (presence.runningTurn) return "working";
+  if (presence.record?.outcome) return "your-move";
+  switch (presence.record?.status?.state) {
+    case "error":
+      return "error";
+    case "idle":
+    case "done":
+      return "idle";
+    default:
+      return "your-move";
+  }
 }
 
 export type TaskRelation = TaskSearchResult["relation"];

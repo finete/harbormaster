@@ -34,6 +34,7 @@ import type {
   HarnessAdapter,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
+  HarnessReviewCapability,
   LaunchSpec,
   PresenceStatus,
   SessionLaunch,
@@ -41,10 +42,12 @@ import type {
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
 import {
+  applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
   mcpIdentityEnv,
   type PresenceReaderOptions,
+  plannotatorSlashReview,
   shellQuote,
 } from "./adapter-common.js";
 import {
@@ -202,6 +205,8 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   readonly messaging: HarnessMessagingCapabilities = {
     ...CLAUDE_CODE_MESSAGING_CAPABILITIES,
   };
+  /** The Plannotator plugin's `/plannotator-review [<PR URL>]`. */
+  readonly review: HarnessReviewCapability = plannotatorSlashReview;
   private readonly readPresence: (taskId: string) => Promise<PresenceStatus>;
   private readonly models: HarnessModelCatalogAccess;
   private readonly transcripts: ClaudeTranscriptAccess;
@@ -238,7 +243,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   }
 
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec {
-    const env = baseLaunchEnv(input, this.cliPath);
+    const env = applyOpenUrlEnv(baseLaunchEnv(input, this.cliPath), input);
     const tooling: string[] = [];
     if (this.cliPath) {
       tooling.push(

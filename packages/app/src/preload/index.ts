@@ -37,11 +37,14 @@ import type {
   ReopenTaskInput,
   RepositoryInfo,
   ResolveInboxItemResult,
+  ReviewSupport,
   RulesListing,
   Task,
   TaskMessage,
   TaskMessagingState,
   TaskState,
+  TaskUrlOpenedPayload,
+  TaskWorkspace,
   TerminalCreateOptions,
   TerminalCreateResult,
   TerminalDataEvent,
@@ -148,7 +151,7 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:listBranches", repositoryId),
     listModels: (): Promise<HarnessModelCatalog[]> =>
       ipcRenderer.invoke("core:listModels"),
-    getTaskWorkspace: (taskId: string): Promise<WorkspaceBinding | undefined> =>
+    getTaskWorkspace: (taskId: string): Promise<TaskWorkspace | undefined> =>
       ipcRenderer.invoke("core:getTaskWorkspace", taskId),
     createTask: (input: CreateTaskInput): Promise<Task> =>
       ipcRenderer.invoke("core:createTask", input),
@@ -312,6 +315,32 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:setRulesEnabled", enabled),
     listAddons: (): Promise<AddonInfo[]> =>
       ipcRenderer.invoke("core:listAddons"),
+    openTaskUrl: (input: {
+      taskId: string;
+      url: string;
+      source?: "plannotator" | "browser";
+    }): Promise<void> => ipcRenderer.invoke("core:openTaskUrl", input),
+    requestReview: (input: {
+      taskId: string;
+      target?: "local" | "pr";
+    }): Promise<{ command: string }> =>
+      ipcRenderer.invoke("core:requestReview", input),
+    reviewSupport: (options?: { refresh?: boolean }): Promise<ReviewSupport> =>
+      ipcRenderer.invoke("core:reviewSupport", options),
+    setCaptureAgentBrowser: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke("core:setCaptureAgentBrowser", enabled),
+    probeUrl: (url: string): Promise<boolean> =>
+      ipcRenderer.invoke("app:probeUrl", url),
+    onTaskUrlOpened: (
+      listener: (payload: TaskUrlOpenedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: TaskUrlOpenedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:task-url-opened", handler);
+      return () => ipcRenderer.removeListener("core:task-url-opened", handler);
+    },
     terminalTail: (taskId: string, count?: number): Promise<string | null> =>
       ipcRenderer.invoke("core:terminalTail", taskId, count),
     retryLaunch: (taskId: string): Promise<boolean> =>

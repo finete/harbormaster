@@ -105,6 +105,19 @@ export interface BuildLaunchSpecInput {
    * `"default"`. Adapters without a permission system ignore it.
    */
   permissions?: LaunchPermissions;
+  /** Absolute path of the host's open-url handler; the adapter exports it as PLANNOTATOR_BROWSER. */
+  openUrlHandler?: string;
+  /** Also export it as BROWSER (config.captureAgentBrowser). */
+  captureBrowser?: boolean;
+}
+
+/** What a Plannotator review covers (docs/plannotator.md): the worktree's local changes, or the task's PR. */
+export type ReviewTarget = { kind: "local" } | { kind: "pr"; url: string };
+
+/** A harness that can start a Plannotator code review in its session. */
+export interface HarnessReviewCapability {
+  /** The text to deliver to the session to start a Plannotator review. */
+  command(target: ReviewTarget): string;
 }
 
 /** How a launched session treats the harness's permission prompts (decision R7). */
@@ -158,6 +171,9 @@ export interface HarnessAdapter {
 
   /** What this harness can deliver to a task's session (see `docs/task-messaging.md`): core resolves the actual message mode from this. */
   readonly messaging: HarnessMessagingCapabilities;
+
+  /** Absent = this harness cannot start a review (button disabled). */
+  readonly review?: HarnessReviewCapability;
 
   /** Build the command/args/cwd/env a frontend should hand to a pty to start (or resume) an interactive session. */
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec;

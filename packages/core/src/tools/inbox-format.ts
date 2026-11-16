@@ -51,12 +51,14 @@ export function buildInboxHeader(message: TaskMessage): string {
       }), approved by the user]`;
     case "receipt":
       return "[Harbormaster]";
+    case "user":
+      return "[Message from the user]";
   }
 }
 
 /**
  * The full text block: header, the message text, `Attachments:` with each
- * copied absolute path, the trust line (omitted for receipts), and, for a
+ * copied absolute path, the trust line (omitted for receipts and the user's own messages), and, for a
  * child's question, how the parent may answer.
  */
 export function buildInboxMessageText(message: TaskMessage): string {
@@ -66,7 +68,10 @@ export function buildInboxMessageText(message: TaskMessage): string {
       `Attachments:\n${message.attachments.map((a) => a.path).join("\n")}`,
     );
   }
-  if (message.route !== "receipt") sections.push(TRUST_LINE);
+  // The trust line says "not from the user": wrong for the user's own message.
+  if (message.route !== "receipt" && message.route !== "user") {
+    sections.push(TRUST_LINE);
+  }
   if (message.route === "child-to-parent" && message.sender.kind === "task") {
     sections.push(
       `Reply with the send_to_task tool to ${message.sender.taskId} only if your brief or context settles it; product or scope decisions go to the user (ask them, then relay the answer).`,

@@ -39,6 +39,7 @@ import type {
   HarnessAdapter,
   HarnessModelCatalog,
   PresenceStatus,
+  ReviewTarget,
   SessionLaunch,
 } from "../contracts/harness.js";
 import type {
@@ -70,11 +71,13 @@ import type {
   DeploymentStageConfig,
   GlobalConfig,
   PullRequestRole,
+  ReviewSupport,
   Task,
   TaskCleanup,
   TaskLaunch,
   TaskPullRequest,
   TaskState,
+  TaskWorkspace,
   ThinkingLevel,
   WorkspaceBinding,
 } from "../contracts/model.js";
@@ -116,6 +119,7 @@ import type {
   IdGenerator,
   MessageAccess,
   PresenceAccess,
+  ReviewSupportProbeAccess,
   ScratchWorkspaceAccess,
   SessionFileAccess,
   TaskAttachmentAccess,
@@ -159,6 +163,7 @@ import {
   classifyRoute,
   countLoopMessages,
   defaultMode,
+  deriveAgentActivity,
   deriveMessagingStates,
   deriveRunState,
   matchTasks,
@@ -177,6 +182,14 @@ import {
   toScannedRepositories,
 } from "../engines/onboarding.js";
 import { parsePullRequestUrl } from "../engines/pull-request-url.js";
+import {
+  claudePluginVersion,
+  loopbackUrl,
+  parseSemver,
+  piExtensionVersion,
+  type ReviewVersions,
+  reviewSupportFor,
+} from "../engines/review-support.js";
 import type { ResolvedMove } from "../engines/rules/evaluation.js";
 import { effectivePipeline } from "../engines/rules/views.js";
 import { shouldWatchSessionFile } from "../engines/session-file-check.js";
@@ -266,6 +279,10 @@ export interface CoreManagerDependencies {
   logger?: CoreLogger;
   /** `doctor`'s read-only machine probes; `doctor` throws "doctor is not configured" without it. */
   environment?: EnvironmentProbeAccess;
+  /** Plannotator version probes; `reviewSupport` throws "review support is not configured" without it. */
+  reviewProbes?: ReviewSupportProbeAccess;
+  /** The host's open-url handler path (`createCore({ openUrlHandler })`), handed out by `getLaunchSettings`. */
+  openUrlHandler?: string;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -344,6 +361,10 @@ export class CoreManager implements CoreCommands {
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
   private readonly doneCleanupFailures = new Map<string, string>();
+  /** `reviewSupport`'s probed versions, reused for `REVIEW_SUPPORT_CACHE_MS`. */
+  private reviewVersions:
+    | { at: number; checkedAt: string; versions: Promise<ReviewVersions> }
+    | undefined;
 
   constructor(private readonly deps: CoreManagerDependencies) {
     this.log = deps.logger ?? noopCoreLogger;
@@ -380,6 +401,10 @@ export class CoreManager implements CoreCommands {
                 : {}),
             },
             http: { fetchText: (url) => deps.versions.fetchText(url) },
+            tasks: {
+              agent: (taskId) => this.agentActivity(taskId),
+              worktreeDirty: (taskId) => this.worktreeDirty(taskId),
+            },
           },
         })
       : undefined;
@@ -637,10 +662,27 @@ export class CoreManager implements CoreCommands {
     return parent;
   }
 
-  async getTaskWorkspace(
-    taskId: string,
-  ): Promise<WorkspaceBinding | undefined> {
-    return this.deps.bindings.getBindingForTask(taskId);
+  async getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined> {
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding?.worktreePath || binding.scratch) return binding;
+    const dirty = await this.deps.worktrees
+      .isWorktreeDirty(binding.worktreePath)
+      .catch(() => undefined);
+    return dirty === undefined ? binding : { ...binding, dirty };
+  }
+
+  /** The rules' `agent` fact: what the task's agent is doing (throws when presence is unreadable). */
+  private async agentActivity(taskId: string): Promise<string> {
+    const { harness } = this.deps;
+    if (!harness) throw new Error("presence is not configured");
+    return deriveAgentActivity(await harness.presence(taskId));
+  }
+
+  /** The rules' `worktree.dirty` fact: `undefined` without a git worktree; throws when git is unreadable. */
+  private async worktreeDirty(taskId: string): Promise<boolean | undefined> {
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding?.worktreePath || binding.scratch) return undefined;
+    return this.deps.worktrees.isWorktreeDirty(binding.worktreePath);
   }
 
   async createTask(input: CreateTaskInput): Promise<Task> {
@@ -2004,6 +2046,10 @@ export class CoreManager implements CoreCommands {
       defaultHarness: resolveNewTaskHarness({ repository, config }),
       bypassPermissions: resolveLaunchBypass({ repository, config }),
       customAgents: config.agents?.custom ?? [],
+      ...(this.deps.openUrlHandler
+        ? { openUrlHandler: this.deps.openUrlHandler }
+        : {}),
+      captureAgentBrowser: config.captureAgentBrowser ?? false,
     };
   }
 
@@ -4058,6 +4104,125 @@ export class CoreManager implements CoreCommands {
     const columns = await this.listBoard();
     this.deps.events.emit("board-changed", { columns });
   }
+
+  // --- Code review via Plannotator (docs/plannotator.md) -----------------
+
+  async openTaskUrl(input: {
+    taskId: string;
+    url: string;
+    source?: "plannotator" | "browser";
+  }): Promise<void> {
+    const url = loopbackUrl(input.url);
+    if (!url) {
+      throw new Error(
+        `Only http(s) URLs on 127.0.0.1, localhost or [::1] open in Harbormaster: ${input.url}`,
+      );
+    }
+    await this.requireTask(input.taskId);
+    this.deps.events.emit("task-url-opened", {
+      taskId: input.taskId,
+      url,
+      source: input.source === "plannotator" ? "plannotator" : "browser",
+    });
+  }
+
+  async requestReview(input: {
+    taskId: string;
+    target?: "local" | "pr";
+  }): Promise<{ command: string }> {
+    const task = await this.requireTask(input.taskId);
+    const harness = await this.harnessFor(task);
+    if (!harness.review) {
+      throw new Error(`${harness.label} can't start a code review.`);
+    }
+    const prUrl = task.pr?.url;
+    const kind = input.target ?? (prUrl ? "pr" : "local");
+    let target: ReviewTarget;
+    if (kind === "pr") {
+      if (!prUrl) throw new Error(`Task ${task.id} has no pull request.`);
+      target = { kind: "pr", url: prUrl };
+    } else {
+      target = { kind: "local" };
+    }
+    const command = harness.review.command(target);
+    await this.sendTaskMessage({
+      from: { kind: "user" },
+      targetTaskId: task.id,
+      text: command,
+      mode: "steer",
+    });
+    return { command };
+  }
+
+  async reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport> {
+    const probes = this.deps.reviewProbes;
+    if (!probes) throw new Error("review support is not configured");
+    const nowMs = this.deps.clock.now().getTime();
+    let entry = this.reviewVersions;
+    if (
+      options?.refresh ||
+      !entry ||
+      nowMs - entry.at >= REVIEW_SUPPORT_CACHE_MS
+    ) {
+      const versions = probeReviewVersions(probes);
+      const fresh = {
+        at: nowMs,
+        checkedAt: this.deps.clock.now().toISOString(),
+        versions,
+      };
+      this.reviewVersions = fresh;
+      entry = fresh;
+      // A failed probe run must not stick for a minute.
+      versions.catch(() => {
+        if (this.reviewVersions === fresh) this.reviewVersions = undefined;
+      });
+    }
+    const [versions, config] = await Promise.all([
+      entry.versions,
+      this.deps.config.load(),
+    ]);
+    const harnesses = this.deps.harnesses
+      ? this.deps.harnesses.list(config.agents?.custom ?? [])
+      : this.deps.harness
+        ? [this.deps.harness]
+        : [];
+    return {
+      harnesses: harnesses.map((harness) =>
+        reviewSupportFor(harness, versions),
+      ),
+      checkedAt: entry.checkedAt,
+    };
+  }
+
+  async setCaptureAgentBrowser(enabled: boolean): Promise<void> {
+    await this.applySettings({ captureAgentBrowser: enabled });
+  }
+}
+
+/** How long `reviewSupport`'s probed versions are reused. */
+const REVIEW_SUPPORT_CACHE_MS = 60_000;
+
+/** Runs the four Plannotator probes in parallel and parses their versions. */
+async function probeReviewVersions(
+  probes: ReviewSupportProbeAccess,
+): Promise<ReviewVersions> {
+  const [binary, manifest, plugins, claude] = await Promise.all([
+    probes.plannotatorVersion(),
+    probes.piExtensionManifest(),
+    probes.claudePluginList(),
+    probes.claudeVersion(),
+  ]);
+  const versions: ReviewVersions = {};
+  const found = {
+    binary: parseSemver(binary),
+    "pi-extension": piExtensionVersion(manifest),
+    "claude-plugin": claudePluginVersion(plugins),
+    "claude-code": parseSemver(claude),
+  } as const;
+  for (const [id, version] of Object.entries(found)) {
+    if (version) versions[id as keyof ReviewVersions] = version;
+  }
+  return versions;
 }
 
 /** A failed probe in one line: timed out, not found, or its first output line. */
@@ -4183,6 +4348,7 @@ function senderLabelFor(sender: MessageSender, senderTask?: Task): string {
   if (sender.kind === "task") return senderTask?.title ?? sender.taskId;
   if (sender.kind === "session") return `Pi session in ${sender.cwd}`;
   if (sender.kind === "rule") return `Rule ${sender.ruleId}`;
+  if (sender.kind === "user") return "You";
   return "Harbormaster";
 }
 

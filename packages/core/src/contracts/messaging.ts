@@ -13,14 +13,16 @@ export type MessageSender =
   | { kind: "task"; taskId: string }
   | { kind: "session"; cwd: string; sessionId?: string } // non-task Pi session
   | { kind: "harbormaster" } // receipts
-  | { kind: "rule"; ruleId: string }; // a rules-engine `message` action (needs approval like any non-task sender)
+  | { kind: "rule"; ruleId: string } // a rules-engine `message` action (needs approval like any non-task sender)
+  | { kind: "user" }; // the user, from the app (e.g. the Review button): no approval
 
 /** Decided by core at send time from lineage; never supplied by the agent. */
 export type MessageRoute =
   | "parent-to-child" // no approval, counts toward the loop cap
   | "child-to-parent" // no approval, a question, counts toward the loop cap
   | "approval" // everything else: needs the user's approval
-  | "receipt"; // approval result back to a task sender
+  | "receipt" // approval result back to a task sender
+  | "user"; // sent by the user themself: no approval, no loop cap
 
 export type MessageStatus =
   | "awaiting_approval"

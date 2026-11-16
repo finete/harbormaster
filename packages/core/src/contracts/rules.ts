@@ -135,6 +135,17 @@ export interface SourceServices {
     /** GET a small text document (cached ~5 minutes per URL). */
     fetchText(url: string): Promise<string>;
   };
+  /**
+   * Live per-task observations behind the `harbormaster` source's `agent`
+   * and `worktree.dirty` facts (docs/plannotator.md "Rules surface").
+   * Absent in hand-built runtimes (the facts are then omitted).
+   */
+  tasks?: {
+    /** What the task's agent is doing (`working` / `idle` / `your-move` / `error` / `stopped`); throws when presence cannot be read. */
+    agent(taskId: string): Promise<string>;
+    /** Uncommitted changes in the task's git worktree; `undefined` without one; throws when git cannot be read. */
+    worktreeDirty(taskId: string): Promise<boolean | undefined>;
+  };
 }
 
 /** What the github source reads per observed PR (a superset of `PullRequestStatus`). */

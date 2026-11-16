@@ -10,6 +10,12 @@ import "dockview-react/dist/styles/dockview.css";
 import { RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import {
+  reviewPanelId,
+  type TaskUrlOpen,
+  taskUrls,
+  useTaskUrls,
+} from "../lib/task-urls";
 import { defaultTerminalTitle } from "../lib/terminal-title";
 import { cn } from "../lib/utils";
 import {
@@ -23,15 +29,18 @@ import { TaskActions } from "./TaskActions";
 import { TaskAudit } from "./TaskAudit";
 import { TerminalPane } from "./TerminalPane";
 import { TerminalTab } from "./TerminalTab";
+import { UrlPane, type UrlPanelParams } from "./UrlPane";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
 const components = {
   terminal: TerminalPane,
+  url: UrlPane,
 };
 
 const tabComponents = {
   terminal: TerminalTab,
+  url: TerminalTab,
 };
 
 let nextPanelId = 1;
@@ -51,9 +60,12 @@ const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
  */
 export const TaskWorkspace = memo(function TaskWorkspace({
   taskId,
+  focused = true,
   onCloseTask,
 }: {
   taskId: string;
+  /** Whether this workspace is the visible one (clears the task's "review open" mark once its review tab is seen). */
+  focused?: boolean;
   /**
    * Close a task's workspace: unmounts every pane, ending their
    * ptys. Takes the task id (not a pre-bound closure) so callers can pass one
@@ -66,6 +78,9 @@ export const TaskWorkspace = memo(function TaskWorkspace({
   // workspace binding resolves — whichever of the two happens last.
   const [api, setApi] = useState<DockviewApi | null>(null);
   const initialPanelCreatedRef = useRef(false);
+  // Set once the initial layout (restored or default) is in place: queued
+  // URL opens are applied only after it, never clobbered by `fromJSON`.
+  const [bootstrapped, setBootstrapped] = useState(false);
   // The worktree the current Pi panel was opened in; a reopened Done task
   // gets a new worktree, and with it a new Pi panel.
   const piPanelCwdRef = useRef<string | undefined>(undefined);
@@ -126,6 +141,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
       // resumes through the normal claimSessionLaunch path even if the
       // worktree changed since the layout was saved (e.g. a Done-task
       // reopen); extra shell panels respawn in their saved cwds untouched.
+      setBootstrapped(true);
       const saved = readWorkspaceLayout(window.localStorage, taskId);
       if (saved) {
         try {
@@ -177,6 +193,32 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     });
     return () => disposable.dispose();
   }, [api, taskId]);
+
+  // Agent-opened URLs (docs/plannotator.md): apply this task's queued
+  // opens. Only the Review button's open takes focus; a Plannotator URL
+  // navigates the one review tab, any other loopback URL gets a preview
+  // tab, both without changing the active tab.
+  const pendingOpens = useTaskUrls().pending[taskId];
+  useEffect(() => {
+    if (!api || !bootstrapped || !pendingOpens) return;
+    taskUrls.take(taskId);
+    for (const open of pendingOpens) applyUrlOpen(api, taskId, open);
+  }, [api, bootstrapped, pendingOpens, taskId]);
+
+  // The "review open" mark lasts until the user actually sees the review
+  // tab: this workspace visible with that tab active.
+  const marked = useTaskUrls().marked.includes(taskId);
+  useEffect(() => {
+    if (!api || !marked) return;
+    const check = (): void => {
+      if (focused && api.activePanel?.id === reviewPanelId(taskId)) {
+        taskUrls.clearMark(taskId);
+      }
+    };
+    check();
+    const disposable = api.onDidActivePanelChange(check);
+    return () => disposable.dispose();
+  }, [api, marked, focused, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
     apiRef.current = event.api;
@@ -334,3 +376,54 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     </div>
   );
 });
+
+/** One queued open (lib/task-urls.ts) applied to a task's dockview. */
+function applyUrlOpen(
+  api: DockviewApi,
+  taskId: string,
+  open: TaskUrlOpen,
+): void {
+  if (open.kind === "review") {
+    const id = reviewPanelId(taskId);
+    // `url: undefined` clears the old session's URL (dockview merges
+    // parameters, deleting undefined keys): the tab shows "starting".
+    const params: UrlPanelParams = { taskId, kind: "review", url: open.url };
+    const existing = api.getPanel(id);
+    if (existing) {
+      existing.api.updateParameters(params);
+      if (open.focus) existing.api.setActive();
+      return;
+    }
+    api.addPanel({
+      id,
+      component: "url",
+      tabComponent: "url",
+      title: "Review",
+      params,
+      // Hidden tabs keep their frame (and the user's annotations) alive.
+      renderer: "always",
+      ...(open.focus ? {} : { inactive: true }),
+    });
+    return;
+  }
+  const params: UrlPanelParams = { taskId, kind: "preview", url: open.url };
+  const existing = api.panels.find(
+    (panel) => (panel.params as UrlPanelParams | undefined)?.url === open.url,
+  );
+  if (existing) return;
+  let title = open.url;
+  try {
+    title = new URL(open.url).host;
+  } catch {
+    // Keep the raw URL.
+  }
+  api.addPanel({
+    id: `preview:${taskId}:${nextPanelId++}`,
+    component: "url",
+    tabComponent: "url",
+    title,
+    params,
+    renderer: "always",
+    inactive: true,
+  });
+}

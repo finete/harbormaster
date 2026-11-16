@@ -6,6 +6,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BuildLaunchSpecInput } from "@harbormaster/core";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   PrimaryLaunchCore,
@@ -133,6 +134,46 @@ describe("resolvePrimaryLaunch worktree existence", () => {
     );
     expect(interactive.spec).toBeDefined();
     expect(seen.slice(2)).toEqual(["default", "default"]);
+  });
+
+  it("passes the open-url handler (and captureBrowser) to the adapter", async () => {
+    const live = mkdtempSync(join(tmpdir(), "harbormaster-live-"));
+    tempDirs.push(live);
+    const { core } = fakeCore(live);
+    const inputs: Array<
+      Pick<BuildLaunchSpecInput, "openUrlHandler" | "captureBrowser">
+    > = [];
+    const recording: PrimaryLaunchHarness = {
+      buildLaunchSpec: (input) => {
+        inputs.push({
+          openUrlHandler: input.openUrlHandler,
+          captureBrowser: input.captureBrowser,
+        });
+        return {
+          command: "/bin/sh",
+          args: [],
+          cwd: input.workspacePath,
+          env: {},
+        };
+      },
+    };
+    await resolvePrimaryLaunch("t1", "/state", core, recording, {
+      openUrlHandler: "/app/bin/harbormaster-open-url",
+      captureBrowser: true,
+    });
+    await resolvePrimaryLaunch("t1", "/state", core, recording);
+    expect(inputs).toEqual([
+      {
+        openUrlHandler: "/app/bin/harbormaster-open-url",
+        captureBrowser: true,
+      },
+      {
+        openUrlHandler: "/app/bin/harbormaster-open-url",
+        captureBrowser: true,
+      },
+      { openUrlHandler: undefined, captureBrowser: undefined },
+      { openUrlHandler: undefined, captureBrowser: undefined },
+    ]);
   });
 
   it("reports no worktree when the task has no binding", async () => {

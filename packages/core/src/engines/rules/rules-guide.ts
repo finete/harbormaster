@@ -232,7 +232,11 @@ Built-in sources and entities:
   \`stageId\`, \`repository\`, \`branch\`, \`pipeline\`); fires when a task
   changes column, so a rule re-evaluates when a task enters the state it
   cares about. Listening to \`[github.pr.*, harbormaster.task.*]\` and reading
-  \`facts\` (not \`event.data\`) makes a rule level-triggered.
+  \`facts\` (not \`event.data\`) makes a rule level-triggered. Two live
+  facts too: \`harbormaster.task.agentChanged\` (what the task's agent is
+  doing) and \`harbormaster.task.worktree.dirtyChanged\` (uncommitted changes
+  in a Working task's worktree), e.g. "agent idle + dirty worktree →
+  \`message\` \`/plannotator-review\`" (no such rule ships).
 
 ### \`if\`: a CEL condition
 
@@ -256,7 +260,11 @@ ${taskFields}
     \`satisfiedStageId\`, \`next\` (stage to enter next or \`null\`), \`land\`
     (deployed past the last stage). Use brackets: the id has a dash.
   - \`facts.harbormaster\`: \`state\`, \`awaitingKind\`, \`stageId\`,
-    \`repository\`, \`branch\`, \`pipeline\` (the repository's stage ids).
+    \`repository\`, \`branch\`, \`pipeline\` (the repository's stage ids),
+    \`agent\` (\`"working"\` | \`"idle"\` | \`"your-move"\` | \`"error"\` |
+    \`"stopped"\`), and \`facts.harbormaster["worktree.dirty"]\` (boolean;
+    \`null\` unless the task is Working with a git worktree; use brackets:
+    the key has a dot).
   - Addon sources appear under their own id.
 - \`repo\`: the task's repository or \`null\`: \`repo.id\`,
   \`repo.deployment.stages\` (each \`id\`, \`label\`, \`hook\`, \`options\`).

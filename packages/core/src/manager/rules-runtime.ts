@@ -135,6 +135,7 @@ export interface RulesRuntimeDependencies {
   services: {
     github: Omit<SourceServices["github"], "observed">;
     http: SourceServices["http"];
+    tasks?: SourceServices["tasks"];
   };
 }
 
@@ -202,6 +203,7 @@ export class RulesRuntime {
             | undefined,
       },
       http: this.deps.services.http,
+      ...(this.deps.services.tasks ? { tasks: this.deps.services.tasks } : {}),
     };
 
     // 1. Sources → events (snapshot diffs + pushed events).

@@ -27,6 +27,8 @@ export interface OpCallRequest {
   method: "op";
   op: string;
   args?: Record<string, unknown>;
+  /** The calling session's identity (`callerFromEnv`), for task-scoped ops (`open_url`, `request_review`). */
+  caller?: ToolCaller;
 }
 
 /** Ring the caller whenever its task's inbox changes; streams `inbox` events. */

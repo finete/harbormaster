@@ -11,6 +11,7 @@ export * from "./messaging.js";
 export * from "./onboarding.js";
 export * from "./pull-request-url.js";
 export * from "./repository-label.js";
+export * from "./review-support.js";
 export * from "./rules/index.js";
 export * from "./session-file-check.js";
 export * from "./sources/index.js";

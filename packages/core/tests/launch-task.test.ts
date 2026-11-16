@@ -500,6 +500,7 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
       defaultHarness: "pi",
       bypassPermissions: true,
       customAgents: [],
+      captureAgentBrowser: false,
     });
   });
 
@@ -513,6 +514,7 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
         codeRoot: join(f.stateDir, "..", "Code"),
         branchPrefix: "",
         launch: { maxConcurrent: 2, defaultModel: "anthropic/claude" },
+        captureAgentBrowser: true,
       }),
     );
     expect(await f.core.commands.getLaunchSettings()).toEqual({
@@ -521,6 +523,7 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
       defaultHarness: "pi",
       bypassPermissions: true,
       customAgents: [],
+      captureAgentBrowser: true,
     });
   });
 });

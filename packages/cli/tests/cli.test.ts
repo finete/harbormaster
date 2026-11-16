@@ -25,6 +25,7 @@ import {
   createMcpServer,
   DOCTOR_WITHOUT_APP_NOTE,
   EXIT_NOT_RUNNING,
+  EXIT_OPEN_URL_FAILED,
   formatDoctorOutput,
   inboxHookOutput,
   main,
@@ -490,6 +491,72 @@ describe("harbormaster doctor --all-remotes", () => {
     expect(await main(["doctor", "--all-remotes", "--json"], both)).toBe(0);
     expect(inputs[2]).toEqual({ probeAllRemotes: true });
     expect(await main(["doctor", "--all-remotes", "yes"], io())).toBe(64);
+  });
+});
+
+describe("harbormaster open-url / review", () => {
+  it("open-url opens a loopback URL for the env's task and emits task-url-opened", async () => {
+    const task = await launch("Reviewable");
+    const opened: unknown[] = [];
+    core.events.on("task-url-opened", (payload) => opened.push(payload));
+    const run = io({ HARBORMASTER_TASK_ID: task });
+    expect(
+      await main(
+        ["open-url", "http://127.0.0.1:19432/", "--source", "plannotator"],
+        run,
+      ),
+    ).toBe(0);
+    const plain = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["open-url", "http://localhost:5173/x"], plain)).toBe(0);
+    expect(opened).toEqual([
+      { taskId: task, url: "http://127.0.0.1:19432/", source: "plannotator" },
+      { taskId: task, url: "http://localhost:5173/x", source: "browser" },
+    ]);
+  });
+
+  it("open-url exits 1 (so the handler falls back to `open`) for a non-loopback URL, outside a task, or with the app down", async () => {
+    const task = await launch("Reviewable");
+    const remote = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["open-url", "https://example.com/"], remote)).toBe(
+      EXIT_OPEN_URL_FAILED,
+    );
+    expect(remote.err()).toContain("127.0.0.1, localhost or [::1]");
+    const noTask = io();
+    expect(await main(["open-url", "http://localhost:1/"], noTask)).toBe(
+      EXIT_OPEN_URL_FAILED,
+    );
+    await server?.close();
+    server = undefined;
+    const down = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["open-url", "http://localhost:1/"], down)).toBe(1);
+    expect(down.err()).toBe("Harbormaster is not running\n");
+  });
+
+  it("review sends the review command to the env's task (or --task), --local/--pr picking the target", async () => {
+    const task = await launch("Reviewable");
+    const run = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["review"], run)).toBe(0);
+    expect(run.out()).toContain('Sent "/plannotator-review"');
+    const local = io();
+    expect(
+      await main(["review", "--local", "--task", task, "--json"], local),
+    ).toBe(0);
+    expect(JSON.parse(local.out())).toEqual({
+      taskId: task,
+      command: "/plannotator-review",
+    });
+    const pr = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["review", "--pr"], pr)).toBe(1);
+    expect(pr.err()).toContain("has no pull request");
+    const both = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["review", "--local", "--pr"], both)).toBe(64);
+    const outside = io();
+    expect(await main(["review"], outside)).toBe(64);
+    const messages = await core.commands.listMessages({ taskId: task });
+    expect(messages.map((message) => [message.sender, message.text])).toEqual([
+      [{ kind: "user" }, "/plannotator-review"],
+      [{ kind: "user" }, "/plannotator-review"],
+    ]);
   });
 });
 

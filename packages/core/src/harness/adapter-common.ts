@@ -7,7 +7,9 @@
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
 import type {
   BuildLaunchSpecInput,
+  HarnessReviewCapability,
   PresenceStatus,
+  ReviewTarget,
   SessionLaunch,
 } from "../contracts/harness.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
@@ -24,6 +26,10 @@ export const STATE_DIR_ENV = "HARBORMASTER_STATE_DIR";
 export const SESSION_ID_ENV = "HARBORMASTER_SESSION_ID";
 export const SOCKET_ENV = "HARBORMASTER_SOCKET";
 export const CLI_ENV = "HARBORMASTER_CLI";
+/** Plannotator opens its session URL through this (docs/plannotator.md "Transport"). */
+export const PLANNOTATOR_BROWSER_ENV = "PLANNOTATOR_BROWSER";
+/** Every other browser open; set only when `captureBrowser` (config.captureAgentBrowser). */
+export const BROWSER_ENV = "BROWSER";
 
 export interface PresenceReaderOptions {
   /** Per-user state directory root (locates `<stateDir>/presence`). */
@@ -111,4 +117,53 @@ export function mcpIdentityEnv(
 export function shellQuote(word: string): string {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(word)) return word;
   return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Point the session's URL opens at the host's open-url handler (docs/
+ * plannotator.md decision 6): `PLANNOTATOR_BROWSER` always (when the host
+ * has a handler), `BROWSER` too when `captureBrowser`, but never over a
+ * `BROWSER` the adapter already set on purpose. Mutates and returns `env`.
+ */
+export function applyOpenUrlEnv(
+  env: Record<string, string>,
+  input: Pick<BuildLaunchSpecInput, "openUrlHandler" | "captureBrowser">,
+): Record<string, string> {
+  const handler = input.openUrlHandler;
+  if (!handler) return env;
+  env[PLANNOTATOR_BROWSER_ENV] = handler;
+  if (input.captureBrowser && env[BROWSER_ENV] === undefined) {
+    env[BROWSER_ENV] = handler;
+  }
+  return env;
+}
+
+/** The Plannotator slash command Pi and Claude Code share (`/plannotator-review [<PR URL>]`). */
+export const PLANNOTATOR_REVIEW_COMMAND = "/plannotator-review";
+
+/** `/plannotator-review`, with the PR URL appended for a PR review. */
+export const plannotatorSlashReview: HarnessReviewCapability = {
+  command(target: ReviewTarget): string {
+    return target.kind === "pr"
+      ? `${PLANNOTATOR_REVIEW_COMMAND} ${target.url}`
+      : PLANNOTATOR_REVIEW_COMMAND;
+  },
+};
+
+/**
+ * A custom agent's review command from its `reviewCommand` template:
+ * `{target}` becomes the PR URL (or nothing for local changes); a template
+ * without `{target}` gets the PR URL appended.
+ */
+export function templateReviewCommand(
+  template: string,
+  target: ReviewTarget,
+): string {
+  const value = target.kind === "pr" ? target.url : "";
+  const text = template.includes("{target}")
+    ? template.replaceAll("{target}", value)
+    : value
+      ? `${template} ${value}`
+      : template;
+  return text.replace(/[ \t]+/g, " ").trim();
 }

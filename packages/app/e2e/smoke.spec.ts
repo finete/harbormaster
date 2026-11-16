@@ -474,7 +474,14 @@ test("the workspace header keeps the verbs (Await… · Done, no kind names) and
   );
   await expect(actions.getByTestId(`to-done-button-${taskId}`)).toBeVisible();
   await expect(actions).not.toContainText("review");
-  await expect(actions).not.toContainText("Review");
+  // The only "Review" is the Review split button (docs/plannotator.md
+  // decision 1), not a kind name beside the verbs.
+  await expect(actions.getByTestId(`review-button-${taskId}`)).toHaveText(
+    "Review",
+  );
+  await expect
+    .poll(async () => (await actions.innerText()).split("Review").length - 1)
+    .toBe(1);
 
   await actions.getByTestId(`await-button-${taskId}`).click();
   await expect(window.getByTestId("await-picker")).toBeVisible();

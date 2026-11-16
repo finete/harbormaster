@@ -128,6 +128,11 @@ import {
   type OpenInResult,
   runOpenInArgv,
 } from "./open-in";
+import {
+  isLoopbackUrl,
+  probeLoopbackUrl,
+  resolveOpenUrlHandler,
+} from "./open-url";
 import { passTimer } from "./pass-timer";
 import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
@@ -151,6 +156,7 @@ import {
   resizeSession,
   resolveCommandPath,
   setProgramStatusListener,
+  setReadyUrlListener,
   writeToSession,
 } from "./ptySessions";
 import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
@@ -327,11 +333,41 @@ const bundledPiExtension = resolvePiExtensionSource({
 });
 // Core's operation log (`[core:<scope>] …` lines) goes through console, so
 // it lands in main.log with everything else.
+// `harbormaster-open-url` (docs/plannotator.md): exported to every task
+// session as PLANNOTATOR_BROWSER, so a Plannotator review opens in the
+// task's workspace. Absent: sessions launch without it and the pty
+// fallback below watches for Plannotator's ready line instead.
+const openUrlHandler = resolveOpenUrlHandler({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  mainDir: __dirname,
+});
+if (!openUrlHandler) {
+  console.error(
+    "[main] harbormaster-open-url not found: reviews fall back to the pty ready line",
+  );
+}
 const core = createCore({
   stateDir: activeStateDir,
   logger: consoleCoreLogger(console),
   ...(bundledPiExtension ? { piExtensionSource: bundledPiExtension } : {}),
+  ...(openUrlHandler ? { openUrlHandler } : {}),
 });
+
+/** The open-url handler half of a launch's options (`captureAgentBrowser` read fresh per launch). */
+async function openUrlLaunchOptions(): Promise<{
+  openUrlHandler?: string;
+  captureBrowser?: boolean;
+}> {
+  if (!openUrlHandler) return {};
+  const settings = await core.commands
+    .getLaunchSettings()
+    .catch(() => undefined);
+  return {
+    openUrlHandler,
+    ...(settings?.captureAgentBrowser ? { captureBrowser: true } : {}),
+  };
+}
 /** App-only facts for the `doctor` command (Setup screen, Export Diagnostics). */
 const doctorFacts: DoctorHostFacts = {
   loginShellPath: loginShellPathAtStart,
@@ -490,6 +526,7 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
     harnessForTask,
     {
       permissions: task?.launch?.bypassPermissions ? "bypass" : "default",
+      ...(await openUrlLaunchOptions()),
     },
   );
   if (!resolution.binding?.worktreePath) {
@@ -912,6 +949,54 @@ function registerCoreIpc(): void {
     for (const win of BrowserWindow.getAllWindows()) {
       safeSend(win.webContents, "core:inbox-changed", undefined);
     }
+  });
+
+  // Code review (docs/plannotator.md).
+  ipcMain.handle(
+    "core:openTaskUrl",
+    (
+      _event,
+      input: {
+        taskId: string;
+        url: string;
+        source?: "plannotator" | "browser";
+      },
+    ) => core.commands.openTaskUrl(input),
+  );
+  ipcMain.handle(
+    "core:requestReview",
+    (_event, input: { taskId: string; target?: "local" | "pr" }) =>
+      core.commands.requestReview(input),
+  );
+  ipcMain.handle(
+    "core:reviewSupport",
+    (_event, options?: { refresh?: boolean }) =>
+      core.commands.reviewSupport(
+        options?.refresh === true ? { refresh: true } : undefined,
+      ),
+  );
+  ipcMain.handle("core:setCaptureAgentBrowser", (_event, enabled: unknown) =>
+    core.commands.setCaptureAgentBrowser(enabled === true),
+  );
+  // The review tab polls this while open: a Plannotator server exits once
+  // its feedback is sent. Loopback only (see open-url.ts).
+  ipcMain.handle("app:probeUrl", (_event, url: unknown) =>
+    typeof url === "string" ? probeLoopbackUrl(url) : false,
+  );
+  core.events.on("task-url-opened", (payload) => {
+    if (!isLoopbackUrl(payload.url)) return;
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:task-url-opened", payload);
+    }
+  });
+  // Pty fallback: a session launched without the handler printed
+  // Plannotator's ready line (see ptySessions.ts `readyLineWatcher`).
+  setReadyUrlListener((taskId, url) => {
+    void core.commands
+      .openTaskUrl({ taskId, url, source: "plannotator" })
+      .catch((error: unknown) => {
+        console.error(`[review] opening ${url} for ${taskId} failed:`, error);
+      });
   });
 
   // Push channel: forward every core event to every live window. `safeSend`
@@ -1400,7 +1485,7 @@ function registerPtyIpc(): void {
               core.commands,
               harnessForTask,
               // An interactive pane never bypasses permissions (R7).
-              { permissions: "default" },
+              { permissions: "default", ...(await openUrlLaunchOptions()) },
             )
           : undefined;
       const spec = resolution?.spec;

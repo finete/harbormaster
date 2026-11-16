@@ -14,6 +14,7 @@ import type {
   HarnessAdapter,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
+  HarnessReviewCapability,
   LaunchSpec,
   PresenceStatus,
   SessionLaunch,
@@ -25,6 +26,7 @@ import {
   resolveSocketPath,
   resolveStatePaths,
 } from "../utilities/state-paths.js";
+import { applyOpenUrlEnv, plannotatorSlashReview } from "./adapter-common.js";
 import {
   derivePresenceStatus,
   type PresenceLivenessOptions,
@@ -242,6 +244,8 @@ export class PiHarnessAdapter implements HarnessAdapter {
   readonly messaging: HarnessMessagingCapabilities = {
     ...PI_MESSAGING_CAPABILITIES,
   };
+  /** The Plannotator Pi extension's `/plannotator-review [<PR URL>]`. */
+  readonly review: HarnessReviewCapability = plannotatorSlashReview;
   private readonly presenceAccess: PresenceAccess;
   private readonly models: HarnessModelCatalogAccess;
   private readonly clock: Clock;
@@ -306,6 +310,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
       [SOCKET_ENV]: resolveSocketPath(input.stateDir),
       [PROGRAM_STATUS_ENV]: "1",
     };
+    applyOpenUrlEnv(env, input);
     if (this.cliPath) {
       env[CLI_ENV] = this.cliPath;
       const identity: Record<string, string> = {

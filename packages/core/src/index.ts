@@ -21,6 +21,7 @@ import {
   LocalGitRepositoryAccess,
   LocalGitWorktreeAccess,
   LocalOnboardingProbeAccess,
+  LocalReviewSupportProbeAccess,
   LocalRulesFileAccess,
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
@@ -36,7 +37,11 @@ import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { HarnessAdapter } from "./contracts/harness.js";
 import { type CoreLogger, noopCoreLogger } from "./contracts/logger.js";
 import type { OnboardingProbeAccess } from "./contracts/onboarding.js";
-import type { Clock, IdGenerator } from "./contracts/services.js";
+import type {
+  Clock,
+  IdGenerator,
+  ReviewSupportProbeAccess,
+} from "./contracts/services.js";
 import { PiHarnessAdapter } from "./harness/pi-adapter.js";
 import { createHarnessRegistry, HarnessRegistry } from "./harness/registry.js";
 import { CoreManager } from "./manager/core-manager.js";
@@ -87,6 +92,14 @@ export interface CoreOptions {
   environment?: EnvironmentProbeAccess;
   /** The Pi extension source the host bundles, compared by `doctor`'s `agents.pi-extension` check. */
   piExtensionSource?: string;
+  /**
+   * Absolute path of the host's open-url handler script (docs/plannotator.md
+   * "Transport"), handed out by `getLaunchSettings` so launch specs export
+   * it as `PLANNOTATOR_BROWSER` (and `BROWSER` with `captureAgentBrowser`).
+   */
+  openUrlHandler?: string;
+  /** Overrides `reviewSupport`'s Plannotator version probes; tests inject fakes. */
+  reviewProbes?: ReviewSupportProbeAccess;
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -175,6 +188,10 @@ export function createCore(options: CoreOptions = {}): Core {
           ? { piExtensionSource: options.piExtensionSource }
           : {}),
       }),
+    reviewProbes: options.reviewProbes ?? new LocalReviewSupportProbeAccess(),
+    ...(options.openUrlHandler
+      ? { openUrlHandler: options.openUrlHandler }
+      : {}),
   });
 
   return { commands, events };

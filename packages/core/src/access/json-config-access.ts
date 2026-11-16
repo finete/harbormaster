@@ -77,6 +77,9 @@ export class JsonConfigAccess implements ConfigAccess {
       );
       return {
         automation: normalizeAutomation(raw.automation),
+        captureAgentBrowser: normalizeCaptureAgentBrowser(
+          raw.captureAgentBrowser,
+        ),
         ...(sources ? { sources } : {}),
         codeRoot: normalizeCodeRoot(raw.codeRoot),
         branchPrefix: normalizeBranchPrefix(raw.branchPrefix),
@@ -183,6 +186,9 @@ function applyPatch(
     raw.onboardingCompletedAt = patch.onboardingCompletedAt;
   }
   if (patch.automation !== undefined) raw.automation = patch.automation;
+  if (patch.captureAgentBrowser !== undefined) {
+    raw.captureAgentBrowser = patch.captureAgentBrowser;
+  }
   return raw;
 }
 
@@ -431,6 +437,8 @@ function normalizeAgents(value: unknown): GlobalConfig["agents"] | undefined {
       }
       agent.promptArg = entry.promptArg;
     }
+    if (entry.reviewCommand !== undefined)
+      agent.reviewCommand = text("reviewCommand");
     return agent;
   });
   return { custom };
@@ -493,6 +501,13 @@ function normalizeAutomation(value: unknown): boolean {
   if (value === undefined) return true;
   if (typeof value !== "boolean")
     throw new Error("automation must be a boolean");
+  return value;
+}
+
+function normalizeCaptureAgentBrowser(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean")
+    throw new Error("captureAgentBrowser must be a boolean");
   return value;
 }
 

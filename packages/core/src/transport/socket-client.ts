@@ -149,11 +149,13 @@ export async function callOp(
   socketPath: string,
   op: string,
   args: Record<string, unknown>,
+  caller?: ToolCaller,
 ): Promise<ToolResult> {
   const response = await sendSocketRequest(socketPath, {
     method: "op",
     op,
     args,
+    ...(caller ? { caller } : {}),
   });
   if ("event" in response) throw new Error("unexpected event");
   if (!response.ok) throw new Error(response.error);

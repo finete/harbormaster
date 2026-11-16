@@ -57,7 +57,11 @@ export function WorkspaceView({
           className="absolute inset-0 h-full w-full"
           style={{ display: taskId === focusedTaskId ? "block" : "none" }}
         >
-          <TaskWorkspace taskId={taskId} onCloseTask={onCloseTask} />
+          <TaskWorkspace
+            taskId={taskId}
+            focused={taskId === focusedTaskId}
+            onCloseTask={onCloseTask}
+          />
         </div>
       ))}
       {composer && <div className="absolute inset-0 z-10 flex">{composer}</div>}

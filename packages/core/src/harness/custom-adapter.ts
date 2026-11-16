@@ -10,15 +10,18 @@ import type {
   BuildLaunchSpecInput,
   HarnessAdapter,
   HarnessModelCatalog,
+  HarnessReviewCapability,
   LaunchSpec,
   PresenceStatus,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { CustomAgentConfig } from "../contracts/model.js";
 import {
+  applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
   type PresenceReaderOptions,
+  templateReviewCommand,
 } from "./adapter-common.js";
 
 export const NO_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
@@ -39,6 +42,8 @@ export class CustomHarnessAdapter implements HarnessAdapter {
   readonly messaging: HarnessMessagingCapabilities = {
     ...NO_MESSAGING_CAPABILITIES,
   };
+  /** Present only when the config declares a `reviewCommand` template. */
+  readonly review?: HarnessReviewCapability;
   private readonly readPresence: (taskId: string) => Promise<PresenceStatus>;
   private readonly cliPath: string | undefined;
 
@@ -51,6 +56,12 @@ export class CustomHarnessAdapter implements HarnessAdapter {
     this.command = config.command;
     this.readPresence = createPresenceReader(options);
     this.cliPath = options.cliPath;
+    const template = config.reviewCommand?.trim();
+    if (template) {
+      this.review = {
+        command: (target) => templateReviewCommand(template, target),
+      };
+    }
   }
 
   async defaults(): Promise<
@@ -73,7 +84,7 @@ export class CustomHarnessAdapter implements HarnessAdapter {
         ...(prompt && passPrompt ? [prompt] : []),
       ],
       cwd: input.workspacePath,
-      env: baseLaunchEnv(input, this.cliPath),
+      env: applyOpenUrlEnv(baseLaunchEnv(input, this.cliPath), input),
     };
   }
 

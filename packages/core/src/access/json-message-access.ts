@@ -429,7 +429,13 @@ const STATUSES = [
   "rejected",
   "failed",
 ];
-const ROUTES = ["parent-to-child", "child-to-parent", "approval", "receipt"];
+const ROUTES = [
+  "parent-to-child",
+  "child-to-parent",
+  "approval",
+  "receipt",
+  "user",
+];
 
 function validMessage(value: unknown): value is TaskMessage {
   if (!isRecord(value)) return false;

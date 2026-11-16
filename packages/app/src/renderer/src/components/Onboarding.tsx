@@ -47,11 +47,13 @@ import { modKeyLabel } from "../lib/platform";
 import { rulesEditRequest, rulesFolder } from "../lib/rules-format";
 import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
+import { CodeReviewSettings } from "./CodeReviewSettings";
 import { SetupCheckResults, useSetupCheck } from "./SetupCheck";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Kbd } from "./ui/kbd";
 import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
 
 const STEP_COUNT = ONBOARDING_STEPS.length;
 
@@ -96,44 +98,6 @@ export function LogoGlyph({ className }: { className?: string }): JSX.Element {
         stroke="#6ef5d6"
       />
     </svg>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  disabled,
-  testId,
-  label,
-}: {
-  checked: boolean;
-  onChange(next: boolean): void;
-  disabled?: boolean;
-  testId: string;
-  label: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      data-testid={testId}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-[120ms] ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50",
-        checked ? "border-primary bg-primary" : "border-border bg-muted",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-block h-4 w-4 rounded-full transition-transform duration-[120ms] ease-out",
-          checked ? "bg-primary-foreground" : "bg-muted-foreground",
-          checked ? "translate-x-4" : "translate-x-0.5",
-        )}
-      />
-    </button>
   );
 }
 
@@ -616,7 +580,7 @@ function AgentStep({
         </p>
       )}
       <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
-        <Toggle
+        <Switch
           checked={bypass}
           onChange={onBypass}
           testId="onboarding-bypass"
@@ -632,6 +596,7 @@ function AgentStep({
           </p>
         </div>
       </div>
+      <CodeReviewSettings defaultHarness={choice} />
     </div>
   );
 }
@@ -715,7 +680,7 @@ function GithubStep({
         </div>
       )}
       <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
-        <Toggle
+        <Switch
           checked={enabled}
           onChange={onEnabled}
           disabled={!status?.authenticated}

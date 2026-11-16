@@ -18,6 +18,8 @@ import { truncateTitle } from "../lib/terminal-title";
  */
 export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
   const { api } = props;
+  // The same tab look serves the `url` panels (review/preview, UrlPane).
+  const testId = api.tabComponent === "url" ? "url-tab" : "terminal-tab";
   const [title, setTitle] = useState(api.title ?? "");
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
   return (
     <div
       className="dv-default-tab"
-      data-testid="terminal-tab"
+      data-testid={testId}
       data-panel-id={api.id}
       title={title}
       role="tab"
@@ -51,13 +53,13 @@ export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
         api.setActive();
       }}
     >
-      <span className="dv-default-tab-content" data-testid="terminal-tab-title">
+      <span className="dv-default-tab-content" data-testid={`${testId}-title`}>
         {truncateTitle(title)}
       </span>
       <button
         type="button"
         className="dv-default-tab-action"
-        data-testid="terminal-tab-close"
+        data-testid={`${testId}-close`}
         aria-label="Close"
         onPointerDown={(event) => event.preventDefault()}
         onClick={(event) => {

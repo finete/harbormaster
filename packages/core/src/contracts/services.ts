@@ -296,6 +296,8 @@ export interface ConfigSettingsPatch {
   onboardingCompletedAt?: string;
   /** `automation`: whether rules run at all (the Rules on/off switch). */
   automation?: boolean;
+  /** `captureAgentBrowser`: agent sessions also get the open-url handler as `BROWSER`. */
+  captureAgentBrowser?: boolean;
 }
 
 /** Pre-rules `movers` config lists (global and per repository). */
@@ -309,4 +311,21 @@ export interface Clock {
 }
 export interface IdGenerator {
   next(): string;
+}
+
+/**
+ * The machine probes behind `CoreCommands.reviewSupport` (docs/plannotator.md
+ * "Minimum versions"): raw outputs, parsed by `engines/review-support.ts`.
+ * Each resolves `undefined` when the piece cannot be found or run; none
+ * throws.
+ */
+export interface ReviewSupportProbeAccess {
+  /** `plannotator --version` output. */
+  plannotatorVersion(): Promise<string | undefined>;
+  /** The installed `@plannotator/pi-extension` `package.json` text (Pi's npm dir). */
+  piExtensionManifest(): Promise<string | undefined>;
+  /** `claude plugin list --json` output (the text listing is accepted too). */
+  claudePluginList(): Promise<string | undefined>;
+  /** `claude --version` output. */
+  claudeVersion(): Promise<string | undefined>;
 }

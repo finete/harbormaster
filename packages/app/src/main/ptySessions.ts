@@ -20,6 +20,10 @@ import * as pty from "node-pty";
 import { bufferTail } from "../shared/terminal-tail";
 import { debugLog, isDebugLogging } from "./debug-log";
 import {
+  createReadyLineMatcher,
+  OPEN_URL_HANDLER_ENV,
+} from "./plannotator-ready-line";
+import {
   createPtyDataBatcher,
   createPtyFlowControl,
   type PtyDataBatcher,
@@ -173,6 +177,32 @@ function createProgramStatusFilter(
       }
     },
     dispose: clearHold,
+  };
+}
+
+/**
+ * Where a task primary's `Plannotator session ready: <url>` goes (the pty
+ * fallback of docs/plannotator.md): only for a launch whose env had no
+ * open-url handler, since a session with one reports its URL itself.
+ */
+let readyUrlListener: ((taskId: string, url: string) => void) | undefined;
+
+export function setReadyUrlListener(
+  listener: ((taskId: string, url: string) => void) | undefined,
+): void {
+  readyUrlListener = listener;
+}
+
+/** The ready-line watcher for a task primary's launch, or `undefined` when the launch had a handler. */
+function readyLineWatcher(
+  taskId: string,
+  spec: LaunchSpecLike,
+): ((data: string) => void) | undefined {
+  // The flag on the launch: its env carries the handler or it does not.
+  if (spec.env[OPEN_URL_HANDLER_ENV]) return undefined;
+  const match = createReadyLineMatcher();
+  return (data) => {
+    for (const url of match(data)) readyUrlListener?.(taskId, url);
   };
 }
 
@@ -408,9 +438,14 @@ export function createSession(
     registerAsPane && options?.taskId
       ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
       : undefined;
+  const readyLine =
+    registerAsPane && options?.taskId && spec
+      ? readyLineWatcher(options.taskId, spec)
+      : undefined;
   const dataDisposable = ptyProcess.onData((data) => {
     notePtyData(id, options?.taskId, data);
     outputTail.push(data);
+    readyLine?.(data);
     if (statusFilter) statusFilter.feed(data);
     else forward(data);
   });
@@ -574,9 +609,11 @@ export function createBackgroundPrimarySession(
     modes.feed(data);
     io.sink(data);
   });
+  const readyLine = readyLineWatcher(taskId, spec);
   const dataDisposable = ptyProcess.onData((data) => {
     notePtyData(id, taskId, data);
     outputTail.push(data);
+    readyLine?.(data);
     statusFilter.feed(data);
   });
   const exitDisposable = ptyProcess.onExit(({ exitCode, signal }) => {

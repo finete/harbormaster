@@ -2,6 +2,7 @@ import { useDraggable } from "@dnd-kit/core";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
+import { useReadyToReview } from "../lib/review";
 import {
   deriveMessagingChips,
   loopCapLabel,
@@ -11,6 +12,7 @@ import {
   deriveOutcomeLine,
   derivePresenceActivity,
 } from "../lib/task-status-lines";
+import { useTaskUrls } from "../lib/task-urls";
 import {
   lastInteractionTimestamp,
   relativeTime,
@@ -20,11 +22,16 @@ import { useNow } from "../lib/use-now";
 import { cn } from "../lib/utils";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { RepoChip } from "./RepoChip";
+import { ReviewChips } from "./ReviewChips";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { RunningSpinner } from "./ui/running-spinner";
 
 type TaskCardPresence = PresenceBadge | undefined;
+
+/** `ReviewChips` on a card: the Badge geometry (ui/badge.tsx). */
+const REVIEW_CHIP_CLASS =
+  "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium";
 
 /**
  * One board card: title, branch + repo chip, PR/presence/unread chrome only, plus a
@@ -123,6 +130,9 @@ function TaskCardFace({
     derivePresenceActivity(presence, messaging.suppressAttention) ===
     "your-move";
   const outcome = deriveOutcomeLine(presence);
+  const reviewMarked = useTaskUrls().marked.includes(task.id);
+  const readyToReview = useReadyToReview().includes(task.id);
+  const reviewChip = reviewMarked || readyToReview;
   const launchMarker = deriveLaunchMarker(task);
 
   const isAwaiting = task.state === "awaiting" && !!task.awaiting;
@@ -254,6 +264,7 @@ function TaskCardFace({
         attention ||
         launchMarker ||
         task.pr ||
+        reviewChip ||
         messaging.waitingOnParent ||
         messaging.approvalsWaiting > 0 ||
         messaging.childQuestionsWaiting > 0 ||
@@ -285,6 +296,7 @@ function TaskCardFace({
               your move
             </Badge>
           )}
+          <ReviewChips taskId={task.id} chipClassName={REVIEW_CHIP_CLASS} />
           {messaging.waitingOnParent && (
             <Badge
               variant="neutral"

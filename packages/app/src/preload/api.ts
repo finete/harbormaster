@@ -39,6 +39,7 @@ import type {
   RepositoryInfo,
   ResolveInboxItemOptions,
   ResolveInboxItemResult,
+  ReviewSupport,
   RulesCheckInput,
   RulesCheckResult,
   RulesListing,
@@ -47,6 +48,8 @@ import type {
   TaskMessage,
   TaskMessagingState,
   TaskState,
+  TaskUrlOpenedPayload,
+  TaskWorkspace,
   ToAwaitOptions,
   ToDoneResult,
   UpdateTaskInput,
@@ -109,6 +112,9 @@ export type {
   RepositoryCheckout,
   RepositoryInfo,
   ResolveInboxItemResult,
+  ReviewSupport,
+  ReviewSupportHarness,
+  ReviewSupportPiece,
   Rule,
   RuleActionOutcome,
   RuleActionSpec,
@@ -122,6 +128,8 @@ export type {
   TaskMessage,
   TaskMessagingState,
   TaskState,
+  TaskUrlOpenedPayload,
+  TaskWorkspace,
   ThinkingLevel,
   ToAwaitOptions,
   ToDoneConfirmation,
@@ -380,7 +388,7 @@ export interface HarbormasterApi {
     listBranches(repositoryId: string): Promise<string[]>;
     /** See `CoreCommands.listModels`. */
     listModels(): Promise<HarnessModelCatalog[]>;
-    getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
+    getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined>;
     createTask(input: CreateTaskInput): Promise<Task>;
     moveTask(
       id: string,
@@ -555,6 +563,27 @@ export interface HarbormasterApi {
     retryLaunch(taskId: string): Promise<boolean>;
     /** The inbox changed (an item was added, resolved or snoozed); re-read it. */
     onInboxChanged(listener: () => void): () => void;
+    /** Show a loopback URL in the task's dockview (docs/plannotator.md). See `CoreCommands.openTaskUrl`. */
+    openTaskUrl(input: {
+      taskId: string;
+      url: string;
+      source?: "plannotator" | "browser";
+    }): Promise<void>;
+    /** Deliver the harness's Plannotator review command to the task's session. See `CoreCommands.requestReview`. */
+    requestReview(input: {
+      taskId: string;
+      target?: "local" | "pr";
+    }): Promise<{ command: string }>;
+    /** Per-harness Plannotator status; `refresh` re-probes. See `CoreCommands.reviewSupport`. */
+    reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
+    /** The Settings "Capture agent browser opens" switch. See `CoreCommands.setCaptureAgentBrowser`. */
+    setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+    /** Whether a loopback URL's server still answers (a HEAD from main; never a non-loopback URL). */
+    probeUrl(url: string): Promise<boolean>;
+    /** Subscribes to core's `task-url-opened` push channel; returns an unsubscribe fn. */
+    onTaskUrlOpened(
+      listener: (payload: TaskUrlOpenedPayload) => void,
+    ): () => void;
   };
   terminalHost: TerminalHostApi;
   app: {

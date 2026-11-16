@@ -49,6 +49,10 @@ export interface PrimaryLaunchOptions {
    * pane never bypasses. Default `"default"`.
    */
   permissions?: LaunchPermissions;
+  /** The host's open-url handler (docs/plannotator.md), exported by the adapter as PLANNOTATOR_BROWSER. */
+  openUrlHandler?: string;
+  /** Also export it as BROWSER (`captureAgentBrowser`). */
+  captureBrowser?: boolean;
 }
 
 export interface PrimaryLaunchResolution {
@@ -129,6 +133,12 @@ export async function resolvePrimaryLaunch(
     workspacePath: binding.worktreePath,
     stateDir,
     permissions: options.permissions ?? "default",
+    ...(options.openUrlHandler
+      ? {
+          openUrlHandler: options.openUrlHandler,
+          ...(options.captureBrowser ? { captureBrowser: true } : {}),
+        }
+      : {}),
   };
   const probeSpec = harness.buildLaunchSpec(baseSpecInput);
   if (!commandExists(probeSpec.command)) {

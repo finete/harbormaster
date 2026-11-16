@@ -179,3 +179,39 @@ writeFileSync(LOG, JSON.stringify(log, null, 2));
   chmodSync(fakePi, 0o755);
   return fakePi;
 }
+
+/**
+ * A stand-in `pi` (a node script) for the code review flow
+ * (docs/plannotator.md): reports `idle` over OSC 7501 and claims its inbox
+ * through the `harbormaster` CLI (`HARBORMASTER_CLI inbox claim`, like the
+ * Pi extension's delivery) every 300 ms. Each delivered text is appended to
+ * `logFile`; one containing `/plannotator-review` runs `plannotator
+ * review` (whatever is first on PATH) in the session's own pty and env, so
+ * PLANNOTATOR_BROWSER and the ready line behave as with the real agent.
+ */
+export function writeReviewPi(dir: string, logFile: string): string {
+  const fakePi = path.join(dir, "fake-pi-review.mjs");
+  const script = String.raw`#!/usr/bin/env node
+import { execFile, spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
+const LOG = ${JSON.stringify(logFile)};
+process.stdout.write("\x1b]7501;state=idle\x07fake review pi ready\r\n");
+const claim = () =>
+  execFile(process.env.HARBORMASTER_CLI, ["inbox", "claim"], (error, stdout) => {
+    if (!error) {
+      for (const message of JSON.parse(stdout).messages ?? []) {
+        appendFileSync(LOG, JSON.stringify(message.text) + "\n");
+        if (message.text.includes("/plannotator-review")) {
+          spawn("plannotator", ["review"], { stdio: "inherit" });
+        }
+      }
+    }
+    setTimeout(claim, 300);
+  });
+claim();
+setInterval(() => {}, 1 << 30);
+`;
+  writeFileSync(fakePi, script);
+  chmodSync(fakePi, 0o755);
+  return fakePi;
+}

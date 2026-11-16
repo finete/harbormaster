@@ -1,0 +1,35 @@
+#!/bin/sh
+# Plannotator's (and, with captureAgentBrowser, every agent's) browser hook
+# inside Harbormaster.app (Contents/Resources/bin/harbormaster-open-url; in
+# development packages/app/resources/bin/). The harness adapter exports this
+# path as PLANNOTATOR_BROWSER (and BROWSER) in a task's session env, so a
+# Plannotator session opens as a tab in the task's workspace instead of the
+# system browser. See docs/plannotator.md "Transport".
+#
+# `harbormaster open-url` reaches the running app over its local socket
+# (task id from HARBORMASTER_TASK_ID) and exits non-zero when the app is
+# down, so the system browser is the fallback. The CLI is the session's
+# HARBORMASTER_CLI when set, else the sibling launcher. Not `exec`: the
+# fallback must run when the CLI fails.
+#
+# Source: core treats an open as a plain browser open (a preview tab) unless
+# the caller says `--source plannotator` (the task's review tab). With
+# captureAgentBrowser off (the default) only PLANNOTATOR_BROWSER points here,
+# so every call is Plannotator's. With it on, BROWSER is this same path and
+# the two are indistinguishable from here: those calls stay `browser`.
+url="$1"
+case "$url" in
+  http://* | https://*) ;;
+  *)
+    echo "harbormaster-open-url: refusing a non-http(s) URL: $url" >&2
+    exit 2
+    ;;
+esac
+
+cli="${HARBORMASTER_CLI:-$(dirname "$0")/harbormaster}"
+if [ "${BROWSER:-}" = "$0" ]; then
+  "$cli" open-url "$url" && exit 0
+else
+  "$cli" open-url "$url" --source plannotator && exit 0
+fi
+exec open "$url"

@@ -147,6 +147,14 @@ export interface CustomAgentConfig {
   args?: string[];
   /** How the task's first prompt is passed: appended as the last argument (default) or not at all. */
   promptArg?: "positional" | "none";
+  /**
+   * The text that starts a Plannotator code review in this agent's session
+   * (docs/plannotator.md decision 4), e.g. `"!plannotator review {target}"`.
+   * `{target}` is replaced by the PR URL for a PR review and by nothing for
+   * local changes (surrounding whitespace collapsed); without `{target}`
+   * the PR URL is appended. Absent = this agent cannot start a review.
+   */
+  reviewCommand?: string;
 }
 
 /** Ordered list of board columns; the source of truth for board layout. */
@@ -484,6 +492,13 @@ export interface GlobalConfig {
   inbox?: { priorityFilter?: string };
   /** ISO time the first-run wizard was finished (`CoreCommands.completeOnboarding`); absent = show it. */
   onboardingCompletedAt?: string;
+  /**
+   * Agent sessions also get the host's open-url handler as `BROWSER`, so
+   * every browser open (dev servers, `gh pr view --web`, ...) lands in the
+   * app (docs/plannotator.md decision 6). Plannotator itself is wired
+   * through `PLANNOTATOR_BROWSER` regardless. Default `false`.
+   */
+  captureAgentBrowser: boolean;
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks whose agent is *running* (see `GlobalConfig.launch`). */
@@ -501,4 +516,41 @@ export const DEFAULT_MESSAGE_LOOP_CAP = 8;
 /** Written to a fresh config file. Automation rules live in `<stateDir>/rules/rules.yaml`. */
 export const defaultGlobalConfig = (): GlobalConfig => ({
   automation: true,
+  captureAgentBrowser: false,
 });
+
+/** One piece of a harness's Plannotator setup (docs/plannotator.md "Minimum versions"). */
+export interface ReviewSupportPiece {
+  id: "binary" | "pi-extension" | "claude-plugin" | "claude-code";
+  label: string;
+  /** semver when found */
+  installed?: string;
+  minimum: string;
+  state: "ready" | "missing" | "outdated";
+  /** the exact shell command */
+  fix: string;
+}
+
+/** One harness's Plannotator status: the worst of its pieces; `unsupported` without any. */
+export interface ReviewSupportHarness {
+  /** adapter id */
+  harness: string;
+  state: "ready" | "missing" | "outdated" | "unsupported";
+  pieces: ReviewSupportPiece[];
+}
+
+/** Per-harness Plannotator status (`CoreCommands.reviewSupport`). */
+export interface ReviewSupport {
+  harnesses: ReviewSupportHarness[];
+  checkedAt: string;
+}
+
+/** A task's workspace binding as `getTaskWorkspace` returns it. */
+export interface TaskWorkspace extends WorkspaceBinding {
+  /**
+   * Whether the worktree has uncommitted changes (`git status
+   * --porcelain`), for the "ready to review" hint. Absent for a scratch or
+   * parked workspace, or when git could not be read.
+   */
+  dirty?: boolean;
+}

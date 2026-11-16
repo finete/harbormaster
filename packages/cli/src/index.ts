@@ -15,6 +15,8 @@
 //   harbormaster rules list | rules on | rules off | rules check [--task <id>] [--replay <from>]
 //   harbormaster addons list
 //   harbormaster doctor [--all-remotes] [--json]
+//   harbormaster open-url <url> [--source plannotator|browser]
+//   harbormaster review [--local|--pr] [--task <id>]
 //
 // The inbox / events / rules / addons verbs are the core's user operations
 // (`OPS_CATALOG`, tools/ops.ts) over the same socket, never hand-rolled here.
@@ -22,6 +24,11 @@
 // useful exactly then, so when nothing answers on the socket it runs the
 // same read-only `doctor` command on an in-process core (never while the
 // app runs: one writer per state dir).
+//
+// `open-url` is the agent's browser handler (docs/plannotator.md
+// "Transport": `harbormaster open-url "$1" || open "$1"`): it exits 1 on any
+// failure (app down, not a task session, not a loopback URL) so the
+// script's system-browser fallback runs.
 
 import {
   callerFromEnv,
@@ -48,6 +55,9 @@ export { createMcpServer } from "./mcp.js";
 
 /** Exit code when the app is not running. */
 export const EXIT_NOT_RUNNING = 2;
+
+/** `open-url`'s exit code for every failure, the app being down included (the handler script then falls back to `open`). */
+export const EXIT_OPEN_URL_FAILED = 1;
 
 export interface CliIo {
   env: NodeJS.ProcessEnv;
@@ -147,6 +157,8 @@ function usage(): string {
     "  addons list [--json]                      Built-in sources and installed addons",
     "  doctor [--all-remotes] [--json]           Check the setup (works with the app down); exit 1 on a failure.",
     "                                            Remotes: only repositories with an active task (max 5), or all with --all-remotes",
+    "  open-url <url> [--source plannotator|browser]  Show a loopback URL in this task's tab (exit 1 otherwise)",
+    "  review [--local|--pr] [--task <id>]       Start a Plannotator review in the task's session (default: its PR, else local)",
     "",
   ].join("\n");
 }
@@ -310,6 +322,95 @@ async function runDoctor(
   return doctorExitCode(report);
 }
 
+/**
+ * `open-url <url>`: the agent's browser handler. The task is the launch
+ * env's `HARBORMASTER_TASK_ID` (a nested session inside the task's pane
+ * still opens in that task); every failure exits 1, the app being down
+ * included, so the handler script's `|| open "$1"` runs.
+ */
+async function runOpenUrl(
+  argv: readonly string[],
+  socketPath: string,
+  caller: ToolCaller,
+  io: CliIo,
+): Promise<number> {
+  const [url, ...flagArgs] = argv;
+  if (!url || url.startsWith("--")) {
+    throw new UsageError(
+      "usage: open-url <url> [--source plannotator|browser]",
+    );
+  }
+  const flags = parseFlags(flagArgs);
+  const source = pick(flags, ["source"]).source;
+  if (
+    source !== undefined &&
+    source !== "plannotator" &&
+    source !== "browser"
+  ) {
+    throw new UsageError("--source must be plannotator or browser");
+  }
+  const taskId = io.env.HARBORMASTER_TASK_ID || undefined;
+  if (!taskId) {
+    io.stderr("open-url: not a Harbormaster task session\n");
+    return EXIT_OPEN_URL_FAILED;
+  }
+  try {
+    const result = await callOp(
+      socketPath,
+      "open_url",
+      { url, ...(source ? { source } : {}) },
+      { ...caller, taskId },
+    );
+    io.stdout(`${result.text}\n`);
+    return 0;
+  } catch (error) {
+    io.stderr(
+      `${error instanceof HarbormasterNotRunningError ? NOT_RUNNING_MESSAGE : error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return EXIT_OPEN_URL_FAILED;
+  }
+}
+
+/** `review [--local|--pr] [--task <id>]`: `requestReview` for this task (or `--task`). */
+async function runReview(
+  argv: readonly string[],
+  socketPath: string,
+  caller: ToolCaller,
+  io: CliIo,
+): Promise<number> {
+  const flags = parseFlags(argv);
+  const picked = pick(flags, ["local", "pr", "task"]);
+  if (picked.local !== undefined && picked.pr !== undefined) {
+    throw new UsageError("pick one of --local / --pr");
+  }
+  for (const key of ["local", "pr"] as const) {
+    if (picked[key] !== undefined && picked[key] !== "true") {
+      throw new UsageError(`--${key} takes no value`);
+    }
+  }
+  const target = picked.local ? "local" : picked.pr ? "pr" : undefined;
+  if (!picked.task && !caller.taskId) {
+    throw new UsageError(
+      "--task <id> is required outside a Harbormaster task session",
+    );
+  }
+  const result = await callOp(
+    socketPath,
+    "request_review",
+    {
+      ...(target ? { target } : {}),
+      ...(picked.task ? { task: picked.task } : {}),
+    },
+    caller,
+  );
+  io.stdout(
+    flags.get("json") === "true"
+      ? `${JSON.stringify(result.details ?? {}, null, 2)}\n`
+      : `${result.text}\n`,
+  );
+  return 0;
+}
+
 /** Runs one CLI invocation; resolves the exit code. */
 export async function main(
   argv: readonly string[],
@@ -419,6 +520,12 @@ export async function main(
     }
     if (command === "doctor") {
       return await runDoctor(parseFlags(rest), socketPath, io);
+    }
+    if (command === "open-url") {
+      return await runOpenUrl(rest, socketPath, caller, io);
+    }
+    if (command === "review") {
+      return await runReview(rest, socketPath, caller, io);
     }
     if (command === "addons") {
       const [verb, ...flagArgs] = rest;

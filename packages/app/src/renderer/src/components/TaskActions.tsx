@@ -13,13 +13,15 @@ import {
 } from "../lib/task-mutations";
 import { type AwaitChoice, AwaitDialog } from "./AwaitDialog";
 import { ReopenTaskDialog } from "./ReopenTaskDialog";
+import { ReviewButton } from "./ReviewButton";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
 /**
  * The focused task's workflow verbs in `TaskWorkspace`'s header — the only
  * place action buttons live (board cards carry none; the board drives the
- * same verbs by key and drag): Start (backlog) · Await… · Done, or Reopen
+ * same verbs by key and drag): Start (backlog) · Review ▾ (Working/Awaiting,
+ * see ReviewButton) · Await… · Done, or Reopen
  * once Done. Await… opens the shared kind picker (`AwaitDialog`); which
  * awaiting kinds exist and what each does is core's registry, never a
  * button here. Everything calls straight through the IPC bridge — the
@@ -157,6 +159,9 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           Start
           <Kbd>s</Kbd>
         </Button>
+      )}
+      {(task.state === "working" || task.state === "awaiting") && (
+        <ReviewButton task={task} />
       )}
       <Button
         size="sm"

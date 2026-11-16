@@ -32,11 +32,12 @@ import type {
   BoardColumn,
   CustomAgentConfig,
   PullRequestRole,
+  ReviewSupport,
   Task,
   TaskKind,
   TaskState,
+  TaskWorkspace,
   ThinkingLevel,
-  WorkspaceBinding,
 } from "./model.js";
 import type {
   CodeRootScan,
@@ -389,6 +390,10 @@ export interface LaunchSettings {
   bypassPermissions: boolean;
   /** User-configured "any CLI" agents (`GlobalConfig.agents.custom`), for the app's launch-spec registry. */
   customAgents: CustomAgentConfig[];
+  /** The host's open-url handler (`createCore({ openUrlHandler })`), for `BuildLaunchSpecInput.openUrlHandler`. */
+  openUrlHandler?: string;
+  /** `GlobalConfig.captureAgentBrowser`, for `BuildLaunchSpecInput.captureBrowser`. */
+  captureAgentBrowser: boolean;
 }
 
 /** The typed command surface frontends call. No frontend touches state files. */
@@ -416,9 +421,10 @@ export interface CoreCommands {
    * The workspace binding for a task, if one was created for it: a git
    * worktree/branch for repository-backed tasks, a scratch directory
    * (`scratch: true`) for started repository-less tasks; `undefined` for
-   * parked tasks or tasks whose binding was removed.
+   * parked tasks or tasks whose binding was removed. A git worktree also
+   * reports `dirty` (uncommitted changes) for the "ready to review" hint.
    */
-  getTaskWorkspace(taskId: string): Promise<WorkspaceBinding | undefined>;
+  getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined>;
   /**
    * Create a task. With `input.start` it lands in `working`; otherwise it is
    * parked in `backlog`. When `input.repositoryId` is set the repository is
@@ -837,6 +843,30 @@ export interface CoreCommands {
    * per check (an unrunnable probe reports `skip`) and nothing is written.
    */
   doctor(input?: DoctorInput): Promise<DoctorReport>;
+
+  // --- Code review via Plannotator (docs/plannotator.md) -----------------
+
+  /**
+   * An agent session asked to open `url` (the host's open-url handler, via
+   * the socket's `open_url`). Rejects anything but `http(s)` on
+   * `127.0.0.1` / `localhost` / `[::1]` (the caller falls back to the system
+   * browser); otherwise emits `task-url-opened`. `source` defaults to
+   * `"browser"`.
+   */
+  openTaskUrl(input: {
+    taskId: string;
+    url: string;
+    source?: "plannotator" | "browser";
+  }): Promise<void>;
+  /** Build the adapter's review command for the target (default: pr when the task has one) and deliver it to the session. */
+  requestReview(input: {
+    taskId: string;
+    target?: "local" | "pr";
+  }): Promise<{ command: string }>;
+  /** Per-harness Plannotator status (see ReviewSupport). Cheap: version probes, cached 60 s, re-run on demand. */
+  reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
+  /** Flip `config.captureAgentBrowser` (applies to sessions launched afterwards). */
+  setCaptureAgentBrowser(enabled: boolean): Promise<void>;
 }
 
 export interface RefreshResult {

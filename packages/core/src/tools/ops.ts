@@ -14,7 +14,7 @@ import type { TaskMessage } from "../contracts/messaging.js";
 import type { Task } from "../contracts/model.js";
 import type { AuditEntry, RulesListing } from "../contracts/rules.js";
 import { formatDoctorReport } from "../engines/doctor.js";
-import type { ToolInputSchema, ToolResult } from "./catalog.js";
+import type { ToolCaller, ToolInputSchema, ToolResult } from "./catalog.js";
 
 export interface OpDefinition {
   /** Stable snake_case name (`inbox_list`); the CLI maps its verbs onto it. */
@@ -24,6 +24,8 @@ export interface OpDefinition {
   handler(
     args: Record<string, unknown>,
     commands: CoreCommands,
+    /** The calling session (from its launch env); task-scoped ops read `taskId` here, never from `args`. */
+    caller: ToolCaller,
   ): Promise<ToolResult>;
 }
 
@@ -412,6 +414,75 @@ const addonsList: OpDefinition = {
   },
 };
 
+/** The calling task, or a clear error when the caller is not a task session. */
+function callerTask(caller: ToolCaller, op: string): string {
+  if (!caller.taskId) {
+    throw new Error(
+      `${op} must run inside a Harbormaster task session (HARBORMASTER_TASK_ID is not set)`,
+    );
+  }
+  return caller.taskId;
+}
+
+const openUrl: OpDefinition = {
+  name: "open_url",
+  title:
+    "Open a loopback URL in the calling task's Harbormaster tab (the agent's browser handler)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      url: { type: "string" },
+      source: { type: "string", enum: ["plannotator", "browser"] },
+    },
+    required: ["url"],
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const url = str(args, "url");
+    if (!url) throw new Error("url is required");
+    const source = str(args, "source");
+    if (source && source !== "plannotator" && source !== "browser") {
+      throw new Error("source must be plannotator or browser");
+    }
+    const taskId = callerTask(caller, "open_url");
+    await commands.openTaskUrl({
+      taskId,
+      url,
+      ...(source ? { source: source as "plannotator" | "browser" } : {}),
+    });
+    return { text: `Opened ${url} in Harbormaster`, details: { taskId, url } };
+  },
+};
+
+const requestReview: OpDefinition = {
+  name: "request_review",
+  title:
+    "Start a Plannotator code review in the calling task's session (default: its PR, else local changes)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      target: { type: "string", enum: ["local", "pr"] },
+      task: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const target = str(args, "target");
+    if (target && target !== "local" && target !== "pr") {
+      throw new Error("target must be local or pr");
+    }
+    const taskId = str(args, "task") ?? callerTask(caller, "request_review");
+    const result = await commands.requestReview({
+      taskId,
+      ...(target ? { target: target as "local" | "pr" } : {}),
+    });
+    return {
+      text: `Sent ${JSON.stringify(result.command)} to task ${taskId}`,
+      details: { taskId, ...result },
+    };
+  },
+};
+
 /** Every operation, in display order. */
 const doctor: OpDefinition = {
   name: "doctor",
@@ -456,6 +527,8 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   rulesCheck,
   addonsList,
   doctor,
+  openUrl,
+  requestReview,
 ];
 
 /** Runs one operation against the command API. */
@@ -463,6 +536,7 @@ export async function dispatchOpCall(
   commands: CoreCommands,
   name: string,
   args: unknown,
+  caller: ToolCaller = {},
 ): Promise<ToolResult> {
   const op = OPS_CATALOG.find((candidate) => candidate.name === name);
   if (!op) {
@@ -474,5 +548,5 @@ export async function dispatchOpCall(
     args && typeof args === "object" && !Array.isArray(args)
       ? (args as Record<string, unknown>)
       : {};
-  return op.handler(record, commands);
+  return op.handler(record, commands, caller);
 }

@@ -15,7 +15,7 @@ Settled by grilling, one decision at a time.
 | 2 | **Placement/focus**: one review tab per task in that task's dockview. The button creates it, or focuses it when present. A rule- or agent-initiated session navigates the existing tab and marks the task; it never steals focus. |
 | 3 | **Lifecycle**: the tab persists like a terminal tab; a Plannotator session is its content. When the session ends (feedback sent / server gone) the tab shows a state placeholder ("Review sent — the agent is working on it") with **Review again**. Closing the tab is manual. |
 | 4 | **Command**: the harness adapter declares its review command (Pi and Claude Code `/plannotator-review`, Codex `!plannotator review`; none → button disabled). Split button: **Review** (default: the task's PR when it has one, else local changes) · chevron: *Local changes* / *Pull request #N*. No per-task memory. |
-| 5 | **Detection UI**: an onboarding line on the agent screen and a persistent per-harness "Code review" row in Settings, re-checked on window focus. Three states: missing → install command, outdated → upgrade command (per piece), ready ✓. Minimums below. |
+| 5 | **Detection UI**: the app has no Settings view yet, so the per-harness "Code review" section (`CodeReviewSettings`, self-contained so it can move to a Settings screen later) lives on the setup wizard's Agent step, reachable any time via Welcome / Setup…; the one-line status for the chosen default agent sits at its top. Re-checked on window focus. Three states: missing → install command, outdated → upgrade command (per piece), ready ✓. Minimums below. |
 | 6 | **Generic pane**: the tab type is "agent-opened local URL". Plannotator is wired unconditionally through `PLANNOTATOR_BROWSER`; catching every `BROWSER` open (dev servers, `gh pr view --web`…) sits behind the setting `captureAgentBrowser`, **off by default**, applied per harness by the adapter. Only loopback URLs are shown in-app; anything else goes to the system browser. |
 | 7 | **Embedding**: `<iframe>` (verified: Plannotator's review page sets no `X-Frame-Options` / `frame-ancestors`, and its UI never checks `window.top`; sub-resources are sandboxed separately). Sandbox `allow-scripts allow-same-origin allow-forms allow-popups`; CSP `frame-src` for `http://127.0.0.1:* http://localhost:*`. Fall back to `WebContentsView` only if the page misbehaves in a frame. |
 | 8 | **Testing**: a fake `plannotator` on PATH for one e2e launch; a contract test pinning the four facts we rely on (below) that runs against a real install and skips otherwise; an opt-in `HARBORMASTER_REAL_PLANNOTATOR=1` full smoke. |
@@ -51,8 +51,9 @@ Upstream ask (issue to open): a generic host IPC registry like their
 agent process (env from the adapter)
   PLANNOTATOR_BROWSER=<app>/Contents/Resources/bin/harbormaster-open-url
   [BROWSER=<same>, only when captureAgentBrowser]
-  → script: `harbormaster open-url "$1" || open "$1"`   (CLI over the local socket; falls back when the app is down)
-  → socket op `open_url { url }` (task id from the caller's HARBORMASTER_TASK_ID)
+  → script: `harbormaster open-url "$1" --source plannotator || open "$1"`   (CLI over the local socket; falls back when the app is down;
+            no `--source` when $BROWSER is the script itself, i.e. captureAgentBrowser: it cannot tell the two apart)
+  → socket op `open_url { url, source? }` (task id from the caller's HARBORMASTER_TASK_ID)
   → core `openTaskUrl` validates loopback, emits `task-url-opened`
   → app: review tab (Plannotator URL) or preview tab (other), per decisions 2/6
 Fallback: the pty owner matches `Plannotator session ready: <url>` on the task's
@@ -89,7 +90,7 @@ export interface BuildLaunchSpecInput {
 export interface TaskUrlOpenedPayload {
   taskId: string;
   url: string;              // loopback only
-  source: "plannotator" | "browser";   // plannotator when the URL's server answers the ready-line shape or the caller said so
+  source: "plannotator" | "browser";   // plannotator only when the caller says so (the script, the pty ready-line fallback); default browser
 }
 // CoreEventMap gains "task-url-opened": TaskUrlOpenedPayload
 ```
@@ -132,7 +133,7 @@ and `worktree.dirty` (boolean, Dev tasks with a worktree; `git status
 `harbormaster.task.worktree.dirtyChanged`. The app's "ready to review" hint
 reads the same two facts through `getTaskWorkspace` (`dirty`) and presence.
 
-Socket/CLI: op `open_url { url }`; `harbormaster open-url <url>` (task id
+Socket/CLI: op `open_url { url, source? }`; `harbormaster open-url <url> [--source plannotator|browser]` (task id
 from `HARBORMASTER_TASK_ID`; exit 1 with no app, so the script's `|| open`
 runs). `harbormaster review [--local|--pr]` is the CLI face of
 `requestReview`.
@@ -140,7 +141,9 @@ runs). `harbormaster review [--local|--pr]` is the CLI face of
 ## App
 
 - `resources/bin/harbormaster-open-url` (bundled next to `harbormaster`;
-  in dev, `packages/app/scripts/open-url.sh`): `exec harbormaster open-url "$1" || exec open "$1"`.
+  dev uses the same file under `packages/app/resources/bin/`): runs
+  `${HARBORMASTER_CLI:-<sibling>/harbormaster} open-url "$1" --source plannotator`, else `open "$1"`
+  (no `exec` before the fallback; no `--source` when invoked as `$BROWSER`).
   Main passes its absolute path as `openUrlHandler` when building launch specs.
 - Dockview panel type `url`: iframe per decision 7; a Plannotator URL opens
   as the task's single review tab (`review:<taskId>`), others as preview tabs.

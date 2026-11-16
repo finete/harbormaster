@@ -24,6 +24,19 @@ export interface MessagesChangedPayload {
   taskIds: string[];
 }
 
+/**
+ * An agent session asked to open a URL (Plannotator via
+ * `PLANNOTATOR_BROWSER`, or any `BROWSER` open when
+ * `captureAgentBrowser`); see docs/plannotator.md "Transport".
+ */
+export interface TaskUrlOpenedPayload {
+  taskId: string;
+  /** Loopback only (`http(s)://127.0.0.1|localhost|[::1]`). */
+  url: string;
+  /** `plannotator` when the caller said so; otherwise `browser`. */
+  source: "plannotator" | "browser";
+}
+
 /** Every event name the core emits, mapped to its payload shape. */
 export interface CoreEventMap {
   "board-changed": BoardChangedPayload;
@@ -31,6 +44,7 @@ export interface CoreEventMap {
   "presence-changed": PresenceChangedPayload;
   "messages-changed": MessagesChangedPayload;
   "inbox-changed": InboxChangedPayload;
+  "task-url-opened": TaskUrlOpenedPayload;
 }
 
 export type CoreEventName = keyof CoreEventMap;

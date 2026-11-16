@@ -127,6 +127,7 @@ export async function startToolSocketServer(
             commands,
             request.op,
             request.args ?? {},
+            request.caller ?? {},
           );
           write(socket, { id, ok: true, result });
           return;

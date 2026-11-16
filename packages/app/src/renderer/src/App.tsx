@@ -27,6 +27,7 @@ import {
   flattenBoard,
   useBoard,
   useManualRefresh,
+  usePresenceMap,
   useTaskNotifications,
   useUnreadTaskIds,
 } from "./core-client";
@@ -50,7 +51,9 @@ import {
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
 import { modKeyLabel } from "./lib/platform";
+import { useReadyToReviewEvaluation } from "./lib/review";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
+import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
 import { cn } from "./lib/utils";
@@ -150,12 +153,17 @@ export function App({
   useEffect(() => {
     storeDraft(window.localStorage, draft);
   }, [draft]);
+  // Agent-opened URLs (docs/plannotator.md): queued per task for its
+  // workspace; never changes focus or view here.
+  useEffect(() => startTaskUrlListener(), []);
   // Sticky composer choices (last Where / agent / model, recent Wheres).
   const [newTaskPrefs, setNewTaskPrefs] = useState<NewTaskPrefs>(() =>
     readPrefs(window.localStorage),
   );
   const visibleTaskId = draftFocused ? "" : focusedTaskId;
   const boardTasks = useMemo(() => flatRows.map((row) => row.task), [flatRows]);
+  // The "Ready to review" hint (lib/review.ts): idle Dev tasks with a dirty worktree.
+  useReadyToReviewEvaluation(boardTasks, usePresenceMap());
   const draftOrigin = draft?.originTaskId
     ? (boardTasks.find((task) => task.id === draft.originTaskId) ?? null)
     : null;
