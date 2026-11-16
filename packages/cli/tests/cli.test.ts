@@ -14,6 +14,9 @@ import {
   PiHarnessAdapter,
   resolveSocketPath,
   startToolSocketServer,
+  type TaskUsage,
+  type TaskUsageQuery,
+  type TaskUsageRow,
   TOOL_CATALOG,
   type ToolSocketServer,
 } from "@harbormaster/core";
@@ -356,6 +359,195 @@ describe("harbormaster inbox list / resolve, events, rules, addons", () => {
     expect(addons.out()).toContain("built-in");
     const usage = io();
     expect(await main(["events", "--bogus", "x"], usage)).toBe(64);
+  });
+});
+
+describe("harbormaster usage", () => {
+  function taskUsage(
+    tokens: Partial<TaskUsage["totals"]>,
+    extra: Partial<TaskUsage> = {},
+  ): TaskUsage {
+    const totals = {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      turns: 1,
+      ...tokens,
+    };
+    return {
+      status: "ready",
+      totals,
+      byModel: [],
+      sessions: [],
+      computedAt: "2026-11-16T10:00:00.000Z",
+      ...extra,
+    };
+  }
+
+  const rows: TaskUsageRow[] = [
+    {
+      taskId: "t-pi",
+      title: "Pi work",
+      repository: "repo-a",
+      harness: "pi",
+      state: "done",
+      usage: taskUsage(
+        { input: 300, output: 100 },
+        { cost: 3, costSource: "pi" },
+      ),
+      subtaskUsage: {
+        input: 10,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        count: 1,
+      },
+    },
+    {
+      taskId: "t-claude",
+      title: "Claude work",
+      repository: "repo-a",
+      harness: "claude",
+      state: "working",
+      usage: taskUsage({ input: 1500, cacheRead: 100 }),
+    },
+  ];
+
+  function stubUsage(): TaskUsageQuery[] {
+    const queries: TaskUsageQuery[] = [];
+    core.commands.listTaskUsage = async (query) => {
+      queries.push(query ?? {});
+      return rows;
+    };
+    return queries;
+  }
+
+  it("prints the op's rows plus a totals line, all time by default", async () => {
+    const queries = stubUsage();
+    const run = io();
+    expect(await main(["usage"], run)).toBe(0);
+    expect(queries).toEqual([{}]);
+    expect(run.out()).toContain(
+      "400 tok  ~$3.00 est. by pi  pi  t-pi  Pi work  incl. 1 subtask (10 tok)",
+    );
+    expect(run.out()).toContain("claude  t-claude  Claude work");
+    expect(run.out().trimEnd().split("\n").at(-1)).toBe(
+      "2 tasks · 2.0k tokens · ~$3.00 est. at list price (not your bill)",
+    );
+  });
+
+  it("maps every flag onto the op, --include-archived included", async () => {
+    const queries = stubUsage();
+    expect(
+      await main(
+        [
+          "usage",
+          "--from",
+          "2026-11-01",
+          "--to=2026-11-15",
+          "--repository",
+          "repo-a",
+          "--harness",
+          "pi",
+          "--model",
+          "claude-opus-5-5",
+          "--include-archived",
+        ],
+        io(),
+      ),
+    ).toBe(0);
+    expect(await main(["usage", "--include-archived", "false"], io())).toBe(0);
+    expect(queries).toEqual([
+      {
+        from: "2026-11-01",
+        to: "2026-11-15",
+        repository: "repo-a",
+        harness: "pi",
+        model: "claude-opus-5-5",
+        includeArchived: true,
+      },
+      {},
+    ]);
+  });
+
+  it("--json prints the rows", async () => {
+    stubUsage();
+    const run = io();
+    expect(await main(["usage", "--json"], run)).toBe(0);
+    expect(JSON.parse(run.out())).toEqual(rows);
+  });
+
+  it("says so when nothing is recorded", async () => {
+    const run = io();
+    expect(await main(["usage"], run)).toBe(0);
+    expect(run.out()).toBe("No task usage recorded.\n");
+  });
+
+  it("refresh prints the recomputed usage, or that no session is recorded", async () => {
+    const asked: string[] = [];
+    core.commands.refreshTaskUsage = async (taskId) => {
+      asked.push(taskId);
+      return taskId === "t-pi"
+        ? taskUsage(
+            { input: 300, output: 100, turns: 2 },
+            {
+              cost: 3,
+              costSource: "pi",
+              byModel: [
+                {
+                  model: "claude-opus-5-5",
+                  input: 300,
+                  output: 100,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  turns: 2,
+                  cost: 3,
+                },
+              ],
+            },
+          )
+        : undefined;
+    };
+    const ready = io();
+    expect(await main(["usage", "refresh", "t-pi"], ready)).toBe(0);
+    expect(ready.out()).toBe(
+      [
+        "Task t-pi: 400 tokens · 2 turns · ~$3.00 est. by pi at list price (not your bill)",
+        "  input 300 · output 100 · cache read 0 · cache write 0",
+        "  claude-opus-5-5  400 tok  2 turns  ~$3.00",
+        "",
+      ].join("\n"),
+    );
+    const none = io();
+    expect(await main(["usage", "refresh", "t-none"], none)).toBe(0);
+    expect(none.out()).toBe("Task t-none: no session recorded\n");
+    const json = io();
+    expect(await main(["usage", "refresh", "t-pi", "--json"], json)).toBe(0);
+    expect(JSON.parse(json.out())).toMatchObject({
+      taskId: "t-pi",
+      usage: { cost: 3 },
+    });
+    expect(asked).toEqual(["t-pi", "t-none", "t-pi"]);
+  });
+
+  it("rejects unknown flags and a missing task id", async () => {
+    stubUsage();
+    const bogus = io();
+    expect(await main(["usage", "--bogus", "x"], bogus)).toBe(64);
+    expect(bogus.err()).toContain("unknown flag --bogus");
+    expect(bogus.err()).toContain("usage refresh <taskId>");
+    expect(await main(["usage", "--include-archived", "yes"], io())).toBe(64);
+    expect(await main(["usage", "refresh"], io())).toBe(64);
+    expect(await main(["usage", "refresh", "t1", "--bogus"], io())).toBe(64);
+  });
+
+  it("exits 2 when the app is down", async () => {
+    await server?.close();
+    server = undefined;
+    const run = io();
+    expect(await main(["usage"], run)).toBe(EXIT_NOT_RUNNING);
+    expect(await main(["usage", "refresh", "t1"], io())).toBe(EXIT_NOT_RUNNING);
   });
 });
 

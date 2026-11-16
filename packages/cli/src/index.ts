@@ -14,11 +14,13 @@
 //   harbormaster events [--task <id>] [--rule <id> [--file <f>]] [--since <time>] [--limit <n>] [--json]
 //   harbormaster rules list | rules on | rules off | rules check [--task <id>] [--replay <from>]
 //   harbormaster addons list
+//   harbormaster usage [--from <date>] [--to <date>] [--repository <id>] [--harness <id>] [--model <id>] [--include-archived] [--json]
+//   harbormaster usage refresh <taskId> [--json]
 //   harbormaster doctor [--all-remotes] [--json]
 //   harbormaster open-url <url> [--source plannotator|browser]
 //   harbormaster review [--local|--pr] [--task <id>]
 //
-// The inbox / events / rules / addons verbs are the core's user operations
+// The inbox / events / rules / addons / usage verbs are the core's user operations
 // (`OPS_CATALOG`, tools/ops.ts) over the same socket, never hand-rolled here.
 // `doctor` is the one verb that also works with the app down: it is most
 // useful exactly then, so when nothing answers on the socket it runs the
@@ -41,13 +43,17 @@ import {
   doctorExitCode,
   findTool,
   formatDoctorReport,
+  formatTokenCount,
   HarbormasterNotRunningError,
   type InboxClaimDetails,
   NOT_RUNNING_MESSAGE,
   socketPathFromEnv,
+  type TaskUsage,
+  type TaskUsageRow,
   TOOL_CATALOG,
   type ToolCaller,
   type ToolDefinition,
+  totalTokens,
 } from "@harbormaster/core";
 import { serveMcpOverStdio } from "./mcp.js";
 
@@ -155,6 +161,9 @@ function usage(): string {
     "  rules on | rules off                      Turn the rules on or off",
     "  rules check [--task <id>] [--replay <from>] [--json]  Dry run over recorded events",
     "  addons list [--json]                      Built-in sources and installed addons",
+    "  usage [--from <date>] [--to <date>] [--repository <id>] [--harness <id>] [--model <id>] [--include-archived] [--json]",
+    "                                            Per-task token usage, most tokens first (default: all time); --json exports the rows",
+    "  usage refresh <taskId> [--json]           Recompute one task's token usage from its session files",
     "  doctor [--all-remotes] [--json]           Check the setup (works with the app down); exit 1 on a failure.",
     "                                            Remotes: only repositories with an active task (max 5), or all with --all-remotes",
     "  open-url <url> [--source plannotator|browser]  Show a loopback URL in this task's tab (exit 1 otherwise)",
@@ -261,6 +270,116 @@ async function runOp(
     flags.get("json") === "true"
       ? `${JSON.stringify(result.details ?? {}, null, 2)}\n`
       : `${result.text}\n`,
+  );
+  return 0;
+}
+
+/** `usage`'s flags → the `usage` op's arguments. */
+const USAGE_FLAGS: Record<string, string> = {
+  from: "from",
+  to: "to",
+  repository: "repository",
+  harness: "harness",
+  model: "model",
+  "include-archived": "includeArchived",
+};
+
+/** `$` is an estimate and never shown bare (docs/costs.md decision 3). */
+function formatCost(cost: number): string {
+  return `~$${cost.toFixed(2)}`;
+}
+
+/** The totals line under `usage`'s rows: tasks, tokens, and `$` only where the harness priced it. */
+export function formatUsageTotals(rows: readonly TaskUsageRow[]): string {
+  let tokens = 0;
+  let cost: number | undefined;
+  for (const row of rows) {
+    if (row.usage.status === "ready") tokens += totalTokens(row.usage.totals);
+    if (row.usage.cost !== undefined) cost = (cost ?? 0) + row.usage.cost;
+  }
+  const parts = [
+    `${rows.length} task${rows.length === 1 ? "" : "s"}`,
+    `${formatTokenCount(tokens)} tokens`,
+  ];
+  if (cost !== undefined) {
+    parts.push(`${formatCost(cost)} est. at list price (not your bill)`);
+  }
+  return parts.join(" · ");
+}
+
+/** One task's `TaskUsage` after `usage refresh`. */
+export function formatTaskUsage(
+  taskId: string,
+  usage: TaskUsage | undefined,
+): string {
+  if (!usage) return `Task ${taskId}: no session recorded`;
+  if (usage.status !== "ready") {
+    return `Task ${taskId}: ${usage.status}${usage.reason ? ` (${usage.reason})` : ""}`;
+  }
+  const { totals } = usage;
+  const lines = [
+    `Task ${taskId}: ${formatTokenCount(totalTokens(totals))} tokens · ${totals.turns} turn${totals.turns === 1 ? "" : "s"}${
+      usage.cost !== undefined
+        ? ` · ${formatCost(usage.cost)} est. by ${usage.costSource ?? "harness"} at list price (not your bill)`
+        : ""
+    }`,
+    `  input ${formatTokenCount(totals.input)} · output ${formatTokenCount(totals.output)} · cache read ${formatTokenCount(totals.cacheRead)} · cache write ${formatTokenCount(totals.cacheWrite)}`,
+  ];
+  for (const model of usage.byModel) {
+    lines.push(
+      `  ${model.model}  ${formatTokenCount(totalTokens(model))} tok  ${model.turns} turn${model.turns === 1 ? "" : "s"}${
+        model.cost !== undefined ? `  ${formatCost(model.cost)}` : ""
+      }`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** `usage [filters] [--json]` and `usage refresh <taskId>`. */
+async function runUsage(
+  argv: readonly string[],
+  socketPath: string,
+  io: CliIo,
+): Promise<number> {
+  const json = (flags: Map<string, string>) => flags.get("json") === "true";
+  if (argv[0] === "refresh") {
+    const [, taskId, ...flagArgs] = argv;
+    if (!taskId || taskId.startsWith("--")) {
+      throw new UsageError("usage: usage refresh <taskId> [--json]");
+    }
+    const flags = parseFlags(flagArgs);
+    pick(flags, []);
+    const result = await callOp(socketPath, "usage_refresh", { task: taskId });
+    const details = (result.details ?? {}) as { usage?: TaskUsage };
+    io.stdout(
+      json(flags)
+        ? `${JSON.stringify(details, null, 2)}\n`
+        : `${formatTaskUsage(taskId, details.usage)}\n`,
+    );
+    return 0;
+  }
+  const flags = parseFlags(argv);
+  const args: Record<string, unknown> = {};
+  for (const [flag, value] of Object.entries(
+    pick(flags, Object.keys(USAGE_FLAGS)),
+  )) {
+    if (flag === "include-archived") {
+      if (value !== "true" && value !== "false") {
+        throw new UsageError(
+          "--include-archived takes no value (or true|false)",
+        );
+      }
+      args.includeArchived = value === "true";
+    } else {
+      args[USAGE_FLAGS[flag] as string] = value;
+    }
+  }
+  const result = await callOp(socketPath, "usage", args);
+  const rows = ((result.details ?? {}) as { rows?: TaskUsageRow[] }).rows ?? [];
+  io.stdout(
+    json(flags)
+      ? `${JSON.stringify(rows, null, 2)}\n`
+      : `${result.text}\n${rows.length ? `${formatUsageTotals(rows)}\n` : ""}`,
   );
   return 0;
 }
@@ -526,6 +645,9 @@ export async function main(
     }
     if (command === "review") {
       return await runReview(rest, socketPath, caller, io);
+    }
+    if (command === "usage") {
+      return await runUsage(rest, socketPath, io);
     }
     if (command === "addons") {
       const [verb, ...flagArgs] = rest;
