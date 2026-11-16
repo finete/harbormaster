@@ -300,10 +300,14 @@ const LOCATION_CACHE_TTL_MS = 30_000;
 /** PR observations in flight at once during `refresh()` (pi-home parity). */
 const REFRESH_CONCURRENCY = 4;
 
-/** A refresh tick's batched PR answer for one task: its status (possibly none), or the batch's failure. */
+/**
+ * A refresh tick's batched PR answer for one task: its status (possibly
+ * none), or `batchFailed` when its repository's batch failed (that failure
+ * is reported once for the batch, not per task).
+ */
 type PrefetchedPullRequest =
   | { status: PullRequestStatus | undefined }
-  | { error: unknown };
+  | { batchFailed: true };
 
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
@@ -2065,7 +2069,12 @@ export class CoreManager implements CoreCommands {
         observed[index] = adopted ?? listed;
       },
     );
-    const prefetched = await this.prefetchPullRequests(observed, repositories);
+    const prefetched = await this.prefetchPullRequests(
+      observed,
+      repositories,
+      warnings,
+      connectivity,
+    );
     // This tick's PR observations, by task id, for the `github` source.
     const observations = new Map<string, { status?: PullRequestStatus }>();
     await forEachConcurrently(observed, REFRESH_CONCURRENCY, async (task) => {
@@ -2206,15 +2215,18 @@ export class CoreManager implements CoreCommands {
 
   /**
    * One batched PR lookup per repository for this tick's observed tasks
-   * (when the PR access supports it), keyed by task id. A failed batch
-   * hands its error to each of its tasks, so `refreshTask` reports it
-   * exactly as a failed per-task lookup (per-task warning or connectivity
-   * count) and records no observation for the rules engine. Tasks missing from the map (no
-   * batch support, no origin remote) are looked up one by one as before.
+   * (when the PR access supports it), keyed by task id. A failed batch is
+   * one failure with one cause: it is reported once for the repository
+   * (one warning or one connectivity count, never one per task), and its
+   * tasks are marked `batchFailed` so `refreshTask` records no observation
+   * for the rules engine. Tasks missing from the map (no batch support, no
+   * origin remote) are looked up one by one as before.
    */
   private async prefetchPullRequests(
     tasks: readonly Task[],
     repositories: Map<string, RepositoryInfo> | undefined,
+    warnings: string[],
+    connectivity: { failedChecks: number },
   ): Promise<Map<string, PrefetchedPullRequest>> {
     const prefetched = new Map<string, PrefetchedPullRequest>();
     const pullRequests = this.deps.pullRequests;
@@ -2241,7 +2253,15 @@ export class CoreManager implements CoreCommands {
             });
           }
         } catch (error) {
-          for (const task of group) prefetched.set(task.id, { error });
+          for (const task of group) {
+            prefetched.set(task.id, { batchFailed: true });
+          }
+          this.recordFailure(
+            `PR status for ${repositoryId} (${group.length} task${group.length === 1 ? "" : "s"})`,
+            error,
+            warnings,
+            connectivity,
+          );
         }
       }),
     );
@@ -2272,7 +2292,8 @@ export class CoreManager implements CoreCommands {
 
     let changed = false;
     try {
-      if (prefetched && "error" in prefetched) throw prefetched.error;
+      // Already reported once for the whole batch by prefetchPullRequests.
+      if (prefetched && "batchFailed" in prefetched) return false;
       const status = prefetched
         ? prefetched.status
         : await this.deps.pullRequests.status(repositoryId, branch);

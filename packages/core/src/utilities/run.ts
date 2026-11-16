@@ -124,7 +124,7 @@ export async function run(
     return result.stdout.trimEnd();
   } catch (error) {
     throw new Error(
-      `${command} ${args.join(" ")} failed${cwd ? ` (cwd: ${cwd})` : ""}: ${describeExecError(error, options)}`,
+      `${command} ${describeArgs(args)} failed${cwd ? ` (cwd: ${cwd})` : ""}: ${describeExecError(error, options)}`,
     );
   }
 }
@@ -144,6 +144,34 @@ export async function tryRun(
   }
 }
 
+/** Arguments longer than this are elided in error messages. */
+const MAX_ARG_CHARS_IN_ERROR = 80;
+/** Arguments past this many characters in total are dropped (counted) in error messages. */
+const MAX_ARGS_CHARS_IN_ERROR = 300;
+
+/**
+ * The argument list as shown in an error message: an over-long argument (a
+ * whole GraphQL query, a PR body) is cut to its start plus its length, so a
+ * failure stays a readable one-liner in toasts and logs.
+ */
+export function describeArgs(args: readonly string[]): string {
+  const shown: string[] = [];
+  let length = 0;
+  for (const arg of args) {
+    const part =
+      arg.length > MAX_ARG_CHARS_IN_ERROR
+        ? `${arg.slice(0, MAX_ARG_CHARS_IN_ERROR - 20).replace(/\s+/g, " ")}…(${arg.length} chars)`
+        : arg;
+    if (shown.length > 0 && length + part.length > MAX_ARGS_CHARS_IN_ERROR) {
+      shown.push(`…(+${args.length - shown.length} more args)`);
+      break;
+    }
+    shown.push(part);
+    length += part.length + 1;
+  }
+  return shown.join(" ");
+}
+
 function describeExecError(error: unknown, options?: RunOptions): string {
   if (error && typeof error === "object") {
     const { killed, code } = error as { killed?: unknown; code?: unknown };
@@ -157,6 +185,9 @@ function describeExecError(error: unknown, options?: RunOptions): string {
         ? String((error as { stderr?: unknown }).stderr ?? "").trim()
         : "";
     if (stderr) return stderr;
+    // execFile's own message ("Command failed: <whole command line>")
+    // repeats every argument unelided; the exit status says the same.
+    if (typeof code === "number") return `exit code ${code}`;
     const message =
       "message" in error
         ? String((error as { message?: unknown }).message ?? "")

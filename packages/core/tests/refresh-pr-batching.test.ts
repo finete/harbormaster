@@ -167,21 +167,19 @@ describe("refresh() batches PR observation per repository", () => {
     ).toBeUndefined();
   });
 
-  it("a failed batch is reported per task, like failed per-task lookups", async () => {
+  it("a failed batch is reported once for its repository, not once per task", async () => {
     const pullRequests = new BatchingPullRequests(
       () => undefined,
       new Error("HTTP 401: Bad credentials"),
     );
-    const { core, tasks } = await fixture(pullRequests);
+    const { core, repo } = await fixture(pullRequests);
 
     const result = await core.commands.refresh();
 
     expect(pullRequests.statusCalls).toEqual([]);
-    expect([...result.warnings].sort()).toEqual(
-      tasks
-        .map((task) => expect.stringContaining(`${task.title}: HTTP 401`))
-        .sort(),
-    );
+    expect(result.warnings).toEqual([
+      `PR status for ${repo.id} (3 tasks): HTTP 401: Bad credentials`,
+    ]);
 
     const offline = new BatchingPullRequests(
       () => undefined,
@@ -192,7 +190,7 @@ describe("refresh() batches PR observation per repository", () => {
     expect(offlineResult.warnings).toEqual([]);
     expect(offlineResult.connectivity).toEqual({
       offline: true,
-      failedChecks: 3,
+      failedChecks: 1,
     });
   });
 });
