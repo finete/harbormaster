@@ -24,7 +24,6 @@ import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
 import { prBadgeLabel, prBadgeVariant } from "./pr-badge";
 import { RepoChip } from "./RepoChip";
-import { ReviewChips } from "./ReviewChips";
 import {
   activityTimestamp,
   pullRequestUrl,
@@ -509,7 +508,6 @@ export function SidebarTaskRow({
             {stateChipLabel(task, state)}
           </span>
           <PrChip task={task} />
-          <ReviewChips taskId={task.id} chipClassName={CHIP_BASE} />
           {waiting && (
             <span
               data-testid="sidebar-row-waiting-on-parent"

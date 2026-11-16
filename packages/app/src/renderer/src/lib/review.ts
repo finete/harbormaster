@@ -1,16 +1,11 @@
 // Code review via Plannotator (docs/plannotator.md), renderer side: when
 // the Review button is enabled, which target it defaults to, what a review
-// tab shows while it waits for a session (`reviewWaitState`), which tasks
-// get the quiet "Ready to review" hint, and the shared stores behind them
-// (`reviewSupport`, re-checked on window focus; idle Dev tasks' worktree
-// dirtiness, read from core's refresh-tick pass on presence pushes and
-// after every refresh tick).
+// tab shows while it waits for a session (`reviewWaitState`), and the
+// shared `reviewSupport` store (re-checked on window focus).
 // The decisions are pure functions (tests/review.test.ts).
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type {
-  PresenceBadge,
-  PresenceChangedPayload,
   ReviewRequestResult,
   ReviewSupport,
   ReviewSupportHarness,
@@ -181,25 +176,6 @@ export async function startReview(
   }
 }
 
-/** "Idle" for the hint (decision 1): a live session at rest, not mid-turn and not asking anything. */
-export function isAgentIdle(badge: PresenceBadge | undefined): boolean {
-  if (!badge?.live || badge.runningTurn) return false;
-  const state = badge.status?.state;
-  return state === undefined || state === "idle" || state === "done";
-}
-
-/** Dev tasks whose agent is idle: the only ones whose worktree is worth checking. */
-export function reviewHintCandidates(
-  tasks: readonly Task[],
-  presence: PresenceChangedPayload,
-): string[] {
-  return tasks
-    .filter(
-      (task) => task.state === "working" && isAgentIdle(presence[task.id]),
-    )
-    .map((task) => task.id);
-}
-
 // --- shared stores --------------------------------------------------------------
 
 let reloadSupport: ((refresh: boolean) => void) | undefined;
@@ -229,71 +205,4 @@ export function recheckReviewSupport(): void {
 /** Per-harness Plannotator status (shared; refreshed on window focus). */
 export function useReviewSupport(): ReviewSupport | null {
   return useSyncExternalStore(supportStore.subscribe, supportStore.getSnapshot);
-}
-
-let readyIds: readonly string[] = [];
-const readyListeners = new Set<() => void>();
-function setReady(next: readonly string[]): void {
-  if (next.join("\n") === readyIds.join("\n")) return;
-  readyIds = next;
-  for (const listener of Array.from(readyListeners)) listener();
-}
-
-/**
- * Reads core's stored worktree pass once (`listWorktreeStatus`: the refresh
- * tick's single `git status` per Working task, the same one the rules'
- * `worktree.dirty` fact uses) and publishes the "Ready to review" set. One
- * IPC call per evaluation, never one per candidate, and no git per call.
- * A candidate list that changed while a read was in flight wins: only the
- * latest evaluation publishes.
- */
-let evaluation = 0;
-export function evaluateReadyToReview(candidates: readonly string[]): void {
-  const run = ++evaluation;
-  // Drop non-candidates right away (an agent that started working).
-  setReady(readyIds.filter((id) => candidates.includes(id)));
-  if (candidates.length === 0) return;
-  void window.harbormaster.core
-    .listWorktreeStatus()
-    .then((statuses) => {
-      if (run !== evaluation) return;
-      setReady(candidates.filter((id) => statuses[id]?.dirty === true));
-    })
-    .catch(() => {});
-}
-
-/** The current "Ready to review" set (the store's snapshot). */
-export function readyToReviewIds(): readonly string[] {
-  return readyIds;
-}
-
-/** Task ids showing the "Ready to review" chip. */
-export function useReadyToReview(): readonly string[] {
-  return useSyncExternalStore((listener) => {
-    readyListeners.add(listener);
-    return () => readyListeners.delete(listener);
-  }, readyToReviewIds);
-}
-
-/**
- * Keeps the "Ready to review" set current (App mounts it once): on every
- * presence push and after every refresh tick (the 30 s loop).
- */
-export function useReadyToReviewEvaluation(
-  tasks: readonly Task[],
-  presence: PresenceChangedPayload,
-): void {
-  const candidates = useRef<string[]>([]);
-  candidates.current = reviewHintCandidates(tasks, presence);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: each presence push (and board change) is a re-evaluation trigger.
-  useEffect(() => {
-    evaluateReadyToReview(candidates.current);
-  }, [presence, tasks]);
-  useEffect(
-    () =>
-      window.harbormaster.core.onRefreshed(() =>
-        evaluateReadyToReview(candidates.current),
-      ),
-    [],
-  );
 }

@@ -11,7 +11,7 @@ Settled by grilling, one decision at a time.
 
 | # | Decision |
 |---|---|
-| 1 | **Trigger**: a **Review** button on the task (beside Await… · Done) plus a "ready to review" hint on a Dev task whose agent is idle with a dirty worktree. The trigger is exposed to the rules engine (facts + events below) so a user can write "idle + dirty → `message "/plannotator-review"`"; **no such rule ships**. Harbormaster never opens a review on its own. |
+| 1 | **Trigger**: a **Review** button on the task (beside Await… · Done) (a "ready to review" hint on idle Dev tasks with a dirty worktree shipped first and was removed 2026-11-16: idle + uncommitted changes holds for nearly every idle task, so it said nothing and crowded the sidebar row). The trigger is exposed to the rules engine (facts + events below) so a user can write "idle + dirty → `message "/plannotator-review"`"; **no such rule ships**. Harbormaster never opens a review on its own. |
 | 2 | **Placement/focus**: one review tab per task in that task's dockview. The button creates it, or focuses it when present. A rule- or agent-initiated session navigates the existing tab; it never steals focus. The tab is the only indication: no sidebar/card mark (revised 2026-11-16: a "review open" chip outlived closed and never-started reviews). |
 | 3 | **Lifecycle**: the tab persists like a terminal tab; a Plannotator session is its content. When the session ends (feedback sent / server gone) the tab shows a state placeholder ("Review sent — the agent is working on it") with **Review again**. Closing the tab is manual. |
 | 4 | **Command**: the harness adapter declares its review command (Pi and Claude Code `/plannotator-review`, Codex `!plannotator review`; none → button disabled). Split button: **Review** (default: the task's PR when it has one, else local changes) · chevron: *Local changes* / *Pull request #N*. No per-task memory. **Delivery** (revised 2026-11-16, see "Transport → Review button"): the button's command is *typed* into the task's primary pty when the agent is at its prompt, queued until the agent's turn ends when it is working, and left to inbox messaging only when the task has no pty of ours. Rule-driven reviews (`message` action) keep using messaging. |
@@ -196,9 +196,8 @@ and `worktree.dirty` (boolean, Dev tasks with a worktree) → events
 `harbormaster.task.agentChanged`, `harbormaster.task.worktree.dirtyChanged`.
 `worktree.dirty` comes from one `git status --porcelain` pass per refresh
 tick (rules on or off; 6 in flight, 2 s each, a run that fails or times out
-keeps the previous value), stored in core and shared by every reader. The
-app's "ready to review" hint reads that pass through `listWorktreeStatus()`
-(one call per presence push / refresh, no git in the handler) plus presence.
+keeps the previous value), stored in core and shared by every reader
+(`listWorktreeStatus()` serves it without running git).
 `getTaskWorkspace().dirty` runs git fresh per call and stays off periodic
 paths.
 
@@ -222,8 +221,6 @@ runs). `harbormaster review [--local|--pr]` is the CLI face of
   `startReview` (lib/review.ts) → IPC `core:requestReview` → main's
   `requestReviewFromButton`, which returns `{ command, delivery: "typed" |
   "queued" | "message" }` for the tab's placeholder (`reviewWaitState`).
-- Hint: "Ready to review" chip on the card/row when `agent === "idle"` and
-  `worktree.dirty` (Dev only).
 - Settings: "Code review" section = `reviewSupport()` rows per harness +
   the `captureAgentBrowser` switch. Onboarding agent screen: one line with
   the same three states.

@@ -27,7 +27,6 @@ import {
   flattenBoard,
   useBoard,
   useManualRefresh,
-  usePresenceMap,
   useTaskNotifications,
   useUnreadTaskIds,
 } from "./core-client";
@@ -51,10 +50,7 @@ import {
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
 import { modKeyLabel } from "./lib/platform";
-import {
-  startReviewRejectedListener,
-  useReadyToReviewEvaluation,
-} from "./lib/review";
+import { startReviewRejectedListener } from "./lib/review";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
@@ -167,7 +163,6 @@ export function App({
   const visibleTaskId = draftFocused ? "" : focusedTaskId;
   const boardTasks = useMemo(() => flatRows.map((row) => row.task), [flatRows]);
   // The "Ready to review" hint (lib/review.ts): idle Dev tasks with a dirty worktree.
-  useReadyToReviewEvaluation(boardTasks, usePresenceMap());
   const draftOrigin = draft?.originTaskId
     ? (boardTasks.find((task) => task.id === draft.originTaskId) ?? null)
     : null;
