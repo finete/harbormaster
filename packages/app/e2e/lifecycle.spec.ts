@@ -797,7 +797,7 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("a repo task with an open PR check fails gh, and the next refresh tick shows a warning toast", async () => {
+  test("a repo task with an open PR check fails gh, and the next refresh tick shows one per-repo warning toast", async () => {
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Flaky Gh Task");
     await chooseWhere(window, { index: 1 });
@@ -822,9 +822,21 @@ test.describe("the refresh loop surfaces a dismissible warning banner when gh fa
     // — same command surface the timer itself calls.
     await window.evaluate(() => window.harbormaster.core.refresh());
 
+    // A failed batched PR lookup is reported once per repository (not per
+    // task) as "PR status for <repo> (N task[s]): <gh error>". The fake gh's
+    // "simulated failure" is not transient (no timeout / 5xx), so it warns on
+    // the first tick — only transient failures wait for 3 consecutive ticks
+    // (covered in core's refresh-pr-batching tests). The `gh api graphql`
+    // command line in the error elides the long query to "…(N chars)" so the
+    // toast stays a readable one-liner.
     const warning = window.getByTestId("toast-warning");
     await expect(warning).toBeVisible({ timeout: 15_000 });
-    await expect(warning).toContainText("Flaky Gh Task");
+    await expect(warning).toHaveCount(1);
+    await expect(warning).toContainText(/PR status for .+ \(1 task\):/);
+    await expect(warning).toContainText("fake gh: simulated failure");
+    await expect(warning).toContainText(/…\(\d+ chars\)/);
+    await expect(warning).not.toContainText("Flaky Gh Task");
+    expect((await warning.textContent())?.length ?? 0).toBeLessThan(600);
 
     // Electron's test viewport can report this fixed-position banner as
     // technically out of the visible viewport depending on window geometry
