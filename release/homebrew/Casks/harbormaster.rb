@@ -3,8 +3,8 @@
 # rewrites `version` and `sha256` here and in the tap checkout on every
 # release. Install: brew install --cask finete/tap/harbormaster
 cask "harbormaster" do
-  version "0.3.1"
-  sha256 "514eae4d4d5df19ce2c6b381f80c80f1f2c5454b8c7b2a5b4653e993b3c1d08c"
+  version "0.4.0"
+  sha256 "91281b57b2e5bb95f1131a1ef25f3dc1bb5bb31a8eedde00b5619251812472ed"
 
   url "https://github.com/finete/harbormaster/releases/download/v#{version}/Harbormaster-#{version}-arm64-mac.zip"
   name "Harbormaster"
