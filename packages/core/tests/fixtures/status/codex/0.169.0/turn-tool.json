@@ -1,0 +1,63 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "turn-tool",
+  "recordedAt": "2026-11-17T16:33:11.846Z",
+  "prompts": [
+    "Run `ls` with your shell tool, then reply with exactly the word DONE."
+  ],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 25514,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 2964
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3098
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 4900
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6430
+    },
+    {
+      "state": "done",
+      "app": "codex",
+      "ms": 12864
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

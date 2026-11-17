@@ -97,6 +97,23 @@ describe("program status in the pty layer", () => {
     ]);
   });
 
+  it("hands an OSC 9 note right before done to that report as its message (Codex, X4)", async () => {
+    const { pid } = createBackgroundPrimarySession(
+      "task-3",
+      shSpec(
+        "printf '\\033]9;4;1;50\\007\\033]7501;state=working\\007\\033]9;All set\\007'; sleep 0.05; printf '\\033]7501;state=done\\007'; sleep 0.2",
+      ),
+      () => {},
+    );
+    await expect
+      .poll(() => exits, { timeout: 5000 })
+      .toEqual([{ taskId: "task-3", pid }]);
+    expect(reports).toEqual([
+      { taskId: "task-3", pid, report: { state: "working" } },
+      { taskId: "task-3", pid, report: { state: "done", message: "All set" } },
+    ]);
+  });
+
   it("leaves a plain shell's output untouched and never reports for it", async () => {
     let output = "";
     const { id } = createSession(

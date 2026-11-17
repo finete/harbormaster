@@ -1,0 +1,61 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "turn",
+  "recordedAt": "2026-11-17T16:32:53.459Z",
+  "prompts": ["Reply with exactly the word OK and nothing else."],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 18235,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 3368
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3499
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 5277
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6833
+    },
+    {
+      "state": "done",
+      "app": "codex",
+      "ms": 9451
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

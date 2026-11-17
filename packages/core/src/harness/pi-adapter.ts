@@ -25,6 +25,7 @@ import type {
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
 import type { SessionUsage } from "../contracts/usage.js";
+import { canonicalPath } from "../utilities/canonical-path.js";
 import { SystemClock } from "../utilities/defaults.js";
 import {
   resolveSocketPath,
@@ -342,9 +343,13 @@ export class PiHarnessAdapter implements HarnessAdapter {
     this.agentDir = options.agentDir;
   }
 
+  /** Pi keys its session dir by its resolved cwd (`/tmp` → `/private/tmp` on macOS). */
   expectedSessionFile(cwd: string, sessionId: string): ExpectedSessionFile {
     return {
-      dir: piSessionDir(cwd, this.agentDir ?? defaultPiAgentDir()),
+      dir: piSessionDir(
+        canonicalPath(cwd),
+        this.agentDir ?? defaultPiAgentDir(),
+      ),
       fileSuffix: `_${sessionId}.jsonl`,
     };
   }

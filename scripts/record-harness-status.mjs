@@ -22,15 +22,20 @@
 //   node scripts/record-harness-status.mjs --harness pi --scenario turn
 //   node scripts/record-harness-status.mjs --harness claude-code \
 //     --scenario background-work --version 2.1.326 [--out <dir>] [--keep-temp]
+//   node scripts/record-harness-status.mjs --harness codex --scenario all \
+//     --command <prefix>/node_modules/.bin/codex
 //
 // Scenarios: startup, turn, turn-tool, permission, cancel, background-work,
 // subagent, exit. `--version` defaults to the CLI's own `--version`. The
-// binary is the descriptor's first alias found on PATH that is not a
-// terminal-multiplexer shim (cmux), or the descriptor's override env var.
+// binary is `--command <path>` (a pinned install outside PATH, e.g. the
+// real-CLI tier's npm prefix), else the descriptor's override env var, else
+// its first alias found on PATH that is not a terminal-multiplexer shim
+// (cmux).
 // Input typed before the TUI is ready is dropped, so every scenario waits for
 // the first 7501 report (or ~3 s with none) before typing; Enter is "\r".
 // Claude's folder-trust dialog is answered like a user (Enter on "Yes, I
-// trust this folder"). Output after the last 7501 report is truncated so a
+// trust this folder"), and Codex's ("Trust this folder?", Enter on "Trust
+// and continue"; Codex then records the folder in ~/.codex/config.toml). Output after the last 7501 report is truncated so a
 // fixture stays small.
 
 import { execFileSync } from "node:child_process";
@@ -79,7 +84,7 @@ export const SCENARIO_PROMPTS = {
 };
 
 /** How each harness leaves its TUI (the exit scenario). */
-const EXIT_KEYS = { "claude-code": "/exit\r", pi: "/quit\r" };
+const EXIT_KEYS = { "claude-code": "/exit\r", pi: "/quit\r", codex: "/quit" };
 
 /**
  * Extra launch args per harness and scenario. A user whose own settings
@@ -88,12 +93,28 @@ const EXIT_KEYS = { "claude-code": "/exit\r", pi: "/quit\r" };
  * (ask beats allow in Claude's precedence).
  */
 const SCENARIO_ARGS = {
+  // Codex: no approval prompt inside the workspace sandbox by default
+  // (and `approval_policy="untrusted"` is rejected on 0.169.0), so the
+  // permission scenario runs read-only: writing the file needs approval.
+  codex: {
+    permission: ["-s", "read-only", "-a", "on-request"],
+  },
   "claude-code": {
     permission: [
       "--settings",
       JSON.stringify({ permissions: { ask: ["Write", "Edit", "Bash"] } }),
     ],
   },
+};
+
+/**
+ * Extra launch args per harness for every scenario. Codex: low reasoning
+ * effort (fast, cheap turns; the dialect does not depend on it) and no
+ * user `notify` program (a user's turn-ended hook stays out of the
+ * recording).
+ */
+const HARNESS_ARGS = {
+  codex: ["-c", 'model_reasoning_effort="low"', "-c", "notify=[]"],
 };
 
 const MAX_FIXTURE_BYTES = 200 * 1024;
@@ -123,8 +144,9 @@ function isExecutable(path) {
   }
 }
 
-/** The descriptor's binary: an override env var, else the first non-shim PATH hit. */
-function resolveBinary(adapter) {
+/** The descriptor's binary: `--command`, an override env var, else the first non-shim PATH hit. */
+function resolveBinary(adapter, command) {
+  if (command) return command;
   for (const name of adapter.descriptor.commandEnv) {
     if (process.env[name]) return process.env[name];
   }
@@ -353,6 +375,23 @@ async function settle(session, harness, notes) {
   const started = Date.now();
   const ready = await waitFor(async () => {
     const text = session.screen();
+    if (/Hooks need review/.test(text) && /without trusting/.test(text)) {
+      // Codex: the user's own untrusted hooks (~/.codex/hooks.json). The
+      // app's launches pass --dangerously-bypass-hook-trust and never see
+      // this; the recorder skips them (Esc) rather than run them.
+      session.proc.write("\x1b");
+      notes.push("skipped Codex's hook-review dialog (Esc)");
+      await sleep(1500);
+      return false;
+    }
+    if (/Trust this folder\?/.test(text) && /Trust and continue/.test(text)) {
+      // Codex: option 1 "Trust and continue" is preselected.
+      session.proc.write("\r");
+      if (!trustDialog) notes.push("answered the folder-trust dialog");
+      trustDialog = true;
+      await sleep(1500);
+      return false;
+    }
     if (/Yes, I trust this folder/.test(text)) {
       const selected = text.split("\n").find((line) => line.includes("\u276f"));
       session.proc.write(selected?.includes("Yes, I trust") ? "\r" : "\x1b[B");
@@ -518,7 +557,10 @@ async function recordScenario({
   const workspace = makeWorkspace();
   const stateDir = mkdtempSync(join(tmpdir(), "hm-status-state-"));
   const notes = [];
-  const extraArgs = SCENARIO_ARGS[harness]?.[scenario] ?? [];
+  const extraArgs = [
+    ...(HARNESS_ARGS[harness] ?? []),
+    ...(SCENARIO_ARGS[harness]?.[scenario] ?? []),
+  ];
   const session = startSession({
     core,
     adapter,
@@ -585,14 +627,14 @@ async function main() {
   const scenarioArg = flags.get("scenario");
   if (!harness || !scenarioArg) {
     console.error(
-      "usage: record-harness-status.mjs --harness <id> --scenario <id>|all [--version <x>] [--out <dir>] [--keep-temp]",
+      "usage: record-harness-status.mjs --harness <id> --scenario <id>|all [--command <path>] [--version <x>] [--out <dir>] [--keep-temp]",
     );
     process.exit(2);
   }
   const core = await import(join(ROOT, "packages", "core", "dist", "index.js"));
   const adapter = core.createHarnessRegistry({}).get(harness);
   if (!adapter) throw new Error(`unknown harness ${harness}`);
-  const binary = resolveBinary(adapter);
+  const binary = resolveBinary(adapter, flags.get("command"));
   const version = flags.get("version") ?? cliVersion(adapter, binary);
   const scenarios = scenarioArg === "all" ? SCENARIOS : scenarioArg.split(",");
   for (const scenario of scenarios) {

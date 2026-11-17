@@ -3,7 +3,9 @@
 // installed Pi extension's `package.json` under Pi's npm dir, `claude
 // plugin list --json`, `claude --version` and the `plannotator-review`
 // Claude skill's SKILL.md (`$CLAUDE_CONFIG_DIR` or `~/.claude`, then
-// `skills/`). Raw outputs only, parsed by
+// `skills/`), and the same skill where Codex reads user skills
+// (`$CODEX_HOME/skills` or `~/.codex/skills`, then `~/.agents/skills`).
+// Raw outputs only, parsed by
 // `engines/review-support.ts`; every probe is time-boxed and never throws.
 
 import { readFile } from "node:fs/promises";
@@ -94,5 +96,22 @@ export class LocalReviewSupportProbeAccess implements ReviewSupportProbeAccess {
     const configDir = this.env.CLAUDE_CONFIG_DIR || join(this.home, ".claude");
     const path = join(configDir, "skills", "plannotator-review", "SKILL.md");
     return readFile(path, "utf8").catch(() => undefined);
+  }
+
+  async codexReviewSkill(): Promise<string | undefined> {
+    // Codex's skill roots (codex-cli 0.169.0): `$CODEX_HOME/skills`
+    // ("codex-home-skills") and `~/.agents/skills` ("user-agent-skills").
+    const codexHome = this.env.CODEX_HOME || join(this.home, ".codex");
+    for (const root of [
+      join(codexHome, "skills"),
+      join(this.home, ".agents", "skills"),
+    ]) {
+      const text = await readFile(
+        join(root, "plannotator-review", "SKILL.md"),
+        "utf8",
+      ).catch(() => undefined);
+      if (text !== undefined) return text;
+    }
+    return undefined;
   }
 }

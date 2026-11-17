@@ -114,6 +114,17 @@ it("has the required recordings (S1)", () => {
   expect(recorded("pi")).toEqual(
     expect.arrayContaining(["startup", "turn", "cancel"]),
   );
+  expect(recorded("codex")).toEqual(
+    expect.arrayContaining([
+      "startup",
+      "turn",
+      "turn-tool",
+      "permission",
+      "cancel",
+      "background-work",
+      "exit",
+    ]),
+  );
 });
 
 describe.each(
@@ -152,16 +163,16 @@ describe.each(
 });
 
 describe("scenario semantics", () => {
-  it("a Claude turn ends in done; a Pi turn ends in done", () => {
-    for (const harness of ["claude-code", "pi"]) {
+  it("a Claude, Pi and Codex turn ends in done", () => {
+    for (const harness of ["claude-code", "pi", "codex"]) {
       const { meta } = fixture(harness, "turn");
       expect(meta.expected.states.at(-1), harness).toBe("done");
       expect(meta.expected.states, harness).toContain("working");
     }
   });
 
-  it("Esc cancel ends idle (not done, not working) for both", () => {
-    for (const harness of ["claude-code", "pi"]) {
+  it("Esc cancel ends idle (not done, not working) for all", () => {
+    for (const harness of ["claude-code", "pi", "codex"]) {
       const { meta } = fixture(harness, "cancel");
       expect(meta.expected.states, harness).toContain("working");
       expect(meta.expected.states.at(-1), harness).toBe("idle");
@@ -169,7 +180,7 @@ describe("scenario semantics", () => {
   });
 
   it("startup settles idle", () => {
-    for (const harness of ["claude-code", "pi"]) {
+    for (const harness of ["claude-code", "pi", "codex"]) {
       expect(fixture(harness, "startup").meta.expected.states.at(-1)).toBe(
         "idle",
       );
@@ -203,5 +214,40 @@ describe("scenario semantics", () => {
     );
     if (!entry) return;
     expect(parse(entry.raw).at(-1)?.state).toBe("done");
+  });
+
+  it("Codex reports without the probe and blips idle→working→idle at startup (X4)", () => {
+    const { meta, raw } = fixture("codex", "startup");
+    expect(raw).not.toContain("\x1b]7501;?");
+    expect(meta.expected.states).toEqual(["idle", "working", "idle"]);
+  });
+
+  it("Codex: blocked carries no message; declining (Esc) ends idle", () => {
+    const reports = parse(fixture("codex", "permission").raw);
+    const blocked = reports.filter((report) => report.state === "blocked");
+    expect(blocked.length).toBeGreaterThan(0);
+    for (const report of blocked) {
+      expect(report.message).toBeUndefined();
+      expect(report.kind).toBe("permission");
+    }
+    expect(reports.at(-1)?.state).toBe("idle");
+  });
+
+  it("Codex: the reply arrives as OSC 9 right before done; background work still ends in done", () => {
+    for (const scenario of ["turn", "background-work"]) {
+      const { raw } = fixture("codex", scenario);
+      const done = raw.lastIndexOf("\x1b]7501;state=done");
+      const note = raw.lastIndexOf("\x1b]9;", done);
+      expect(done, scenario).toBeGreaterThan(0);
+      expect(note, scenario).toBeGreaterThan(0);
+      // Nothing but the OSC 9 sequence sits between them.
+      const between = raw.slice(note, done);
+      expect(between, scenario).toMatch(
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 9 framing
+        /^\x1b\]9;[^\x07\x1b]*(\x07|\x1b\\)$/,
+      );
+      expect(parse(raw).at(-1)?.state, scenario).toBe("done");
+    }
+    expect(fixture("codex", "turn").raw).toContain("\x1b]9;OK");
   });
 });

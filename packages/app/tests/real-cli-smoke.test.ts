@@ -1,5 +1,5 @@
 // Keyless real-CLI tier, T3 (decision R15; docs/harness-additions.md P5 and
-// "Test tiers"): install the pinned `claude` and `pi` into a throwaway npm
+// "Test tiers"): install the pinned `claude`, `pi` and `codex` into a throwaway npm
 // prefix, launch each with Harbormaster's exact launch spec (core's
 // adapters) in a real pty, and assert every contract row that needs no
 // model (`e2e/contracts/<harness>.ts`, `needsModel: false`), one test per
@@ -7,7 +7,9 @@
 //
 // Keyless, no network model: Claude gets a fake ANTHROPIC_API_KEY and Pi a
 // `models.json` provider, both pointed at a local canned Messages-API stub
-// (`startMessagesStub`), so turns, hooks, transcripts and session files are
+// (`startMessagesStub`); Codex a `model_providers` entry in a fresh
+// CODEX_HOME pointed at a canned Responses-API stub (`startResponsesStub`);
+// so turns, hooks, transcripts and session files are
 // real while no model ever answers. The `harbormaster` CLI path in the
 // launch spec is a logging stand-in, so hook stdin/env and the MCP server
 // spawn are observable; Pi's inbox extension (packages/extension) talks to
@@ -17,7 +19,7 @@
 // Skipped unless HARBORMASTER_REAL_CLI=1 (it downloads ~100 MB). Optional:
 // HARBORMASTER_REAL_CLI_PREFIX=<dir> reuses an install. Nothing touches the
 // real ~/.claude or ~/.pi: HOME is the test sandbox (vitest.isolate-home)
-// and CLAUDE_CONFIG_DIR / PI_CODING_AGENT_DIR point into the temp dir.
+// and CLAUDE_CONFIG_DIR / PI_CODING_AGENT_DIR / CODEX_HOME point into the temp dir.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -42,12 +44,14 @@ import { dirname, join } from "node:path";
 import {
   type BuildLaunchSpecInput,
   ClaudeCodeHarnessAdapter,
+  CodexHarnessAdapter,
   PiHarnessAdapter,
   ProgramStatusParser,
 } from "@harbormaster/core";
 import * as pty from "node-pty";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLAUDE_CODE_CONTRACT } from "../e2e/contracts/claude-code";
+import { CODEX_CONTRACT } from "../e2e/contracts/codex";
 import { PI_CONTRACT } from "../e2e/contracts/pi";
 import type { ContractRow } from "../e2e/contracts/types";
 
@@ -55,6 +59,7 @@ import type { ContractRow } from "../e2e/contracts/types";
 export const PINNED = {
   claude: "@anthropic-ai/claude-code@2.1.322",
   pi: "@earendil-works/pi-coding-agent@1.5.2",
+  codex: "@openai/codex@0.169.0",
 } as const;
 
 const enabled = process.env.HARBORMASTER_REAL_CLI === "1";
@@ -107,7 +112,7 @@ async function waitFor(
   return predicate();
 }
 
-function bin(name: "claude" | "pi"): string {
+function bin(name: "claude" | "pi" | "codex"): string {
   return join(prefix, "node_modules", ".bin", name);
 }
 
@@ -363,6 +368,105 @@ async function startMessagesStub(): Promise<MessagesStub> {
   };
 }
 
+/** An OpenAI Responses-API stand-in for Codex: every turn answers "OK"; a user prompt containing TOOL_TRIGGER first gets one `exec_command` call. */
+interface ResponsesStub {
+  url: string;
+  bodies: string[];
+  seen(text: string): boolean;
+  close(): Promise<void>;
+}
+
+async function startResponsesStub(): Promise<ResponsesStub> {
+  const bodies: string[] = [];
+  const server = createHttpServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      bodies.push(body);
+      if (
+        request.method !== "POST" ||
+        !(request.url ?? "").endsWith("/responses")
+      ) {
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end("{}");
+        return;
+      }
+      let parsed: {
+        input?: Array<{ type?: string; role?: string; content?: unknown }>;
+        tools?: Array<{ name?: string }>;
+      } = {};
+      try {
+        parsed = JSON.parse(body);
+      } catch {}
+      // The turn's input: the last item that is not a developer message
+      // (hook context arrives as developer messages after the prompt).
+      const last = (parsed.input ?? [])
+        .filter(
+          (item) => !(item.type === "message" && item.role === "developer"),
+        )
+        .at(-1);
+      const useTool =
+        (parsed.tools ?? []).some((tool) => tool.name === "exec_command") &&
+        last?.type === "message" &&
+        last.role === "user" &&
+        JSON.stringify(last.content).includes(TOOL_TRIGGER);
+      const n = bodies.length;
+      const item = useTool
+        ? {
+            type: "function_call",
+            id: `fc_${n}`,
+            call_id: `call_${n}`,
+            name: "exec_command",
+            arguments: JSON.stringify({ cmd: "true" }),
+          }
+        : {
+            type: "message",
+            role: "assistant",
+            id: `msg_${n}`,
+            content: [{ type: "output_text", text: "OK" }],
+          };
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const event = (type: string, data: Record<string, unknown>): void => {
+        response.write(
+          `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`,
+        );
+      };
+      event("response.created", { response: { id: `resp_${n}` } });
+      event("response.output_item.done", { output_index: 0, item });
+      event("response.completed", {
+        response: {
+          id: `resp_${n}`,
+          usage: {
+            input_tokens: 10,
+            input_tokens_details: { cached_tokens: 2 },
+            output_tokens: 3,
+            output_tokens_details: { reasoning_tokens: 1 },
+            total_tokens: 13,
+          },
+        },
+      });
+      response.end();
+    });
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    bodies,
+    seen: (text) => bodies.some((body) => body.includes(text)),
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
 /** One call of the logging `harbormaster` stand-in. */
 interface CliCall {
   args: string[];
@@ -372,9 +476,9 @@ interface CliCall {
 
 /**
  * Writes the logging stand-in for the `harbormaster` CLI: appends
- * `{ args, env, stdin }` per call to `log`; `hook inbox --mode <mode>`
- * prints (once) the reply file `<replies>/<mode>` if present, else `{}`;
- * `mcp` exits at once.
+ * `{ args, env, stdin }` per call to `log`; `hook inbox --mode <mode>` /
+ * `hook codex --event <event>` prints (once) the reply file
+ * `<replies>/<mode|event>` if present, else `{}`; `mcp` exits at once.
  */
 function writeCliLogger(dir: string, log: string, replies: string): string {
   const file = join(dir, "harbormaster-logger.cjs");
@@ -388,7 +492,8 @@ function writeCliLogger(dir: string, log: string, replies: string): string {
       'const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("HARBORMASTER")));',
       `fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, env, stdin }) + "\\n");`,
       'if (args[0] === "hook") {',
-      `  const reply = ${JSON.stringify(replies)} + "/" + args[args.indexOf("--mode") + 1];`,
+      `  const key = args.includes("--mode") ? args[args.indexOf("--mode") + 1] : args[args.indexOf("--event") + 1];`,
+      `  const reply = ${JSON.stringify(replies)} + "/" + key;`,
       '  let out = "{}";',
       '  try { out = fs.readFileSync(reply, "utf8"); fs.rmSync(reply); } catch {}',
       "  process.stdout.write(out);",
@@ -470,7 +575,11 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
     root = mkdtempSync(join(realpathSync(tmpdir()), "hm-real-cli-"));
     mkdirSync(join(root, "state"), { recursive: true });
     prefix = process.env.HARBORMASTER_REAL_CLI_PREFIX || join(root, "prefix");
-    if (!existsSync(bin("claude")) || !existsSync(bin("pi"))) {
+    if (
+      !existsSync(bin("claude")) ||
+      !existsSync(bin("pi")) ||
+      !existsSync(bin("codex"))
+    ) {
       execFileSync(
         "npm",
         [
@@ -482,6 +591,7 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
           "--no-save",
           PINNED.claude,
           PINNED.pi,
+          PINNED.codex,
         ],
         { stdio: "inherit", timeout: 600_000 },
       );
@@ -501,6 +611,7 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
     expect(PINNED.pi).toBe(
       `@earendil-works/pi-coding-agent@${PI_CONTRACT.version}`,
     );
+    expect(PINNED.codex).toBe(`@openai/codex@${CODEX_CONTRACT.version}`);
   });
 
   describe("Claude Code", () => {
@@ -1573,9 +1684,586 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
     everyKeylessRowAsserted();
   });
 
+  describe("Codex", () => {
+    const X = CODEX_CONTRACT;
+    const { rowIt, everyKeylessRowAsserted } = rowTests(X);
+    const FIRST_PROMPT = `-hm-codex-first ${TOOL_TRIGGER}`;
+    const CATCH_UP = "hm-codex-catch-up";
+    const STEER = "hm-codex-steer";
+    const MODEL = "stub-model";
+    const TASK = "smoke-codex";
+    const SKILL_MARKER = "hm-codex-skill-body";
+    const AGENTS_MARKER = "hm-codex-agents-skill-body";
+    const QUEUED_MARKER = "hm-codex-queued-skill-body";
+
+    let home: string;
+    let workspace: string;
+    let log: string;
+    let replies: string;
+    let cli: string;
+    let responses: ResponsesStub;
+    const o = {
+      version: "",
+      main: undefined as PtyRun | undefined,
+      mainDone: false,
+      sessionId: "",
+      rollout: "",
+      popupHeld: false,
+      popupSubmitted: false,
+      agentsSkillRan: false,
+      queueOut: "",
+      queueExit: -1,
+      queuedTurn: false,
+      resumed: undefined as PtyRun | undefined,
+      resumeHistory: false,
+      forked: undefined as PtyRun | undefined,
+      forkId: "",
+      forkHistory: false,
+      idle: undefined as PtyRun | undefined,
+      idleRollouts: [] as string[],
+      idleStarts: -1,
+      bypassReady: true,
+      bypassShowedTrust: false,
+      trust: undefined as PtyRun | undefined,
+      trustShown: false,
+      reportsDuringTrust: [] as string[],
+      readyAfterTrust: false,
+      trustConfig: "",
+    };
+
+    const adapter = (): CodexHarnessAdapter =>
+      new CodexHarnessAdapter({ cliPath: cli, homeDir: home });
+
+    const codexEnv = (): Record<string, string> => ({
+      ...sandboxEnv(),
+      CODEX_HOME: home,
+      HM_STUB_KEY: "keyless",
+    });
+
+    const run = (input: BuildLaunchSpecInput): PtyRun => {
+      const spec = adapter().buildLaunchSpec(input);
+      return new PtyRun(bin("codex"), spec.args, {
+        cwd: spec.cwd,
+        env: { ...codexEnv(), ...spec.env },
+      });
+    };
+
+    const reply = (event: string, value: unknown): void =>
+      writeFileSync(join(replies, event), JSON.stringify(value));
+
+    const prompts = (): string[] =>
+      hookInputs(log, "UserPromptSubmit").map((input) => String(input.prompt));
+
+    const skill = (dir: string, name: string, body: string): void => {
+      mkdirSync(join(dir, name), { recursive: true });
+      writeFileSync(
+        join(dir, name, "SKILL.md"),
+        `---\nname: ${name}\ndescription: smoke\n---\n${body}\n`,
+      );
+    };
+
+    const rollouts = (): string[] => {
+      const found: string[] = [];
+      const walk = (dir: string): void => {
+        if (!existsSync(dir)) return;
+        for (const name of readdirSync(dir, { withFileTypes: true })) {
+          if (name.isDirectory()) walk(join(dir, name.name));
+          else found.push(join(dir, name.name));
+        }
+      };
+      walk(join(home, "sessions"));
+      return found;
+    };
+
+    beforeAll(async () => {
+      responses = await startResponsesStub();
+      home = join(root, "codex-home");
+      workspace = join(root, "codex-work");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(workspace, { recursive: true });
+      // Keyless: a provider at the canned Responses stub; the workspace
+      // pre-trusted the way Codex itself records it (codex.trust.folder).
+      writeFileSync(
+        join(home, "config.toml"),
+        [
+          'model_provider = "hmstub"',
+          `model = "${MODEL}"`,
+          "",
+          "[model_providers.hmstub]",
+          'name = "stub"',
+          `base_url = "${responses.url}/v1"`,
+          'wire_api = "responses"',
+          'env_key = "HM_STUB_KEY"',
+          "",
+          `[projects."${realpathSync(workspace)}"]`,
+          'trust_level = "trusted"',
+          "",
+        ].join("\n"),
+      );
+      log = join(root, "codex-cli.log");
+      replies = join(root, "codex-replies");
+      mkdirSync(replies, { recursive: true });
+      cli = writeCliLogger(root, log, replies);
+      skill(join(home, "skills"), "hm-smoke-skill", SKILL_MARKER);
+      skill(join(home, "skills"), "hm-queued-skill", QUEUED_MARKER);
+      skill(
+        join(process.env.HOME ?? root, ".agents", "skills"),
+        "hm-agents-skill",
+        AGENTS_MARKER,
+      );
+
+      o.version = execFileSync(bin("codex"), ["--version"], {
+        env: codexEnv(),
+        encoding: "utf8",
+      }).trim();
+
+      // Main: a new bypass session whose prompt makes the stub call one tool.
+      reply("user-prompt-submit", {
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: CATCH_UP,
+        },
+      });
+      reply("post-tool-use", {
+        hookSpecificOutput: {
+          hookEventName: "PostToolUse",
+          additionalContext: STEER,
+        },
+      });
+      const main = run(
+        launchInput({
+          taskId: TASK,
+          workspacePath: workspace,
+          session: { mode: "new", sessionId: "placeholder", model: MODEL },
+          initialPrompt: FIRST_PROMPT,
+        }),
+      );
+      o.main = main;
+      const turn = X.row("codex.status.turn").facts;
+      o.mainDone = await waitFor(
+        () =>
+          hookInputs(log, "Stop").length > 0 &&
+          main.reports().includes(turn.done),
+      );
+      const start = hookInputs(log, "SessionStart")[0] ?? {};
+      o.sessionId = String(start.session_id ?? "");
+      o.rollout = String(start.transcript_path ?? "");
+
+      // A bare $skill + Enter only completes; Enter again submits.
+      const before = prompts().length;
+      await main.typeLine("$hm-smoke-skill");
+      // The behavior is "nothing is submitted": give it time to (not) happen.
+      await sleep(2_000);
+      o.popupHeld = prompts().length === before;
+      main.write("\r");
+      o.popupSubmitted = await waitFor(() => responses.seen(SKILL_MARKER));
+      await waitFor(() => hookInputs(log, "Stop").length >= 2);
+      // The typing fallback's form: a trailing space submits at once.
+      await main.typeLine("$hm-agents-skill ");
+      o.agentsSkillRan = await waitFor(() => responses.seen(AGENTS_MARKER));
+      await waitFor(() => hookInputs(log, "Stop").length >= 3);
+
+      // `codex queue` into the live idle session (X5), a skill included.
+      const queued = adapter().deliverCommand(
+        "wakeIdle",
+        o.sessionId,
+        "$hm-queued-skill hm-codex-queued-text",
+      );
+      try {
+        o.queueOut = execFileSync(bin("codex"), queued?.args ?? [], {
+          env: codexEnv(),
+          encoding: "utf8",
+        });
+        o.queueExit = 0;
+      } catch (error) {
+        o.queueExit = (error as { status?: number }).status ?? 1;
+      }
+      o.queuedTurn = await waitFor(
+        () =>
+          prompts().includes("$hm-queued-skill hm-codex-queued-text") &&
+          responses.seen(QUEUED_MARKER),
+      );
+      await waitFor(() => hookInputs(log, "Stop").length >= 4);
+      await main.stop();
+
+      // Resume (default permissions), then fork from the rollout.
+      const resumed = run(
+        launchInput({
+          taskId: TASK,
+          workspacePath: workspace,
+          permissions: "default",
+          session: { mode: "resume", sessionId: o.sessionId },
+          initialPrompt: "hm-codex-resume",
+        }),
+      );
+      o.resumed = resumed;
+      o.resumeHistory = await waitFor(() =>
+        responses.bodies.some(
+          (body) =>
+            body.includes("hm-codex-resume") && body.includes("hm-codex-first"),
+        ),
+      );
+      await waitFor(() =>
+        hookInputs(log, "Stop").some(
+          (input) =>
+            input.session_id === o.sessionId &&
+            prompts().includes("hm-codex-resume"),
+        ),
+      );
+      await sleep(500);
+      await resumed.stop();
+      const forked = run(
+        launchInput({
+          taskId: TASK,
+          workspacePath: workspace,
+          session: {
+            mode: "fork",
+            sessionId: "placeholder",
+            forkFrom: o.rollout,
+          },
+          initialPrompt: "hm-codex-fork",
+        }),
+      );
+      o.forked = forked;
+      o.forkHistory = await waitFor(() =>
+        responses.bodies.some(
+          (body) =>
+            body.includes("hm-codex-fork") && body.includes("hm-codex-first"),
+        ),
+      );
+      await waitFor(() =>
+        hookInputs(log, "UserPromptSubmit").some(
+          (input) => input.prompt === "hm-codex-fork",
+        ),
+      );
+      o.forkId = String(
+        hookInputs(log, "UserPromptSubmit").find(
+          (input) => input.prompt === "hm-codex-fork",
+        )?.session_id ?? "",
+      );
+      await waitFor(() =>
+        hookInputs(log, "Stop").some((input) => input.session_id === o.forkId),
+      );
+      await forked.stop();
+
+      // No prompt: idle without a probe; no rollout and no SessionStart
+      // until a first prompt.
+      const rolloutsBefore = rollouts();
+      const startsBefore = hookInputs(log, "SessionStart").length;
+      const idle = run(launchInput({ taskId: TASK, workspacePath: workspace }));
+      o.idle = idle;
+      await waitFor(() =>
+        idle.reports().includes(X.row("codex.status.no-probe").facts.ready),
+      );
+      // The behavior is "nothing is written yet": give it time to (not) happen.
+      await sleep(2_000);
+      o.idleRollouts = rollouts().filter(
+        (file) => !rolloutsBefore.includes(file),
+      );
+      o.idleStarts = hookInputs(log, "SessionStart").length - startsBefore;
+      await idle.stop();
+
+      // A never-trusted folder shows the dialog, a bypass launch too.
+      // (Codex asks only for a git repository, as a task worktree is.)
+      const bypassFresh = join(root, "codex-fresh-bypass");
+      mkdirSync(bypassFresh, { recursive: true });
+      execFileSync("git", ["init", "-q"], { cwd: bypassFresh });
+      const skipped = run(
+        launchInput({ taskId: TASK, workspacePath: bypassFresh }),
+      );
+      o.bypassShowedTrust = await waitFor(() =>
+        skipped.shows(X.row("codex.trust.folder").facts.question),
+      );
+      o.bypassReady = skipped.reports().length > 0;
+      await skipped.stop();
+      const fresh = join(root, "codex-fresh");
+      mkdirSync(fresh, { recursive: true });
+      execFileSync("git", ["init", "-q"], { cwd: fresh });
+      const trust = run(
+        launchInput({
+          taskId: TASK,
+          workspacePath: fresh,
+          permissions: "default",
+        }),
+      );
+      o.trust = trust;
+      const folder = X.row("codex.trust.folder").facts;
+      o.trustShown = await waitFor(
+        () => trust.shows(folder.question) && trust.shows(folder.accept),
+      );
+      await sleep(500);
+      o.reportsDuringTrust = trust.reports();
+      trust.write("\r");
+      o.readyAfterTrust = await waitFor(() =>
+        trust.reports().includes(X.row("codex.status.no-probe").facts.ready),
+      );
+      await trust.stop();
+      o.trustConfig = readFileSync(join(home, "config.toml"), "utf8");
+      console.log(
+        "[real-cli-smoke] codex",
+        JSON.stringify({
+          main: main.reports(),
+          tail: main.tail(),
+          hooks: readCalls(log).map((call) => call.args.join(" ")),
+        }),
+      );
+    }, SCENARIO_MS);
+
+    afterAll(async () => {
+      for (const ran of [o.main, o.resumed, o.forked, o.idle, o.trust]) {
+        await ran?.stop();
+      }
+      await responses?.close();
+    });
+
+    rowIt("codex.version", () => {
+      const facts = X.row("codex.version").facts;
+      expect(o.version).toMatch(new RegExp(facts.pattern));
+      expect(o.version).toBe(facts.output);
+      expect(adapter().descriptor.parseVersion(o.version)).toBe(X.version);
+    });
+
+    rowIt("codex.argv.hooks", () => {
+      const facts = X.row("codex.argv.hooks").facts;
+      for (const event of facts.events) {
+        expect(hookInputs(log, event).length, event).toBeGreaterThan(0);
+      }
+      // Per session only: nothing was written into CODEX_HOME.
+      expect(readFileSync(join(home, "config.toml"), "utf8")).not.toContain(
+        "hook codex",
+      );
+      expect(existsSync(join(home, "hooks.json"))).toBe(false);
+    });
+
+    rowIt("codex.hook.command-shell", () => {
+      const facts = X.row("codex.hook.command-shell").facts;
+      const hooks = readCalls(log).filter((call) => call.args[0] === "hook");
+      expect(hooks.length).toBeGreaterThan(0);
+      for (const call of hooks) {
+        expect(call.args.slice(0, 3)).toEqual(["hook", "codex", "--event"]);
+        expect(call.env[facts.inheritedEnv]).toBe(TASK);
+        const input = JSON.parse(call.stdin) as Record<string, unknown>;
+        for (const key of facts.stdinKeys) expect(input).toHaveProperty(key);
+      }
+    });
+
+    rowIt("codex.hook.session-start", () => {
+      const facts = X.row("codex.hook.session-start").facts;
+      const starts = hookInputs(log, facts.event);
+      for (const key of facts.stdinKeys) expect(starts[0]).toHaveProperty(key);
+      expect(starts[0]?.source).toBe(facts.newSource);
+      expect(o.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+      // Fired with the first prompt, not at start: the idle run saw none.
+      expect(o.idleStarts).toBe(0);
+      // The adapter reads the id back out of the rollout's name.
+      expect(o.rollout.endsWith(`-${o.sessionId}.jsonl`)).toBe(true);
+    });
+
+    rowIt("codex.hook.user-prompt-submit", () => {
+      const facts = X.row("codex.hook.user-prompt-submit").facts;
+      const input = hookInputs(log, facts.event)[0];
+      for (const key of facts.stdinKeys) expect(input).toHaveProperty(key);
+      expect(responses.seen(CATCH_UP)).toBe(true);
+    });
+
+    rowIt("codex.hook.post-tool-use", () => {
+      const facts = X.row("codex.hook.post-tool-use").facts;
+      const input = hookInputs(log, facts.event)[0];
+      for (const key of facts.stdinKeys) expect(input).toHaveProperty(key);
+      // Codex names its exec_command tool "Bash" in hook payloads.
+      expect(input?.tool_name).toBe(facts.toolName);
+      expect(responses.seen(STEER)).toBe(true);
+    });
+
+    rowIt("codex.hook.stop", () => {
+      const facts = X.row("codex.hook.stop").facts;
+      const input = hookInputs(log, facts.event)[0];
+      for (const key of facts.stdinKeys) expect(input).toHaveProperty(key);
+      expect(input?.stop_hook_active).toBe(false);
+      expect(input?.session_id).toBe(o.sessionId);
+    });
+
+    rowIt("codex.argv.mcp", () => {
+      const facts = X.row("codex.argv.mcp").facts;
+      const spawned = readCalls(log).find((call) => call.args[0] === "mcp");
+      expect(spawned?.args).toEqual(facts.args);
+      expect(spawned?.env.HARBORMASTER_TASK_ID).toBe(TASK);
+    });
+
+    rowIt("codex.argv.resume", () => {
+      expect(o.resumeHistory).toBe(true);
+      const starts = hookInputs(log, "SessionStart");
+      expect(
+        starts.some(
+          (input) =>
+            input.session_id === o.sessionId && input.source === "resume",
+        ),
+      ).toBe(true);
+    });
+
+    rowIt("codex.argv.fork", () => {
+      const facts = X.row("codex.argv.fork").facts;
+      expect(o.forkHistory).toBe(true);
+      expect(o.forkId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(o.forkId).not.toBe(o.sessionId);
+      const forkRollout = rollouts().find((file) =>
+        file.endsWith(`-${o.forkId}.jsonl`),
+      );
+      const meta = JSON.parse(
+        readFileSync(forkRollout ?? "", "utf8").split("\n")[0] ?? "{}",
+      ) as { payload?: Record<string, unknown> };
+      expect(meta.payload?.[facts.metaKey]).toBe(o.sessionId);
+    });
+
+    rowIt("codex.argv.bypass", () => {
+      const facts = X.row("codex.argv.bypass").facts;
+      const byId = (id: string) =>
+        hookInputs(log, "UserPromptSubmit").find(
+          (input) => input.session_id === id,
+        );
+      expect(byId(o.sessionId)?.permission_mode).toBe(facts.permissionMode);
+      // A resumed session keeps the mode it was created with, even when
+      // reopened without the flag.
+      const resumed = hookInputs(log, "UserPromptSubmit").find(
+        (input) => input.prompt === "hm-codex-resume",
+      );
+      expect(resumed?.permission_mode).toBe(facts.resumeKeeps);
+    });
+
+    rowIt("codex.sandbox.network", () => {
+      const facts = X.row("codex.sandbox.network").facts;
+      const listen = (extra: string[]): string => {
+        try {
+          return execFileSync(
+            bin("codex"),
+            [
+              "sandbox",
+              "-c",
+              facts.mode,
+              ...extra,
+              "--",
+              process.execPath,
+              "-e",
+              'require("net").createServer().listen(0,"127.0.0.1",function(){console.log("listening");process.exit(0)}).on("error",function(e){console.log(e.code);process.exit(1)})',
+            ],
+            { cwd: workspace, env: codexEnv(), encoding: "utf8" },
+          ).trim();
+        } catch (error) {
+          return String((error as { stdout?: string }).stdout ?? "").trim();
+        }
+      };
+      expect(listen([])).toContain(facts.denied);
+      expect(listen(["-c", facts.override])).toContain("listening");
+      // Every launch carries it.
+      const args = adapter().buildLaunchSpec(
+        launchInput({ taskId: TASK, workspacePath: workspace }),
+      ).args;
+      expect(args).toContain(facts.override);
+    });
+
+    rowIt("codex.argv.model", () => {
+      expect(hookInputs(log, "SessionStart")[0]?.model).toBe(MODEL);
+      expect(
+        responses.bodies.some((body) => body.includes(`"model":"${MODEL}"`)),
+      ).toBe(true);
+    });
+
+    rowIt("codex.prompt.after-dashdash", () => {
+      expect(prompts()[0]).toBe(FIRST_PROMPT);
+      expect(prompts()).toContain("hm-codex-resume");
+    });
+
+    rowIt("codex.status.no-probe", () => {
+      const facts = X.row("codex.status.no-probe").facts;
+      expect(o.idle?.raw).not.toContain(facts.probe);
+      expect(o.idle?.probes).toBe(0);
+      expect(o.idle?.reports()[0]).toBe(facts.ready);
+    });
+
+    rowIt("codex.status.turn", () => {
+      const facts = X.row("codex.status.turn").facts;
+      expect(o.mainDone).toBe(true);
+      const raw = o.main?.raw ?? "";
+      const done = raw.indexOf(`\x1b]7501;${facts.done}`);
+      expect(raw.indexOf(`\x1b]7501;${facts.working}`)).toBeGreaterThan(-1);
+      expect(done).toBeGreaterThan(raw.indexOf(`\x1b]7501;${facts.working}`));
+      // The reply right before done, as OSC 9.
+      expect(raw.slice(raw.lastIndexOf(facts.osc9, done), done)).toBe(
+        `${facts.osc9}OK\x07`,
+      );
+      const args = adapter().buildLaunchSpec(
+        launchInput({ taskId: TASK, workspacePath: workspace }),
+      ).args;
+      for (const override of facts.overrides) expect(args).toContain(override);
+    });
+
+    rowIt("codex.queue", () => {
+      const facts = X.row("codex.queue").facts;
+      expect(o.queueExit).toBe(0);
+      expect(o.queueOut).toContain(facts.reply);
+      expect(o.queueOut).toContain(o.sessionId);
+      expect(o.queuedTurn).toBe(true);
+    });
+
+    rowIt("codex.command.skill", () => {
+      expect(o.popupSubmitted).toBe(true);
+      expect(o.agentsSkillRan).toBe(true);
+      expect(responses.seen(QUEUED_MARKER)).toBe(true);
+    });
+
+    rowIt("codex.command.skill-popup", () => {
+      expect(o.popupHeld, o.main?.tail()).toBe(true);
+      expect(o.popupSubmitted).toBe(true);
+      expect(o.agentsSkillRan).toBe(true);
+    });
+
+    rowIt("codex.session-file.layout", () => {
+      const facts = X.row("codex.session-file.layout").facts;
+      expect(o.rollout).toMatch(
+        new RegExp(
+          `^${home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/${facts.dir}/\\d{4}/\\d{2}/\\d{2}/${facts.prefix}[^/]+-${o.sessionId}\\${facts.suffix}$`,
+        ),
+      );
+      expect(existsSync(o.rollout)).toBe(true);
+      // Written with the first prompt: the idle session has none yet.
+      expect(o.idleRollouts).toEqual([]);
+      expect(readFileSync(o.rollout, "utf8")).toContain(`"${facts.usageType}"`);
+    });
+
+    rowIt("codex.env.home", async () => {
+      // Rollouts, skills, the queue: all under CODEX_HOME.
+      expect(o.rollout.startsWith(home)).toBe(true);
+      expect(o.queuedTurn).toBe(true);
+      const usage = await adapter().readSessionUsage(o.rollout);
+      expect(usage?.byModel[0]?.model).toBe(MODEL);
+      expect(usage?.byModel[0]?.turns).toBeGreaterThan(0);
+      expect(usage?.byModel[0]?.output).toBeGreaterThan(0);
+    });
+
+    rowIt("codex.trust.folder", () => {
+      const facts = X.row("codex.trust.folder").facts;
+      expect(o.trustShown, o.trust?.tail()).toBe(true);
+      expect(o.reportsDuringTrust).toEqual([]);
+      expect(o.readyAfterTrust).toBe(true);
+      expect(o.trustConfig).toContain(
+        `[projects."${realpathSync(join(root, "codex-fresh"))}"]`,
+      );
+      expect(o.trustConfig).toContain(facts.persisted);
+      // A bypass launch shows it too (no report while it is up).
+      expect(o.bypassShowedTrust).toBe(true);
+      expect(o.bypassReady).toBe(false);
+    });
+
+    everyKeylessRowAsserted();
+  });
+
   // Rows a keyless run cannot check; the real smoke (T4) owns them.
   describe.skip("needs a model: real smoke (T4)", () => {
-    for (const row of [...CLAUDE_CODE_CONTRACT.rows, ...PI_CONTRACT.rows]) {
+    for (const row of [
+      ...CLAUDE_CODE_CONTRACT.rows,
+      ...PI_CONTRACT.rows,
+      ...CODEX_CONTRACT.rows,
+    ]) {
       if (row.needsModel) it(`${row.id}: ${row.title}`, () => {});
     }
   });

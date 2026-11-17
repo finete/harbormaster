@@ -77,6 +77,35 @@ export async function typeCommand(
   return write("\r");
 }
 
+/**
+ * The text main types for `command`. A Codex skill mention (`$name`) on
+ * its own opens Codex's completion popup, where Enter only inserts the
+ * skill; a trailing space closes the popup so Enter submits (verified on
+ * codex-cli 0.169.0). Every other command is typed as-is.
+ */
+export function typedCommandText(command: string): string {
+  return /^\$[A-Za-z0-9_-]+$/.test(command) ? `${command} ` : command;
+}
+
+/**
+ * Types free text + Enter (the queued-delivery fallback): a multi-line text
+ * goes as one bracketed paste, so its newlines stay in the input instead of
+ * submitting each line.
+ */
+export async function typeText(
+  write: (data: string) => boolean,
+  text: string,
+  sleep: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<boolean> {
+  const body = /[\r\n]/.test(text)
+    ? `\x1b[200~${text}\x1b[201~`
+    : typedCommandText(text);
+  if (!write(body)) return false;
+  await sleep(TYPE_ENTER_DELAY_MS);
+  return write("\r");
+}
+
 export interface QueuedReviewDeps {
   /** Claims exactly this message for the app (core `claimInboxMessages` with `messageIds`); whether it was still pending. */
   claim(taskId: string, messageId: string): Promise<boolean>;

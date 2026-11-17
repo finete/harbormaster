@@ -1,0 +1,63 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "background-work",
+  "recordedAt": "2026-11-17T16:37:26.160Z",
+  "prompts": [
+    "Run `sleep 120` in the background, then reply with exactly the word DONE"
+  ],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 26017,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 2959
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3100
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 4873
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6427
+    },
+    {
+      "state": "done",
+      "app": "codex",
+      "ms": 12673
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

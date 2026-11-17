@@ -8,6 +8,7 @@
 //   harbormaster mcp                                  MCP stdio server
 //   harbormaster <tool> [--json '<args>'] [--<arg> <value>...] [--details]
 //   harbormaster hook inbox --mode steer|follow-up|catch-up   (also reports the turn boundary, S5)
+//   harbormaster hook codex --event session-start|user-prompt-submit|post-tool-use|stop   (X1-X3)
 //   harbormaster inbox claim --task <id> [--idle true|false]
 //   harbormaster inbox list [--priority|--other] [--json]
 //   harbormaster inbox resolve <id> [<button>]
@@ -72,6 +73,8 @@ export interface CliIo {
   stderr: (text: string) => void;
   /** Starts the MCP stdio server (injectable so tests never grab real stdio). */
   serveMcp?: typeof serveMcpOverStdio;
+  /** The hook's stdin (Codex writes its event JSON there); defaults to reading process stdin with a short deadline. */
+  readStdin?: () => Promise<string>;
   /** `doctor` with the app down (injectable; defaults to an in-process core). */
   localDoctor?: (
     env: NodeJS.ProcessEnv,
@@ -153,6 +156,7 @@ function usage(): string {
     "Other commands:",
     "  mcp                                       MCP stdio server exposing every tool",
     "  hook inbox --mode steer|follow-up|catch-up   Claude Code hook: deliver inbox messages",
+    "  hook codex --event <event>                Codex hook: session binding, turn boundaries, inbox (session-start|user-prompt-submit|post-tool-use|stop)",
     "  inbox claim --task <id> [--idle true|false]  Claim a task's inbox messages as JSON",
     "  inbox list [--priority|--other] [--json]  Items that need you (rule items, approvals)",
     "  inbox resolve <id> [<button>]             Press an item's button (default: dismiss)",
@@ -255,6 +259,216 @@ async function runHook(
   await (early ??
     reportTurnBoundary(socketPath, caller, hookTurnBoundary(mode, !!text)));
   io.stdout(`${JSON.stringify(inboxHookOutput(mode, text))}\n`);
+  return 0;
+}
+
+// --- Codex hooks (docs/harness-additions.md X1-X3, X5) -------------------------
+
+/** The `--event` names `harbormaster hook codex` takes (`CODEX_HOOK_EVENTS` in core's adapter). */
+export type CodexHookEvent =
+  | "session-start"
+  | "user-prompt-submit"
+  | "post-tool-use"
+  | "stop";
+
+const CODEX_HOOK_EVENTS: readonly CodexHookEvent[] = [
+  "session-start",
+  "user-prompt-submit",
+  "post-tool-use",
+  "stop",
+];
+
+/**
+ * Codex blocks its TUI until a hook exits (X2), so every socket round trip
+ * of one hook run shares this budget; past it the hook replies with what it
+ * has (nothing to deliver) and exits 0.
+ */
+export const CODEX_HOOK_DEADLINE_MS = 2_000;
+
+/** How long the hook waits for Codex's stdin JSON (written before the hook runs, then closed). */
+const CODEX_HOOK_STDIN_MS = 500;
+
+/** `promise`, or `fallback` once `ms` passed (the promise keeps running; the process exits after the reply). */
+function withDeadline<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), Math.max(0, ms));
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
+/** Process stdin as text, or what arrived within `ms` (never waits on an open pipe forever). */
+function readProcessStdin(ms = CODEX_HOOK_STDIN_MS): Promise<string> {
+  if (process.stdin.isTTY) return Promise.resolve("");
+  return new Promise((resolve) => {
+    let text = "";
+    const done = () => {
+      clearTimeout(timer);
+      process.stdin.pause();
+      resolve(text);
+    };
+    const timer = setTimeout(done, ms);
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk: string) => {
+      text += chunk;
+    });
+    process.stdin.on("end", done);
+    process.stdin.on("error", done);
+  });
+}
+
+/** The hook's event JSON (`{}` when absent or not an object). */
+export function parseCodexHookInput(text: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(text) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Codex's hook output for one event: inbox text as `additionalContext`
+ * (UserPromptSubmit = catch-up, PostToolUse = steer; Codex adds it as a
+ * developer message, the same shape as Claude Code's), else `{}`.
+ * SessionStart and Stop never deliver: follow-ups and idle wake-ups go
+ * through `codex queue`, run by the app (X5).
+ */
+export function codexHookOutput(event: CodexHookEvent, text: string): unknown {
+  if (!text || (event !== "user-prompt-submit" && event !== "post-tool-use")) {
+    return {};
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName:
+        event === "post-tool-use" ? "PostToolUse" : "UserPromptSubmit",
+      additionalContext: text,
+    },
+  };
+}
+
+/**
+ * The claimed messages' text for `additionalContext`, minus any the
+ * submitted prompt already is: the app's `codex queue` delivery (X5) makes
+ * a message the prompt itself, and this claim is what settles it as
+ * delivered; repeating it as context would hand it to the model twice. A
+ * Review command travels without its inbox header (route `user`).
+ */
+export function codexContextText(
+  messages: readonly { text: string; details?: { route?: string } }[],
+  prompt: string,
+): string {
+  const body = (message: { text: string; details?: { route?: string } }) =>
+    message.details?.route === "user"
+      ? message.text.replace(/^\[Message from the user\]\n\n/, "")
+      : message.text;
+  return messages
+    .filter(
+      (message) => !prompt.trim() || !prompt.includes(body(message).trim()),
+    )
+    .map((message) => message.text)
+    .join("\n\n---\n\n");
+}
+
+/** The turn boundary a Codex hook reports (S5): none for SessionStart. */
+export function codexHookTurnBoundary(
+  event: CodexHookEvent,
+): "stop" | "prompt" | "tool" | undefined {
+  switch (event) {
+    case "user-prompt-submit":
+      return "prompt";
+    case "post-tool-use":
+      return "tool";
+    case "stop":
+      return "stop";
+    case "session-start":
+      return undefined;
+  }
+}
+
+async function runCodexHook(
+  flags: Map<string, string>,
+  socketPath: string,
+  caller: ToolCaller,
+  io: CliIo,
+): Promise<number> {
+  const started = Date.now();
+  const event = flags.get("event") as CodexHookEvent | undefined;
+  if (!event || !CODEX_HOOK_EVENTS.includes(event)) {
+    throw new UsageError(
+      `--event must be one of ${CODEX_HOOK_EVENTS.join(", ")}`,
+    );
+  }
+  const reply = (output: unknown) => io.stdout(`${JSON.stringify(output)}\n`);
+  if (!caller.taskId) {
+    // Not a Harbormaster task session: nothing to bind or deliver.
+    reply({});
+    return 0;
+  }
+  const left = () => CODEX_HOOK_DEADLINE_MS - (Date.now() - started);
+  const input = parseCodexHookInput(
+    await withDeadline(
+      (io.readStdin ?? readProcessStdin)(),
+      CODEX_HOOK_STDIN_MS,
+      "",
+    ),
+  );
+  const boundary = codexHookTurnBoundary(event);
+  // Delivering events claim first (the claim is the reply); the others
+  // reply `{}` at once and do their socket work afterwards, still bounded.
+  let text = "";
+  if (event === "user-prompt-submit" || event === "post-tool-use") {
+    const prompt = typeof input.prompt === "string" ? input.prompt : "";
+    const claim = callTool(
+      socketPath,
+      "inbox_claim",
+      // PostToolUse is mid-turn: steer messages only; a submitted prompt
+      // may carry any pending message along (catch-up).
+      { idle: event === "user-prompt-submit" },
+      caller,
+    ).then((result) =>
+      codexContextText(
+        (result.details as InboxClaimDetails | undefined)?.messages ?? [],
+        prompt,
+      ),
+    );
+    text = await withDeadline(claim, left(), "");
+  }
+  reply(codexHookOutput(event, text));
+  const work: Promise<unknown>[] = [];
+  if (boundary) work.push(reportTurnBoundary(socketPath, caller, boundary));
+  if (
+    event === "session-start" &&
+    typeof input.session_id === "string" &&
+    typeof input.transcript_path === "string"
+  ) {
+    work.push(
+      callOp(
+        socketPath,
+        "session_start",
+        { sessionId: input.session_id, sessionPath: input.transcript_path },
+        caller,
+      ).catch(() => {
+        // Best effort: the binding is learned again on the next start.
+      }),
+    );
+  }
+  await withDeadline(Promise.all(work), left(), undefined);
   return 0;
 }
 
@@ -584,8 +798,13 @@ export async function main(
     }
     if (command === "hook") {
       const [kind, ...flagArgs] = rest;
+      if (kind === "codex") {
+        return await runCodexHook(parseFlags(flagArgs), socketPath, caller, io);
+      }
       if (kind !== "inbox")
-        throw new UsageError("usage: hook inbox --mode <mode>");
+        throw new UsageError(
+          "usage: hook inbox --mode <mode> | hook codex --event <event>",
+        );
       return await runHook(parseFlags(flagArgs), socketPath, caller, io);
     }
     if (command === "inbox") {
@@ -733,5 +952,10 @@ export function run(): void {
     stderr: (text) => process.stderr.write(text),
   }).then((code) => {
     process.exitCode = code;
+    // A Codex hook blocks Codex's TUI until it exits (X2): never linger on
+    // a socket the deadline already gave up on.
+    if (process.argv[2] === "hook" && process.argv[3] === "codex") {
+      process.stdout.write("", () => process.exit(code));
+    }
   });
 }

@@ -483,6 +483,39 @@ const turnBoundary: OpDefinition = {
   },
 };
 
+const sessionStart: OpDefinition = {
+  name: "session_start",
+  title:
+    "Bind the calling task to the session its agent just started (a session-start hook: the session id and transcript file)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: { type: "string" },
+      sessionPath: { type: "string" },
+    },
+    required: ["sessionId", "sessionPath"],
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const sessionId = str(args, "sessionId");
+    const sessionPath = str(args, "sessionPath");
+    if (!sessionId || !sessionPath) {
+      throw new Error("sessionId and sessionPath are required");
+    }
+    const taskId = callerTask(caller, "session_start");
+    const recorded = await commands.recordTaskSession(taskId, {
+      sessionId,
+      sessionPath,
+    });
+    return {
+      text: recorded
+        ? `Session ${sessionId} recorded for task ${taskId}`
+        : `Session ${sessionId} not recorded (the task is bound to another session)`,
+      details: { taskId, sessionId, recorded },
+    };
+  },
+};
+
 const requestReview: OpDefinition = {
   name: "request_review",
   title:
@@ -649,6 +682,7 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   doctor,
   openUrl,
   turnBoundary,
+  sessionStart,
   requestReview,
   usageList,
   usageRefresh,

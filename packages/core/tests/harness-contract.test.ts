@@ -35,6 +35,7 @@ import type {
 import type { PresenceAccess } from "../src/contracts/services.js";
 import { compareSemver } from "../src/engines/review-support.js";
 import { ClaudeCodeHarnessAdapter } from "../src/harness/claude-code-adapter.js";
+import { CodexHarnessAdapter } from "../src/harness/codex-adapter.js";
 import { CustomHarnessAdapter } from "../src/harness/custom-adapter.js";
 import {
   deliveryAgreesWithMessaging,
@@ -114,6 +115,18 @@ const SUBJECTS: Subject[] = [
     defuse: "double-dash",
     make: ({ cliPath, models }) =>
       new ClaudeCodeHarnessAdapter({
+        presence: noPresence,
+        transcripts: { exists: () => true },
+        ...(cliPath ? { cliPath } : {}),
+        ...(models ? { models } : {}),
+      }),
+  },
+  {
+    name: "codex",
+    commandEnv: "HARBORMASTER_CODEX_COMMAND",
+    defuse: "double-dash",
+    make: ({ cliPath, models }) =>
+      new CodexHarnessAdapter({
         presence: noPresence,
         transcripts: { exists: () => true },
         ...(cliPath ? { cliPath } : {}),
@@ -318,7 +331,14 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
         HARBORMASTER_CLI: CLI,
       });
       if (session && "sessionId" in session) {
-        expect(built.env.HARBORMASTER_SESSION_ID).toBe(session.sessionId);
+        // A learned id (Codex) is only known for a session it reopens; a
+        // new or forked one reports its own from the session-start hook.
+        const placeholder =
+          adapter.capabilities.sessionId === "learned" &&
+          (session.mode === "new" || session.mode === "fork");
+        expect(built.env.HARBORMASTER_SESSION_ID).toBe(
+          placeholder ? undefined : session.sessionId,
+        );
       }
       // The prompt reaches the program exactly once.
       expect(built.args.filter((arg) => arg.includes("do it"))).toHaveLength(1);
@@ -332,6 +352,7 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     expect(built.env.HARBORMASTER_MCP_SERVER).toBeUndefined();
     expect(built.args).not.toContain("--mcp-config");
     expect(built.args).not.toContain("--settings");
+    expect(built.args.join(" ")).not.toMatch(/hooks\.|mcp_servers\./);
   });
 
   it("defuses prompts that look like options or attachments", () => {
@@ -361,6 +382,13 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     expect(normal.args).not.toContain("--dangerously-skip-permissions");
     if (subject.name === "claude-code") {
       expect(bypass.args).toContain("--dangerously-skip-permissions");
+    } else if (subject.name === "codex") {
+      expect(bypass.args).toContain(
+        "--dangerously-bypass-approvals-and-sandbox",
+      );
+      expect(normal.args).not.toContain(
+        "--dangerously-bypass-approvals-and-sandbox",
+      );
     } else {
       // No permission system: the flag changes nothing.
       expect(bypass.args).toEqual(normal.args);
@@ -386,6 +414,17 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
         .hooks;
       expect("PostToolUse" in hooks).toBe(steer);
       expect("Stop" in hooks).toBe(followUp);
+    }
+    const overrides = built.args.filter((arg) => arg.startsWith("hooks."));
+    if (overrides.length > 0) {
+      // Codex: steer rides PostToolUse, catch-up UserPromptSubmit; follow-up
+      // and idle wake-up go through its deliver command (`codex queue`).
+      expect(
+        overrides.some((arg) => arg.startsWith("hooks.PostToolUse=")),
+      ).toBe(steer);
+      expect(Boolean(adapter.deliverCommand?.("followUp", SESSION, "hi"))).toBe(
+        followUp,
+      );
     }
     if (subject.name === "custom") expect(receive).toBe(false);
     else expect(receive).toBe(true);
@@ -444,6 +483,12 @@ if (at !== -1) {
   const command = JSON.parse(args[at + 1]).hooks.Stop[0].hooks[0].command;
   hook = JSON.parse(execSync(command, { shell: "/bin/sh", encoding: "utf8" }));
 }
+// Codex: -c hooks.Stop=[{hooks=[{type="command",command=<TOML literal>,…}]}]
+const stop = args.find((arg) => arg.startsWith("hooks.Stop="));
+if (stop) {
+  const command = /command='''(.*?)'''/.exec(stop)[1];
+  hook = JSON.parse(execSync(command, { shell: "/bin/sh", encoding: "utf8", input: "{}" }));
+}
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => key.startsWith("HARBORMASTER")),
 );
@@ -456,6 +501,7 @@ process.stdout.write("\x1b]7501;state=blocked:kind=question\x07");
   for (const key of [
     "HARBORMASTER_PI_COMMAND",
     "HARBORMASTER_CLAUDE_COMMAND",
+    "HARBORMASTER_CODEX_COMMAND",
   ]) {
     saved[key] = process.env[key];
     process.env[key] = fakeCli;
@@ -507,6 +553,12 @@ describe.each(SUBJECTS)("agent contract (process): $name", (subject) => {
       expect(echoed.hook).toEqual({
         decision: "block",
         reason: "inbox for task-9 (hook inbox --mode follow-up)",
+      });
+    } else if (subject.name === "codex") {
+      // The TOML literal carried the shell-quoted path with its space.
+      expect(echoed.hook).toEqual({
+        decision: "block",
+        reason: "inbox for task-9 (hook codex --event stop)",
       });
     } else {
       expect(echoed.hook).toBeNull();

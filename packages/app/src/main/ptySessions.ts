@@ -19,6 +19,7 @@ import { app } from "electron";
 import * as pty from "node-pty";
 import { bufferTail } from "../shared/terminal-tail";
 import { debugLog, isDebugLogging } from "./debug-log";
+import { DoneMessageJoiner, Osc9Splitter } from "./osc9-notifications";
 import {
   createReadyLineMatcher,
   OPEN_URL_HANDLER_ENV,
@@ -148,30 +149,47 @@ function createProgramStatusFilter(
   forward: (data: string) => void,
 ): { feed: (raw: string) => void; dispose: () => void } {
   const parser = new ProgramStatusParser();
+  // OSC 9 notes (Codex's reply text, X4) become the next `done`'s message.
+  const osc9 = new Osc9Splitter();
+  const doneMessages = new DoneMessageJoiner();
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
   const clearHold = (): void => {
     if (holdTimer !== undefined) clearTimeout(holdTimer);
     holdTimer = undefined;
   };
+  const feedStatus = (text: string): void => {
+    const result = parser.feed(text);
+    for (const reply of result.replies) {
+      try {
+        ptyProcess.write(reply);
+      } catch {
+        // Already gone; nothing to answer.
+      }
+    }
+    for (const report of result.reports) {
+      programStatusListener?.onReport(
+        taskId,
+        ptyProcess.pid,
+        doneMessages.apply(report),
+      );
+    }
+    if (result.output) forward(result.output);
+  };
   return {
     feed: (raw) => {
       clearHold();
-      const result = parser.feed(raw);
-      for (const reply of result.replies) {
-        try {
-          ptyProcess.write(reply);
-        } catch {
-          // Already gone; nothing to answer.
+      for (const piece of osc9.feed(raw)) {
+        if (piece.kind === "text") {
+          feedStatus(piece.text);
+        } else {
+          doneMessages.noteOsc9(piece.body);
+          feedStatus(piece.raw);
         }
       }
-      for (const report of result.reports) {
-        programStatusListener?.onReport(taskId, ptyProcess.pid, report);
-      }
-      if (result.output) forward(result.output);
-      if (parser.hasPending) {
+      if (parser.hasPending || osc9.hasPending) {
         holdTimer = setTimeout(() => {
           holdTimer = undefined;
-          const held = parser.flush();
+          const held = parser.flush() + osc9.flush();
           if (held) forward(held);
         }, PROGRAM_STATUS_HOLD_MS);
       }

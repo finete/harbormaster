@@ -1,0 +1,86 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "permission",
+  "recordedAt": "2026-11-17T16:38:06.700Z",
+  "prompts": [
+    "Create a file named hello.txt containing the word hi. Do nothing else."
+  ],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-s",
+    "read-only",
+    "-a",
+    "on-request",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 24619,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 3344
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3485
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 5344
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6828
+    },
+    {
+      "state": "blocked",
+      "kind": "permission",
+      "app": "codex",
+      "ms": 11586
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 13669
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 13690
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": [
+      "idle",
+      "working",
+      "idle",
+      "working",
+      "blocked",
+      "working",
+      "idle"
+    ],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

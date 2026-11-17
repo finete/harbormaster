@@ -540,11 +540,12 @@ export interface ReviewSupportPiece {
     | "pi-extension"
     | "claude-plugin"
     | "claude-skill"
-    | "claude-code";
+    | "claude-code"
+    | "codex-skill";
   label: string;
   /** semver when found (versioned pieces only) */
   installed?: string;
-  /** Absent for a presence-only piece (`claude-skill`): found = ready. */
+  /** Absent for a presence-only piece (`claude-skill`, `codex-skill`): found = ready. */
   minimum?: string;
   state: "ready" | "missing" | "outdated";
   /** the exact shell command */

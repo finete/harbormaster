@@ -201,6 +201,7 @@ class FakeProbes implements ReviewSupportProbeAccess {
     public plugin?: string,
     public claude?: string,
     public skill?: string,
+    public codexSkill?: string,
   ) {}
   async plannotatorVersion() {
     this.calls++;
@@ -225,6 +226,9 @@ class FakeProbes implements ReviewSupportProbeAccess {
   }
   async claudeReviewSkill() {
     return this.skill;
+  }
+  async codexReviewSkill() {
+    return this.codexSkill;
   }
 }
 
@@ -458,6 +462,13 @@ describe("reviewSupport", () => {
       ["claude-skill", "curl -fsSL https://plannotator.ai/install.sh | bash"],
       ["claude-code", expect.any(String)],
     ]);
+    // Codex: the binary + the $plannotator-review skill (X9).
+    const codex = support.harnesses.find((h) => h.harness === "codex");
+    expect(codex?.state).toBe("missing");
+    expect(codex?.pieces.map((piece) => [piece.id, piece.fix])).toEqual([
+      ["binary", "curl -fsSL https://plannotator.ai/install.sh | bash"],
+      ["codex-skill", "curl -fsSL https://plannotator.ai/install.sh | bash"],
+    ]);
     // Custom agents carry their own label (Settings → Code review lists it).
     expect(support.harnesses.find((h) => h.harness === "aider")).toEqual({
       harness: "aider",
@@ -473,6 +484,7 @@ describe("reviewSupport", () => {
       "0.27.15",
       "0.28.52",
       "2.1.286",
+      "---\nname: plannotator-review\n---",
       "---\nname: plannotator-review\n---",
     );
     const { core } = await boot({ probes });
@@ -506,6 +518,7 @@ describe("reviewSupport", () => {
     expect(fresh.harnesses.map((h) => [h.harness, h.state])).toEqual([
       ["pi", "ready"],
       ["claude-code", "ready"],
+      ["codex", "ready"],
     ]);
   });
 

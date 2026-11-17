@@ -23,12 +23,14 @@ import type {
   PullRequestAccess,
   VersionAccess,
 } from "../src/contracts/github.js";
+import type { HarnessAdapter } from "../src/contracts/harness.js";
 import type {
   Clock,
   TaskStateAccess,
   WorkspaceBindingAccess,
 } from "../src/contracts/index.js";
 import {
+  CodexHarnessAdapter,
   CoreEventBus,
   CoreManager,
   isToDoneConfirmation,
@@ -102,7 +104,9 @@ interface Fixture {
   failNext: (verb: "replaceBinding" | "attachBinding" | "replaceTask") => void;
 }
 
-async function fixture(): Promise<Fixture> {
+async function fixture(
+  options: { harness?: HarnessAdapter } = {},
+): Promise<Fixture> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "harbormaster-session-")),
   );
@@ -181,6 +185,7 @@ async function fixture(): Promise<Fixture> {
     scratch: new LocalScratchWorkspaceAccess(join(stateDir, "scratch")),
     pullRequests: noGithub,
     versions: noGithub,
+    ...(options.harness ? { harness: options.harness } : {}),
   });
   return {
     root,
@@ -407,6 +412,109 @@ describe.skipIf(!gitAvailable)("toDone keeps the session identity", () => {
     expect(binding?.sessionId).toBe(launch.sessionId);
     expect(binding?.sessionPath).toBe(file);
     expect(await f.manager.claimSessionLaunch(task.id)).toBeUndefined();
+  });
+});
+
+describe.skipIf(!gitAvailable)("learned session ids (Codex, X3)", () => {
+  const codex = () =>
+    new CodexHarnessAdapter({
+      isAlive: () => false,
+      transcripts: { exists: () => true },
+    });
+  const CODEX_ID = "01a1e9b8-423b-77b0-9d23-69f3fa042cd7";
+
+  async function rollout(root: string, id: string): Promise<string> {
+    const dir = join(root, "codex", "sessions", "2026", "11", "17");
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, `rollout-2026-11-17T15-35-29-${id}.jsonl`);
+    await writeFile(file, "{}\n");
+    return file;
+  }
+
+  it("never persists a placeholder id; binds what SessionStart reports, then resumes it", async () => {
+    const f = await fixture({ harness: codex() });
+    const task = await startedTask(f);
+    const first = await f.manager.claimSessionLaunch(task.id);
+    expect(first?.mode).toBe("new");
+    expect(
+      (await f.manager.getTaskWorkspace(task.id))?.sessionId,
+    ).toBeUndefined();
+    // Nothing reported yet and the prompt never went out: new again.
+    expect((await f.manager.claimSessionLaunch(task.id))?.mode).toBe("new");
+
+    const file = await rollout(f.root, CODEX_ID);
+    expect(
+      await f.manager.recordTaskSession(task.id, {
+        sessionId: CODEX_ID,
+        sessionPath: file,
+      }),
+    ).toBe(true);
+    expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+      mode: "resume",
+      sessionId: CODEX_ID,
+      sessionPath: file,
+    });
+    // A later /new in the pane does not steal the binding.
+    expect(
+      await f.manager.recordTaskSession(task.id, {
+        sessionId: "01a1e9b8-0000-0000-0000-000000000000",
+        sessionPath: join(f.root, "other.jsonl"),
+      }),
+    ).toBe(false);
+    // The app's queue delivery targets the learned id.
+    expect(
+      await f.manager.harnessDeliverCommand(task.id, "wakeIdle", "hi"),
+    ).toEqual({
+      command: "codex",
+      args: ["queue", "--thread", CODEX_ID, "--message", "hi"],
+    });
+  });
+
+  it("has no deliver command before the id is learned", async () => {
+    const f = await fixture({ harness: codex() });
+    const task = await startedTask(f);
+    await f.manager.claimSessionLaunch(task.id);
+    expect(
+      await f.manager.harnessDeliverCommand(task.id, "wakeIdle", "hi"),
+    ).toBeUndefined();
+  });
+
+  it("a reopened task forks the previous rollout and learns the fork's id", async () => {
+    const f = await fixture({ harness: codex() });
+    const task = await startedTask(f);
+    await f.manager.claimSessionLaunch(task.id);
+    const file = await rollout(f.root, CODEX_ID);
+    await f.manager.recordTaskSession(task.id, {
+      sessionId: CODEX_ID,
+      sessionPath: file,
+    });
+    await f.manager.claimInitialPrompt(task.id);
+    const result = await f.manager.toDone(task.id, {
+      force: { confirmed: true },
+    });
+    if (isToDoneConfirmation(result)) throw new Error("unexpected question");
+    await f.manager.reopenTask(task.id, { objective: "More" });
+
+    const launch = await f.manager.claimSessionLaunch(task.id);
+    expect(launch?.mode).toBe("fork");
+    if (launch?.mode !== "fork") return;
+    expect(launch.forkFrom).toBe(file);
+    expect(
+      (await f.manager.getTaskWorkspace(task.id))?.sessionId,
+    ).toBeUndefined();
+    const forkId = "01a1ea4d-1d67-78e3-865d-ae1f75e381e8";
+    const forked = await rollout(f.root, forkId);
+    expect(
+      await f.manager.recordTaskSession(task.id, {
+        sessionId: forkId,
+        sessionPath: forked,
+      }),
+    ).toBe(true);
+    expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+      mode: "resume",
+      sessionId: forkId,
+      sessionPath: forked,
+    });
   });
 });
 

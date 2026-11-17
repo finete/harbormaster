@@ -5,6 +5,7 @@
 import type { DoctorInput, DoctorReport } from "./doctor.js";
 import type { PullRequestPreview } from "./github.js";
 import type {
+  HarnessDeliverCommand,
   HarnessDescriptorInfo,
   HarnessModelCatalog,
   PresenceStatus,
@@ -574,6 +575,19 @@ export interface CoreCommands {
    * calls it once per presence-poll tick. Returns how many were missing.
    */
   checkPendingSessionFiles(): Promise<number>;
+  /**
+   * The harness CLI command that hands `text` to the task's live session
+   * from outside the agent (docs/harness-additions.md X5: Codex's `codex
+   * queue --thread <id> --message <text>`), for the app (the process owner)
+   * to run. `undefined` when the task's harness has no such channel or its
+   * session id is not known yet (a learned id arrives with the first
+   * prompt's SessionStart hook).
+   */
+  harnessDeliverCommand(
+    taskId: string,
+    kind: "followUp" | "wakeIdle",
+    text: string,
+  ): Promise<HarnessDeliverCommand | undefined>;
   /**
    * Reopen a Done task as a new work cycle (pi-home's `reopenDoneWork`): a
    * fresh branch + worktree off the repository's default branch, with the
