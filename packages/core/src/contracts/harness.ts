@@ -245,6 +245,8 @@ export interface HarnessDescriptor {
   configDir(env: NodeJS.ProcessEnv, home: string): string | undefined;
   /** Review-support pieces (`engines/review-support.ts`) this harness needs for a Plannotator review, in display order; `[]` = none. */
   readonly reviewPieces: readonly ReviewSupportPiece["id"][];
+  /** Why this harness cannot start a Plannotator review (shown on the disabled Review button); absent = it can, or the generic text. */
+  readonly reviewUnavailableReason?: string;
   /**
    * Whether a PATH hit is a terminal-multiplexer shim (cmux writes
    * `…/cmux-cli-shims/<uuid>/claude`), not the agent itself: lookup skips
@@ -264,6 +266,7 @@ export interface HarnessDescriptorInfo {
   minVersion?: string;
   verifiedVersion?: string;
   reviewPieces: ReviewSupportPiece["id"][];
+  reviewUnavailableReason?: string;
   /** A built-in adapter (not `agents.custom[]`). */
   builtin: boolean;
   /** Whether the harness can start a Plannotator review at all. */

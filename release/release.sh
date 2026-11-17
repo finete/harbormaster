@@ -156,9 +156,30 @@ echo "release: $TAG  (tap: $TAP_DIR${DRY_RUN:+, dry-run=$DRY_RUN})"
 # --- 0. gate + real smoke (refuse on failure) --------------------------------
 # The real smoke drives the user's own logged-in agents; its login preflight
 # fails with "missing login: ..." and that message stops the release.
+# Codex and Cursor cases run against the pinned CLIs in the real-CLI prefix
+# (HARBORMASTER_REAL_CLI_PREFIX, default /tmp/hm-real-cli-prefix; installed by
+# the keyless real-CLI tier) when present; a machine without them skips those
+# cases with the spec's own message. Explicit HARBORMASTER_REAL_SMOKE_CODEX /
+# _CURSOR paths win.
+smoke_binaries() {
+  local prefix cursor_build
+  prefix="${HARBORMASTER_REAL_CLI_PREFIX:-/tmp/hm-real-cli-prefix}"
+  if [[ -z "${HARBORMASTER_REAL_SMOKE_CODEX:-}" && -x "$prefix/node_modules/.bin/codex" ]]; then
+    export HARBORMASTER_REAL_SMOKE_CODEX="$prefix/node_modules/.bin/codex"
+  fi
+  if [[ -z "${HARBORMASTER_REAL_SMOKE_CURSOR:-}" ]]; then
+    cursor_build="$(ls "$prefix/cursor-agent" 2>/dev/null | sort | tail -n 1 || true)"
+    if [[ -n "$cursor_build" && -x "$prefix/cursor-agent/$cursor_build/dist-package/cursor-agent" ]]; then
+      export HARBORMASTER_REAL_SMOKE_CURSOR="$prefix/cursor-agent/$cursor_build/dist-package/cursor-agent"
+    fi
+  fi
+  echo "real smoke: codex=${HARBORMASTER_REAL_SMOKE_CODEX:-skipped} cursor=${HARBORMASTER_REAL_SMOKE_CURSOR:-skipped}"
+}
+
 real_smoke() {
   local log status login
   log="$(mktemp)"
+  smoke_binaries
   (cd "$ROOT/packages/app" && npx electron-vite build) || die "electron-vite build failed"
   set +e
   (cd "$ROOT/packages/app" && HARBORMASTER_REAL_SMOKE=1 npx playwright test e2e/real-smoke.spec.ts) 2>&1 | tee "$log"

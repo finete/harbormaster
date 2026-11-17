@@ -18,6 +18,12 @@ const support: ReviewSupport = {
     { harness: "pi", state: "ready", pieces: [] },
     { harness: "claude-code", state: "outdated", pieces: [] },
     { harness: "custom", state: "unsupported", pieces: [] },
+    {
+      harness: "cursor",
+      state: "unsupported",
+      pieces: [],
+      reason: "Plannotator doesn't support Cursor CLI yet",
+    },
   ],
 };
 
@@ -32,6 +38,11 @@ describe("reviewDisabledReason", () => {
   it("points at setup when Plannotator is not ready", () => {
     expect(reviewDisabledReason({ support, harness: "claude-code" })).toBe(
       REVIEW_SETUP_HINT,
+    );
+  });
+  it("shows the harness's own reason when it states one (Cursor, C7)", () => {
+    expect(reviewDisabledReason({ support, harness: "cursor" })).toBe(
+      "Plannotator doesn't support Cursor CLI yet",
     );
   });
   it("is disabled for a harness without a review command or unlisted", () => {

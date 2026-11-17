@@ -560,6 +560,8 @@ export interface ReviewSupportHarness {
   label?: string;
   state: "ready" | "missing" | "outdated" | "unsupported";
   pieces: ReviewSupportPiece[];
+  /** For `unsupported`: the harness's own reason, when it states one (`HarnessDescriptor.reviewUnavailableReason`). */
+  reason?: string;
 }
 
 /** Per-harness Plannotator status (`CoreCommands.reviewSupport`). */

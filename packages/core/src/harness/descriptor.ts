@@ -69,6 +69,9 @@ export function harnessDescriptorInfo(
       ? { verifiedVersion: descriptor.verifiedVersion }
       : {}),
     reviewPieces: [...descriptor.reviewPieces],
+    ...(descriptor.reviewUnavailableReason
+      ? { reviewUnavailableReason: descriptor.reviewUnavailableReason }
+      : {}),
     builtin,
     review: Boolean(adapter.review),
   };

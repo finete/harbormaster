@@ -108,6 +108,7 @@ export const CURSOR_DESCRIPTOR: HarnessDescriptor = {
   configDir: (env, home) => cursorConfigDir(env, home),
   // No Plannotator integration for Cursor's CLI (C7).
   reviewPieces: [],
+  reviewUnavailableReason: "Plannotator doesn't support Cursor CLI yet",
   isShim: isTerminalShim,
 };
 

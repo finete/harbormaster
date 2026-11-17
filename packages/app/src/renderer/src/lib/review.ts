@@ -51,7 +51,7 @@ export function reviewDisabledReason(input: {
   if (!input.support) return "Checking code review support…";
   const entry = harnessSupport(input.support, input.harness);
   if (!entry || entry.state === "unsupported") {
-    return "This agent cannot start a code review";
+    return entry?.reason ?? "This agent cannot start a code review";
   }
   if (entry.state !== "ready") return REVIEW_SETUP_HINT;
   return undefined;

@@ -210,14 +210,21 @@ export function reviewSupportFor(
   harness: {
     id: string;
     review?: unknown;
-    descriptor: { reviewPieces: readonly ReviewPieceId[] };
+    descriptor: {
+      reviewPieces: readonly ReviewPieceId[];
+      reviewUnavailableReason?: string;
+    };
   },
   versions: ReviewVersions,
 ): ReviewSupportHarness {
-  return reviewHarness(
+  const status = reviewHarness(
     harness.id,
     reviewPiecesFor(harness).map((id) => reviewPiece(id, versions[id])),
   );
+  const reason = harness.descriptor.reviewUnavailableReason;
+  return status.state === "unsupported" && reason
+    ? { ...status, reason }
+    : status;
 }
 
 /** Hosts an agent-opened URL may show in-app (docs/plannotator.md decision 6). */
