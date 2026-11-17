@@ -287,7 +287,7 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
 - In-app card (bottom-right, closable per version): hourly version check
   against GitHub Releases (`http-version-access` over Electron's
   `net.fetch`, so it trusts the macOS keychain), shows
-  `brew upgrade --cask harbormaster` with a copy button.
+  `brew update && brew upgrade --cask harbormaster` with a copy button.
 - "Export diagnostics" (settings): zips `<userData>/logs` + a redacted
   `config.json` + `harbormaster rules list` output.
 - LICENSE: MIT, `finete`.

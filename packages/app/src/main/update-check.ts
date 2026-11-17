@@ -23,7 +23,13 @@ export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
  * rather than a full interval later.
  */
 export const UPDATE_CHECK_POLL_MS = 15 * 60 * 1000;
-export const UPGRADE_COMMAND = "brew upgrade --cask harbormaster";
+/**
+ * `brew update` first: Homebrew refreshes its taps at most once a day on its
+ * own, so right after a release a bare `brew upgrade` can report the cask
+ * as already up to date.
+ */
+export const UPGRADE_COMMAND =
+  "brew update && brew upgrade --cask harbormaster";
 
 export interface UpdateInfo {
   /** The newer release's version, without a leading `v` (e.g. `1.2.0`). */

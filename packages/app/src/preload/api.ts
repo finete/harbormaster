@@ -768,6 +768,6 @@ export type OpenInResult = { ok: true } | { ok: false; error: string };
 export interface UpdateInfo {
   /** Version without a leading `v`, e.g. `1.2.0`. */
   version: string;
-  /** The command that upgrades the installed app (`brew upgrade --cask harbormaster`). */
+  /** The command that upgrades the installed app (`brew update && brew upgrade --cask harbormaster`). */
   command: string;
 }

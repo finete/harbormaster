@@ -3,8 +3,8 @@
 Harbormaster ships as an unsigned Apple Silicon build: an electron-builder
 zip attached to a GitHub release of `finete/harbormaster`, installed and
 upgraded only through the Homebrew cask in `finete/homebrew-tap` (release
-plan R12). The app checks GitHub Releases on startup and every 6 hours and
-shows `brew upgrade --cask harbormaster` when a newer version exists.
+plan R12). The app checks GitHub Releases on startup and every hour and
+shows `brew update && brew upgrade --cask harbormaster` when a newer version exists.
 
 Everything here acts as the `finete` GitHub account and nobody else (see
 `AGENTS.md`, "Identity"): every `gh` call is prefixed with
@@ -120,5 +120,5 @@ Current Homebrew refuses casks from taps the user has not trusted; a
 fully-qualified `brew install --cask finete/tap/harbormaster` trusts the cask
 as part of the install, so no separate `brew trust` step is needed.
 
-After the next release, the running app shows the upgrade banner;
-`brew upgrade --cask harbormaster` installs it.
+After the next release, the running app shows the upgrade card;
+`brew update && brew upgrade --cask harbormaster` installs it.

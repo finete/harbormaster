@@ -79,7 +79,9 @@ describe("newerVersion", () => {
   });
 
   it("names the Homebrew cask upgrade", () => {
-    expect(UPGRADE_COMMAND).toBe("brew upgrade --cask harbormaster");
+    expect(UPGRADE_COMMAND).toBe(
+      "brew update && brew upgrade --cask harbormaster",
+    );
   });
 });
 

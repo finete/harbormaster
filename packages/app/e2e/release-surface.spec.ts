@@ -141,7 +141,7 @@ test("a newer GitHub release, fetched through Chromium's TLS stack, shows a clos
   await expect(banner).toHaveAttribute("data-version", "999.0.0");
   await expect(banner).toContainText("Harbormaster v999.0.0 is available");
   await expect(window.getByTestId("update-banner-command")).toHaveText(
-    "brew upgrade --cask harbormaster",
+    "brew update && brew upgrade --cask harbormaster",
   );
 
   // Copy goes through main's clipboard; keep the developer's clipboard.
@@ -150,7 +150,7 @@ test("a newer GitHub release, fetched through Chromium's TLS stack, shows a clos
     await window.getByTestId("update-banner-copy").click();
     await expect(window.getByTestId("update-banner-copy")).toHaveText("Copied");
     expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(
-      "brew upgrade --cask harbormaster",
+      "brew update && brew upgrade --cask harbormaster",
     );
   } finally {
     await app.evaluate(

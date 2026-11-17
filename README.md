@@ -46,7 +46,7 @@ four-screen setup walks you through:
 ### Upgrade
 
 ```sh
-brew upgrade --cask harbormaster
+brew update && brew upgrade --cask harbormaster
 ```
 
 The app checks GitHub Releases hourly and shows a small card with that
