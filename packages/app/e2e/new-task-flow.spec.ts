@@ -660,6 +660,14 @@ test("Cmd/Ctrl+N from the board opens the draft at the top of the sidebar; a pro
     .getByTestId("new-task-prompt-input")
     .fill("Derive my title from this line\nand ignore the rest");
   await expect(draftRow).toContainText("Derive my title from this line");
+  // From a page (Inbox, Costs), the draft row brings the composer back.
+  for (const page of ["inbox", "costs"] as const) {
+    await window.getByTestId(`${page}-button`).click();
+    await expect(window.getByTestId(`${page}-view`)).toBeVisible();
+    await draftRow.click();
+    await expect(window.getByTestId(`${page}-view`)).toBeHidden();
+    await expect(window.getByTestId("new-task-composer")).toBeVisible();
+  }
   // Chat in the repository: no worktree, pi runs in the checkout itself.
   await window.getByTestId("new-task-mode-chat").click();
   await chooseWhere(window, REPO_ID);

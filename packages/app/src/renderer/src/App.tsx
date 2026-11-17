@@ -700,10 +700,9 @@ export function App({
               onNewTask={openDraft}
               draftLabel={draft ? draftLabel(draft) : null}
               draftFocused={draftFocused}
-              onSelectDraft={() => {
-                setDraftFocused(true);
-                setDraftFocusSignal((count) => count + 1);
-              }}
+              // Same as New task: focus the existing draft AND leave any page
+              // (Inbox / Rules / Costs) for the workspace that shows it.
+              onSelectDraft={openDraft}
               onCloseDraft={closeDraft}
             />
             {view === "inbox" && (
