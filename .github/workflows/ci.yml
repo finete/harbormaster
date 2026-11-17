@@ -1,0 +1,75 @@
+# Push/PR checks (docs/harness-additions.md P3): biome, typecheck, unit
+# tests for every workspace, then the keyless real-CLI tier (T3) against the
+# pinned agent CLIs. The Electron e2e suite and the real smoke (T4, needs a
+# login) stay local: `npm run gate` / `npm run gate:harness`. No secrets.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # Git fixtures in the unit tests assume new repositories start on main
+      # (macOS's Xcode git ships that as its system default). System scope:
+      # vitest gives every test file its own empty HOME, hiding --global.
+      - name: Git default branch
+        run: sudo git config --system init.defaultBranch main
+
+      # No .nvmrc; package.json engines is ">=20", so pin the LTS line.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Unit tests import the electron package (its binary path), so the
+      # binary is installed; cache its download. node-pty builds from source
+      # (python3, make and g++ ship with the image).
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Biome
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # The cache key follows PINNED in packages/app/tests/real-cli-smoke.test.ts.
+      - name: Pinned agent CLIs
+        id: pins
+        run: |
+          node scripts/pinned-clis.mjs
+          echo "key=$(node scripts/pinned-clis.mjs | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "HARBORMASTER_REAL_CLI_PREFIX=$HOME/.cache/harbormaster-real-cli" >> "$GITHUB_ENV"
+
+      - name: Cache pinned agent CLIs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/harbormaster-real-cli
+          key: real-cli-${{ runner.os }}-node22-${{ steps.pins.outputs.key }}
+
+      - name: Keyless real-CLI tier
+        env:
+          HARBORMASTER_REAL_CLI: "1"
+        run: npx vitest run packages/app/tests/real-cli-smoke.test.ts

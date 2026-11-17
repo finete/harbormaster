@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/*/tests/**/*.test.ts"],
+    include: ["packages/*/tests/**/*.test.ts", "scripts/**/*.test.ts"],
     environment: "node",
     // Sandbox HOME so no test can fall back to the real ~/Code or ~/.harbormaster.
     setupFiles: ["./vitest.isolate-home.ts"],

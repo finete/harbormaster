@@ -14,6 +14,8 @@
     "test": "vitest run",
     "lint": "biome check .",
     "format": "biome format --write .",
+    "gate": "node scripts/gate.mjs",
+    "gate:harness": "node scripts/gate.mjs --harness",
     "dist": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli && npm run build -w @harbormaster/app && npm run dist -w @harbormaster/app"
   },
   "engines": {

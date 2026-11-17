@@ -20,15 +20,25 @@
 //
 // Run: npx electron-vite build && HARBORMASTER_REAL_SMOKE=1 \
 //   npx playwright test e2e/real-smoke.spec.ts
+//
+// Login preflight: before anything launches, every built-in harness must
+// be logged in (`claude auth status`, `pi auth check` for Pi's default
+// provider); otherwise the run fails with "missing login: …" (release.sh
+// stops on that message). A fully passing run writes <repo root>/.real-smoke-ok
+// ({ commit, at, harnesses }, gitignored), which `npm run gate:harness`
+// checks for freshness (scripts/check-smoke-marker.mjs,
+// docs/harness-additions.md P4).
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { createCore } from "@harbormaster/core";
 import {
@@ -45,6 +55,19 @@ const REPO_ID = "github.com/finete/harbormaster";
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const repoRoot = path.join(__dirname, "..", "..", "..");
 const cliBin = path.join(repoRoot, "packages", "cli", "bin", "harbormaster.js");
+/** Built-in harnesses this smoke covers (recorded in the marker). */
+const HARNESSES = ["pi", "claude-code"] as const;
+/** Number of `test(...)` cases below; the marker needs every one passed. */
+const SMOKE_TESTS = 4;
+const MARKER = path.join(repoRoot, ".real-smoke-ok");
+/**
+ * The PATH a Dock launch would see for agents: a terminal multiplexer's
+ * per-session CLI shims (cmux) are not the tools.
+ */
+const AGENT_PATH = (process.env.PATH ?? "")
+  .split(path.delimiter)
+  .filter((entry) => !entry.includes("cmux-cli-shims"))
+  .join(path.delimiter);
 
 test.describe.configure({ mode: "serial", timeout: 240_000 });
 test.skip(!ENABLED, "HARBORMASTER_REAL_SMOKE=1 runs the real-tool smoke");
@@ -56,8 +79,85 @@ let stateDir: string;
 const tasks: Record<"pi" | "claude", string> = { pi: "", claude: "" };
 const mainProcessErrors: string[] = [];
 const mainLog: string[] = [];
+let passedTests = 0;
+let failedTests = 0;
+
+/** Runs an agent CLI for its JSON status; stdout even on a non-zero exit. */
+function agentJson(command: string, args: string[]): unknown {
+  let out = "";
+  try {
+    out = execFileSync(command, args, {
+      encoding: "utf8",
+      env: { ...process.env, PATH: AGENT_PATH },
+      timeout: 60_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stdout?: string };
+    if (failure.code === "ENOENT") throw new Error(`${command} not on PATH`);
+    out = failure.stdout ?? "";
+    if (!out.trim()) throw new Error(failure.message.split("\n")[0]);
+  }
+  try {
+    return JSON.parse(out);
+  } catch {
+    throw new Error(`unexpected output: ${out.trim().slice(0, 200)}`);
+  }
+}
+
+/** Harnesses without a usable login, with the reason and the fix. */
+function missingLogins(): string[] {
+  const missing: string[] = [];
+  try {
+    const status = agentJson("claude", ["auth", "status"]) as {
+      loggedIn?: boolean;
+    };
+    if (status.loggedIn !== true) throw new Error("not logged in");
+  } catch (error) {
+    missing.push(
+      `claude-code (${(error as Error).message}; run \`claude\` and /login)`,
+    );
+  }
+  try {
+    const agentDir =
+      process.env.PI_CODING_AGENT_DIR ?? path.join(homedir(), ".pi", "agent");
+    const settingsFile = path.join(agentDir, "settings.json");
+    const provider = existsSync(settingsFile)
+      ? (
+          JSON.parse(readFileSync(settingsFile, "utf8")) as {
+            defaultProvider?: string;
+          }
+        ).defaultProvider
+      : undefined;
+    if (!provider) throw new Error("no default provider");
+    const check = agentJson("pi", [
+      "auth",
+      "check",
+      "--provider",
+      provider,
+      "--json",
+    ]) as { status?: string; reason?: string };
+    if (check.status !== "ready") {
+      throw new Error(`${provider}: ${check.reason ?? check.status}`);
+    }
+  } catch (error) {
+    missing.push(`pi (${(error as Error).message}; run \`pi\` and /login)`);
+  }
+  return missing;
+}
+
+test.afterEach(() => {
+  if (test.info().status === "passed") passedTests += 1;
+  else failedTests += 1;
+});
 
 test.beforeAll(async () => {
+  // A new run revokes the last one's verdict until it passes in full.
+  rmSync(MARKER, { force: true });
+  const missing = missingLogins();
+  if (missing.length > 0) {
+    throw new Error(`real smoke: missing login: ${missing.join("; ")}`);
+  }
   root = mkdtempSync(path.join(tmpdir(), "harbormaster-real-smoke-"));
   stateDir = path.join(root, "state");
   const codeRoot = path.join(root, "Code");
@@ -99,12 +199,7 @@ test.beforeAll(async () => {
     args: [mainEntry],
     env: {
       ...process.env,
-      // The PATH a Dock launch would see for agents: a terminal
-      // multiplexer's per-session CLI shims (cmux) are not the tools.
-      PATH: (process.env.PATH ?? "")
-        .split(path.delimiter)
-        .filter((entry) => !entry.includes("cmux-cli-shims"))
-        .join(path.delimiter),
+      PATH: AGENT_PATH,
       HARBORMASTER_STATE_DIR: stateDir,
       HARBORMASTER_USER_DATA_DIR: path.join(root, "electron-profile"),
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
@@ -166,6 +261,17 @@ test.afterAll(async () => {
     rmSync(root, { recursive: true, force: true });
   }
   expect(mainProcessErrors, mainProcessErrors.join("\n---\n")).toEqual([]);
+  // Only a full, fully passing run vouches for this commit (a --grep
+  // subset or any failure leaves no marker).
+  if (failedTests === 0 && passedTests === SMOKE_TESTS) {
+    const commit = execFileSync("git", ["-C", repoRoot, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    writeFileSync(
+      MARKER,
+      `${JSON.stringify({ commit, at: new Date().toISOString(), harnesses: HARNESSES }, null, 2)}\n`,
+    );
+  }
 });
 
 function terminal(taskId: string): Locator {

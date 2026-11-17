@@ -10,3 +10,5 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+# Real-smoke marker (packages/app/e2e/real-smoke.spec.ts, scripts/check-smoke-marker.mjs)
+.real-smoke-ok
