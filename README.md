@@ -49,7 +49,10 @@ four-screen setup walks you through:
 brew upgrade --cask harbormaster
 ```
 
-The app shows a banner with that command when a new release is out.
+The app checks GitHub Releases hourly and shows a small card with that
+command (and a copy button) when a new release is out. Behind a
+TLS-inspecting corporate proxy, the app trusts the proxy's root CA from the
+macOS keychain like your browser does; nothing to configure.
 
 ### Uninstall
 

@@ -183,6 +183,7 @@ import {
 } from "./review-transport";
 import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
+import { systemFetch } from "./system-fetch";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import {
   createUpdateChecker,
@@ -369,9 +370,18 @@ if (!openUrlHandler) {
     "[main] harbormaster-open-url not found: reviews fall back to the pty ready line",
   );
 }
+// Version endpoints go through Chromium's network stack so a TLS-inspecting
+// proxy's root CA in the macOS keychain is trusted (see system-fetch.ts).
+const versionAccess = new HttpVersionAccess(
+  undefined,
+  undefined,
+  undefined,
+  systemFetch,
+);
 const core = createCore({
   stateDir: activeStateDir,
   logger: consoleCoreLogger(console),
+  versions: versionAccess,
   // Hand edits of config.json reach open windows (docs/settings.md S4).
   watchConfig: true,
   ...(bundledPiExtension ? { piExtensionSource: bundledPiExtension } : {}),
@@ -2205,19 +2215,39 @@ function cliPathForTools(): string | undefined {
   return cliPath;
 }
 
-// "New version available" banner (see update-check.ts). Packaged builds ask
-// GitHub Releases on startup and every 6h; dev and e2e runs check only when
+// "New version available" card (see update-check.ts). Packaged builds ask
+// GitHub Releases on startup and hourly (failures retry every 15 min and are
+// logged, never shown); dev and e2e runs check only when
 // `HARBORMASTER_UPDATE_URL` points somewhere (e2e serves a stub release),
 // so no test ever calls the real GitHub API. `HARBORMASTER_UPDATE_CHECK=off`
 // disables it outright.
 const updateUrl =
   process.env.HARBORMASTER_UPDATE_URL ??
   (app.isPackaged ? DEFAULT_UPDATE_URL : undefined);
-const releaseVersions = new HttpVersionAccess();
+// Own instance: its 5-minute cache must not serve core's version polls, and
+// the update URL is never a deployment stage.
+const releaseVersions = new HttpVersionAccess(
+  undefined,
+  undefined,
+  undefined,
+  systemFetch,
+);
+let lastUpdateCheckError: string | undefined;
 const updateChecker = createUpdateChecker({
   currentVersion: app.getVersion(),
   url: updateUrl ?? DEFAULT_UPDATE_URL,
-  fetchText: (url) => releaseVersions.fetchText(url),
+  fetchText: async (url) => {
+    const body = await releaseVersions.fetchText(url);
+    lastUpdateCheckError = undefined;
+    return body;
+  },
+  onError: (error) => {
+    // Once per distinct failure, not every 15-minute retry.
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === lastUpdateCheckError) return;
+    lastUpdateCheckError = message;
+    console.warn(`[main] update check failed: ${message}`);
+  },
   onUpdate: (update: UpdateInfo) => {
     for (const win of BrowserWindow.getAllWindows()) {
       safeSend(win.webContents, "app:update-available", update);

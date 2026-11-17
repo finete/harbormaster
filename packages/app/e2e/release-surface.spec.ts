@@ -1,17 +1,25 @@
 // Release surface (release plan, "Build and distribution"): the "new version
-// available" banner fed by a stubbed GitHub "latest release" endpoint, and
+// available" card fed by a stubbed GitHub "latest release" endpoint, and
 // "Export diagnostics" from the app menu. One launch covers both seams;
 // semver comparison, redaction and the zip format are unit-tested
 // (tests/update-check.test.ts, tests/diagnostics.test.ts).
+//
+// The stub serves HTTPS with a self-signed certificate and the app launches
+// with Chromium's --ignore-certificate-errors: only a fetch through
+// Chromium's network stack (main/system-fetch.ts, which trusts the macOS
+// keychain like a browser) honors that switch. Node's fetch would reject
+// the certificate, as it rejects a TLS-inspecting proxy's, and no card
+// would ever show.
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -55,7 +63,29 @@ test.beforeAll(async () => {
   savePath = path.join(stateDir, "diagnostics.zip");
 
   // Stub GitHub "latest release" endpoint (same JSON shape as the real API).
-  server = createServer((_req, res) => {
+  const keyPath = path.join(stateDir, "tls-key.pem");
+  const certPath = path.join(stateDir, "tls-cert.pem");
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-keyout",
+      keyPath,
+      "-out",
+      certPath,
+    ],
+    { stdio: "ignore" },
+  );
+  const tls = { key: readFileSync(keyPath), cert: readFileSync(certPath) };
+  server = createServer(tls, (_req, res) => {
     releaseRequests++;
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ tag_name: "v999.0.0", draft: false }));
@@ -66,13 +96,13 @@ test.beforeAll(async () => {
   const { port } = server.address() as AddressInfo;
 
   app = await electron.launch({
-    args: [mainEntry],
+    args: [mainEntry, "--ignore-certificate-errors"],
     env: {
       ...process.env,
       HARBORMASTER_STATE_DIR: stateDir,
       HARBORMASTER_USER_DATA_DIR: userData,
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
-      HARBORMASTER_UPDATE_URL: `http://127.0.0.1:${port}/repos/finete/harbormaster/releases/latest`,
+      HARBORMASTER_UPDATE_URL: `https://127.0.0.1:${port}/repos/finete/harbormaster/releases/latest`,
       HARBORMASTER_E2E_SAVE_PATH: savePath,
     },
   });
@@ -96,9 +126,17 @@ test.afterAll(async () => {
   rmSync(stateDir, { recursive: true, force: true });
 });
 
-test("a newer GitHub release shows a dismissible upgrade banner with a copy button", async () => {
+test("a newer GitHub release, fetched through Chromium's TLS stack, shows a closable upgrade card with a copy button", async () => {
   const banner = window.getByTestId("update-banner");
   await expect(banner).toBeVisible();
+  // A floating card in the bottom-right corner, not a strip.
+  const box = await banner.boundingBox();
+  const viewport = await window.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  expect(box && box.x > viewport.width / 2).toBe(true);
+  expect(box && box.y > viewport.height / 2).toBe(true);
   expect(releaseRequests).toBeGreaterThan(0);
   await expect(banner).toHaveAttribute("data-version", "999.0.0");
   await expect(banner).toContainText("Harbormaster v999.0.0 is available");

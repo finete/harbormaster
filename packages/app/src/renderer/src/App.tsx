@@ -634,8 +634,6 @@ export function App({
           ConnectivityBanner): an environmental state, never a per-task
           warning toast. */}
       <ConnectivityBanner />
-      {/* "vX is available: brew upgrade --cask harbormaster" (see UpdateBanner). */}
-      <UpdateBanner />
       <div className="flex min-h-0 flex-1">
         {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
           (and its pty-backed terminals) alive across board/workspace switches. */}
@@ -826,7 +824,10 @@ export function App({
             openTask(taskId);
           }}
         />
-        <ToastHost />
+        <ToastHost>
+          {/* "New version available" card with the brew command (see UpdateBanner). */}
+          <UpdateBanner />
+        </ToastHost>
         <ConfirmHost />
       </div>
     </div>

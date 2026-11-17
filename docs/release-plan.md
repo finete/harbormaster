@@ -284,8 +284,10 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
 - `finete/homebrew-tap` repo with `Casks/harbormaster.rb`
   (`binary` stanza installs the `harbormaster` CLI). Release script bumps
   version + sha256 and pushes the tap.
-- In-app banner: version check against GitHub Releases (`http-version-access`
-  exists), shows `brew upgrade --cask harbormaster`.
+- In-app card (bottom-right, closable per version): hourly version check
+  against GitHub Releases (`http-version-access` over Electron's
+  `net.fetch`, so it trusts the macOS keychain), shows
+  `brew upgrade --cask harbormaster` with a copy button.
 - "Export diagnostics" (settings): zips `<userData>/logs` + a redacted
   `config.json` + `harbormaster rules list` output.
 - LICENSE: MIT, `finete`.

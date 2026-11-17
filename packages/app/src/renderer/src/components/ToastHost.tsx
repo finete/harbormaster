@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, X } from "lucide-react";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import {
@@ -19,8 +19,11 @@ import {
  * Hygiene: the stack is capped (`capVisibleToasts`) so a long run of
  * distinct warnings never grows into an undismissable wall — the rest
  * collapse behind a "+N more" row the owner can expand on demand.
+ *
+ * `children` (the update card) sit at the top of the same stack, so a
+ * floating card and the toasts never overlap.
  */
-export function ToastHost(): JSX.Element {
+export function ToastHost({ children }: { children?: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [expanded, setExpanded] = useState(false);
 
@@ -32,8 +35,6 @@ export function ToastHost(): JSX.Element {
     if (toasts.length <= TOAST_VISIBLE_CAP) setExpanded(false);
   }, [toasts.length]);
 
-  if (toasts.length === 0) return <div data-testid="toast-host" />;
-
   const { visible, overflow } = capVisibleToasts(toasts);
   const shown = expanded ? toasts : visible;
 
@@ -42,6 +43,7 @@ export function ToastHost(): JSX.Element {
       data-testid="toast-host"
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2"
     >
+      {children}
       {shown.map((toast) => (
         <div
           key={toast.id}

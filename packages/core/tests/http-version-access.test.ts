@@ -3,7 +3,10 @@
 
 import { createServer, type Server, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HttpVersionAccess } from "../src/access/http-version-access.js";
+import {
+  HttpVersionAccess,
+  TLS_TRUST_HINT,
+} from "../src/access/http-version-access.js";
 import { isConnectivityError } from "../src/engines/connectivity.js";
 
 function fakeFetch(text: string, ok = true, status = 200): typeof fetch {
@@ -141,6 +144,44 @@ describe("HttpVersionAccess", () => {
       );
       expect(failure?.cause).toBe(error);
       expect(isConnectivityError(failure?.message ?? "")).toBe(true);
+    },
+  );
+
+  it.each([
+    [
+      "Node",
+      nodeFetchError(
+        codeError(
+          "SELF_SIGNED_CERT_IN_CHAIN",
+          "self signed certificate in certificate chain",
+        ),
+      ),
+      "fetch failed (SELF_SIGNED_CERT_IN_CHAIN: self signed certificate in certificate chain)",
+    ],
+    [
+      "Electron net.fetch",
+      new Error("net::ERR_CERT_AUTHORITY_INVALID"),
+      "net::ERR_CERT_AUTHORITY_INVALID",
+    ],
+  ])(
+    "names an untrusted certificate from %s and keeps it out of the connectivity class",
+    async (_name, error, reason) => {
+      const access = new HttpVersionAccess(
+        5 * 60_000,
+        10_000,
+        Date.now,
+        failingFetch(error),
+      );
+      const failure = await access
+        .fetchText("https://example.com/version")
+        .then(
+          () => undefined,
+          (caught: unknown) => caught as Error,
+        );
+      expect(failure?.message).toBe(
+        `GET https://example.com/version failed: ${reason}; ${TLS_TRUST_HINT}`,
+      );
+      expect(isConnectivityError(failure?.message ?? "")).toBe(false);
     },
   );
 

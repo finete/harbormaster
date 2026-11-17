@@ -23,6 +23,10 @@ describe("isConnectivityError", () => {
     "connect ENETUNREACH 10.0.0.1:443",
     "connect EHOSTUNREACH 10.0.0.1:443",
     "fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error)",
+    "GET https://api.example.com/version failed: net::ERR_NAME_NOT_RESOLVED",
+    "net::ERR_INTERNET_DISCONNECTED",
+    "net::ERR_CONNECTION_REFUSED",
+    "net::ERR_NETWORK_CHANGED",
   ])("classifies %s as a connectivity failure", (message) => {
     expect(isConnectivityError(message)).toBe(true);
   });
@@ -35,6 +39,8 @@ describe("isConnectivityError", () => {
     "pull request #4 not found",
     "fatal: not a git repository",
     "gh auth login required",
+    "net::ERR_CERT_AUTHORITY_INVALID",
+    "fetch failed (SELF_SIGNED_CERT_IN_CHAIN: self signed certificate in certificate chain)",
   ])("does not classify %s as a connectivity failure", (message) => {
     expect(isConnectivityError(message)).toBe(false);
   });

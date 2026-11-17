@@ -3,8 +3,10 @@
 // repo, rate limit, ...). No I/O — refresh() in the manager uses this to
 // decide whether a per-task failure becomes a per-task warning (today's
 // behavior) or rolls up into a single connectivity marker (the offline
-// banner). Patterns cover gh's own network-failure phrasing plus the
-// Node/libcurl error codes a dead network or a TLS stall surfaces as.
+// banner). Patterns cover gh's own network-failure phrasing, the
+// Node/libcurl error codes a dead network or a TLS stall surfaces as, and
+// Chromium's `net::ERR_*` codes (the app fetches through Electron's
+// net.fetch). An untrusted certificate (`net::ERR_CERT_*`) is NOT offline.
 const CONNECTIVITY_PATTERNS: readonly RegExp[] = [
   /error connecting to/i,
   /check your internet/i,
@@ -24,6 +26,7 @@ const CONNECTIVITY_PATTERNS: readonly RegExp[] = [
   /handshake timeout/i,
   /could not resolve host/i,
   /socket hang up/i,
+  /\bnet::ERR_(?:INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|ADDRESS_UNREACHABLE|NETWORK_CHANGED|NETWORK_IO_SUSPENDED|CONNECTION_(?:REFUSED|RESET|CLOSED|ABORTED|FAILED|TIMED_OUT)|TIMED_OUT|PROXY_CONNECTION_FAILED|TUNNEL_CONNECTION_FAILED)\b/,
 ];
 
 /**

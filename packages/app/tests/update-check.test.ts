@@ -143,4 +143,46 @@ describe("createUpdateChecker", () => {
     checker.stop();
     expect(tick).toBeUndefined();
   });
+
+  it("retries a failed check at the next poll, not a full interval later, and reports the error", async () => {
+    const failure = new Error("SELF_SIGNED_CERT_IN_CHAIN");
+    const fetchText = vi
+      .fn<(url: string) => Promise<string>>()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue("v0.2.0");
+    let tick: (() => void) | undefined;
+    const onUpdate = vi.fn();
+    const onError = vi.fn();
+    const checker = createUpdateChecker({
+      currentVersion: "0.1.0",
+      url: "https://example.test/latest",
+      fetchText,
+      onUpdate,
+      onError,
+      intervalMs: 60_000,
+      pollMs: 100,
+      now: () => 50, // well inside the interval of the failed attempt
+      setInterval: (fn) => {
+        tick = fn;
+        return 1;
+      },
+      clearInterval: () => {},
+    });
+
+    checker.start();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    tick?.();
+    await vi.waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith({
+        version: "0.2.0",
+        command: UPGRADE_COMMAND,
+      }),
+    );
+    // Succeeded: the next poll inside the interval does not fetch again.
+    tick?.();
+    expect(fetchText).toHaveBeenCalledTimes(2);
+    checker.stop();
+  });
 });
