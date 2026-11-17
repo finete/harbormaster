@@ -88,6 +88,43 @@ export interface TurnBoundaryReport {
   at?: string;
 }
 
+/**
+ * A lifecycle event from the hooks of a harness that reports no program
+ * status on its pty (`capabilities.status.protocol: "hooks"`, Cursor;
+ * docs/harness-additions.md C3), for `CoreCommands.reportHookPresence`:
+ * `start` = the session is ready for input (its session-start hook, or the
+ * pty settling on a resume that fires none), `prompt` = a prompt was
+ * submitted, `tool` = a tool ran, `stop` = the turn ended with `status`.
+ */
+export type HookPresenceEvent = "start" | "prompt" | "tool" | "stop";
+
+/** One hook lifecycle report for `CoreCommands.reportHookPresence`. */
+export interface HookPresenceReport {
+  event: HookPresenceEvent;
+  /** For `stop`: how the turn ended (`completed`, `aborted`, `error`; Cursor's words). */
+  status?: string;
+  /** The turn's id when the harness has one (Cursor: `generation_id`). */
+  generation?: string;
+  /** ISO time; defaults to core's clock. */
+  at?: string;
+}
+
+/** One turn's tokens from a harness hook (Cursor's `stop` payload), for `CoreCommands.recordTurnUsage`. */
+export interface HarnessTurnUsage {
+  /** The session (conversation) the turn belongs to. */
+  sessionId: string;
+  /** The turn's id (deduplicates a repeated report). */
+  generation: string;
+  model: string;
+  /** Uncached input tokens. */
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** ISO time of the report. */
+  at?: string;
+}
+
 export interface ReopenTaskInput {
   /**
    * pi-home's "What should Pi do now?" answer. When non-empty it becomes the
@@ -748,6 +785,21 @@ export interface CoreCommands {
     taskId: string,
     boundary: TurnBoundaryReport,
   ): Promise<void>;
+  /**
+   * Presence from the hooks of a harness whose `status.protocol` is
+   * `"hooks"` (Cursor, docs/harness-additions.md C3): applied to the task's
+   * live attachment (the launcher registered it at spawn), never creating
+   * one. `start` → idle only while the attachment is still starting;
+   * `prompt`/`tool` → working; `stop` → done (`completed`), idle
+   * (`aborted`: a user cancel) or error. Also records the turn boundary.
+   */
+  reportHookPresence(taskId: string, report: HookPresenceReport): Promise<void>;
+  /**
+   * One turn's tokens reported by the task's harness hook (Cursor writes
+   * none into its transcript, docs/harness-additions.md C5): kept by the
+   * harness's usage access and summed into the task's usage.
+   */
+  recordTurnUsage(taskId: string, usage: HarnessTurnUsage): Promise<void>;
   /** The task's agent process exited: end its attachment (a reported outcome survives as `ended`). */
   endPresence(
     taskId: string,

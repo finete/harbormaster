@@ -45,6 +45,10 @@ export interface StatePaths {
   /** `<stateDir>/inbox/items.json`: persisted inbox items. */
   readonly inboxFile: string;
   readonly inboxLockFile: string;
+  /** `<stateDir>/harness-usage/<harness>/<sessionId>.jsonl`: per-turn tokens a harness hook reported (Cursor). */
+  readonly harnessUsageDir: string;
+  /** `<stateDir>/cursor-plugins/<taskId>/`: Cursor's per-session plugin directory (hooks + MCP), written by the launcher. */
+  readonly cursorPluginsDir: string;
 }
 
 /** Unix socket paths are capped (104 bytes on macOS); stay safely under it. */
@@ -94,5 +98,7 @@ export function resolveStatePaths(
     addonsDir: join(stateDir, "addons"),
     inboxFile: join(stateDir, "inbox", "items.json"),
     inboxLockFile: join(stateDir, "inbox", "items.lock"),
+    harnessUsageDir: join(stateDir, "harness-usage"),
+    cursorPluginsDir: join(stateDir, "cursor-plugins"),
   };
 }

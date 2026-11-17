@@ -41,6 +41,8 @@ export interface TurnTracking {
   /** The last report as the adapter interpreted it, before any boundary override. */
   reading?: ProgramStatusReading;
   lastBoundary?: TurnBoundaryKind;
+  /** Hooks-reported presence (Cursor): the generation of the last `aborted` stop (harness/hook-presence.ts). */
+  abortedGeneration?: string;
 }
 
 /** Tracking after a program-status report from `pid` (a new process forgets the old boundary). */

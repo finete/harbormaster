@@ -1,0 +1,47 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.13",
+  "scenario": "startup",
+  "recordedAt": "2026-11-17T18:01:33.696Z",
+  "prompts": [],
+  "command": [
+    "cursor-agent",
+    "--trust",
+    "--approve-mcps",
+    "--plugin-dir",
+    "/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-state-PXcOPJ/cursor-plugins/status-recording"
+  ],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 765,
+  "reports": [],
+  "hooks": [
+    {
+      "event": "session-start",
+      "ms": 6407,
+      "payload": {
+        "conversation_id": "a258d4c0-0d99-4426-aed8-ccec9ad0241c",
+        "generation_id": "a258d4c0-0d99-4426-aed8-ccec9ad0241c",
+        "model": "auto-smart",
+        "is_background_agent": false,
+        "session_id": "a258d4c0-0d99-4426-aed8-ccec9ad0241c",
+        "hook_event_name": "sessionStart",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-4unqZl"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {}
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

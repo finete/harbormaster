@@ -425,6 +425,17 @@ describe("onboarding commands", () => {
         installHint: "npm install -g @openai/codex",
         upgradeHint: "npm install -g @openai/codex@latest",
       },
+      {
+        id: "cursor",
+        label: "Cursor",
+        command: "agent",
+        available: false,
+        error: "not found",
+        minVersion: "2026.06.15",
+        verifiedVersion: "2026.11.13",
+        installHint: "curl https://cursor.com/install -fsS | bash",
+        upgradeHint: "curl https://cursor.com/install -fsS | bash",
+      },
     ]);
     const state = await core.commands.setDefaultAgent({
       harness: "claude-code",
@@ -478,7 +489,7 @@ describe("onboarding commands", () => {
       customAgent: { id: "cc2", label: "Claude 2", command: "claude" },
     });
     const detected = await core.commands.detectAgents();
-    expect(detected.slice(3)).toEqual([
+    expect(detected.slice(4)).toEqual([
       {
         id: "aider",
         label: "Aider",

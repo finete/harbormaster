@@ -516,6 +516,90 @@ const sessionStart: OpDefinition = {
   },
 };
 
+const hookPresence: OpDefinition = {
+  name: "hook_presence",
+  title:
+    "Report the calling task's presence from its agent's lifecycle hook (a harness that reports no status on its terminal: start / prompt / tool / stop)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      event: { type: "string", enum: ["start", "prompt", "tool", "stop"] },
+      status: { type: "string" },
+      generation: { type: "string" },
+    },
+    required: ["event"],
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const event = str(args, "event");
+    if (
+      event !== "start" &&
+      event !== "prompt" &&
+      event !== "tool" &&
+      event !== "stop"
+    ) {
+      throw new Error("event must be start, prompt, tool or stop");
+    }
+    const status = str(args, "status");
+    const generation = str(args, "generation");
+    const taskId = callerTask(caller, "hook_presence");
+    await commands.reportHookPresence(taskId, {
+      event,
+      ...(status ? { status } : {}),
+      ...(generation ? { generation } : {}),
+    });
+    return {
+      text: `Hook presence ${event} recorded`,
+      details: { taskId, event },
+    };
+  },
+};
+
+const turnUsage: OpDefinition = {
+  name: "turn_usage",
+  title:
+    "Record one turn's token usage reported by the calling task's agent hook (a harness that writes none into its transcript)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      sessionId: { type: "string" },
+      generation: { type: "string" },
+      model: { type: "string" },
+      input: { type: "integer", minimum: 0 },
+      output: { type: "integer", minimum: 0 },
+      cacheRead: { type: "integer", minimum: 0 },
+      cacheWrite: { type: "integer", minimum: 0 },
+    },
+    required: ["sessionId", "generation"],
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const sessionId = str(args, "sessionId");
+    const generation = str(args, "generation");
+    if (!sessionId || !generation) {
+      throw new Error("sessionId and generation are required");
+    }
+    const taskId = callerTask(caller, "turn_usage");
+    const count = (key: string) => {
+      const value = Number(args[key] ?? 0);
+      return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    };
+    await commands.recordTurnUsage(taskId, {
+      sessionId,
+      generation,
+      model: str(args, "model") ?? "unknown",
+      input: count("input"),
+      output: count("output"),
+      cacheRead: count("cacheRead"),
+      cacheWrite: count("cacheWrite"),
+    });
+    return {
+      text: `Turn usage recorded for session ${sessionId}`,
+      details: { taskId, sessionId, generation },
+    };
+  },
+};
+
 const requestReview: OpDefinition = {
   name: "request_review",
   title:
@@ -683,6 +767,8 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   openUrl,
   turnBoundary,
   sessionStart,
+  hookPresence,
+  turnUsage,
   requestReview,
   usageList,
   usageRefresh,

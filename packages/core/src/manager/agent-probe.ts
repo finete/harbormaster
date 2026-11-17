@@ -16,6 +16,10 @@ export async function probeAgentCommand(
     ? [[override]]
     : descriptor.commands;
   let shim: string | undefined;
+  // A hit whose version output is not this CLI's (`versionIdentifies`:
+  // Cursor's generic `agent`) is another program: try the next alias,
+  // falling back to the first such hit when none is the CLI.
+  let other: AgentProbe | undefined;
   for (const argv of aliases) {
     const [binary, ...rest] = argv;
     if (!binary) continue;
@@ -32,13 +36,19 @@ export async function probeAgentCommand(
     const version = outcome.ok
       ? descriptor.parseVersion(outcome.output)
       : undefined;
-    return {
+    const probe: AgentProbe = {
       command: argv.join(" "),
       path,
       outcome,
       ...(version ? { version } : {}),
     };
+    if (descriptor.versionIdentifies && !override && !version) {
+      other ??= probe;
+      continue;
+    }
+    return probe;
   }
+  if (other) return other;
   return {
     command: aliases[0]?.join(" ") ?? descriptor.id,
     ...(shim ? { shim } : {}),

@@ -5,6 +5,12 @@
 // adapter's `interpretProgramStatus`, exactly as the app's pty layer and
 // core's `reportPresence` do. The expected state sequence lives in the
 // sibling .json, so a re-recording that changes behavior is a reviewed diff.
+//
+// A harness that reports through hooks (Cursor, `status.protocol: "hooks"`)
+// emits nothing on its pty: its fixture's sequence is the recorded hook
+// events (`hooks` in the .json), replayed through the adapter's event map
+// (`cursorHookPresenceEvent`) and core's hook→presence rule
+// (`hookPresenceReading`), from the launcher's `working` "Starting…".
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +19,13 @@ import type {
   HarnessAdapter,
   ProgramStatusReading,
 } from "../src/contracts/harness.js";
+import { HOOK_PRESENCE_STARTING } from "../src/contracts/harness.js";
 import { CLAUDE_AWAITED_BACKGROUND } from "../src/harness/claude-code-adapter.js";
+import {
+  type CursorHookEventName,
+  cursorHookPresenceEvent,
+} from "../src/harness/cursor-adapter.js";
+import { hookPresenceReading } from "../src/harness/hook-presence.js";
 import { createHarnessRegistry } from "../src/harness/registry.js";
 import {
   ProgramStatusParser,
@@ -29,8 +41,51 @@ interface FixtureMeta {
   recordedAt: string;
   prompts: string[];
   reports: Array<ProgramStatusReport & { ms: number }>;
+  /** Hooks-reporting harnesses: the hook events, in order. */
+  hooks?: HookEvent[];
   notes: string[];
   expected: { states: string[]; final?: ProgramStatusReading };
+}
+
+interface HookEvent {
+  event: CursorHookEventName;
+  ms: number;
+  payload: Record<string, unknown>;
+  reply: Record<string, unknown>;
+}
+
+/** What core records from a hooks-reporting harness's events (presence starts `working` "Starting…"). */
+function replayHooks(hooks: readonly HookEvent[]): ProgramStatusReading[] {
+  let status: ProgramStatusReading = {
+    state: "working",
+    message: HOOK_PRESENCE_STARTING,
+  };
+  let aborted: string | undefined;
+  const readings: ProgramStatusReading[] = [];
+  for (const hook of hooks) {
+    const event = cursorHookPresenceEvent(
+      hook.event,
+      typeof hook.reply.followup_message === "string",
+    );
+    const status_ =
+      typeof hook.payload.status === "string" ? hook.payload.status : undefined;
+    const generation =
+      typeof hook.payload.generation_id === "string"
+        ? hook.payload.generation_id
+        : undefined;
+    const report = {
+      event,
+      ...(event === "stop" && status_ ? { status: status_ } : {}),
+      ...(generation ? { generation } : {}),
+    };
+    const reading = hookPresenceReading({ ...status, at: "" }, report, aborted);
+    if (event === "stop" && status_ === "aborted") aborted = generation;
+    if (reading) {
+      status = reading;
+      readings.push(reading);
+    }
+  }
+  return readings;
 }
 
 interface Fixture {
@@ -125,6 +180,16 @@ it("has the required recordings (S1)", () => {
       "exit",
     ]),
   );
+  expect(recorded("cursor")).toEqual(
+    expect.arrayContaining([
+      "startup",
+      "turn",
+      "turn-tool",
+      "cancel",
+      "background-work",
+      "exit",
+    ]),
+  );
 });
 
 describe.each(
@@ -152,7 +217,15 @@ describe.each(
 
   it("interprets to the expected state sequence", () => {
     if (!adapter) return;
-    const readings = interpret(adapter, parse(raw));
+    const hooks = adapter.capabilities.status.protocol === "hooks";
+    if (hooks) {
+      // Nothing on the pty; the hooks are the sequence.
+      expect(parse(raw)).toEqual([]);
+      expect(meta.hooks?.length ?? 0).toBeGreaterThan(0);
+    }
+    const readings = hooks
+      ? replayHooks(meta.hooks ?? [])
+      : interpret(adapter, parse(raw));
     expect(collapse(readings)).toEqual(meta.expected.states);
     if (meta.expected.final) {
       expect(readings.at(-1)).toEqual(meta.expected.final);
@@ -163,8 +236,8 @@ describe.each(
 });
 
 describe("scenario semantics", () => {
-  it("a Claude, Pi and Codex turn ends in done", () => {
-    for (const harness of ["claude-code", "pi", "codex"]) {
+  it("a Claude, Pi, Codex and Cursor turn ends in done", () => {
+    for (const harness of ["claude-code", "pi", "codex", "cursor"]) {
       const { meta } = fixture(harness, "turn");
       expect(meta.expected.states.at(-1), harness).toBe("done");
       expect(meta.expected.states, harness).toContain("working");
@@ -172,7 +245,7 @@ describe("scenario semantics", () => {
   });
 
   it("Esc cancel ends idle (not done, not working) for all", () => {
-    for (const harness of ["claude-code", "pi", "codex"]) {
+    for (const harness of ["claude-code", "pi", "codex", "cursor"]) {
       const { meta } = fixture(harness, "cancel");
       expect(meta.expected.states, harness).toContain("working");
       expect(meta.expected.states.at(-1), harness).toBe("idle");
@@ -180,7 +253,7 @@ describe("scenario semantics", () => {
   });
 
   it("startup settles idle", () => {
-    for (const harness of ["claude-code", "pi", "codex"]) {
+    for (const harness of ["claude-code", "pi", "codex", "cursor"]) {
       expect(fixture(harness, "startup").meta.expected.states.at(-1)).toBe(
         "idle",
       );
@@ -249,5 +322,42 @@ describe("scenario semantics", () => {
       expect(parse(raw).at(-1)?.state, scenario).toBe("done");
     }
     expect(fixture("codex", "turn").raw).toContain("\x1b]9;OK");
+  });
+
+  it("Cursor: Esc fires stop 'aborted' then 'error' for the same generation, recorded idle (no warning)", () => {
+    const { meta } = fixture("cursor", "cancel");
+    const stops = (meta.hooks ?? []).filter((hook) => hook.event === "stop");
+    expect(stops.map((hook) => hook.payload.status)).toEqual([
+      "aborted",
+      "error",
+    ]);
+    expect(stops[0]?.payload.generation_id).toBe(
+      stops[1]?.payload.generation_id,
+    );
+    expect(meta.expected.final).toEqual({ state: "idle" });
+  });
+
+  it("Cursor: the stop payload carries per-turn tokens; the transcript path is null at sessionStart", () => {
+    const { meta } = fixture("cursor", "turn");
+    const start = meta.hooks?.find((hook) => hook.event === "session-start");
+    expect(start?.payload.transcript_path).toBeNull();
+    expect(start?.payload.conversation_id).toBe(start?.payload.session_id);
+    const stop = meta.hooks?.find((hook) => hook.event === "stop");
+    expect(stop?.payload).toMatchObject({
+      status: "completed",
+      loop_count: 0,
+      input_tokens: expect.any(Number),
+      output_tokens: expect.any(Number),
+      cache_read_tokens: expect.any(Number),
+      cache_write_tokens: expect.any(Number),
+    });
+    // Recordings never keep the account's e-mail.
+    for (const entry of FIXTURES.filter((f) => f.meta.harness === "cursor")) {
+      for (const hook of entry.meta.hooks ?? []) {
+        if ("user_email" in hook.payload) {
+          expect(hook.payload.user_email).toBe("<redacted>");
+        }
+      }
+    }
   });
 });

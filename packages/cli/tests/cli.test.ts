@@ -9,8 +9,10 @@ import { join } from "node:path";
 import {
   type Core,
   createCore,
+  createHarnessRegistry,
   type DoctorReport,
   doctorExitCode,
+  HOOK_PRESENCE_STARTING,
   PiHarnessAdapter,
   resolveSocketPath,
   startToolSocketServer,
@@ -29,6 +31,8 @@ import {
   codexContextText,
   codexHookOutput,
   createMcpServer,
+  cursorHookOutput,
+  cursorStopMayFollowUp,
   DOCTOR_WITHOUT_APP_NOTE,
   EXIT_NOT_RUNNING,
   EXIT_OPEN_URL_FAILED,
@@ -372,6 +376,240 @@ describe("harbormaster hook codex (X1-X3, X5)", () => {
   it("rejects an unknown event", async () => {
     const run = io({ HARBORMASTER_TASK_ID: "t1" });
     expect(await main(["hook", "codex", "--event", "nope"], run)).toBe(64);
+  });
+});
+
+describe("harbormaster hook cursor (C3-C5)", () => {
+  // A core whose tasks can run on Cursor (the suite's default core is Pi-only).
+  let cursorCore: Core;
+  let cursorServer: ToolSocketServer;
+  let cursorState: string;
+
+  beforeEach(async () => {
+    cursorState = await mkdtemp(join(tmpdir(), "hm-cli-cursor-"));
+    await mkdir(join(cursorState, "Code"));
+    await writeFile(
+      join(cursorState, "config.json"),
+      JSON.stringify({ codeRoot: join(cursorState, "Code") }),
+    );
+    cursorCore = createCore({
+      stateDir: cursorState,
+      harnesses: createHarnessRegistry({
+        stateDir: cursorState,
+        isAlive: () => true,
+      }),
+    });
+    cursorServer = await startToolSocketServer({
+      socketPath: resolveSocketPath(cursorState),
+      commands: cursorCore.commands,
+    });
+  });
+
+  afterEach(async () => {
+    await cursorServer.close();
+    cursorCore.close();
+    await rm(cursorState, { recursive: true, force: true });
+  });
+
+  const CHAT = "8834eead-98ee-4a2d-a2a8-b2fff2192041";
+  const cursorIo = (taskId: string, stdin: unknown) => {
+    let out = "";
+    return {
+      env: {
+        HARBORMASTER_STATE_DIR: cursorState,
+        HARBORMASTER_TASK_ID: taskId,
+        CURSOR_DATA_DIR: join(cursorState, "cursor-data"),
+      },
+      cwd: cursorState,
+      stdout: (text: string) => {
+        out += text;
+      },
+      stderr: () => {},
+      readStdin: async () => JSON.stringify(stdin),
+      out: () => out,
+    };
+  };
+  const hook = async (
+    taskId: string,
+    event: string,
+    stdin: Record<string, unknown>,
+  ) => {
+    const run = cursorIo(taskId, {
+      conversation_id: CHAT,
+      session_id: CHAT,
+      generation_id: "g1",
+      workspace_roots: ["/private/tmp/wt"],
+      transcript_path: null,
+      ...stdin,
+    });
+    expect(await main(["hook", "cursor", "--event", event], run)).toBe(0);
+    return JSON.parse(run.out()) as Record<string, unknown>;
+  };
+
+  async function cursorTask(parentId?: string): Promise<string> {
+    const task = await cursorCore.commands.launchTask({
+      relation: parentId ? "child" : "standalone",
+      ...(parentId ? { fromTaskId: parentId } : {}),
+      title: "Cursor work",
+      prompt: "p",
+      repository: { none: true },
+      harness: "cursor",
+    });
+    // The launcher registered the attachment at spawn (C9).
+    await cursorCore.commands.reportPresence(task.id, {
+      state: "working",
+      message: HOOK_PRESENCE_STARTING,
+      pid: process.pid,
+    });
+    return task.id;
+  }
+  const presence = async (taskId: string) =>
+    (await cursorCore.commands.getPresence(taskId)).record?.status?.state;
+
+  it("session-start binds the learned chat (predicted transcript) and marks the agent ready", async () => {
+    const taskId = await cursorTask();
+    expect(await hook(taskId, "session-start", {})).toEqual({});
+    expect(await presence(taskId)).toBe("idle");
+    const binding = await cursorCore.commands.getTaskWorkspace(taskId);
+    expect(binding?.sessionId).toBe(CHAT);
+    expect(binding?.sessionPath).toBe(
+      join(
+        cursorState,
+        "cursor-data",
+        "projects",
+        "private-tmp-wt",
+        "agent-transcripts",
+        CHAT,
+        `${CHAT}.jsonl`,
+      ),
+    );
+  });
+
+  it("catch-up rides beforeSubmitPrompt's additional_context; a follow-up the stop hook's followup_message, once per stop chain", async () => {
+    const parent = await cursorCore.commands.launchTask({
+      relation: "standalone",
+      title: "Parent",
+      prompt: "p",
+      repository: { none: true },
+    });
+    const taskId = await cursorTask(parent.id);
+    await cursorCore.commands.sendTaskMessage({
+      from: { kind: "task", taskId: parent.id },
+      targetTaskId: taskId,
+      text: "catch up on this",
+      mode: "followUp",
+    });
+    const submit = await hook(taskId, "before-submit-prompt", {
+      prompt: "hello",
+    });
+    expect(submit.continue).toBe(true);
+    expect(String(submit.additional_context)).toContain("catch up on this");
+    expect(await presence(taskId)).toBe("working");
+
+    await cursorCore.commands.sendTaskMessage({
+      from: { kind: "task", taskId: parent.id },
+      targetTaskId: taskId,
+      text: "follow up on this",
+      mode: "followUp",
+    });
+    // A follow-up turn's own stop (loop_count 1) never chains another.
+    expect(
+      await hook(taskId, "stop", { status: "completed", loop_count: 1 }),
+    ).toEqual({});
+    // An aborted turn takes none either.
+    expect(
+      await hook(taskId, "stop", { status: "aborted", loop_count: 0 }),
+    ).toEqual({});
+    const stop = await hook(taskId, "stop", {
+      status: "completed",
+      loop_count: 0,
+      generation_id: "g9",
+      model: "auto-smart",
+      input_tokens: 20717,
+      output_tokens: 4,
+      cache_read_tokens: 8325,
+      cache_write_tokens: 12388,
+    });
+    expect(String(stop.followup_message)).toContain("follow up on this");
+    // The follow-up turn runs without a beforeSubmitPrompt: still working.
+    expect(await presence(taskId)).toBe("working");
+    const messages = await cursorCore.commands.listMessages({ taskId });
+    expect(messages.every((message) => message.status === "delivered")).toBe(
+      true,
+    );
+    // The stop's tokens were recorded for the chat (the transcript has none).
+    const usage = await cursorCore.commands.refreshTaskUsage(taskId);
+    expect(usage?.totals).toMatchObject({
+      input: 4,
+      output: 4,
+      cacheRead: 8325,
+      cacheWrite: 12388,
+    });
+    expect(await hook(taskId, "stop", { status: "completed" })).toEqual({});
+    expect(await presence(taskId)).toBe("done");
+  });
+
+  it("shapes Cursor hook output and guards the follow-up loop", () => {
+    expect(cursorHookOutput("before-submit-prompt", "")).toEqual({
+      continue: true,
+    });
+    expect(cursorHookOutput("before-submit-prompt", "x")).toEqual({
+      continue: true,
+      additional_context: "x",
+    });
+    expect(cursorHookOutput("stop", "x")).toEqual({ followup_message: "x" });
+    expect(cursorHookOutput("post-tool-use", "x")).toEqual({});
+    expect(cursorHookOutput("session-start", "x")).toEqual({});
+    expect(cursorStopMayFollowUp({ status: "completed", loop_count: 0 })).toBe(
+      true,
+    );
+    expect(cursorStopMayFollowUp({ status: "completed", loop_count: 1 })).toBe(
+      false,
+    );
+    expect(cursorStopMayFollowUp({ status: "error", loop_count: 0 })).toBe(
+      false,
+    );
+  });
+
+  it("replies at once and never outlives its deadline when the app hangs", async () => {
+    const { createServer } = await import("node:net");
+    const hungDir = await mkdtemp(join(tmpdir(), "hm-hung-"));
+    const socketPath = resolveSocketPath(hungDir);
+    await mkdir(join(socketPath, ".."), { recursive: true });
+    const hung = createServer(() => {});
+    await new Promise<void>((resolve) => hung.listen(socketPath, resolve));
+    try {
+      for (const [event, reply] of [
+        ["session-start", {}],
+        ["stop", {}],
+        ["before-submit-prompt", { continue: true }],
+        ["post-tool-use", {}],
+      ] as const) {
+        const run = {
+          ...io({
+            HARBORMASTER_TASK_ID: "t1",
+            HARBORMASTER_STATE_DIR: hungDir,
+          }),
+          readStdin: () => new Promise<string>(() => {}), // never ends
+        };
+        const started = Date.now();
+        expect(await main(["hook", "cursor", "--event", event], run)).toBe(0);
+        expect(Date.now() - started).toBeLessThan(CODEX_HOOK_DEADLINE_MS + 700);
+        expect(JSON.parse(run.out())).toEqual(reply);
+      }
+    } finally {
+      hung.close();
+      await rm(hungDir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("outside a task session it only lets the prompt through", async () => {
+    const run = io({});
+    expect(
+      await main(["hook", "cursor", "--event", "before-submit-prompt"], run),
+    ).toBe(0);
+    expect(JSON.parse(run.out())).toEqual({ continue: true });
+    expect(await main(["hook", "cursor", "--event", "nope"], io({}))).toBe(64);
   });
 });
 

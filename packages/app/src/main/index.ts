@@ -46,10 +46,12 @@ import {
   DEFAULT_STATE_DIR,
   execFileRunner,
   type HarnessAdapter,
+  HOOK_PRESENCE_STARTING,
   HttpVersionAccess,
   harnessLaunchCommand,
   isConnectivityError,
   PI_HARNESS_ID,
+  PTY_TYPING_CHANNEL,
   parsePullRequestUrl,
   probeSocketOwner,
   resolveSocketPath,
@@ -509,6 +511,29 @@ setProgramStatusListener({
         console.error(`[presence] report for ${taskId} failed:`, error);
       });
   },
+  // A harness that reports through hooks (Cursor, docs/harness-additions.md
+  // C3/C9): starting until its session-start hook (or, on a resume, its
+  // pty settling) says it is ready; nothing is typed into it before.
+  onHookStart: (taskId, pid) => {
+    void core.commands
+      .reportPresence(taskId, {
+        state: "working",
+        message: HOOK_PRESENCE_STARTING,
+        pid,
+      })
+      .then(() => pollPresenceOnce())
+      .catch((error: unknown) => {
+        console.error(`[presence] start for ${taskId} failed:`, error);
+      });
+  },
+  onHookReady: (taskId) => {
+    void core.commands
+      .reportHookPresence(taskId, { event: "start" })
+      .then(() => pollPresenceOnce())
+      .catch((error: unknown) => {
+        console.error(`[presence] ready for ${taskId} failed:`, error);
+      });
+  },
   onExit: (taskId, pid) => {
     void core.commands
       .endPresence(taskId, { pid })
@@ -667,7 +692,12 @@ async function runHarnessDeliveryPass(
         "wakeIdle",
         text,
       );
-      if (!deliver) continue;
+      if (!deliver) {
+        // No deliver command, but the harness takes a message typed at
+        // its prompt (Cursor, docs/harness-additions.md C4): claim, type.
+        await typeIdleMessages(taskId, messages, text);
+        continue;
+      }
       await harnessDeliveries.send(
         taskId,
         deliver,
@@ -680,6 +710,39 @@ async function runHarnessDeliveryPass(
   } finally {
     deliveryPassRunning = false;
   }
+}
+
+/**
+ * The idle wake-up of a harness whose only way into an idle session is its
+ * pane (`channels.wakeIdle === PTY_TYPING_CHANNEL`, Cursor): the messages
+ * are claimed first (a hook may have taken them meanwhile), then typed as
+ * one prompt. Called only while the agent is at its prompt, which for a
+ * hooks-reporting harness is never before it said it is ready (C9).
+ */
+async function typeIdleMessages(
+  taskId: string,
+  messages: readonly { id: string }[],
+  text: string,
+): Promise<void> {
+  const adapter = await harnessForTask(taskId).catch(() => undefined);
+  if (adapter?.capabilities.delivery.channels.wakeIdle !== PTY_TYPING_CHANNEL) {
+    return;
+  }
+  const claimed = await core.commands
+    .claimInboxMessages(taskId, {
+      idle: true,
+      messageIds: messages.map((message) => message.id),
+    })
+    .catch(() => []);
+  if (claimed.length === 0) return;
+  const typed = await typeText(
+    (data) => writeToPrimarySession(taskId, data),
+    claimed.length === messages.length ? text : queueTextFor(claimed),
+  );
+  console.log(
+    `[delivery] typed ${JSON.stringify({ taskId, messages: claimed.length, typed })}`,
+  );
+  if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
 }
 
 const queuedReviews = new QueuedReviews({

@@ -1,6 +1,6 @@
 // The harness registry (decision R8): every agent a task can run on, keyed
-// by `HarnessAdapter.id` (`Task.harness`). Built-ins are Pi, Claude Code
-// and Codex; user-configured "any CLI" agents (`GlobalConfig.agents.custom[]`)
+// by `HarnessAdapter.id` (`Task.harness`). Built-ins are Pi, Claude Code,
+// Codex and Cursor; user-configured "any CLI" agents (`GlobalConfig.agents.custom[]`)
 // are added per call from the current config, so editing the config needs
 // no restart. A custom agent can never shadow a built-in id.
 
@@ -15,6 +15,7 @@ import {
 import type { PresenceReaderOptions } from "./adapter-common.js";
 import { ClaudeCodeHarnessAdapter } from "./claude-code-adapter.js";
 import { CodexHarnessAdapter } from "./codex-adapter.js";
+import { CursorHarnessAdapter } from "./cursor-adapter.js";
 import { CustomHarnessAdapter } from "./custom-adapter.js";
 import { PiHarnessAdapter } from "./pi-adapter.js";
 
@@ -92,7 +93,7 @@ export class HarnessRegistry {
   }
 }
 
-/** The built-in registry: Pi, Claude Code and Codex sharing one presence registry and CLI path. */
+/** The built-in registry: Pi, Claude Code, Codex and Cursor sharing one presence registry and CLI path. */
 export function createHarnessRegistry(
   options: HarnessRegistryOptions = {},
 ): HarnessRegistry {
@@ -108,6 +109,7 @@ export function createHarnessRegistry(
       new PiHarnessAdapter(shared),
       new ClaudeCodeHarnessAdapter(shared),
       new CodexHarnessAdapter(shared),
+      new CursorHarnessAdapter(shared),
     ],
     options,
   );

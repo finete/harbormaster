@@ -1,0 +1,111 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.13",
+  "scenario": "cancel",
+  "recordedAt": "2026-11-17T18:02:20.535Z",
+  "prompts": [
+    "Count from 1 to 300, one number per line, with no other text. Do not use any tools."
+  ],
+  "command": [
+    "cursor-agent",
+    "--trust",
+    "--approve-mcps",
+    "--plugin-dir",
+    "/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-state-7DboRy/cursor-plugins/status-recording"
+  ],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 17042,
+  "reports": [],
+  "hooks": [
+    {
+      "event": "session-start",
+      "ms": 6053,
+      "payload": {
+        "conversation_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "generation_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "model": "auto-smart",
+        "is_background_agent": false,
+        "session_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "hook_event_name": "sessionStart",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-YGfTNB"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {}
+    },
+    {
+      "event": "before-submit-prompt",
+      "ms": 8103,
+      "payload": {
+        "conversation_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "generation_id": "6e65a112-dff7-4b99-8dec-e584f9b7db97",
+        "model": "auto-smart",
+        "prompt": "Count from 1 to 300, one number per line, with no other text. Do not use any tools.",
+        "attachments": [],
+        "session_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-YGfTNB"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {
+        "continue": true
+      }
+    },
+    {
+      "event": "stop",
+      "ms": 11040,
+      "payload": {
+        "conversation_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "generation_id": "6e65a112-dff7-4b99-8dec-e584f9b7db97",
+        "model": "auto-smart",
+        "status": "aborted",
+        "loop_count": 0,
+        "session_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "hook_event_name": "stop",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-YGfTNB"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-YGfTNB/agent-transcripts/4aef109c-cc86-4b94-98e2-8fc7541796c5/4aef109c-cc86-4b94-98e2-8fc7541796c5.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "stop",
+      "ms": 11128,
+      "payload": {
+        "conversation_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "generation_id": "6e65a112-dff7-4b99-8dec-e584f9b7db97",
+        "model": "auto-smart",
+        "status": "error",
+        "loop_count": 0,
+        "session_id": "4aef109c-cc86-4b94-98e2-8fc7541796c5",
+        "hook_event_name": "stop",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-YGfTNB"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-YGfTNB/agent-transcripts/4aef109c-cc86-4b94-98e2-8fc7541796c5/4aef109c-cc86-4b94-98e2-8fc7541796c5.jsonl"
+      },
+      "reply": {}
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle", "working", "idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}
