@@ -19,6 +19,11 @@ import { app } from "electron";
 import * as pty from "node-pty";
 import { bufferTail } from "../shared/terminal-tail";
 import { debugLog, isDebugLogging } from "./debug-log";
+import {
+  createHookReadyWatcher,
+  type LaunchPrepareLike,
+  materializeLaunchFiles,
+} from "./launch-prepare";
 import { DoneMessageJoiner, Osc9Splitter } from "./osc9-notifications";
 import {
   createReadyLineMatcher,
@@ -121,6 +126,13 @@ const sessions = new Map<string, PtySessionRecord>();
  */
 export interface ProgramStatusListener {
   onReport(taskId: string, pid: number, report: ProgramStatusReport): void;
+  /**
+   * A primary whose program reports no status on its pty (`hookStatus`,
+   * Cursor) just spawned: register the attachment as starting.
+   */
+  onHookStart?(taskId: string, pid: number): void;
+  /** That program looks ready for input (its pty went quiet; `hookStatus.ready: "quiet"`). */
+  onHookReady?(taskId: string, pid: number): void;
   /** The task primary's process exited (pid liveness is the "ended" signal). */
   onExit(taskId: string, pid: number): void;
 }
@@ -147,8 +159,20 @@ function createProgramStatusFilter(
   taskId: string,
   ptyProcess: pty.IPty,
   forward: (data: string) => void,
+  hookStatus?: LaunchSpecLike["hookStatus"],
 ): { feed: (raw: string) => void; dispose: () => void } {
   const parser = new ProgramStatusParser();
+  // A program that reports through hooks (Cursor): registered as starting
+  // now; ready on its session-start hook, or once its output settles when
+  // none will fire (a resume).
+  if (hookStatus) programStatusListener?.onHookStart?.(taskId, ptyProcess.pid);
+  const ready =
+    hookStatus?.ready === "quiet"
+      ? createHookReadyWatcher({
+          onReady: () =>
+            programStatusListener?.onHookReady?.(taskId, ptyProcess.pid),
+        })
+      : undefined;
   // OSC 9 notes (Codex's reply text, X4) become the next `done`'s message.
   const osc9 = new Osc9Splitter();
   const doneMessages = new DoneMessageJoiner();
@@ -177,6 +201,7 @@ function createProgramStatusFilter(
   };
   return {
     feed: (raw) => {
+      ready?.feed();
       clearHold();
       for (const piece of osc9.feed(raw)) {
         if (piece.kind === "text") {
@@ -194,7 +219,10 @@ function createProgramStatusFilter(
         }, PROGRAM_STATUS_HOLD_MS);
       }
     },
-    dispose: clearHold,
+    dispose: () => {
+      clearHold();
+      ready?.dispose();
+    },
   };
 }
 
@@ -292,6 +320,10 @@ export interface LaunchSpecLike {
   args: string[];
   cwd: string;
   env: Record<string, string>;
+  /** Files to write before spawning (core's `LaunchSpec.prepare`; see launch-prepare.ts). */
+  prepare?: LaunchPrepareLike;
+  /** The program reports through hooks, not its pty (core's `LaunchSpec.hookStatus`). */
+  hookStatus?: { ready: "hook" | "quiet" };
 }
 
 export interface PtySessionOptions {
@@ -398,6 +430,7 @@ export function createSession(
   const spawnedAtMs = Date.now();
   let ptyProcess: pty.IPty;
   try {
+    if (useSpec && spec.prepare) materializeLaunchFiles(spec.prepare);
     ptyProcess = spawnWithFdHygiene(() =>
       useSpec
         ? pty.spawn(spec.command, spec.args, {
@@ -497,7 +530,12 @@ export function createSession(
   // Only a task primary running the harness reports program status.
   const statusFilter =
     registerAsPane && options?.taskId
-      ? createProgramStatusFilter(options.taskId, ptyProcess, forward)
+      ? createProgramStatusFilter(
+          options.taskId,
+          ptyProcess,
+          forward,
+          useSpec ? spec.hookStatus : undefined,
+        )
       : undefined;
   const readyLine = readyLineWatcher(
     options?.taskId,
@@ -606,6 +644,7 @@ export function createBackgroundPrimarySession(
   const spawnedAtMs = Date.now();
   let ptyProcess: pty.IPty;
   try {
+    if (spec.prepare) materializeLaunchFiles(spec.prepare);
     ptyProcess = spawnWithFdHygiene(() =>
       pty.spawn(spec.command, spec.args, {
         name: "xterm-256color",
@@ -669,10 +708,15 @@ export function createBackgroundPrimarySession(
     },
   };
   const modes = createTerminalModeTracker();
-  const statusFilter = createProgramStatusFilter(taskId, ptyProcess, (data) => {
-    modes.feed(data);
-    io.sink(data);
-  });
+  const statusFilter = createProgramStatusFilter(
+    taskId,
+    ptyProcess,
+    (data) => {
+      modes.feed(data);
+      io.sink(data);
+    },
+    spec.hookStatus,
+  );
   const readyLine = readyLineWatcher(taskId, exportedOpenUrlHandler(spec));
   const dataDisposable = ptyProcess.onData((data) => {
     notePtyData(id, taskId, data);

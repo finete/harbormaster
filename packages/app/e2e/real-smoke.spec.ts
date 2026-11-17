@@ -25,6 +25,15 @@
 // message and the marker does not list codex. Codex uses the real
 // ~/.codex (its login); trusting the worktree there is Codex's own write.
 //
+// Cursor: likewise only with HARBORMASTER_REAL_SMOKE_CURSOR=<path to a
+// cursor-agent> (e.g. the real-CLI tier's extracted tarball,
+// <prefix>/cursor-agent/<build>/dist-package/cursor-agent), logged in
+// (`agent status`). Its cases: Setup finds it with its version and no
+// review support (C7); a pane reaches "your move" through the hooks alone
+// after a short prompt, then the S4 background-sleep turn ends at rest; a
+// parent's message reaches the busy agent through the stop hook's
+// followup_message (C4); usage comes from the stop payloads (C5).
+//
 // State, worktrees and the Electron profile live in a temp dir. Agent
 // session files land in the real ~/.pi / ~/.claude (the agents need the
 // real HOME for auth); the worktree paths name them as smoke runs.
@@ -70,12 +79,19 @@ const cliBin = path.join(repoRoot, "packages", "cli", "bin", "harbormaster.js");
 const CODEX = process.env.HARBORMASTER_REAL_SMOKE_CODEX || undefined;
 const CODEX_SKIP =
   "Codex: set HARBORMASTER_REAL_SMOKE_CODEX=<path to a real codex> (e.g. <real-CLI prefix>/node_modules/.bin/codex) to run the Codex cases";
+/** A real Cursor CLI for the Cursor cases (see the header); absent = skipped. */
+const CURSOR = process.env.HARBORMASTER_REAL_SMOKE_CURSOR || undefined;
+const CURSOR_SKIP =
+  "Cursor: set HARBORMASTER_REAL_SMOKE_CURSOR=<path to a real cursor-agent> (e.g. <real-CLI prefix>/cursor-agent/<build>/dist-package/cursor-agent) to run the Cursor cases";
 /** Built-in harnesses this smoke covers (recorded in the marker). */
-const HARNESSES = CODEX
-  ? (["pi", "claude-code", "codex"] as const)
-  : (["pi", "claude-code"] as const);
+const HARNESSES: readonly ("pi" | "claude-code" | "codex" | "cursor")[] = [
+  "pi",
+  "claude-code",
+  ...(CODEX ? (["codex"] as const) : []),
+  ...(CURSOR ? (["cursor"] as const) : []),
+];
 /** Number of `test(...)` cases that run below; the marker needs every one passed. */
-const SMOKE_TESTS = CODEX ? 6 : 4;
+const SMOKE_TESTS = 4 + (CODEX ? 2 : 0) + (CURSOR ? 3 : 0);
 const MARKER = path.join(repoRoot, ".real-smoke-ok");
 /**
  * The PATH a Dock launch would see for agents: a terminal multiplexer's
@@ -93,10 +109,11 @@ let app: ElectronApplication;
 let window: Page;
 let root: string;
 let stateDir: string;
-const tasks: Record<"pi" | "claude" | "codex", string> = {
+const tasks: Record<"pi" | "claude" | "codex" | "cursor", string> = {
   pi: "",
   claude: "",
   codex: "",
+  cursor: "",
 };
 const mainProcessErrors: string[] = [];
 const mainLog: string[] = [];
@@ -177,6 +194,16 @@ function missingLogins(): string[] {
       );
     }
   }
+  if (CURSOR) {
+    try {
+      const status = agentJson(CURSOR, ["status", "--format", "json"]) as {
+        isAuthenticated?: boolean;
+      };
+      if (status.isAuthenticated !== true) throw new Error("not logged in");
+    } catch (error) {
+      missing.push(`cursor (${(error as Error).message}; run \`agent login\`)`);
+    }
+  }
   return missing;
 }
 
@@ -242,6 +269,7 @@ test.beforeAll(async () => {
       HARBORMASTER_PI_EXTENSIONS_DIR: path.join(root, "pi-extensions"),
       HARBORMASTER_CLI_PATH: cliBin,
       ...(CODEX ? { HARBORMASTER_CODEX_COMMAND: CODEX } : {}),
+      ...(CURSOR ? { HARBORMASTER_CURSOR_COMMAND: CURSOR } : {}),
     },
   });
   const onChunk = (chunk: Buffer): void => {
@@ -574,6 +602,201 @@ test("Codex: Review queues $plannotator-review and opens the real Plannotator pa
   expect(mainLog.join("")).toMatch(
     new RegExp(`\\[delivery\\] queued \\{"taskId":"${taskId}"`),
   );
+});
+
+/** Presence as the row reads it: `running` mid-turn, else the last state. */
+async function presenceVerdict(taskId: string): Promise<string> {
+  const presence = await createCore({ stateDir }).commands.getPresence(taskId);
+  return presence.runningTurn
+    ? "running"
+    : (presence.record?.status?.state ?? "none");
+}
+
+/** Types a prompt into the task's pane like a person (Enter on its own). */
+async function typePrompt(taskId: string, text: string): Promise<void> {
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  await workspace.locator(".xterm").first().click();
+  await window.keyboard.type(text);
+  await window.waitForTimeout(300);
+  await window.keyboard.press("Enter");
+}
+
+/**
+ * Waits until the Cursor task is at rest, answering Cursor's command
+ * approval ("Run this command?") like a user ("y" = Run once): an
+ * interactive pane has no -f, and the prompt fires no hook, so presence
+ * reads running meanwhile (open row cursor.status.blocked, annotated).
+ */
+async function cursorUntilAtRest(
+  taskId: string,
+  timeout: number,
+): Promise<string> {
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  let approvals = 0;
+  await expect
+    .poll(
+      async () => {
+        const text = await screenText(taskId);
+        if (/Run this command\?/.test(text) && /Run \(once\)/.test(text)) {
+          approvals += 1;
+          await workspace.locator(".xterm").first().click();
+          await window.keyboard.press("y");
+          await window.waitForTimeout(1_000);
+          return "approving";
+        }
+        return presenceVerdict(taskId);
+      },
+      { timeout, intervals: [1_000] },
+    )
+    .toMatch(/^(done|idle)$/);
+  if (approvals > 0) {
+    test.info().annotations.push({
+      type: "cursor-approval-prompt",
+      description: `answered ${approvals} command approval(s); presence read running meanwhile (cursor.status.blocked)`,
+    });
+  }
+  return presenceVerdict(taskId);
+}
+
+test("Cursor: Setup finds the real CLI with its version; no review support (C6-C8)", async () => {
+  test.skip(!CURSOR, CURSOR_SKIP);
+  const agents = await window.evaluate(() =>
+    window.harbormaster.onboarding.detectAgents(),
+  );
+  const cursor = agents.find((agent) => agent.id === "cursor");
+  expect(cursor, JSON.stringify(agents)).toMatchObject({
+    label: "Cursor",
+    available: true,
+    version: expect.stringMatching(/^\d{4}\.\d{2}\.\d{2}$/),
+    floor: "ok",
+  });
+  const support = await window.evaluate(() =>
+    window.harbormaster.core.reviewSupport({ refresh: true }),
+  );
+  expect(
+    support.harnesses.find((entry) => entry.harness === "cursor")?.state,
+  ).toBe("unsupported");
+});
+
+test("Cursor: hooks alone drive the pane to your move after a prompt; a background sleep turn ends at rest (S4); usage from the stop hook", async () => {
+  test.skip(!CURSOR, CURSOR_SKIP);
+  const taskId = tasks.cursor;
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${taskId}`).click();
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  await expect(workspace.getByTestId("terminal-tab").first()).toBeVisible();
+  // Starting… until sessionStart (C9), then idle: no dialog (--trust,
+  // --approve-mcps), nothing typed before.
+  await expect
+    .poll(() => presenceVerdict(taskId), {
+      timeout: 90_000,
+      intervals: [500],
+    })
+    .toBe("idle");
+  await expect(
+    window.getByTestId(`review-button-main-${taskId}`),
+  ).toBeDisabled();
+  await typePrompt(taskId, "Reply with exactly the word OK and nothing else.");
+  await expect
+    .poll(() => presenceVerdict(taskId), { timeout: 60_000 })
+    .toBe("done");
+  const core = createCore({ stateDir });
+  const binding = await core.commands.getTaskWorkspace(taskId);
+  expect(binding?.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(binding?.sessionPath).toMatch(
+    new RegExp(
+      `/agent-transcripts/${binding?.sessionId}/${binding?.sessionId}\\.jsonl$`,
+    ),
+  );
+  await expect
+    .poll(() => existsSync(binding?.sessionPath ?? ""), { timeout: 30_000 })
+    .toBe(true);
+  const usage = await core.commands.refreshTaskUsage(taskId);
+  expect(usage?.status, JSON.stringify(usage)).toBe("ready");
+  expect(usage?.totals.output ?? 0).toBeGreaterThan(0);
+
+  // S4: Cursor keeps the turn running while it waits on the background
+  // sleep (the recorded fixture), then stops: at rest, never lingering.
+  await typePrompt(
+    taskId,
+    "Run `sleep 120` in the background, then reply with exactly the word DONE",
+  );
+  await expect
+    .poll(() => presenceVerdict(taskId), { timeout: 60_000 })
+    .toBe("running");
+  await cursorUntilAtRest(taskId, 200_000);
+  test.info().annotations.push({
+    type: "cursor-background-work",
+    description:
+      sleepsRunning() > 0
+        ? "still running after the turn"
+        : "ended with the turn",
+  });
+  const row = window.getByTestId(`sidebar-task-row-${taskId}`);
+  // The behavior is "it stays at rest afterwards": watch a while.
+  await window.waitForTimeout(10_000);
+  await expect(row.getByTestId("sidebar-row-spinner")).toHaveCount(0);
+  expect(await presenceVerdict(taskId)).not.toBe("running");
+});
+
+test("Cursor: a parent's message reaches the busy agent through the stop hook's followup_message (C4)", async () => {
+  test.skip(!CURSOR, CURSOR_SKIP);
+  const taskId = tasks.cursor;
+  const core = createCore({ stateDir });
+  await core.commands.setTaskParent(taskId, tasks.pi);
+  await typePrompt(
+    taskId,
+    "Run `sleep 6` with your shell tool, then reply with exactly the word WAITED.",
+  );
+  await expect
+    .poll(() => presenceVerdict(taskId), { timeout: 60_000 })
+    .toBe("running");
+  const sent = execFileSync(
+    cliBin,
+    [
+      "send_to_task",
+      "--taskId",
+      taskId,
+      "--message",
+      "Reply with exactly the word FOLLOWED.",
+      "--mode",
+      "followUp",
+    ],
+    {
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_TASK_ID: tasks.pi,
+      },
+      encoding: "utf8",
+    },
+  );
+  expect(sent).toBeTruthy();
+  // The turn ends (after its approval, if any) and its stop hook hands
+  // the message over.
+  await cursorUntilAtRest(taskId, 120_000);
+  await expect
+    .poll(
+      async () =>
+        (await core.commands.listMessages({ taskId }))
+          .filter((message) => message.targetTaskId === taskId)
+          .map((message) => `${message.status}:${message.deliveredMode ?? ""}`),
+      { timeout: 120_000, intervals: [1_000] },
+    )
+    .toEqual(["delivered:followUp"]);
+  const transcript =
+    (await core.commands.getTaskWorkspace(taskId))?.sessionPath ?? "";
+  await expect
+    .poll(
+      () => (existsSync(transcript) ? readFileSync(transcript, "utf8") : ""),
+      {
+        timeout: 120_000,
+        intervals: [1_000],
+      },
+    )
+    // The follow-up ran as the next user message and got its reply.
+    .toMatch(/"assistant"[^\n]*FOLLOWED/);
+  expect(await cursorUntilAtRest(taskId, 60_000)).toBe("done");
 });
 
 test("a refresh tick through real gh raises no warning toast", async () => {

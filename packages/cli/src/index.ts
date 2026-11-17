@@ -9,6 +9,7 @@
 //   harbormaster <tool> [--json '<args>'] [--<arg> <value>...] [--details]
 //   harbormaster hook inbox --mode steer|follow-up|catch-up   (also reports the turn boundary, S5)
 //   harbormaster hook codex --event session-start|user-prompt-submit|post-tool-use|stop   (X1-X3)
+//   harbormaster hook cursor --event session-start|before-submit-prompt|post-tool-use|stop   (C2-C5)
 //   harbormaster inbox claim --task <id> [--idle true|false]
 //   harbormaster inbox list [--priority|--other] [--json]
 //   harbormaster inbox resolve <id> [<button>]
@@ -34,10 +35,15 @@
 // script's system-browser fallback runs.
 
 import {
+  type CursorHookEventName,
   callerFromEnv,
   callOp,
   callTool,
   createCore,
+  cursorDataDir,
+  cursorHookPresenceEvent,
+  cursorStopUsage,
+  cursorTranscriptPath,
   DEFAULT_STATE_DIR,
   type DoctorInput,
   type DoctorReport,
@@ -157,6 +163,7 @@ function usage(): string {
     "  mcp                                       MCP stdio server exposing every tool",
     "  hook inbox --mode steer|follow-up|catch-up   Claude Code hook: deliver inbox messages",
     "  hook codex --event <event>                Codex hook: session binding, turn boundaries, inbox (session-start|user-prompt-submit|post-tool-use|stop)",
+    "  hook cursor --event <event>               Cursor hook: session binding, presence, usage, inbox (session-start|before-submit-prompt|post-tool-use|stop)",
     "  inbox claim --task <id> [--idle true|false]  Claim a task's inbox messages as JSON",
     "  inbox list [--priority|--other] [--json]  Items that need you (rule items, approvals)",
     "  inbox resolve <id> [<button>]             Press an item's button (default: dismiss)",
@@ -467,6 +474,183 @@ async function runCodexHook(
         // Best effort: the binding is learned again on the next start.
       }),
     );
+  }
+  await withDeadline(Promise.all(work), left(), undefined);
+  return 0;
+}
+
+// --- Cursor hooks (docs/harness-additions.md C2-C5) -----------------------------
+
+/** The `--event` names `harbormaster hook cursor` takes (`CURSOR_HOOK_EVENTS` in core's adapter). */
+export type CursorHookEvent = CursorHookEventName;
+
+const CURSOR_HOOK_EVENT_NAMES: readonly CursorHookEvent[] = [
+  "session-start",
+  "before-submit-prompt",
+  "post-tool-use",
+  "stop",
+];
+
+/**
+ * The follow-up guard: a stop hook hands Cursor a `followup_message` only
+ * for a turn that was not itself a follow-up (`loop_count` 0), so one
+ * stop never chains into another automatically; a message arriving during
+ * the follow-up turn waits for the next prompt (catch-up) or stop.
+ */
+export const CURSOR_MAX_FOLLOWUP_LOOP = 0;
+
+/**
+ * Cursor's hook output for one event: beforeSubmitPrompt always continues
+ * (claimed messages ride along as `additional_context`, catch-up), a
+ * completed stop hands claimed messages over as `followup_message`
+ * (follow-up); everything else `{}`.
+ */
+export function cursorHookOutput(
+  event: CursorHookEvent,
+  text: string,
+): unknown {
+  if (event === "before-submit-prompt") {
+    return text
+      ? { continue: true, additional_context: text }
+      : { continue: true };
+  }
+  if (event === "stop" && text) return { followup_message: text };
+  return {};
+}
+
+/** Whether a stop payload may carry a follow-up (a completed, non-follow-up turn). */
+export function cursorStopMayFollowUp(input: Record<string, unknown>): boolean {
+  const loop = typeof input.loop_count === "number" ? input.loop_count : 0;
+  const status = typeof input.status === "string" ? input.status : "completed";
+  return status === "completed" && loop <= CURSOR_MAX_FOLLOWUP_LOOP;
+}
+
+/**
+ * The chat's transcript path: the payload's `transcript_path` when Cursor
+ * gives one (it is null until the first turn ended), else where Cursor
+ * writes it for the payload's first workspace root.
+ */
+export function cursorHookTranscriptPath(
+  input: Record<string, unknown>,
+  sessionId: string,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  if (typeof input.transcript_path === "string" && input.transcript_path) {
+    return input.transcript_path;
+  }
+  const roots = Array.isArray(input.workspace_roots)
+    ? input.workspace_roots
+    : [];
+  const workspace = typeof roots[0] === "string" ? roots[0] : undefined;
+  if (!workspace) return undefined;
+  return cursorTranscriptPath(cursorDataDir(env), workspace, sessionId);
+}
+
+async function runCursorHook(
+  flags: Map<string, string>,
+  socketPath: string,
+  caller: ToolCaller,
+  io: CliIo,
+): Promise<number> {
+  const started = Date.now();
+  const event = flags.get("event") as CursorHookEvent | undefined;
+  if (!event || !CURSOR_HOOK_EVENT_NAMES.includes(event)) {
+    throw new UsageError(
+      `--event must be one of ${CURSOR_HOOK_EVENT_NAMES.join(", ")}`,
+    );
+  }
+  const reply = (output: unknown) => io.stdout(`${JSON.stringify(output)}\n`);
+  if (!caller.taskId) {
+    // Not a Harbormaster task session: nothing to report or deliver.
+    reply(cursorHookOutput(event, ""));
+    return 0;
+  }
+  const left = () => CODEX_HOOK_DEADLINE_MS - (Date.now() - started);
+  const input = parseCodexHookInput(
+    await withDeadline(
+      (io.readStdin ?? readProcessStdin)(),
+      CODEX_HOOK_STDIN_MS,
+      "",
+    ),
+  );
+  // Delivering events claim first (the claim is the reply); the others
+  // reply at once and do their socket work afterwards, still bounded.
+  let text = "";
+  if (
+    event === "before-submit-prompt" ||
+    (event === "stop" && cursorStopMayFollowUp(input))
+  ) {
+    const prompt = typeof input.prompt === "string" ? input.prompt : "";
+    const claim = callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      caller,
+    ).then((result) =>
+      codexContextText(
+        (result.details as InboxClaimDetails | undefined)?.messages ?? [],
+        prompt,
+      ),
+    );
+    text = await withDeadline(claim, left(), "");
+  }
+  reply(cursorHookOutput(event, text));
+  const work: Promise<unknown>[] = [];
+  const presence = cursorHookPresenceEvent(event, !!text);
+  const status = typeof input.status === "string" ? input.status : undefined;
+  const generation =
+    typeof input.generation_id === "string" ? input.generation_id : undefined;
+  work.push(
+    callOp(
+      socketPath,
+      "hook_presence",
+      {
+        event: presence,
+        ...(presence === "stop" && status ? { status } : {}),
+        ...(generation ? { generation } : {}),
+      },
+      caller,
+    ).catch(() => {
+      // Best effort: pid liveness still ends the attachment.
+    }),
+  );
+  const sessionId =
+    typeof input.conversation_id === "string"
+      ? input.conversation_id
+      : typeof input.session_id === "string"
+        ? input.session_id
+        : undefined;
+  const sessionPath = sessionId
+    ? cursorHookTranscriptPath(input, sessionId, io.env)
+    : undefined;
+  if (sessionId && sessionPath && event !== "post-tool-use") {
+    // Every turn names its chat (a resume fires no sessionStart): binding
+    // is idempotent in core (tool hooks, many per turn, skip it).
+    work.push(
+      callOp(
+        socketPath,
+        "session_start",
+        { sessionId, sessionPath },
+        caller,
+      ).catch(() => {
+        // Best effort: the binding is learned again on the next hook.
+      }),
+    );
+  }
+  if (event === "stop" && sessionId && generation) {
+    const usage = cursorStopUsage(input);
+    if (usage) {
+      work.push(
+        callOp(
+          socketPath,
+          "turn_usage",
+          { sessionId, generation, ...usage },
+          caller,
+        ).catch(() => {
+          // Best effort: this turn's tokens go uncounted.
+        }),
+      );
+    }
   }
   await withDeadline(Promise.all(work), left(), undefined);
   return 0;
@@ -801,9 +985,17 @@ export async function main(
       if (kind === "codex") {
         return await runCodexHook(parseFlags(flagArgs), socketPath, caller, io);
       }
+      if (kind === "cursor") {
+        return await runCursorHook(
+          parseFlags(flagArgs),
+          socketPath,
+          caller,
+          io,
+        );
+      }
       if (kind !== "inbox")
         throw new UsageError(
-          "usage: hook inbox --mode <mode> | hook codex --event <event>",
+          "usage: hook inbox --mode <mode> | hook codex --event <event> | hook cursor --event <event>",
         );
       return await runHook(parseFlags(flagArgs), socketPath, caller, io);
     }
@@ -954,7 +1146,10 @@ export function run(): void {
     process.exitCode = code;
     // A Codex hook blocks Codex's TUI until it exits (X2): never linger on
     // a socket the deadline already gave up on.
-    if (process.argv[2] === "hook" && process.argv[3] === "codex") {
+    if (
+      process.argv[2] === "hook" &&
+      (process.argv[3] === "codex" || process.argv[3] === "cursor")
+    ) {
       process.stdout.write("", () => process.exit(code));
     }
   });

@@ -33,6 +33,14 @@
 // (cmux).
 // Input typed before the TUI is ready is dropped, so every scenario waits for
 // the first 7501 report (or ~3 s with none) before typing; Enter is "\r".
+//
+// A harness whose presence comes from hooks (`status.protocol: "hooks"`,
+// Cursor) emits nothing on its pty: the recorder hands the adapter a
+// logging stand-in for the `harbormaster` CLI, writes the launch spec's
+// `prepare` files (Cursor's plugin dir) like the app's launcher, waits for
+// the session-start hook before typing (C9), and records the hook events
+// (payloads with `user_email` redacted, and the stand-in's replies) as the
+// fixture's sequence; the .txt keeps the raw pty bytes.
 // Claude's folder-trust dialog is answered like a user (Enter on "Yes, I
 // trust this folder"), and Codex's ("Trust this folder?", Enter on "Trust
 // and continue"; Codex then records the folder in ~/.codex/config.toml). Output after the last 7501 report is truncated so a
@@ -44,6 +52,7 @@ import {
   constants,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -84,7 +93,13 @@ export const SCENARIO_PROMPTS = {
 };
 
 /** How each harness leaves its TUI (the exit scenario). */
-const EXIT_KEYS = { "claude-code": "/exit\r", pi: "/quit\r", codex: "/quit" };
+const EXIT_KEYS = {
+  "claude-code": "/exit\r",
+  pi: "/quit\r",
+  codex: "/quit",
+  // Cursor: Ctrl+D twice ("Press Ctrl+D again to exit").
+  cursor: "\x04",
+};
 
 /**
  * Extra launch args per harness and scenario. A user whose own settings
@@ -93,6 +108,12 @@ const EXIT_KEYS = { "claude-code": "/exit\r", pi: "/quit\r", codex: "/quit" };
  * (ask beats allow in Claude's precedence).
  */
 const SCENARIO_ARGS = {
+  // Cursor's permission prompt fires no hook: tool scenarios run with "Run
+  // Everything" (-f) so the turn is not stuck on an unrecordable prompt.
+  cursor: {
+    "turn-tool": ["-f"],
+    "background-work": ["-f"],
+  },
   // Codex: no approval prompt inside the workspace sandbox by default
   // (and `approval_policy="untrusted"` is rejected on 0.169.0), so the
   // permission scenario runs read-only: writing the file needs approval.
@@ -197,6 +218,55 @@ function makeWorkspace() {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * A stand-in for the `harbormaster` CLI that hook commands call
+ * (`<cli> hook <harness> --event <event>`): appends `{event, ms, payload,
+ * reply}` to `log` and replies like the real hook with nothing to deliver.
+ * Started as `<cli> mcp` (the plugin's MCP server) it just exits.
+ */
+function writeHookLogger(dir, log) {
+  const path = join(dir, "harbormaster-hook-logger.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] !== "hook") process.exit(0);
+const event = args[args.indexOf("--event") + 1];
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  let payload = {};
+  try { payload = JSON.parse(input); } catch {}
+  if (payload && typeof payload === "object" && "user_email" in payload) payload.user_email = "<redacted>";
+  const reply = event === "before-submit-prompt" ? { continue: true } : {};
+  appendFileSync(${JSON.stringify(log)}, JSON.stringify({ event, ms: Date.now(), payload, reply }) + "\\n");
+  process.stdout.write(JSON.stringify(reply) + "\\n");
+});
+`,
+  );
+  execFileSync("chmod", ["+x", path]);
+  return path;
+}
+
+/** The hook events logged so far (`ms` relative to `startedAt`). */
+function readHookLog(log, startedAt) {
+  let text = "";
+  try {
+    text = readFileSync(log, "utf8");
+  } catch {
+    return [];
+  }
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const entry = JSON.parse(line);
+      return { ...entry, ms: entry.ms - startedAt };
+    });
+}
+
+/**
  * One pty session: raw bytes recorded, probes answered like the app, 7501
  * reports collected, the screen mirrored by a headless xterm.
  */
@@ -207,6 +277,7 @@ function startSession({
   workspace,
   stateDir,
   extraArgs,
+  hookLog,
 }) {
   const pty = require("node-pty");
   const { Terminal } = require("@xterm/headless");
@@ -215,6 +286,12 @@ function startSession({
     workspacePath: workspace,
     stateDir,
   });
+  // The app's launcher writes these before spawning (Cursor's plugin dir).
+  for (const [relative, text] of Object.entries(spec.prepare?.files ?? {})) {
+    const path = join(spec.prepare.dir, relative);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  }
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
     // Never let a surrounding Harbormaster session's identity leak in.
@@ -271,6 +348,8 @@ function startSession({
     proc,
     reports,
     screen,
+    /** Hook events so far (hooks-reporting harnesses). */
+    hooks: () => (hookLog ? readHookLog(hookLog, startedAt) : []),
     get probes() {
       return probes;
     },
@@ -281,7 +360,12 @@ function startSession({
     raw() {
       let text = chunks.join("");
       let truncated = false;
-      if (Buffer.byteLength(text) > MAX_FIXTURE_BYTES) {
+      if (Buffer.byteLength(text) > MAX_FIXTURE_BYTES && reports.length === 0) {
+        // No 7501 at all (hooks-reporting harness): keep the tail.
+        const buf = Buffer.from(text);
+        text = buf.subarray(buf.length - MAX_FIXTURE_BYTES).toString();
+        truncated = true;
+      } else if (Buffer.byteLength(text) > MAX_FIXTURE_BYTES) {
         text = chunks.slice(0, Math.max(lastReportEnd, 1)).join("");
         truncated = true;
         if (Buffer.byteLength(text) > MAX_FIXTURE_BYTES) {
@@ -400,6 +484,10 @@ async function settle(session, harness, notes) {
       await sleep(800);
       return false;
     }
+    // Hooks (Cursor): typed text is dropped before sessionStart (C9).
+    if (session.hooks !== undefined && session.hooksProtocol) {
+      return session.hooks().some((hook) => hook.event === "session-start");
+    }
     // Claude: its first report, past the trust dialog's own `blocked`.
     if (harness === "claude-code") {
       const latest = session.reports.at(-1);
@@ -409,7 +497,11 @@ async function settle(session, harness, notes) {
     return Date.now() - started >= 3000;
   }, 60_000);
   if (!ready) {
-    notes.push("no 7501 report within 60 s of start");
+    notes.push(
+      session.hooksProtocol
+        ? "no session-start hook within 60 s of start"
+        : "no 7501 report within 60 s of start",
+    );
   }
   // Let the startup reports finish arriving before typing.
   await sleep(1500);
@@ -420,6 +512,27 @@ const isActive = (r) => r.state === "working" || r.state === "blocked";
 
 /** Types a prompt, then waits until the turn is over (approving permission prompts when asked). */
 async function runTurn(session, prompt, { timeoutMs, approve, notes }) {
+  if (session.hooksProtocol) {
+    const seen = session.hooks().length;
+    session.proc.write(prompt);
+    await sleep(300);
+    session.proc.write("\r");
+    const after = () => session.hooks().slice(seen);
+    if (
+      !(await waitFor(
+        () => after().some((hook) => hook.event === "before-submit-prompt"),
+        30_000,
+      ))
+    ) {
+      notes.push("the turn never fired beforeSubmitPrompt");
+    }
+    const over = await waitFor(
+      () => after().some((hook) => hook.event === "stop"),
+      timeoutMs,
+    );
+    if (!over) notes.push(`no stop hook after ${timeoutMs} ms`);
+    return over;
+  }
   const before = session.reports.length;
   session.proc.write(prompt);
   await sleep(300);
@@ -485,6 +598,33 @@ const SCENARIO_STEPS = {
     await sleep(4000);
   },
   async cancel(session, ctx) {
+    if (session.hooksProtocol) {
+      const seen = session.hooks().length;
+      session.proc.write(SCENARIO_PROMPTS.cancel);
+      await sleep(300);
+      session.proc.write("\r");
+      const after = () => session.hooks().slice(seen);
+      if (
+        !(await waitFor(
+          () => after().some((hook) => hook.event === "before-submit-prompt"),
+          30_000,
+        ))
+      ) {
+        ctx.notes.push("the turn never fired beforeSubmitPrompt");
+      }
+      await sleep(2500);
+      session.proc.write("\x1b");
+      if (
+        !(await waitFor(
+          () => after().some((hook) => hook.event === "stop"),
+          20_000,
+        ))
+      ) {
+        ctx.notes.push("no stop hook 20 s after Esc");
+      }
+      await sleep(4000);
+      return;
+    }
     const before = session.reports.length;
     session.proc.write(SCENARIO_PROMPTS.cancel);
     await sleep(300);
@@ -518,9 +658,11 @@ const SCENARIO_STEPS = {
     await sleep(5000);
   },
   async exit(session, ctx) {
-    session.proc.write(EXIT_KEYS[ctx.harness] ?? "\x03\x03");
+    const key = EXIT_KEYS[ctx.harness] ?? "\x03\x03";
+    session.proc.write(key);
     await sleep(300);
-    session.proc.write("\r");
+    // A control key is pressed twice; a typed command is submitted.
+    session.proc.write(key.length === 1 && key.charCodeAt(0) < 32 ? key : "\r");
     const exited = await waitFor(() => session.exited, 20_000);
     if (!exited) ctx.notes.push("process still running 20 s after the exit");
   },
@@ -544,6 +686,43 @@ export function expectedSequence(core, adapter, raw) {
   return { states, final: readings.at(-1) };
 }
 
+/**
+ * Hooks-reported presence (Cursor): the state sequence core records from
+ * the logged hook events, starting from the launcher's `working`
+ * "Starting…" (harness/hook-presence.ts through the adapter's event map).
+ */
+export function expectedHookSequence(core, hooks) {
+  let status = { state: "working", message: core.HOOK_PRESENCE_STARTING };
+  let aborted;
+  const readings = [];
+  for (const hook of hooks) {
+    const delivered = Boolean(hook.reply?.followup_message);
+    const event = core.cursorHookPresenceEvent(hook.event, delivered);
+    const report = {
+      event,
+      ...(event === "stop" && typeof hook.payload?.status === "string"
+        ? { status: hook.payload.status }
+        : {}),
+      ...(typeof hook.payload?.generation_id === "string"
+        ? { generation: hook.payload.generation_id }
+        : {}),
+    };
+    const reading = core.hookPresenceReading(status, report, aborted);
+    if (report.event === "stop" && report.status === "aborted") {
+      aborted = report.generation;
+    }
+    if (reading) {
+      status = reading;
+      readings.push(reading);
+    }
+  }
+  const states = [];
+  for (const reading of readings) {
+    if (states.at(-1) !== reading.state) states.push(reading.state);
+  }
+  return { states, final: readings.at(-1) };
+}
+
 async function recordScenario({
   core,
   adapter,
@@ -557,6 +736,17 @@ async function recordScenario({
   const workspace = makeWorkspace();
   const stateDir = mkdtempSync(join(tmpdir(), "hm-status-state-"));
   const notes = [];
+  const hooksProtocol = adapter.capabilities.status.protocol === "hooks";
+  const hookLog = hooksProtocol ? join(stateDir, "hooks.jsonl") : undefined;
+  if (hooksProtocol) {
+    // The adapter wires its hooks to this stand-in CLI.
+    adapter = core
+      .createHarnessRegistry({
+        stateDir,
+        cliPath: writeHookLogger(stateDir, hookLog),
+      })
+      .get(harness);
+  }
   const extraArgs = [
     ...(HARNESS_ARGS[harness] ?? []),
     ...(SCENARIO_ARGS[harness]?.[scenario] ?? []),
@@ -568,14 +758,19 @@ async function recordScenario({
     workspace,
     stateDir,
     extraArgs,
+    hookLog,
   });
+  session.hooksProtocol = hooksProtocol;
   const ctx = { harness, notes, timeoutMs: 180_000, approve: false };
   let trustDialog = false;
+  let hooks;
   try {
     trustDialog = await settle(session, harness, notes);
     await SCENARIO_STEPS[scenario](session, ctx);
   } finally {
     session.kill();
+    // The hook log lives in the state dir, removed below.
+    hooks = hooksProtocol ? session.hooks() : undefined;
     killStragglers(workspace);
     if (!keepTemp) {
       rmSync(workspace, { recursive: true, force: true });
@@ -586,7 +781,9 @@ async function recordScenario({
   const dir = join(outDir, harness, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${scenario}.txt`), text);
-  const { states, final } = expectedSequence(core, adapter, text);
+  const { states, final } = hooks
+    ? expectedHookSequence(core, hooks)
+    : expectedSequence(core, adapter, text);
   const meta = {
     harness,
     version,
@@ -607,6 +804,7 @@ async function recordScenario({
     truncated,
     rawBytes: bytes,
     reports: session.reports.map(({ ms, ...report }) => ({ ...report, ms })),
+    ...(hooks ? { hooks } : {}),
     notes,
     // Reviewed expectations the replay test asserts (seeded from this run).
     expected: {

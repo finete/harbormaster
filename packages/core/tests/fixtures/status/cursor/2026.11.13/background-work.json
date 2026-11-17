@@ -1,0 +1,1248 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.13",
+  "scenario": "background-work",
+  "recordedAt": "2026-11-17T18:07:51.379Z",
+  "prompts": [
+    "Run `sleep 120` in the background, then reply with exactly the word DONE"
+  ],
+  "command": [
+    "cursor-agent",
+    "-f",
+    "--trust",
+    "--approve-mcps",
+    "--plugin-dir",
+    "/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-state-4TGeHd/cursor-plugins/status-recording"
+  ],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": true,
+  "rawBytes": 788893,
+  "reports": [],
+  "hooks": [
+    {
+      "event": "session-start",
+      "ms": 7349,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "model": "auto-smart",
+        "is_background_agent": false,
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "sessionStart",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {}
+    },
+    {
+      "event": "before-submit-prompt",
+      "ms": 9526,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "prompt": "Run `sleep 120` in the background, then reply with exactly the word DONE",
+        "attachments": [],
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {
+        "continue": true
+      }
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 12881,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Shell",
+        "tool_input": {
+          "command": "sleep 120",
+          "cwd": ""
+        },
+        "tool_output": "{\"shell_id\":907289,\"pid\":78095}",
+        "duration": 207.031,
+        "tool_use_id": "toolu_01F31bmBfKAFrNk97CPsZZWs",
+        "cwd": "",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 15155,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 2.267,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 17872,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.922,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 20594,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.934,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 23449,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.913,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 26173,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.762,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 28892,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.689,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 31614,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.79,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 34340,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.781,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 37071,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.723,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 39804,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.738,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 42544,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.737,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 45284,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.646,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 48013,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.678,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 50743,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.657,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 53484,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.716,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 56204,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.676,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 58931,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.68,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 61669,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.687,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 64402,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.687,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 67134,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.663,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 69861,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.654,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 72582,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.678,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 75313,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.74,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 78039,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.582,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 80772,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.688,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 83495,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.695,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 86238,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.668,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 88983,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.555,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 91884,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.661,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 94606,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.696,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 97340,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.701,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 100067,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.648,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 102792,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.659,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 105526,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.721,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 108263,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.696,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 110984,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.63,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 113715,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.66,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 116441,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.666,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 119163,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.67,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 121889,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.654,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 124780,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.795,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 127501,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.666,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 130260,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.656,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 132976,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":239}",
+        "duration": 0.721,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "post-tool-use",
+      "ms": 135696,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "tool_name": "Read",
+        "tool_input": {
+          "file_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt"
+        },
+        "tool_output": "{\"file_path\":\"/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/terminals/907289.txt\",\"content_length\":315}",
+        "duration": 0.762,
+        "tool_use_id": "toolu_01AuGhi5jNPnXPTpbroGy8Fa",
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "postToolUse",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    },
+    {
+      "event": "stop",
+      "ms": 138797,
+      "payload": {
+        "conversation_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "generation_id": "79c6c3c3-cc60-4653-bb7a-76560030ce84",
+        "model": "auto-smart",
+        "status": "completed",
+        "loop_count": 0,
+        "input_tokens": 86386,
+        "output_tokens": 407,
+        "cache_read_tokens": 72050,
+        "cache_write_tokens": 14326,
+        "session_id": "bf18198c-f0a0-4d7c-a049-67fdd9eabe68",
+        "hook_event_name": "stop",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-xFtOND"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-xFtOND/agent-transcripts/bf18198c-f0a0-4d7c-a049-67fdd9eabe68/bf18198c-f0a0-4d7c-a049-67fdd9eabe68.jsonl"
+      },
+      "reply": {}
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

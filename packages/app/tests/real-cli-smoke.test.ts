@@ -1,5 +1,6 @@
 // Keyless real-CLI tier, T3 (decision R15; docs/harness-additions.md P5 and
-// "Test tiers"): install the pinned `claude`, `pi` and `codex` into a throwaway npm
+// "Test tiers"): install the pinned `claude`, `pi`, `codex` (and Cursor's
+// `cursor-agent` tarball) into a throwaway npm
 // prefix, launch each with Harbormaster's exact launch spec (core's
 // adapters) in a real pty, and assert every contract row that needs no
 // model (`e2e/contracts/<harness>.ts`, `needsModel: false`), one test per
@@ -17,7 +18,10 @@
 // skipped block at the end for the real smoke (T4).
 //
 // Skipped unless HARBORMASTER_REAL_CLI=1 (it downloads ~100 MB). Optional:
-// HARBORMASTER_REAL_CLI_PREFIX=<dir> reuses an install. Nothing touches the
+// HARBORMASTER_REAL_CLI_PREFIX=<dir> reuses an install. Cursor ships no npm
+// package: its pinned tarball (downloads.cursor.com, per platform) is
+// extracted into the same prefix; keyless it answers only --version,
+// --help and create-chat, so its session rows are T4's. Nothing touches the
 // real ~/.claude or ~/.pi: HOME is the test sandbox (vitest.isolate-home)
 // and CLAUDE_CONFIG_DIR / PI_CODING_AGENT_DIR / CODEX_HOME point into the temp dir.
 
@@ -45,13 +49,17 @@ import {
   type BuildLaunchSpecInput,
   ClaudeCodeHarnessAdapter,
   CodexHarnessAdapter,
+  CursorHarnessAdapter,
+  CursorModelCatalogAccess,
   PiHarnessAdapter,
   ProgramStatusParser,
+  parseCursorVersion,
 } from "@harbormaster/core";
 import * as pty from "node-pty";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLAUDE_CODE_CONTRACT } from "../e2e/contracts/claude-code";
 import { CODEX_CONTRACT } from "../e2e/contracts/codex";
+import { CURSOR_CONTRACT } from "../e2e/contracts/cursor";
 import { PI_CONTRACT } from "../e2e/contracts/pi";
 import type { ContractRow } from "../e2e/contracts/types";
 
@@ -60,6 +68,9 @@ export const PINNED = {
   claude: "@anthropic-ai/claude-code@2.1.322",
   pi: "@earendil-works/pi-coding-agent@1.5.2",
   codex: "@openai/codex@0.169.0",
+  // Not an npm package: Cursor's own tarball (cursorDownloadUrl), extracted
+  // into the same prefix so CI's cache keeps it.
+  cursor: "cursor-agent@2026.11.13-eacade1",
 } as const;
 
 const enabled = process.env.HARBORMASTER_REAL_CLI === "1";
@@ -114,6 +125,38 @@ async function waitFor(
 
 function bin(name: "claude" | "pi" | "codex"): string {
   return join(prefix, "node_modules", ".bin", name);
+}
+
+/** The pinned Cursor build (`<date>-<hash>` of PINNED.cursor). */
+const CURSOR_BUILD = PINNED.cursor.slice(PINNED.cursor.indexOf("@") + 1);
+
+/** Cursor's own tarball for this machine (the installer's source). */
+function cursorDownloadUrl(): string {
+  const os = process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  return `https://downloads.cursor.com/lab/${CURSOR_BUILD}/${os}/${arch}/agent-cli-package.tar.gz`;
+}
+
+function cursorBin(): string {
+  return join(
+    prefix,
+    "cursor-agent",
+    CURSOR_BUILD,
+    "dist-package",
+    "cursor-agent",
+  );
+}
+
+/** Downloads and extracts the pinned Cursor tarball into the prefix (once). */
+function installCursor(): void {
+  if (existsSync(cursorBin())) return;
+  const dir = join(prefix, "cursor-agent", CURSOR_BUILD);
+  mkdirSync(dir, { recursive: true });
+  execFileSync(
+    "sh",
+    ["-c", 'curl -fsSL "$1" | tar -xz -C "$2"', "sh", cursorDownloadUrl(), dir],
+    { stdio: "inherit", timeout: 600_000 },
+  );
 }
 
 function sandboxEnv(): Record<string, string> {
@@ -596,6 +639,7 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
         { stdio: "inherit", timeout: 600_000 },
       );
     }
+    installCursor();
     stub = await startMessagesStub();
   }, 660_000);
 
@@ -612,6 +656,7 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
       `@earendil-works/pi-coding-agent@${PI_CONTRACT.version}`,
     );
     expect(PINNED.codex).toBe(`@openai/codex@${CODEX_CONTRACT.version}`);
+    expect(PINNED.cursor).toBe(`cursor-agent@${CURSOR_CONTRACT.version}`);
   });
 
   describe("Claude Code", () => {
@@ -2262,12 +2307,174 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
     everyKeylessRowAsserted();
   });
 
+  describe("Cursor", () => {
+    const K = CURSOR_CONTRACT;
+    const { rowIt, everyKeylessRowAsserted } = rowTests(K);
+    const TASK = "smoke-cursor";
+
+    let home: string;
+    let workspace: string;
+    let cli: string;
+    const o = {
+      version: "",
+      help: "",
+      print: { out: "", exit: -1 },
+      list: { out: "", exit: -1 },
+      catalogError: "",
+      tui: undefined as PtyRun | undefined,
+      tuiLogin: false,
+      tuiRejected: false,
+      chat: "",
+    };
+
+    /** Logged out: an empty HOME (Cursor keeps its login under ~/.cursor). */
+    const cursorEnv = (): Record<string, string> => ({
+      ...sandboxEnv(),
+      HOME: home,
+    });
+
+    const runCursor = (args: string[]): { out: string; exit: number } => {
+      try {
+        const out = execFileSync(cursorBin(), args, {
+          cwd: workspace,
+          env: cursorEnv(),
+          encoding: "utf8",
+          timeout: 60_000,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        return { out, exit: 0 };
+      } catch (error) {
+        const failed = error as {
+          status?: number;
+          stdout?: string;
+          stderr?: string;
+        };
+        return {
+          out: `${failed.stdout ?? ""}${failed.stderr ?? ""}`,
+          exit: failed.status ?? -1,
+        };
+      }
+    };
+
+    beforeAll(async () => {
+      home = join(root, "cursor-home");
+      workspace = join(root, "cursor-work");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(workspace, { recursive: true });
+      cli = join(root, "cursor-hm-cli");
+      writeFileSync(cli, "#!/bin/sh\necho '{}'\n");
+      execFileSync("chmod", ["+x", cli]);
+      o.version = runCursor(["--version"]).out.trim();
+      o.help = runCursor(["--help"]).out;
+      o.print = runCursor([...K.row("cursor.auth.required").facts.printArgs]);
+      o.list = runCursor([...K.row("cursor.auth.required").facts.listArgs]);
+      // The adapter's own model access, logged out.
+      const previousHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        o.catalogError =
+          (
+            await new CursorModelCatalogAccess({
+              command: () => [cursorBin()],
+              configDir: join(home, ".cursor"),
+            }).listModels()
+          ).error ?? "";
+      } finally {
+        process.env.HOME = previousHome;
+      }
+      // Harbormaster's exact launch argv: commander accepts every flag and
+      // the logged-out TUI asks to log in (no hook ever fires).
+      const adapter = new CursorHarnessAdapter({
+        cliPath: cli,
+        resolveCommand: () => [cursorBin()],
+      });
+      const spec = adapter.buildLaunchSpec(
+        launchInput({
+          taskId: TASK,
+          workspacePath: workspace,
+          initialPrompt: '-hm-cursor-first it\'s "quoted"',
+          session: { mode: "new", sessionId: "placeholder", model: "auto" },
+        }),
+      );
+      for (const [relative, text] of Object.entries(
+        spec.prepare?.files ?? {},
+      )) {
+        const path = join(spec.prepare?.dir ?? root, relative);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, text);
+      }
+      o.tui = new PtyRun(spec.command, spec.args, {
+        cwd: spec.cwd,
+        env: { ...cursorEnv(), ...spec.env },
+      });
+      const tuiFact = K.row("cursor.auth.required").facts.tui;
+      o.tuiLogin = await waitFor(() => o.tui?.shows(tuiFact) ?? false);
+      o.tuiRejected = /unknownoption|error:/i.test(o.tui.screen());
+      await o.tui.stop();
+      // create-chat prints an id, then lingers: read the line, kill it.
+      const chat = new PtyRun(cursorBin(), ["create-chat"], {
+        cwd: workspace,
+        env: cursorEnv(),
+      });
+      await waitFor(() =>
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(
+          chat.raw,
+        ),
+      );
+      o.chat =
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.exec(
+          chat.raw,
+        )?.[0] ?? "";
+      await chat.stop();
+    }, SCENARIO_MS);
+
+    afterAll(async () => {
+      await o.tui?.stop();
+    });
+
+    rowIt("cursor.version", () => {
+      const facts = K.row("cursor.version").facts;
+      expect(o.version).toBe(facts.output);
+      expect(o.version).toMatch(new RegExp(facts.pattern));
+      // The adapter's parser reads it; doctor compares the date part.
+      expect(parseCursorVersion(o.version)).toBe(o.version.split("-")[0]);
+    });
+
+    rowIt("cursor.argv.flags", () => {
+      const facts = K.row("cursor.argv.flags").facts;
+      expect(o.help).toContain(facts.usage);
+      for (const flag of facts.flags) expect(o.help, flag).toContain(flag);
+      // Harbormaster's exact launch argv is accepted (no option error).
+      expect(o.tuiRejected).toBe(false);
+    });
+
+    rowIt("cursor.auth.required", () => {
+      const facts = K.row("cursor.auth.required").facts;
+      expect(o.print.out).toContain(facts.message);
+      expect(o.print.exit).toBe(facts.printExit);
+      expect(o.list.out).toContain(facts.message);
+      expect(o.list.exit).toBe(facts.listExit);
+      expect(o.tuiLogin, o.tui?.tail()).toBe(true);
+      // The model list says so instead of listing nothing silently.
+      expect(o.catalogError).toMatch(/not logged in/);
+    });
+
+    rowIt("cursor.create-chat", () => {
+      expect(o.chat).toMatch(
+        new RegExp(K.row("cursor.create-chat").facts.pattern),
+      );
+    });
+
+    everyKeylessRowAsserted();
+  });
+
   // Rows a keyless run cannot check; the real smoke (T4) owns them.
   describe.skip("needs a model: real smoke (T4)", () => {
     for (const row of [
       ...CLAUDE_CODE_CONTRACT.rows,
       ...PI_CONTRACT.rows,
       ...CODEX_CONTRACT.rows,
+      ...CURSOR_CONTRACT.rows,
     ]) {
       if (row.needsModel) it(`${row.id}: ${row.title}`, () => {});
     }

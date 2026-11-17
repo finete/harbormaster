@@ -622,6 +622,7 @@ describe.skipIf(!gitAvailable)(
         "pi",
         "claude-code",
         "codex",
+        "cursor",
       ]);
     });
 

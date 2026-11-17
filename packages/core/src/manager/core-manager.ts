@@ -8,6 +8,8 @@ import type {
   CoreCommands,
   CreateTaskInput,
   DeleteTaskOptions,
+  HarnessTurnUsage,
+  HookPresenceReport,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
@@ -217,6 +219,10 @@ import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { awaitsUsageBackfill, buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
 import { harnessDescriptorInfo } from "../harness/descriptor.js";
+import {
+  hookPresenceBoundary,
+  hookPresenceReading,
+} from "../harness/hook-presence.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import {
   type HarnessRegistry,
@@ -3666,6 +3672,63 @@ export class CoreManager implements CoreCommands {
             at,
           }),
     );
+  }
+
+  async reportHookPresence(
+    taskId: string,
+    report: HookPresenceReport,
+  ): Promise<void> {
+    const presence = this.requirePresence();
+    // Only the attachment the launcher registered at spawn: a hook from a
+    // session the app does not own (or after its exit) records nothing.
+    const record = await presence.read(taskId);
+    if (!record || record.ended) return;
+    const before = this.turnTracking.get(taskId);
+    const tracking =
+      before?.pid === record.pid ? { ...before } : { pid: record.pid };
+    const boundary = hookPresenceBoundary(report.event);
+    if (boundary) tracking.lastBoundary = boundary;
+    const reading = hookPresenceReading(
+      record.status,
+      report,
+      tracking.abortedGeneration,
+    );
+    if (report.event === "stop" && report.status === "aborted") {
+      if (report.generation) tracking.abortedGeneration = report.generation;
+    } else if (report.event === "prompt") {
+      delete tracking.abortedGeneration;
+    }
+    this.turnTracking.set(taskId, tracking);
+    if (!reading) return;
+    const at = report.at ?? this.deps.clock.now().toISOString();
+    const pid = record.pid;
+    await presence.applyReport(taskId, (current) =>
+      current && (current.ended || current.pid !== pid)
+        ? current
+        : applyProgramStatus(current, {
+            taskId,
+            pid,
+            state: reading.state,
+            ...(reading.message ? { message: reading.message } : {}),
+            at,
+          }),
+    );
+  }
+
+  async recordTurnUsage(
+    taskId: string,
+    usage: HarnessTurnUsage,
+  ): Promise<void> {
+    const task = await this.deps.tasks.getTask(taskId).catch(() => undefined);
+    if (!task) return;
+    const adapter = await this.harnessFor(task).catch(() => undefined);
+    if (!adapter?.recordTurnUsage) return;
+    await adapter.recordTurnUsage({
+      ...usage,
+      at: usage.at ?? this.deps.clock.now().toISOString(),
+    });
+    // The ledger changed but the transcript may not have: recount.
+    await this.usage.update(taskId, { force: true });
   }
 
   async endPresence(

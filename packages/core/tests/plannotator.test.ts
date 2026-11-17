@@ -519,6 +519,8 @@ describe("reviewSupport", () => {
       ["pi", "ready"],
       ["claude-code", "ready"],
       ["codex", "ready"],
+      // C7: no Plannotator integration for Cursor's CLI.
+      ["cursor", "unsupported"],
     ]);
   });
 

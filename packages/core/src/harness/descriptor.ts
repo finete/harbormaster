@@ -34,13 +34,16 @@ export function parseVersionOutput(output: string): string | undefined {
 }
 
 /**
- * The command a harness launches with: the first override env var set,
- * else its first alias's binary (`env` is the launching process's).
+ * The command a harness launches with: the adapter's own alias lookup
+ * (`launchArgv`), else the first override env var set, else its first
+ * alias's binary (`env` is the launching process's).
  */
 export function harnessLaunchCommand(
-  adapter: Pick<HarnessAdapter, "descriptor">,
+  adapter: Pick<HarnessAdapter, "descriptor" | "launchArgv">,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
+  const argv = adapter.launchArgv?.(env);
+  if (argv?.[0]) return argv[0];
   for (const name of adapter.descriptor.commandEnv) {
     const value = env[name];
     if (value) return value;

@@ -27,7 +27,7 @@ pi-subagents (`subagent` steer + `contact_supervisor`), Codex multi-agent
 | 10 | **Loop cap:** only autonomous lineage messages (parent→child, child→parent) count, both directions, per parent–child pair; approved sends and receipts never count. The counter resets whenever the user types into either task. At **8** (`messaging.loopCap`) the send fails with "message cap reached between X and Y; ask the user" and a chip shows it. |
 | 11 | **Content:** text plus optional attachment paths. Core **copies** attachments at send time into `<stateDir>/messages/attachments/<messageId>/` (≤ 10 MB each, ≤ 8 files) so temp-dir cleanup or worktree removal cannot break a held message. On the wire it is always text with the copies' absolute paths; adapters that support images (Pi) also inline them. |
 | 12 | **Retention:** message records forever (they feed the future central prompt view). Attachment files pruned 30 days after both the sender task and the target task are Done (a non-task sender counts as Done); the record keeps `prunedAt`. |
-| 13 | **Delivery mechanics:** the target's own harness integration reads its task's inbox (subscribe + atomic claim) and delivers natively. The app only wakes not-running targets, hosts the approval inbox, and prunes. No pty typing, no new app↔extension IPC. (One exception outside messaging: the Review button types its slash command into the task's primary pty when the agent is at its prompt; see docs/plannotator.md "Review button". A second: Codex's idle wake-up is a `codex queue` the app runs, typed into the pane only when unconfirmed after 60 s; docs/harness-additions.md X5.) |
+| 13 | **Delivery mechanics:** the target's own harness integration reads its task's inbox (subscribe + atomic claim) and delivers natively. The app only wakes not-running targets, hosts the approval inbox, and prunes. No pty typing, no new app↔extension IPC. (One exception outside messaging: the Review button types its slash command into the task's primary pty when the agent is at its prompt; see docs/plannotator.md "Review button". A second: Codex's idle wake-up is a `codex queue` the app runs, typed into the pane only when unconfirmed after 60 s; docs/harness-additions.md X5. A third: Cursor has no outside channel at all, so an idle Cursor session's pending messages are typed into its pane at its prompt; C4.) |
 
 Future (not in this work): a central view of all prompts and steers (the
 message log is its data source), a macOS notification for approvals, Claude
@@ -54,6 +54,14 @@ Code / Codex delivery adapters.
   message stays pending until the agent's next turn (a 7501 `working`, or
   the UserPromptSubmit hook claiming it without repeating it as context),
   else it is typed into the pane after 60 s at the prompt.
+  Cursor (done, 2026-11-17, docs/harness-additions.md C4): no steer
+  (its postToolUse context is read as tool output and ignored by the
+  model); follow-up through the `stop` hook's `followup_message` (one per
+  user turn: only from a `loop_count` 0 stop); catch-up through
+  `beforeSubmitPrompt`'s `additional_context`; an idle session gets its
+  pending messages typed into the pane by the app once the agent is at
+  its prompt (`channels.wakeIdle: "pty typing"`), never before its
+  session-start hook said it is ready (C9).
 
 ## Architecture
 

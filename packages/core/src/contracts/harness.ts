@@ -11,6 +11,7 @@
 // unimplemented, throwing a clear "wave 4" error, so the interface remains
 // honest about what it can do today.
 
+import type { HarnessTurnUsage } from "./commands.js";
 import type { HarnessMessagingCapabilities } from "./messaging.js";
 import type {
   PresenceRecord,
@@ -139,7 +140,47 @@ export interface LaunchSpec {
   args: string[];
   cwd: string;
   env: Record<string, string>;
+  /**
+   * Files the launcher writes before spawning (core never writes: accessor
+   * separation): each `files` key is a path relative to `dir`, created with
+   * its parent directories, overwriting what is there. Cursor's
+   * per-session plugin directory (docs/harness-additions.md C2) travels
+   * this way.
+   */
+  prepare?: LaunchPrepare;
+  /**
+   * The program reports no status on its pty; its hooks do
+   * (`capabilities.status.protocol: "hooks"`, Cursor). The launcher
+   * registers the attachment at spawn as `working` with
+   * `HOOK_PRESENCE_STARTING` (nothing may be typed yet, C9) and reports it
+   * ready (`reportHookPresence` `start`): `ready: "hook"` = a session-start
+   * hook will (a new session); `ready: "quiet"` = none will (a resumed
+   * one), so the launcher does once its output has been quiet for
+   * `HOOK_PRESENCE_QUIET_MS`.
+   */
+  hookStatus?: { ready: "hook" | "quiet" };
 }
+
+/** `LaunchSpec.prepare`: files to materialize under `dir` before spawning. */
+export interface LaunchPrepare {
+  /** Absolute directory. */
+  dir: string;
+  /** Relative path → UTF-8 content. */
+  files: Record<string, string>;
+}
+
+/** The status message of a hooks-reporting attachment that is not ready for input yet. */
+export const HOOK_PRESENCE_STARTING = "Starting…";
+
+/**
+ * `capabilities.delivery.channels.wakeIdle` of a harness whose idle
+ * session only takes a message typed into its pane (Cursor, C4): the app
+ * types pending messages once the agent is at its prompt.
+ */
+export const PTY_TYPING_CHANNEL = "pty typing";
+
+/** Output quiet this long after spawn = a hooks-reporting program that fires no session-start hook is ready. */
+export const HOOK_PRESENCE_QUIET_MS = 2_000;
 
 /** Liveness snapshot for a task's harness session, derived from its presence record. */
 export interface PresenceStatus {
@@ -190,6 +231,12 @@ export interface HarnessDescriptor {
   readonly versionArgs: readonly string[];
   /** The version in the `versionArgs` output (`x.y.z`), when there is one. */
   parseVersion(output: string): string | undefined;
+  /**
+   * The version output identifies the CLI: a hit whose output
+   * `parseVersion` cannot read is another program with the same name
+   * (Cursor's generic `agent`), so the lookup tries the next alias.
+   */
+  readonly versionIdentifies?: boolean;
   /** Oldest version Harbormaster works with; absent = no floor (custom agents). */
   readonly minVersion?: string;
   /** Newest version the real-CLI tier ran against; above it doctor says "newer than tested". */
@@ -292,6 +339,14 @@ export interface HarnessAdapter {
   /** Absent = this harness cannot start a review (button disabled). */
   readonly review?: HarnessReviewCapability;
 
+  /**
+   * The argv prefix a launch runs, when the adapter resolves it among its
+   * aliases itself (Cursor: `agent`, `cursor-agent` or `cursor agent`,
+   * C6); absent = the override env var, else the first alias's binary
+   * (`harnessLaunchCommand`).
+   */
+  launchArgv?(env?: NodeJS.ProcessEnv): string[];
+
   /** Build the command/args/cwd/env a frontend should hand to a pty to start (or resume) an interactive session. */
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec;
 
@@ -330,6 +385,13 @@ export interface HarnessAdapter {
    * harness has no usage reader (the task's usage is `unavailable`).
    */
   readSessionUsage?(sessionPath: string): Promise<SessionUsage | undefined>;
+
+  /**
+   * Keeps one turn's tokens a hook reported (`CoreCommands.recordTurnUsage`)
+   * where `readSessionUsage` finds them: for a harness that writes no
+   * usage into its transcript (Cursor). Absent = such reports are ignored.
+   */
+  recordTurnUsage?(usage: HarnessTurnUsage): Promise<void>;
 
   /**
    * The CLI command that delivers `text` to the live session `sessionId`

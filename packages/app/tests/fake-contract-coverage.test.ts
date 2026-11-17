@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CODE_CONTRACT } from "../e2e/contracts/claude-code";
 import { CODEX_CONTRACT } from "../e2e/contracts/codex";
+import { CURSOR_CONTRACT } from "../e2e/contracts/cursor";
 import { PI_CONTRACT } from "../e2e/contracts/pi";
 import type { ContractRow } from "../e2e/contracts/types";
 
@@ -41,6 +42,7 @@ const CASES: Array<{
   { fake: "fake-claude.ts", contract: CLAUDE_CODE_CONTRACT },
   { fake: "fake-pi.ts", contract: PI_CONTRACT },
   { fake: "fake-codex.ts", contract: CODEX_CONTRACT },
+  { fake: "fake-cursor.ts", contract: CURSOR_CONTRACT },
 ];
 
 describe.each(CASES)(
@@ -91,11 +93,13 @@ describe("contract tables", () => {
       "claude-code": "claude.",
       pi: "pi.",
       codex: "codex.",
+      cursor: "cursor.",
     };
     for (const contract of [
       CLAUDE_CODE_CONTRACT,
       PI_CONTRACT,
       CODEX_CONTRACT,
+      CURSOR_CONTRACT,
     ]) {
       const prefix = prefixes[contract.harness] ?? "?";
       for (const row of contract.rows) {
@@ -113,5 +117,6 @@ describe("contract tables", () => {
       `"@earendil-works/pi-coding-agent@${PI_CONTRACT.version}"`,
     );
     expect(T3).toContain(`"@openai/codex@${CODEX_CONTRACT.version}"`);
+    expect(T3).toContain(`"cursor-agent@${CURSOR_CONTRACT.version}"`);
   });
 });

@@ -258,7 +258,7 @@ describe("Codex launch spec", () => {
     const ids = createHarnessRegistry({ presence: noPresence })
       .list()
       .map((entry) => entry.id);
-    expect(ids).toEqual(["pi", "claude-code", "codex"]);
+    expect(ids).toEqual(["pi", "claude-code", "codex", "cursor"]);
     const { descriptor, capabilities } = adapter();
     expect(descriptor.parseVersion("codex-cli 0.169.0")).toBe("0.169.0");
     expect(descriptor.configDir({}, "/home/me")).toBe("/home/me/.codex");

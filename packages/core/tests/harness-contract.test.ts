@@ -17,25 +17,28 @@ import { execFile } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type {
-  HarnessAdapter,
-  HarnessModelCatalogAccess,
-  LaunchSpec,
-  SessionLaunch,
+import {
+  type HarnessAdapter,
+  type HarnessModelCatalogAccess,
+  type LaunchSpec,
+  PTY_TYPING_CHANNEL,
+  type SessionLaunch,
 } from "../src/contracts/harness.js";
 import type { PresenceAccess } from "../src/contracts/services.js";
 import { compareSemver } from "../src/engines/review-support.js";
 import { ClaudeCodeHarnessAdapter } from "../src/harness/claude-code-adapter.js";
 import { CodexHarnessAdapter } from "../src/harness/codex-adapter.js";
+import { CursorHarnessAdapter } from "../src/harness/cursor-adapter.js";
 import { CustomHarnessAdapter } from "../src/harness/custom-adapter.js";
 import {
   deliveryAgreesWithMessaging,
@@ -134,6 +137,19 @@ const SUBJECTS: Subject[] = [
       }),
   },
   {
+    name: "cursor",
+    commandEnv: "HARBORMASTER_CURSOR_COMMAND",
+    defuse: "double-dash",
+    make: ({ cliPath, models }) =>
+      new CursorHarnessAdapter({
+        presence: noPresence,
+        transcripts: { exists: () => true },
+        resolveCommand: () => ["agent"],
+        ...(cliPath ? { cliPath } : {}),
+        ...(models ? { models } : {}),
+      }),
+  },
+  {
     name: "custom",
     defuse: "none",
     make: ({ cliPath, command }) =>
@@ -202,7 +218,15 @@ describe.each(REGISTERED.map((adapter) => ({ name: adapter.id, adapter })))(
       );
       expect(descriptor.installHint.trim().length).toBeGreaterThan(0);
       expect(descriptor.versionArgs.length).toBeGreaterThan(0);
-      expect(descriptor.parseVersion("tool v1.2.3 (build)")).toBe("1.2.3");
+      if (descriptor.versionIdentifies) {
+        // Only the CLI's own version form counts (Cursor: a date version).
+        expect(descriptor.parseVersion("2026.11.13-eacade1\n")).toBe(
+          "2026.11.13",
+        );
+        expect(descriptor.parseVersion("tool v1.2.3 (build)")).toBeUndefined();
+      } else {
+        expect(descriptor.parseVersion("tool v1.2.3 (build)")).toBe("1.2.3");
+      }
       expect(descriptor.parseVersion("no version here")).toBeUndefined();
       expect(typeof descriptor.configDir({}, "/home/me")).toMatch(
         builtin ? /^string$/ : /^(string|undefined)$/,
@@ -251,7 +275,12 @@ describe.each(REGISTERED.map((adapter) => ({ name: adapter.id, adapter })))(
       // A delivered kind names its channel; an undelivered one has none.
       expect(Boolean(delivery.channels.steer)).toBe(delivery.steer);
       expect(Boolean(delivery.channels.followUp)).toBe(delivery.followUp);
-      expect(Boolean(delivery.channels.wakeIdle)).toBe(delivery.wakeIdle);
+      // Typing into the pane is the one idle channel that is not a wake-up
+      // "without typing" (Cursor, C4).
+      expect(
+        Boolean(delivery.channels.wakeIdle) &&
+          delivery.channels.wakeIdle !== PTY_TYPING_CHANNEL,
+      ).toBe(delivery.wakeIdle);
       if (capabilities.status.protocol === "osc7501") {
         expect(typeof capabilities.status.probe).toBe("boolean");
       }
@@ -352,6 +381,8 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     expect(built.env.HARBORMASTER_MCP_SERVER).toBeUndefined();
     expect(built.args).not.toContain("--mcp-config");
     expect(built.args).not.toContain("--settings");
+    expect(built.args).not.toContain("--plugin-dir");
+    expect(built.prepare).toBeUndefined();
     expect(built.args.join(" ")).not.toMatch(/hooks\.|mcp_servers\./);
   });
 
@@ -382,6 +413,9 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     expect(normal.args).not.toContain("--dangerously-skip-permissions");
     if (subject.name === "claude-code") {
       expect(bypass.args).toContain("--dangerously-skip-permissions");
+    } else if (subject.name === "cursor") {
+      expect(bypass.args).toContain("-f");
+      expect(normal.args).not.toContain("-f");
     } else if (subject.name === "codex") {
       expect(bypass.args).toContain(
         "--dangerously-bypass-approvals-and-sandbox",
@@ -425,6 +459,17 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
       expect(Boolean(adapter.deliverCommand?.("followUp", SESSION, "hi"))).toBe(
         followUp,
       );
+    }
+    if (built.prepare) {
+      // Cursor: hooks in the plugin dir; steer would ride postToolUse's
+      // context, which Cursor's model ignores (C4): postToolUse only
+      // reports the tool boundary, stop carries the follow-up.
+      const hooks = JSON.parse(
+        built.prepare.files["hooks/hooks.json"] ?? "{}",
+      ) as { hooks: Record<string, Array<{ command: string }>> };
+      expect(hooks.hooks.stop?.[0]?.command).toMatch(/--event stop$/);
+      expect(followUp).toBe(true);
+      expect(steer).toBe(false);
     }
     if (subject.name === "custom") expect(receive).toBe(false);
     else expect(receive).toBe(true);
@@ -483,6 +528,13 @@ if (at !== -1) {
   const command = JSON.parse(args[at + 1]).hooks.Stop[0].hooks[0].command;
   hook = JSON.parse(execSync(command, { shell: "/bin/sh", encoding: "utf8" }));
 }
+// Cursor: --plugin-dir <dir> with hooks/hooks.json (the launcher wrote it)
+const plugin = args.indexOf("--plugin-dir");
+if (plugin !== -1) {
+  const { readFileSync } = await import("node:fs");
+  const hooks = JSON.parse(readFileSync(args[plugin + 1] + "/hooks/hooks.json", "utf8"));
+  hook = JSON.parse(execSync(hooks.hooks.stop[0].command, { shell: "/bin/sh", encoding: "utf8", input: "{}" }));
+}
 // Codex: -c hooks.Stop=[{hooks=[{type="command",command=<TOML literal>,…}]}]
 const stop = args.find((arg) => arg.startsWith("hooks.Stop="));
 if (stop) {
@@ -502,6 +554,7 @@ process.stdout.write("\x1b]7501;state=blocked:kind=question\x07");
     "HARBORMASTER_PI_COMMAND",
     "HARBORMASTER_CLAUDE_COMMAND",
     "HARBORMASTER_CODEX_COMMAND",
+    "HARBORMASTER_CURSOR_COMMAND",
   ]) {
     saved[key] = process.env[key];
     process.env[key] = fakeCli;
@@ -532,6 +585,14 @@ describe.each(SUBJECTS)("agent contract (process): $name", (subject) => {
       permissions: "bypass",
     });
     expect(built.command).toBe(fakeCli);
+    // The launcher's part (the app's pty layer): materialize `prepare`.
+    if (built.prepare) {
+      for (const [relative, text] of Object.entries(built.prepare.files)) {
+        const path = join(built.prepare.dir, relative);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, text);
+      }
+    }
     const { stdout } = await execFileAsync(built.command, built.args, {
       cwd: built.cwd,
       env: { PATH: process.env.PATH, ...built.env },
@@ -553,6 +614,12 @@ describe.each(SUBJECTS)("agent contract (process): $name", (subject) => {
       expect(echoed.hook).toEqual({
         decision: "block",
         reason: "inbox for task-9 (hook inbox --mode follow-up)",
+      });
+    } else if (subject.name === "cursor") {
+      // hooks/hooks.json carried the shell-quoted path with its space.
+      expect(echoed.hook).toEqual({
+        decision: "block",
+        reason: "inbox for task-9 (hook cursor --event stop)",
       });
     } else if (subject.name === "codex") {
       // The TOML literal carried the shell-quoted path with its space.

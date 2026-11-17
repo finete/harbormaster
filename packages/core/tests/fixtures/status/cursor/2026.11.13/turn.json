@@ -1,0 +1,93 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.13",
+  "scenario": "turn",
+  "recordedAt": "2026-11-17T18:01:47.870Z",
+  "prompts": ["Reply with exactly the word OK and nothing else."],
+  "command": [
+    "cursor-agent",
+    "--trust",
+    "--approve-mcps",
+    "--plugin-dir",
+    "/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-state-w3jFlw/cursor-plugins/status-recording"
+  ],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 12360,
+  "reports": [],
+  "hooks": [
+    {
+      "event": "session-start",
+      "ms": 4015,
+      "payload": {
+        "conversation_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "generation_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "model": "auto-smart",
+        "is_background_agent": false,
+        "session_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "hook_event_name": "sessionStart",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-5ObQ6n"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {}
+    },
+    {
+      "event": "before-submit-prompt",
+      "ms": 6093,
+      "payload": {
+        "conversation_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "generation_id": "fcee6293-0173-4f34-896c-295bc7403ab8",
+        "model": "auto-smart",
+        "prompt": "Reply with exactly the word OK and nothing else.",
+        "attachments": [],
+        "session_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-5ObQ6n"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {
+        "continue": true
+      }
+    },
+    {
+      "event": "stop",
+      "ms": 8482,
+      "payload": {
+        "conversation_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "generation_id": "fcee6293-0173-4f34-896c-295bc7403ab8",
+        "model": "auto-smart",
+        "status": "completed",
+        "loop_count": 0,
+        "input_tokens": 20366,
+        "output_tokens": 4,
+        "cache_read_tokens": 8325,
+        "cache_write_tokens": 12037,
+        "session_id": "4e648f37-2830-49f7-88fe-fc4be4721e28",
+        "hook_event_name": "stop",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-5ObQ6n"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-5ObQ6n/agent-transcripts/4e648f37-2830-49f7-88fe-fc4be4721e28/4e648f37-2830-49f7-88fe-fc4be4721e28.jsonl"
+      },
+      "reply": {}
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}
