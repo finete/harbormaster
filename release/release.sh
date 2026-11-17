@@ -5,6 +5,10 @@
 #   release/release.sh cask <version> <sha256> <file>   # rewrite one cask file
 #
 # Steps:
+#   0. npm run gate, then the real smoke (electron-vite build +
+#      HARBORMASTER_REAL_SMOKE=1 playwright e2e/real-smoke.spec.ts against the
+#      logged-in pi and claude on this machine); refuses to release on any
+#      failure or a missing login (docs/harness-additions.md P4)
 #   1. bump "version" (and the @harbormaster/* workspace dependency pins) in
 #      every package.json, sync package-lock.json
 #   2. npm run dist (core, app, electron-builder zip + latest-mac.yml)
@@ -32,7 +36,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -148,6 +152,31 @@ if [[ $DRY_RUN -eq 0 ]]; then
   gh auth token --user "$GH_USER" >/dev/null || die "gh has no token for $GH_USER (gh auth login)"
 fi
 echo "release: $TAG  (tap: $TAP_DIR${DRY_RUN:+, dry-run=$DRY_RUN})"
+
+# --- 0. gate + real smoke (refuse on failure) --------------------------------
+# The real smoke drives the user's own logged-in agents; its login preflight
+# fails with "missing login: ..." and that message stops the release.
+real_smoke() {
+  local log status login
+  log="$(mktemp)"
+  (cd "$ROOT/packages/app" && npx electron-vite build) || die "electron-vite build failed"
+  set +e
+  (cd "$ROOT/packages/app" && HARBORMASTER_REAL_SMOKE=1 npx playwright test e2e/real-smoke.spec.ts) 2>&1 | tee "$log"
+  status=$?
+  set -e
+  login="$(grep -o 'missing login: .*' "$log" | head -n 1 || true)"
+  rm -f "$log"
+  [[ -z "$login" ]] || die "real smoke: $login"
+  [[ $status -eq 0 ]] || die "real smoke failed; not releasing"
+  node "$ROOT/scripts/check-smoke-marker.mjs" "$ROOT" || die "real smoke left no fresh .real-smoke-ok"
+}
+
+run npm run gate || die "npm run gate failed; not releasing"
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "[dry-run] cd packages/app && npx electron-vite build && HARBORMASTER_REAL_SMOKE=1 npx playwright test e2e/real-smoke.spec.ts"
+else
+  real_smoke
+fi
 
 # --- 1. bump -------------------------------------------------------------------
 run bump_versions
