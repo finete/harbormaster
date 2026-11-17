@@ -17,6 +17,7 @@ import type {
   Task,
   WorkspaceBinding,
 } from "./model.js";
+import type { ConfigFileError } from "./settings.js";
 
 /**
  * Durable task storage. Exposes atomic business verbs over the task list,
@@ -288,6 +289,43 @@ export interface ConfigAccess {
    * Optional: hand-built fakes may omit it.
    */
   applySettings?(patch: ConfigSettingsPatch): Promise<GlobalConfig>;
+  /**
+   * The last good config plus its raw file object (for "explicitly set"
+   * checks) and the current file problem, if config.json fails to load
+   * (docs/settings.md S4: core keeps the last good config). Optional.
+   */
+  snapshot?(): Promise<ConfigAccessSnapshot>;
+  /**
+   * Subscribe to config changes, whatever their origin: core's own writes
+   * (`origin: "core"`) and hand edits picked up by the file watcher or a
+   * later load (`origin: "file"`). Each distinct file content is reported
+   * once. Returns the unsubscribe. Optional.
+   */
+  onChange?(listener: (change: ConfigChange) => void): () => void;
+  /** Start watching config.json for hand edits (idempotent). Optional. */
+  startWatching?(): void;
+  /** Stop the watcher (idempotent); listeners stay subscribed. Optional. */
+  stopWatching?(): void;
+}
+
+/** `ConfigAccess.snapshot`. */
+export interface ConfigAccessSnapshot {
+  config: GlobalConfig;
+  /** The parsed file object behind `config` (unknown keys included). */
+  raw: Record<string, unknown>;
+  error?: ConfigFileError;
+}
+
+/**
+ * One `ConfigAccess.onChange` notification: a new valid config (with the
+ * one before it), or a file that stopped loading (`error`; `config` is the
+ * last good one, kept in effect).
+ */
+export interface ConfigChange {
+  origin: "core" | "file";
+  previous: GlobalConfig;
+  config: GlobalConfig;
+  error?: ConfigFileError;
 }
 
 /** One `ConfigAccess.applySettings` change set; absent fields are left alone. */
@@ -308,6 +346,12 @@ export interface ConfigSettingsPatch {
   automation?: boolean;
   /** `captureAgentBrowser`: agent sessions also get the open-url handler as `BROWSER`. */
   captureAgentBrowser?: boolean;
+  /**
+   * Generic dotted key-path writes (`updateSettings`): a value sets the key
+   * (creating parent objects), `null` removes it (and parents left empty).
+   * Applied after the named fields above.
+   */
+  set?: Record<string, unknown>;
 }
 
 /** Pre-rules `movers` config lists (global and per repository). */

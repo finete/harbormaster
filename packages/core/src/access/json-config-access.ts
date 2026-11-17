@@ -5,9 +5,10 @@
 // adds back codeRoot/branchPrefix (see contracts/workspace.ts) now that git
 // repository/worktree access needs them.
 
+import { type FSWatcher, mkdirSync, watch } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   CustomAgentConfig,
   DeploymentPipeline,
@@ -19,9 +20,15 @@ import type {
 import { defaultGlobalConfig } from "../contracts/model.js";
 import type {
   ConfigAccess,
+  ConfigAccessSnapshot,
+  ConfigChange,
   ConfigSettingsPatch,
   LegacyMoverOrders,
 } from "../contracts/services.js";
+import {
+  type ConfigFileError,
+  SETTINGS_DESCRIPTION,
+} from "../contracts/settings.js";
 // Imported for its side-effecting declare-module augmentation of
 // GlobalConfig (codeRoot/branchPrefix) — contracts/workspace.ts owns those
 // fields' types.
@@ -29,41 +36,210 @@ import "../contracts/workspace.js";
 import { writeJsonAtomic } from "../utilities/atomic-json.js";
 import { withFileLock } from "../utilities/file-lock.js";
 
+/** How long the watcher waits for a burst of file events to settle. */
+const DEFAULT_WATCH_DEBOUNCE_MS = 150;
+
+/** The last config that loaded, with the file text and raw object behind it. */
+interface GoodConfig {
+  raw: Record<string, unknown>;
+  config: GlobalConfig;
+}
+
+/**
+ * config.json (docs/settings.md S4): loaded on every `load()` but parsed
+ * only when its text changed; an invalid file keeps the last good config
+ * in effect (once one loaded) and exposes the problem through `snapshot()`
+ * and an `onChange` notification. `startWatching()` adds an fs watcher on
+ * the file's directory (robust to atomic renames, debounced), so hand edits
+ * are noticed without a load. Core's own writes update the cached text
+ * first, so the watcher never reports them again (dedupe by content).
+ */
 export class JsonConfigAccess implements ConfigAccess {
-  constructor(private readonly path: string) {}
+  private good: GoodConfig | undefined;
+  private error: ConfigFileError | undefined;
+  /** The file text last read or written (valid or not): unchanged text is never re-parsed or re-reported. */
+  private seenText: string | undefined;
+  /** Read ordering: a read that started before the last applied one is discarded. */
+  private readSeq = 0;
+  private appliedSeq = 0;
+  private readonly listeners = new Set<(change: ConfigChange) => void>();
+  private watcher: FSWatcher | undefined;
+  private watchTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly debounceMs: number;
+
+  constructor(
+    private readonly path: string,
+    options: { watchDebounceMs?: number } = {},
+  ) {
+    this.debounceMs = options.watchDebounceMs ?? DEFAULT_WATCH_DEBOUNCE_MS;
+  }
 
   async load(): Promise<GlobalConfig> {
+    const loaded = await this.readFile();
+    if (loaded !== undefined) return structuredClone(loaded);
+    const config: GlobalConfig = {
+      ...defaultGlobalConfig(),
+      codeRoot: normalizeCodeRoot(undefined),
+      branchPrefix: normalizeBranchPrefix(undefined),
+    };
+    await mkdir(dirname(this.path), { recursive: true });
+    const text = `${JSON.stringify(config, null, 2)}\n`;
+    try {
+      await writeFile(this.path, text, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+    } catch (writeError) {
+      // Another process may have created the config concurrently.
+      if ((writeError as NodeJS.ErrnoException).code !== "EEXIST")
+        throw writeError;
+      const raced = await this.readFile();
+      if (raced !== undefined) return structuredClone(raced);
+    }
+    this.wrote(text, { ...config } as Record<string, unknown>, config);
+    return structuredClone(config);
+  }
+
+  async snapshot(): Promise<ConfigAccessSnapshot> {
+    const config = await this.load();
+    const good = this.good;
+    return {
+      config,
+      raw: good ? structuredClone(good.raw) : {},
+      ...(this.error ? { error: { ...this.error } } : {}),
+    };
+  }
+
+  onChange(listener: (change: ConfigChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  startWatching(): void {
+    if (this.watcher) return;
+    const file = basename(this.path);
+    try {
+      // watch() throws ENOENT on a missing directory (fresh install).
+      mkdirSync(dirname(this.path), { recursive: true });
+      // The directory, not the file: an atomic rename replaces the file's
+      // inode, which a file watcher would stop following.
+      this.watcher = watch(dirname(this.path), (_event, filename) => {
+        if (filename && filename.toString() !== file) return;
+        clearTimeout(this.watchTimer);
+        this.watchTimer = setTimeout(() => {
+          this.watchTimer = undefined;
+          this.readFile().catch(() => {
+            // First load never succeeded and the file is still invalid:
+            // nothing to keep; the next load() reports it.
+          });
+        }, this.debounceMs);
+      });
+      this.watcher.on("error", () => this.stopWatching());
+    } catch {
+      this.watcher = undefined;
+    }
+  }
+
+  stopWatching(): void {
+    clearTimeout(this.watchTimer);
+    this.watchTimer = undefined;
+    this.watcher?.close();
+    this.watcher = undefined;
+  }
+
+  /**
+   * Read the file and, when its text changed, parse it: a valid config
+   * becomes the good one (reported as a `file` change when it differs or
+   * clears an error), an invalid one is recorded as the error and the good
+   * one kept. Resolves `undefined` when there is no file; throws when the
+   * file is invalid and nothing good ever loaded.
+   */
+  private async readFile(): Promise<GlobalConfig | undefined> {
+    const seq = ++this.readSeq;
+    let text: string;
+    try {
+      text = await readFile(this.path, "utf8");
+    } catch (error) {
+      // Missing: load() writes a fresh default (and the watcher ignores it).
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw this.invalid(error);
+    }
+    if (seq < this.appliedSeq || text === this.seenText) return this.current();
+    this.appliedSeq = seq;
+    this.seenText = text;
     let raw: unknown;
     try {
-      raw = JSON.parse(await readFile(this.path, "utf8"));
+      raw = JSON.parse(text);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw this.invalid(error);
-      const config: GlobalConfig = {
-        ...defaultGlobalConfig(),
-        codeRoot: normalizeCodeRoot(undefined),
-        branchPrefix: normalizeBranchPrefix(undefined),
-      };
-      await mkdir(dirname(this.path), { recursive: true });
-      try {
-        await writeFile(this.path, `${JSON.stringify(config, null, 2)}\n`, {
-          encoding: "utf8",
-          flag: "wx",
-          mode: 0o600,
-        });
-      } catch (writeError) {
-        // Another process may have created the config concurrently.
-        if ((writeError as NodeJS.ErrnoException).code !== "EEXIST")
-          throw writeError;
-      }
-      return config;
+      return this.failed(jsonSyntaxError(error, text));
     }
-    return this.parse(raw);
+    let config: GlobalConfig;
+    try {
+      config = this.parse(raw);
+    } catch (error) {
+      return this.failed({ message: problemOf(error) });
+    }
+    const previous = this.good?.config;
+    const hadError = this.error !== undefined;
+    this.good = { raw: raw as Record<string, unknown>, config };
+    this.error = undefined;
+    if (hadError || (previous && !sameConfig(previous, config))) {
+      this.notify({ origin: "file", previous: previous ?? config, config });
+    }
+    return config;
+  }
+
+  /** The good config, or the recorded error thrown when there is none. */
+  private current(): GlobalConfig {
+    if (this.good) return this.good.config;
+    throw this.invalid(new Error(this.error?.message ?? "unreadable"));
+  }
+
+  private failed(error: ConfigFileError): GlobalConfig {
+    const changed = this.error?.message !== error.message;
+    this.error = error;
+    if (!this.good) throw this.invalid(new Error(error.message));
+    if (changed) {
+      const kept = this.good.config;
+      this.notify({ origin: "file", previous: kept, config: kept, error });
+    }
+    return this.good.config;
+  }
+
+  /** Core wrote `text` (= `raw` serialized): adopt it so the watcher sees no news, and report the change. */
+  private wrote(
+    text: string,
+    raw: Record<string, unknown>,
+    config: GlobalConfig,
+    before?: GlobalConfig,
+  ): void {
+    this.appliedSeq = ++this.readSeq;
+    this.seenText = text;
+    const previous = this.good?.config ?? before;
+    const hadError = this.error !== undefined;
+    this.good = { raw, config };
+    this.error = undefined;
+    if (previous && (hadError || !sameConfig(previous, config))) {
+      this.notify({ origin: "core", previous, config });
+    }
+  }
+
+  private notify(change: ConfigChange): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(structuredClone(change));
+      } catch {
+        // A listener's failure is its own; the rest still hear about it.
+      }
+    }
   }
 
   /** Validate and normalize a raw config object (throws "Invalid Harbormaster config"). */
   private parse(raw: unknown): GlobalConfig {
-    if (!isRecord(raw)) throw this.invalid();
+    if (!isRecord(raw)) throw this.invalid(new Error("must be a JSON object"));
     try {
       const repositories = normalizeRepositories(raw.repositories);
       const launch = normalizeLaunch(raw.launch);
@@ -71,6 +247,8 @@ export class JsonConfigAccess implements ConfigAccess {
       const sources = normalizeSources(raw.sources);
       const agents = normalizeAgents(raw.agents);
       const inbox = normalizeInbox(raw.inbox);
+      const terminal = normalizeTerminal(raw.terminal);
+      const notifications = normalizeNotifications(raw.notifications);
       const onboardingCompletedAt = normalizeOptionalText(
         "onboardingCompletedAt",
         raw.onboardingCompletedAt,
@@ -88,6 +266,8 @@ export class JsonConfigAccess implements ConfigAccess {
         ...(messaging ? { messaging } : {}),
         ...(agents ? { agents } : {}),
         ...(inbox ? { inbox } : {}),
+        ...(terminal ? { terminal } : {}),
+        ...(notifications ? { notifications } : {}),
         ...(onboardingCompletedAt ? { onboardingCompletedAt } : {}),
       };
     } catch (error) {
@@ -106,15 +286,32 @@ export class JsonConfigAccess implements ConfigAccess {
         raw = { ...defaultGlobalConfig() };
       }
       if (!isRecord(raw)) throw this.invalid();
+      let before: GlobalConfig | undefined;
+      try {
+        before = this.parse(raw);
+      } catch {
+        before = undefined;
+      }
       const next = applyPatch(structuredClone(raw), patch);
       const config = this.parse(next);
-      await writeJsonAtomic(this.path, next);
-      return config;
+      const text = await writeJsonAtomic(this.path, next);
+      this.wrote(text, next, config, before);
+      return structuredClone(config);
     });
   }
 
   async save(config: GlobalConfig): Promise<void> {
-    await writeJsonAtomic(this.path, config);
+    const text = await writeJsonAtomic(this.path, config);
+    try {
+      this.wrote(
+        text,
+        JSON.parse(text) as Record<string, unknown>,
+        this.parse(JSON.parse(text)),
+      );
+    } catch {
+      // An unloadable config was saved: the next read reports it.
+      this.seenText = undefined;
+    }
   }
 
   /**
@@ -143,9 +340,42 @@ export class JsonConfigAccess implements ConfigAccess {
   }
 
   private invalid(cause?: unknown): Error {
-    const detail = cause instanceof Error ? `: ${cause.message}` : "";
+    const detail = cause instanceof Error ? `: ${problemOf(cause)}` : "";
     return new Error(`Invalid Harbormaster config at ${this.path}${detail}`);
   }
+}
+
+/** An error's message without the "Invalid Harbormaster config at <path>: " wrapper. */
+function problemOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Invalid Harbormaster config at .*?: /, "");
+}
+
+/** A JSON.parse failure, located by line/column when V8 says where. */
+function jsonSyntaxError(error: unknown, text: string): ConfigFileError {
+  const message = error instanceof Error ? error.message : String(error);
+  const located = /\(line (\d+) column (\d+)\)/.exec(message);
+  if (located) {
+    return {
+      message,
+      line: Number(located[1]),
+      column: Number(located[2]),
+    };
+  }
+  const position = /at position (\d+)/.exec(message);
+  if (position) {
+    const before = text.slice(0, Number(position[1])).split("\n");
+    return {
+      message,
+      line: before.length,
+      column: (before.at(-1)?.length ?? 0) + 1,
+    };
+  }
+  return { message };
+}
+
+function sameConfig(a: GlobalConfig, b: GlobalConfig): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /** `patch` applied to a raw config object; every other key is kept verbatim. */
@@ -189,7 +419,100 @@ function applyPatch(
   if (patch.captureAgentBrowser !== undefined) {
     raw.captureAgentBrowser = patch.captureAgentBrowser;
   }
+  for (const [key, value] of Object.entries(patch.set ?? {})) {
+    if (value === null || value === undefined) removeKeyPath(raw, key);
+    else setKeyPath(raw, key, value);
+  }
   return raw;
+}
+
+/** Set dotted `key` in `raw`, creating (or replacing non-object) parents. */
+function setKeyPath(
+  raw: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  const parts = key.split(".");
+  const last = parts.pop();
+  if (!last || parts.some((part) => !part)) {
+    throw new Error(`Invalid setting key "${key}"`);
+  }
+  let parent = raw;
+  for (const part of parts) {
+    const child = parent[part];
+    if (isRecord(child)) parent = child;
+    else {
+      const fresh: Record<string, unknown> = {};
+      parent[part] = fresh;
+      parent = fresh;
+    }
+  }
+  parent[last] = value;
+}
+
+/** Remove dotted `key` from `raw`, then any parent object it left empty. */
+function removeKeyPath(raw: Record<string, unknown>, key: string): void {
+  const parts = key.split(".");
+  const chain: Array<Record<string, unknown>> = [raw];
+  for (const part of parts.slice(0, -1)) {
+    const child = chain.at(-1)?.[part];
+    if (!isRecord(child)) return;
+    chain.push(child);
+  }
+  delete chain.at(-1)?.[parts.at(-1) ?? ""];
+  for (let index = chain.length - 1; index > 0; index -= 1) {
+    if (Object.keys(chain[index] ?? {}).length > 0) break;
+    delete chain[index - 1]?.[parts[index - 1] ?? ""];
+  }
+}
+
+/** The integer bounds the settings description gives `key`. */
+function describedBounds(key: string): { min: number; max: number } {
+  const setting = SETTINGS_DESCRIPTION.find((entry) => entry.key === key);
+  return {
+    min: setting?.min ?? 1,
+    max: setting?.max ?? Number.MAX_SAFE_INTEGER,
+  };
+}
+
+/** `terminal.fontSize`: an integer within the described bounds; absent = the default at read time. */
+function normalizeTerminal(
+  value: unknown,
+): GlobalConfig["terminal"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("terminal must be an object");
+  const terminal: NonNullable<GlobalConfig["terminal"]> = {};
+  if (value.fontSize !== undefined) {
+    const { min, max } = describedBounds("terminal.fontSize");
+    if (
+      typeof value.fontSize !== "number" ||
+      !Number.isInteger(value.fontSize) ||
+      value.fontSize < min ||
+      value.fontSize > max
+    ) {
+      throw new Error(
+        `terminal.fontSize must be a whole number from ${min} to ${max}`,
+      );
+    }
+    terminal.fontSize = value.fontSize;
+  }
+  return terminal;
+}
+
+/** `notifications.enabled`: a boolean; absent = on. */
+function normalizeNotifications(
+  value: unknown,
+): GlobalConfig["notifications"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new Error("notifications must be an object");
+  const notifications: NonNullable<GlobalConfig["notifications"]> = {};
+  if (value.enabled !== undefined) {
+    notifications.enabled = normalizeBoolean(
+      "notifications.enabled",
+      value.enabled,
+    );
+  }
+  return notifications;
 }
 
 function normalizeOptionalText(at: string, value: unknown): string | undefined {

@@ -32,6 +32,7 @@ import type {
   ReopenTaskInput,
   ResolveInboxItemOptions,
   RulesCheckInput,
+  SettingsPatch,
   Task,
   TaskState,
   TaskUsageQuery,
@@ -374,9 +375,12 @@ if (!openUrlHandler) {
 const core = createCore({
   stateDir: activeStateDir,
   logger: consoleCoreLogger(console),
+  // Hand edits of config.json reach open windows (docs/settings.md S4).
+  watchConfig: true,
   ...(bundledPiExtension ? { piExtensionSource: bundledPiExtension } : {}),
   ...(openUrlHandler ? { openUrlHandler } : {}),
 });
+app.on("will-quit", () => core.close());
 
 /** The open-url handler half of a launch's options (`captureAgentBrowser` read fresh per launch). */
 async function openUrlLaunchOptions(): Promise<{
@@ -1109,6 +1113,20 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:setCaptureAgentBrowser", (_event, enabled: unknown) =>
     core.commands.setCaptureAgentBrowser(enabled === true),
   );
+  // Settings (docs/settings.md): the renderer never touches config.json.
+  ipcMain.handle("core:getSettings", () => core.commands.getSettings());
+  ipcMain.handle("core:updateSettings", (_event, patch: unknown) =>
+    core.commands.updateSettings(
+      patch && typeof patch === "object" && !Array.isArray(patch)
+        ? (patch as SettingsPatch)
+        : {},
+    ),
+  );
+  core.events.on("config-changed", (payload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSend(win.webContents, "core:config-changed", payload);
+    }
+  });
   // The review tab polls this while open: a Plannotator server exits once
   // its feedback is sent. Loopback only (see open-url.ts).
   ipcMain.handle("app:probeUrl", (_event, url: unknown) =>

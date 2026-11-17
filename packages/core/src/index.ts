@@ -100,12 +100,20 @@ export interface CoreOptions {
   openUrlHandler?: string;
   /** Overrides `reviewSupport`'s Plannotator version probes; tests inject fakes. */
   reviewProbes?: ReviewSupportProbeAccess;
+  /**
+   * Watch config.json for hand edits (docs/settings.md S4): the long-lived
+   * host (the app) sets it; one-shot clients (the CLI) leave it off.
+   * Stopped by `Core.close()`.
+   */
+  watchConfig?: boolean;
 }
 
 /** The transport-ready facade: commands in, state events out. */
 export interface Core {
   commands: CoreCommands;
   events: CoreEvents;
+  /** Shutdown: stop core's own watchers (config.json). Idempotent. */
+  close(): void;
 }
 
 export function createCore(options: CoreOptions = {}): Core {
@@ -194,5 +202,6 @@ export function createCore(options: CoreOptions = {}): Core {
       : {}),
   });
 
-  return { commands, events };
+  if (options.watchConfig) commands.watchConfig();
+  return { commands, events, close: () => commands.dispose() };
 }

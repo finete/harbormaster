@@ -4,6 +4,7 @@
 // future daemon can re-emit the same payloads over a socket.
 
 import type { BoardColumn, PresenceRecord, Task } from "./model.js";
+import type { ConfigFileError } from "./settings.js";
 
 export interface BoardChangedPayload {
   columns: BoardColumn[];
@@ -37,6 +38,20 @@ export interface TaskUrlOpenedPayload {
   source: "plannotator" | "browser";
 }
 
+/**
+ * config.json changed (docs/settings.md S4/S6): through a core write
+ * (`origin: "core"`, e.g. `updateSettings`) or a hand edit (`"file"`).
+ * `changedKeys` are the dotted leaf paths whose loaded value changed
+ * (empty when only an error appeared or cleared). `error` is set while the
+ * file fails to load (core keeps the last good config); absent once it
+ * loads again. Re-read with `getSettings`.
+ */
+export interface ConfigChangedPayload {
+  changedKeys: string[];
+  origin: "core" | "file";
+  error?: ConfigFileError;
+}
+
 /** Every event name the core emits, mapped to its payload shape. */
 export interface CoreEventMap {
   "board-changed": BoardChangedPayload;
@@ -45,6 +60,7 @@ export interface CoreEventMap {
   "messages-changed": MessagesChangedPayload;
   "inbox-changed": InboxChangedPayload;
   "task-url-opened": TaskUrlOpenedPayload;
+  "config-changed": ConfigChangedPayload;
 }
 
 export type CoreEventName = keyof CoreEventMap;

@@ -10,6 +10,7 @@ import type {
   AwaitingKindOption,
   BoardChangedPayload,
   BoardColumn,
+  ConfigChangedPayload,
   ConnectivityState,
   CreateTaskActionInput,
   CreateTaskInput,
@@ -41,6 +42,8 @@ import type {
   ReviewRequestResult,
   ReviewSupport,
   RulesListing,
+  SettingsPatch,
+  SettingsSnapshot,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -340,6 +343,20 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:reviewSupport", options),
     setCaptureAgentBrowser: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke("core:setCaptureAgentBrowser", enabled),
+    getSettings: (): Promise<SettingsSnapshot> =>
+      ipcRenderer.invoke("core:getSettings"),
+    updateSettings: (patch: SettingsPatch): Promise<SettingsSnapshot> =>
+      ipcRenderer.invoke("core:updateSettings", patch),
+    onConfigChanged: (
+      listener: (payload: ConfigChangedPayload) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: ConfigChangedPayload,
+      ): void => listener(payload);
+      ipcRenderer.on("core:config-changed", handler);
+      return () => ipcRenderer.removeListener("core:config-changed", handler);
+    },
     probeUrl: (url: string): Promise<boolean> =>
       ipcRenderer.invoke("app:probeUrl", url),
     onTaskUrlOpened: (

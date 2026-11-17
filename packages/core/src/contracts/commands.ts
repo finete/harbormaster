@@ -56,6 +56,7 @@ import type {
   RulesCheckResult,
   RulesListing,
 } from "./rules.js";
+import type { SettingsPatch, SettingsSnapshot } from "./settings.js";
 import type { TaskUsage, TaskUsageQuery, TaskUsageRow } from "./usage.js";
 import type { RepositoryInfo } from "./workspace.js";
 
@@ -891,6 +892,28 @@ export interface CoreCommands {
   reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
   /** Flip `config.captureAgentBrowser` (applies to sessions launched afterwards). */
   setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+
+  // --- Settings (docs/settings.md) ---------------------------------------
+
+  /**
+   * Everything the Settings page reads: the settings description, each
+   * described key's effective value, which keys config.json sets
+   * explicitly, per-repository override counts (`launch.defaultHarness`,
+   * `launch.bypassPermissions`), the selectable agents, and the current
+   * config.json problem, if it fails to load (values are then the last
+   * good config's).
+   */
+  getSettings(): Promise<SettingsSnapshot>;
+  /**
+   * The one generic checked write (S6): every key must be described and
+   * its value valid for it (`null` resets: the key is removed and the
+   * default applies); `codeRoot` must be an existing folder. All or
+   * nothing, written atomically under the config lock, keeping every other
+   * key. Emits `config-changed`; change reactions (e.g. repository
+   * rediscovery for `codeRoot`) run for it exactly as for a hand edit.
+   * Rejects with a readable message listing every problem.
+   */
+  updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot>;
 
   // --- Costs: per-task token usage (docs/costs.md) -----------------------
 

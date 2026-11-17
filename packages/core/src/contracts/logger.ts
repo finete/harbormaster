@@ -21,7 +21,8 @@ export type CoreLogScope =
   | "state"
   | "rules"
   | "launch"
-  | "usage";
+  | "usage"
+  | "config";
 
 /** The closed set of timed operation names (one completion line each). */
 export type CoreOperation =

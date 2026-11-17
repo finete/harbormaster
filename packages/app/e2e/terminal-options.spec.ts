@@ -8,11 +8,14 @@
 //      data-unicode-version="11").
 //   3. macOptionClickForcesSelection is true (checked via terminal options
 //      in the renderer).
+//   4. The `terminal.fontSize` setting applies live to an open pane, from
+//      core's updateSettings and from a hand edit of config.json (the
+//      config watcher → config-changed → renderer seam, docs/settings.md).
 //
 // These are checked via DOM attributes set in TerminalPane.tsx and via
 // renderer-side evaluation of the terminal options, rather than through
 // pixel-level canvas introspection which would be brittle.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -105,4 +108,26 @@ test("terminal panel has data-unicode-version=11 (Unicode11Addon is active)", as
   await expect(panel).toHaveAttribute("data-unicode-version", "11", {
     timeout: 5_000,
   });
+});
+
+test("terminal.fontSize applies live: updateSettings and a hand edit of config.json", async () => {
+  const rows = window
+    .getByTestId("terminal-panel")
+    .first()
+    .locator(".xterm-rows");
+  const fontSize = () => rows.evaluate((el) => getComputedStyle(el).fontSize);
+  await expect.poll(fontSize).toBe("13px");
+
+  await window.evaluate(() =>
+    window.harbormaster.core.updateSettings({ "terminal.fontSize": 15 }),
+  );
+  await expect.poll(fontSize, { timeout: 5_000 }).toBe("15px");
+
+  const configPath = path.join(stateDir, "config.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  writeFileSync(
+    configPath,
+    `${JSON.stringify({ ...config, terminal: { fontSize: 19 } }, null, 2)}\n`,
+  );
+  await expect.poll(fontSize, { timeout: 5_000 }).toBe("19px");
 });

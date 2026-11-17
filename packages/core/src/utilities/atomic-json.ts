@@ -12,12 +12,15 @@ export async function readJson<T>(path: string, fallback: () => T): Promise<T> {
   }
 }
 
+/** Write `value` as pretty JSON via temp file + rename; resolves to the exact text written. */
 export async function writeJsonAtomic(
   path: string,
   value: unknown,
-): Promise<void> {
+): Promise<string> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  const text = `${JSON.stringify(value, null, 2)}\n`;
+  await writeFile(temp, text, { mode: 0o600 });
   await rename(temp, path);
+  return text;
 }

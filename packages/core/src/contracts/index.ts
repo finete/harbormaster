@@ -9,5 +9,6 @@ export * from "./model.js";
 export * from "./onboarding.js";
 export * from "./rules.js";
 export * from "./services.js";
+export * from "./settings.js";
 export * from "./usage.js";
 export * from "./workspace.js";

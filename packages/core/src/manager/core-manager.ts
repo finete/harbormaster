@@ -129,6 +129,11 @@ import type {
   WorkspaceBindingAccess,
 } from "../contracts/services.js";
 import type {
+  SettingsHarnessOption,
+  SettingsPatch,
+  SettingsSnapshot,
+} from "../contracts/settings.js";
+import type {
   TaskUsage,
   TaskUsageQuery,
   TaskUsageRow,
@@ -224,6 +229,7 @@ import {
   RulesRuntime,
 } from "./rules-runtime.js";
 import { SessionFileWatch } from "./session-file-watch.js";
+import { SettingsRuntime } from "./settings-runtime.js";
 import { UsageRuntime } from "./usage-runtime.js";
 
 export interface CoreManagerDependencies {
@@ -369,6 +375,8 @@ export class CoreManager implements CoreCommands {
   private readonly sessionFiles: SessionFileWatch;
   /** Per-task token usage (see usage-runtime.ts, docs/costs.md). */
   private readonly usage: UsageRuntime;
+  /** Settings reads/writes and config change reactions (see settings-runtime.ts). */
+  private readonly settings: SettingsRuntime;
   /** Tasks the running refresh observes (for its completion line). */
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
@@ -401,6 +409,14 @@ export class CoreManager implements CoreCommands {
       adapterFor: (task) => this.usageAdapterFor(task),
       bindingFor: (taskId) => deps.bindings.getBindingForTask(taskId),
       publish: (task) => this.publishTaskChange(task),
+    });
+    this.settings = new SettingsRuntime({
+      config: deps.config,
+      events: deps.events,
+      logger: this.log,
+      harnesses: (config) => this.harnessOptions(config),
+      rediscover: (config) => this.allRepositories(config),
+      ...(deps.onboarding ? { folders: deps.onboarding } : {}),
     });
     this.rules = deps.rules
       ? new RulesRuntime({
@@ -4370,6 +4386,47 @@ export class CoreManager implements CoreCommands {
 
   async setCaptureAgentBrowser(enabled: boolean): Promise<void> {
     await this.applySettings({ captureAgentBrowser: enabled });
+  }
+
+  // --- Settings (docs/settings.md; see manager/settings-runtime.ts) -----
+
+  async getSettings(): Promise<SettingsSnapshot> {
+    return this.settings.get();
+  }
+
+  async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
+    return this.settings.update(patch);
+  }
+
+  /** Watch config.json for hand edits (S4); the app calls this once at start. Not part of the command API. */
+  watchConfig(): void {
+    this.settings.watch();
+  }
+
+  /** Shutdown: stop the config watcher and change reactions. */
+  dispose(): void {
+    this.settings.dispose();
+  }
+
+  /** The agents a `harness` setting may name: registered adapters, else the built-ins plus custom agents. */
+  private harnessOptions(config: GlobalConfig): SettingsHarnessOption[] {
+    const custom = config.agents?.custom ?? [];
+    const customIds = new Set(custom.map((agent) => agent.id));
+    if (this.deps.harnesses) {
+      return this.harnessList(config).map((adapter) => ({
+        id: adapter.id,
+        label: adapter.label,
+        custom: customIds.has(adapter.id),
+      }));
+    }
+    return [
+      ...BUILTIN_AGENT_IDS.map((id) => ({ id, label: id, custom: false })),
+      ...custom.map((agent) => ({
+        id: agent.id,
+        label: agent.label,
+        custom: true,
+      })),
+    ];
   }
 }
 

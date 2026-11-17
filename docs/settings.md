@@ -65,3 +65,36 @@ inherited or locked.
   (transportable, no Electron types).
 - Writes made by core itself must not loop through the watcher as
   "external" edits (dedupe by content or a write token).
+
+## Implementation notes (step 1: foundation)
+
+- **Description:** `SETTINGS_DESCRIPTION` in `packages/core/src/contracts/settings.ts`
+  (types `SettingDescription`, `SettingSectionId` = `general | agents |
+  code-review | github | inbox`, `SettingType` = `boolean | integer | string |
+  enum | harness`). Validation is the pure `engines/settings.ts`
+  (`validateSettingsPatch`, `changedConfigKeys`, `affectsConfiguration`).
+- **New config keys:** `terminal.fontSize` (integer 8–32, default 13) and
+  `notifications.enabled` (boolean, default `true`), both on `GlobalConfig`.
+- **Commands:** `getSettings(): SettingsSnapshot` (description, effective
+  `values`, `explicit` keys, `overriddenIn` counts for `launch.defaultHarness`
+  / `launch.bypassPermissions`, `harnesses` choices, `error`) and
+  `updateSettings(patch: Record<key, value | null>)` (`null` removes the key;
+  written through `JsonConfigAccess.applySettings({ set })` under the config
+  lock). IPC: `core:getSettings`, `core:updateSettings`; preload
+  `core.getSettings / updateSettings / onConfigChanged`.
+- **Event:** `config-changed` `{ changedKeys, origin: "core" | "file", error? }`,
+  forwarded to windows as `core:config-changed`.
+- **Watcher:** `JsonConfigAccess.startWatching()` (fs.watch on the state dir,
+  150 ms debounce), enabled by `createCore({ watchConfig: true })` (the app
+  only) and stopped by `Core.close()`. Unchanged file text is never re-parsed
+  or re-reported, so core's own writes do not come back as hand edits. An
+  invalid file keeps the last good config; `error` carries the message (and
+  line/column for JSON syntax errors).
+- **Reactions** (`manager/settings-runtime.ts`, any origin): `codeRoot` /
+  `repositories.*` → repository rediscovery; `launch.defaultHarness` →
+  availability check (logged); `automation` and `sources.*` need only the
+  event (the refresh tick reads both fresh). The per-setting commands
+  (`setCodeRoot`, `setDefaultAgent`, `setRulesEnabled`, `setSourceEnabled`,
+  `setCaptureAgentBrowser`) are unchanged and flow through the same reactions.
+- **Terminal font size** is live already: `renderer/src/lib/terminal-font-size.ts`
+  feeds `createTerminalOptions({ fontSize })` and refits open panes.

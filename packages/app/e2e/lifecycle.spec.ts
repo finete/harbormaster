@@ -700,6 +700,20 @@ test.describe("Done is final: one small question, then the app owns the worktree
     await expect(confirm).toHaveCount(0);
     await expect(window.getByTestId("toast-warning")).toHaveCount(0);
     await expect(window.getByTestId("toast-error")).toHaveCount(0);
+    // The folder disappears before the cleanup result is recorded on the
+    // task, so wait for the record too (raced under full-suite load).
+    await expect
+      .poll(
+        async () =>
+          (
+            await window.evaluate(
+              (id) => window.harbormaster.core.getTask(id),
+              taskId,
+            )
+          )?.cleanup?.attempts,
+        { timeout: 15_000 },
+      )
+      .toBe(1);
     const task = await window.evaluate(
       (id) => window.harbormaster.core.getTask(id),
       taskId,

@@ -1,0 +1,261 @@
+// The settings description (docs/settings.md decision S6): one core-owned,
+// transportable list of every UI-exposed config setting — key path, type,
+// default, constraints, title, help text and section. Frontends draw the
+// Settings page from it; `CoreCommands.updateSettings` validates writes
+// against it (engines/settings.ts). Plain data only: no functions, no
+// Electron or filesystem types.
+
+import {
+  DEFAULT_HARNESS_ID,
+  DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
+  DEFAULT_LAUNCH_MAX_CONCURRENT,
+  DEFAULT_MESSAGE_LOOP_CAP,
+  DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
+} from "./model.js";
+
+/** Settings page sections, most used first (decision S7). */
+export type SettingSectionId =
+  | "general"
+  | "agents"
+  | "code-review"
+  | "github"
+  | "inbox";
+
+/**
+ * Value kinds. `harness` is a string that must name a registered agent
+ * (built-in or `agents.custom[]`); `enum` a string out of `values`.
+ */
+export type SettingType = "boolean" | "integer" | "string" | "enum" | "harness";
+
+/** A setting's value as stored in config.json. */
+export type SettingValue = boolean | number | string;
+
+/** One UI-exposed setting. */
+export interface SettingDescription {
+  /** Dotted key path in config.json (e.g. `launch.maxConcurrent`). */
+  key: string;
+  type: SettingType;
+  /**
+   * The value in effect when the key is absent; `null` when absence means
+   * "no value" (e.g. `launch.defaultModel`: the agent's own default).
+   */
+  default: SettingValue | null;
+  title: string;
+  help: string;
+  section: SettingSectionId;
+  /** `integer`: inclusive bounds. */
+  min?: number;
+  max?: number;
+  /** `enum`: the allowed values. */
+  values?: readonly string[];
+  /** `string`: whether `""` is a valid value (otherwise it must be non-empty once trimmed). */
+  allowEmpty?: boolean;
+  /** Display unit of a stored number (the UI may convert, e.g. ms shown as minutes). */
+  unit?: "ms" | "minutes";
+  /** Shown read-only on the Settings page (changed elsewhere, e.g. `automation` on the Rules page, S13). */
+  uiReadOnly?: boolean;
+  /** Not given a control; the Settings page offers "Edit in config.json" (S1). */
+  fileOnly?: boolean;
+}
+
+/** `terminal.fontSize` default (S11). */
+export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+/** `notifications.enabled` default (S11). */
+export const DEFAULT_NOTIFICATIONS_ENABLED = true;
+/** The github source's search interval default (mirrors engines/sources/github-source.ts). */
+export const DEFAULT_GITHUB_SEARCH_INTERVAL_MS = 5 * 60_000;
+
+/** Every UI-exposed setting that maps to a config key ("Settings in v1"). */
+export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
+  // --- General ---------------------------------------------------------
+  {
+    key: "codeRoot",
+    type: "string",
+    default: "~/Code",
+    title: "Code folder",
+    help: "The folder that holds your repository checkouts. Changing it rediscovers repositories.",
+    section: "general",
+  },
+  {
+    key: "branchPrefix",
+    type: "string",
+    default: "",
+    allowEmpty: true,
+    title: "Branch prefix",
+    help: 'Namespace for branches Harbormaster creates, e.g. "alice/". Leave empty for none.',
+    section: "general",
+  },
+  {
+    key: "terminal.fontSize",
+    type: "integer",
+    default: DEFAULT_TERMINAL_FONT_SIZE,
+    min: 8,
+    max: 32,
+    title: "Terminal font size",
+    help: "Font size of task terminals, in points. Applies to open panes immediately.",
+    section: "general",
+  },
+  {
+    key: "notifications.enabled",
+    type: "boolean",
+    default: DEFAULT_NOTIFICATIONS_ENABLED,
+    title: "Desktop notifications",
+    help: "Show a system notification when a task needs you.",
+    section: "general",
+  },
+  {
+    key: "automation",
+    type: "boolean",
+    default: true,
+    uiReadOnly: true,
+    title: "Automation",
+    help: "Whether board rules run. Managed on the Rules page.",
+    section: "general",
+  },
+  // --- Agents ----------------------------------------------------------
+  {
+    key: "launch.defaultHarness",
+    type: "harness",
+    default: DEFAULT_HARNESS_ID,
+    title: "Default agent",
+    help: "The agent new tasks start with.",
+    section: "agents",
+  },
+  {
+    key: "launch.defaultModel",
+    type: "string",
+    default: null,
+    title: "Default model",
+    help: "Model for tasks on the default agent. Empty uses the agent's own default.",
+    section: "agents",
+  },
+  {
+    key: "launch.bypassPermissions",
+    type: "boolean",
+    default: DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
+    title: "Skip permission prompts for launched tasks",
+    help: "Tasks started in the background run without asking for permission.",
+    section: "agents",
+  },
+  {
+    key: "launch.maxConcurrent",
+    type: "integer",
+    default: DEFAULT_LAUNCH_MAX_CONCURRENT,
+    min: 1,
+    max: 64,
+    title: "Max tasks running at once",
+    help: "Launched tasks beyond this wait in a queue.",
+    section: "agents",
+  },
+  // --- Code review -----------------------------------------------------
+  {
+    key: "captureAgentBrowser",
+    type: "boolean",
+    default: false,
+    title: "Open agents' local pages in the app",
+    help: "Browser opens from agent sessions (dev servers, previews) open in the task's workspace.",
+    section: "code-review",
+  },
+  // --- GitHub & sources ------------------------------------------------
+  {
+    key: "sources.github.enabled",
+    type: "boolean",
+    default: true,
+    title: "GitHub",
+    help: "Watch pull requests of your tasks on GitHub.",
+    section: "github",
+  },
+  {
+    key: "sources.github.settings.watchReviewRequests",
+    type: "boolean",
+    default: false,
+    title: "Create a task when someone requests my review",
+    help: "Look for open pull requests that request your review.",
+    section: "github",
+  },
+  {
+    key: "sources.github.settings.watchMentions",
+    type: "boolean",
+    default: false,
+    title: "Create a task when someone mentions me",
+    help: "Look for open pull requests that mention you.",
+    section: "github",
+  },
+  {
+    key: "sources.github.settings.searchIntervalMs",
+    type: "integer",
+    default: DEFAULT_GITHUB_SEARCH_INTERVAL_MS,
+    min: 60_000,
+    max: 24 * 60 * 60_000,
+    unit: "ms",
+    title: "Check interval",
+    help: "How often to look for review requests and mentions.",
+    section: "github",
+  },
+  // --- Inbox & messaging -----------------------------------------------
+  {
+    key: "messaging.parentReplyTimeoutMinutes",
+    type: "integer",
+    default: DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
+    min: 1,
+    max: 24 * 60,
+    unit: "minutes",
+    title: "Parent reply timeout",
+    help: "How long a subtask's question may wait on its parent before it is flagged.",
+    section: "inbox",
+  },
+  {
+    key: "messaging.loopCap",
+    type: "integer",
+    default: DEFAULT_MESSAGE_LOOP_CAP,
+    min: 1,
+    max: 100,
+    title: "Message loop cap",
+    help: "Messages tasks may exchange on their own before you are asked.",
+    section: "inbox",
+  },
+  {
+    key: "inbox.priorityFilter",
+    type: "string",
+    default: null,
+    fileOnly: true,
+    title: "Priority filter",
+    help: "A CEL expression deciding which inbox items are Priority.",
+    section: "inbox",
+  },
+];
+
+/** `updateSettings` input: key path → new value, or `null` to reset (remove the key). */
+export type SettingsPatch = Record<string, SettingValue | null>;
+
+/** A problem with config.json (syntax or a rejected value). */
+export interface ConfigFileError {
+  /** Human-readable problem, without the file path (e.g. "launch.loopCap must be a positive integer"). */
+  message: string;
+  /** 1-based line, when known (JSON syntax errors). */
+  line?: number;
+  /** 1-based column, when known. */
+  column?: number;
+}
+
+/** A selectable agent for `harness`-typed settings. */
+export interface SettingsHarnessOption {
+  id: string;
+  label: string;
+  custom: boolean;
+}
+
+/** `CoreCommands.getSettings`: everything the Settings page reads. */
+export interface SettingsSnapshot {
+  description: readonly SettingDescription[];
+  /** Effective value per described key (explicit, else the default; `null` = none). */
+  values: Record<string, SettingValue | null>;
+  /** Described keys present in config.json (S12 "changed" markers pair with reset). */
+  explicit: string[];
+  /** Per-repository overrides of global settings (S8): key → number of repositories. */
+  overriddenIn: Record<string, number>;
+  /** Choices for `harness`-typed settings (built-ins, then custom agents). */
+  harnesses: SettingsHarnessOption[];
+  /** config.json currently fails to load; values are the last good config's (S4). */
+  error?: ConfigFileError;
+}

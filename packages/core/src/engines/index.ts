@@ -14,6 +14,7 @@ export * from "./repository-label.js";
 export * from "./review-support.js";
 export * from "./rules/index.js";
 export * from "./session-file-check.js";
+export * from "./settings.js";
 export * from "./sources/index.js";
 export * from "./task-transitions.js";
 export * from "./task-workspace.js";

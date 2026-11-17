@@ -507,6 +507,10 @@ export interface GlobalConfig {
    * through `PLANNOTATOR_BROWSER` regardless. Default `false`.
    */
   captureAgentBrowser: boolean;
+  /** Terminal pane settings (docs/settings.md S11); `fontSize` absent = `DEFAULT_TERMINAL_FONT_SIZE`. */
+  terminal?: { fontSize?: number };
+  /** Desktop notifications (S11); `enabled` absent = on. `HARBORMASTER_NOTIFICATIONS=off` still wins. */
+  notifications?: { enabled?: boolean };
 }
 
 /** `launch.maxConcurrent` default when unset: launched tasks whose agent is *running* (see `GlobalConfig.launch`). */

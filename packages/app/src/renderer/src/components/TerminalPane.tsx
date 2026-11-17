@@ -7,6 +7,10 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
 import {
+  onTerminalFontSizeChange,
+  terminalFontSize,
+} from "../lib/terminal-font-size";
+import {
   createTerminalOptions,
   type HostContext,
   installHostIntegrations,
@@ -71,7 +75,10 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     const isPrimary = !!params?.primary;
 
     const terminal = new Terminal(
-      createTerminalOptions({ primary: isPrimary }),
+      createTerminalOptions({
+        primary: isPrimary,
+        fontSize: terminalFontSize(),
+      }),
     );
 
     // Unicode 11 width tables — must be loaded before open() so the first
@@ -272,6 +279,15 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     });
     resizeObserver.observe(container);
 
+    // The `terminal.fontSize` setting applies live (docs/settings.md S11):
+    // new cell metrics, then a refit (the pty follows via onResize). A
+    // hidden pane refits through the ResizeObserver when it shows.
+    const unsubscribeFontSize = onTerminalFontSizeChange((size) => {
+      if (disposed) return;
+      terminal.options.fontSize = size;
+      if (isContainerVisible(container)) fitAddon.fit();
+    });
+
     // The inbox detail pane reads a task's last lines from its mounted pane
     // (lib/terminal-tail.ts); main's headless mirror covers paneless tasks.
     const unregisterTail =
@@ -291,6 +307,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       unsubscribeData?.();
       unsubscribeExit?.();
       unsubscribeA11y();
+      unsubscribeFontSize();
       // Tab close / pane unmount: release (detach task primaries to the
       // background, dispose shells) instead of unconditionally killing, so
       // reopening re-attaches instantly and a running agent survives a tab

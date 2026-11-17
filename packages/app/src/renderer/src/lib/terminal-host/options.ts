@@ -19,7 +19,7 @@ export const SHELL_SCROLLBACK = 5_000;
 export const TERMINAL_BACKGROUND = "#1e1e1e";
 
 export function createTerminalOptions(
-  opts: { primary?: boolean } = {},
+  opts: { primary?: boolean; fontSize?: number } = {},
 ): ITerminalOptions {
   return {
     // Note: convertEol is intentionally NOT set (item #25).
@@ -28,7 +28,8 @@ export function createTerminalOptions(
     cursorBlink: true,
     fontFamily:
       '"Hack Nerd Font Mono", "HackNerdFontMono", "MesloLGS NF", Menlo, monospace',
-    fontSize: 13,
+    // The `terminal.fontSize` setting (lib/terminal-font-size.ts); 13 by default.
+    fontSize: opts.fontSize ?? 13,
     lineHeight: 1,
     scrollback: opts.primary ? PRIMARY_SCROLLBACK : SHELL_SCROLLBACK,
     macOptionIsMeta: true,

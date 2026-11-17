@@ -14,6 +14,7 @@ import type {
   BoardChangedPayload,
   BoardColumn,
   CodeRootScan,
+  ConfigChangedPayload,
   CreateTaskActionInput,
   CreateTaskInput,
   DetectedAgent,
@@ -44,6 +45,8 @@ import type {
   RulesCheckResult,
   RulesListing,
   SetDefaultAgentInput,
+  SettingsPatch,
+  SettingsSnapshot,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -81,6 +84,8 @@ export type {
   BoardGroup,
   CelOutline,
   CodeRootScan,
+  ConfigChangedPayload,
+  ConfigFileError,
   CreateTaskActionInput,
   CreateTaskInput,
   CustomAgentConfig,
@@ -127,6 +132,13 @@ export type {
   RulesListing,
   ScannedRepository,
   SetDefaultAgentInput,
+  SettingDescription,
+  SettingSectionId,
+  SettingsHarnessOption,
+  SettingsPatch,
+  SettingsSnapshot,
+  SettingType,
+  SettingValue,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -611,6 +623,14 @@ export interface HarbormasterApi {
     reviewSupport(options?: { refresh?: boolean }): Promise<ReviewSupport>;
     /** The Settings "Capture agent browser opens" switch. See `CoreCommands.setCaptureAgentBrowser`. */
     setCaptureAgentBrowser(enabled: boolean): Promise<void>;
+    /** Settings description, values, explicit keys, overrides, config.json error. See `CoreCommands.getSettings`. */
+    getSettings(): Promise<SettingsSnapshot>;
+    /** The generic checked settings write (`null` resets a key). See `CoreCommands.updateSettings`. */
+    updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot>;
+    /** config.json changed (a write here or a hand edit) or stopped/started loading; re-read with `getSettings`. */
+    onConfigChanged(
+      listener: (payload: ConfigChangedPayload) => void,
+    ): () => void;
     /** Whether a loopback URL's server still answers (a HEAD from main; never a non-loopback URL). */
     probeUrl(url: string): Promise<boolean>;
     /** Subscribes to core's `task-url-opened` push channel; returns an unsubscribe fn. */
