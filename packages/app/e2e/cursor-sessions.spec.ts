@@ -252,7 +252,7 @@ test("an interactive Cursor pane: plugin dir with hooks + MCP, no bypass, presen
   await expect(review).toBeDisabled({ timeout: 30_000 });
   await expect(review).toHaveAttribute(
     "title",
-    "This agent cannot start a code review",
+    "Plannotator doesn't support Cursor CLI yet",
   );
 });
 
