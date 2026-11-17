@@ -1,5 +1,5 @@
 // Decides between the first-run wizard and the normal UI
-// (docs/release-plan.md "Onboarding (four screens)"). On first run the
+// (docs/release-plan.md "Onboarding (five screens)"). On first run the
 // wizard is the whole window and the app is not mounted yet (nothing
 // restores or spawns behind it); "Welcome / Setup…" from the menu shows it
 // over the running app instead, so open panes stay alive. "Start" enters

@@ -293,7 +293,7 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   the TUI board, multiplexer leftovers. README rewritten around the Homebrew
   install, the four concepts, and "add your agent".
 
-## Onboarding (four screens)
+## Onboarding (five screens)
 
 1. Code root + add a repository (detects git repos under the root). Warns
    when the root is inside `~/Documents`, `~/Desktop` or `~/Downloads`
@@ -303,9 +303,11 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
 2. Default agent: detected Pi / Claude Code (resolved path and version, or
    the install command when missing). Custom CLIs are configured in
    `config.json` (`agents.custom[]`), not in the wizard.
-3. Enable GitHub: detects `gh auth status`; explains it powers card moves
+3. Code review: Plannotator readiness per agent (docs/plannotator.md
+   decision 5), on its own screen so it is not below the fold of step 2.
+4. Enable GitHub: detects `gh auth status`; explains it powers card moves
    for your PRs and review tasks for others' PRs. Writes the default rules.
-4. Concepts: the three columns and verbs; rules (`~/.harbormaster/rules`);
+5. Concepts: the three columns and verbs; rules (`~/.harbormaster/rules`);
    the inbox; tasks talking to each other (children, messages, cross-task
    messages land in your inbox for approval).
 
@@ -326,7 +328,7 @@ with the full gate green and the acceptance checked.
 | B | Claude Code adapter: launch spec, hooks, mcp-config, permissions switch, agent choice (app/repo/task), child inheritance | Contract tests pass; real `claude` smoke without key passes; e2e with fake claude: status + inbox delivery | merged (claude 2.1.322 starts with our flags and probes 7501; report/MCP/trust dialogs unproven without login) |
 | B | Agent contract test suite + real-CLI smoke job (pi, claude) | Both jobs green locally and in CI | merged; real-CLI smoke is opt-in `HARBORMASTER_REAL_CLI=1` (no CI yet) |
 | D | electron-builder, Homebrew tap + release script, version banner, export diagnostics, LICENSE, README | `brew install --cask finete/tap/harbormaster` works on a clean Mac; banner shows after a release bump | merged 555ccf8; manual: create `finete/homebrew-tap`, first `release/release.sh`, verify brew install on a current-Xcode Mac |
-| E | Onboarding wizard (four screens), first-run defaults | e2e: fresh state dir → wizard → first task created | merged |
+| E | Onboarding wizard (four screens, now five), first-run defaults | e2e: fresh state dir → wizard → first task created | merged |
 | F | Rules page (`docs/rules-page.md`): core activity fold + CEL outline + `setRulesEnabled` + mandatory `label`; app list/sheet/Activity/switch; sidebar entry + ⌘⇧R | Units per the doc; one e2e (`rules.spec.ts`) proven to fail with the page reverted | merged |
 | G | Plannotator review (`docs/plannotator.md`): adapter review command, open-url transport, url pane, Review button + hint, review-support detection, rules facts | Units per the doc; `plannotator.spec.ts` with the fake; contract test | merged |
 

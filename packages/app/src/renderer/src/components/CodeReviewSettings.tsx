@@ -4,7 +4,7 @@
 // `captureAgentBrowser` switch, and, when given the default agent, a
 // one-line summary for it on top. Re-checked whenever the window regains
 // focus (the user just ran a fix command in a terminal) and on Recheck.
-// Self-contained: rendered on the onboarding Agent step today, liftable
+// Self-contained: rendered on the onboarding Code review step today, liftable
 // into a Settings screen as is.
 
 import { Check, Copy, RefreshCw } from "lucide-react";
@@ -117,7 +117,7 @@ function HarnessRow({ entry }: { entry: ReviewSupportHarness }): JSX.Element {
 export function CodeReviewSettings({
   defaultHarness,
 }: {
-  /** Summarized on one line on top (the onboarding Agent step's chosen agent). */
+  /** Summarized on one line on top (the agent chosen on the onboarding Agent step). */
   defaultHarness?: string;
 }): JSX.Element {
   const support = useReviewSupport();

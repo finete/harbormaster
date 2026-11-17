@@ -1,5 +1,6 @@
-// The first-run wizard (docs/release-plan.md "Onboarding (four screens)",
-// R14): code root + repositories, default agent, GitHub, concepts. One
+// The first-run wizard (docs/release-plan.md "Onboarding (five screens)",
+// R14): code root + repositories, default agent,
+// code review (Plannotator), GitHub, concepts. One
 // centered card (stepper on the left, the step on the right, Back and the
 // primary button in the card's own footer), shown as the whole window
 // before the normal UI on first run, and over it from the "Welcome /
@@ -56,6 +57,16 @@ import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 
 const STEP_COUNT = ONBOARDING_STEPS.length;
+
+type StepId = (typeof ONBOARDING_STEPS)[number]["id"];
+
+/** The id of the step at `index` (steps are compared by id, not position). */
+const stepId = (index: number): StepId | undefined =>
+  ONBOARDING_STEPS[index]?.id;
+
+/** The stepper label of step `id` (each screen's title). */
+const stepLabel = (id: StepId): string =>
+  ONBOARDING_STEPS.find((entry) => entry.id === id)?.label ?? "";
 
 /**
  * What "Start" hands back: the first composer's prefill. Start gives the
@@ -268,7 +279,7 @@ function CodeStep({
   }, [preselect, rowCount]);
   return (
     <div className="flex flex-col gap-4">
-      <StepHeader title={ONBOARDING_STEPS[0].label}>
+      <StepHeader title={stepLabel("code")}>
         Harbormaster finds every git repository directly under this folder, and
         agents clone new ones into it. Task worktrees live separately, in
         ~/.harbormaster/worktrees.
@@ -484,7 +495,7 @@ function AgentStep({
   const piInPlay = choice === "pi" || agent("pi")?.available;
   return (
     <div className="flex flex-col gap-4">
-      <StepHeader title={ONBOARDING_STEPS[1].label}>
+      <StepHeader title={stepLabel("agent")}>
         Harbormaster runs the agent you already use; pick the one new tasks
         start with.
       </StepHeader>
@@ -596,12 +607,26 @@ function AgentStep({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+// --- Screen 3: code review ---------------------------------------------------
+
+// CodeReviewSettings persists its own switch and rechecks on focus, so this
+// screen has nothing for `saveStep` to save.
+function ReviewStep({ choice }: { choice: AgentChoice }): JSX.Element {
+  return (
+    <div className="flex flex-col gap-4">
+      <StepHeader title={stepLabel("review")}>
+        Review what your agent changed, inline, before it merges.
+      </StepHeader>
       <CodeReviewSettings defaultHarness={choice} />
     </div>
   );
 }
 
-// --- Screen 3: GitHub --------------------------------------------------------
+// --- Screen 4: GitHub --------------------------------------------------------
 
 function GithubStep({
   status,
@@ -616,7 +641,7 @@ function GithubStep({
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-4">
-      <StepHeader title={ONBOARDING_STEPS[2].label}>
+      <StepHeader title={stepLabel("github")}>
         Harbormaster uses the GitHub CLI (gh) you are already signed in to.
       </StepHeader>
       {!status ? (
@@ -699,7 +724,7 @@ function GithubStep({
   );
 }
 
-// --- Screen 4: concepts ------------------------------------------------------
+// --- Screen 5: concepts ------------------------------------------------------
 
 function Concept({
   icon,
@@ -741,7 +766,7 @@ function ConceptsStep({
   const setupCheck = useSetupCheck();
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-concepts">
-      <StepHeader title={ONBOARDING_STEPS[3].label}>
+      <StepHeader title={stepLabel("concepts")}>
         Four things to know before your first task.
       </StepHeader>
       <div className="flex flex-col gap-3.5">
@@ -869,7 +894,7 @@ export function Onboarding({
   const choiceTouched = useRef(false);
   const [bypass, setBypass] = useState(true);
 
-  // Screen 3.
+  // Screen 4.
   const [gh, setGh] = useState<GithubAuthStatus | null>(null);
   const [githubEnabled, setGithubEnabled] = useState(true);
   const githubTouched = useRef(false);
@@ -1032,13 +1057,14 @@ export function Onboarding({
   /** Save the current screen through core (rejects with the reason it could not). */
   const saveStep = async (): Promise<void> => {
     setError("");
-    if (step === 0) {
+    const id = stepId(step);
+    if (id === "code") {
       // A missing folder (e.g. the ~/harbormaster default) is created.
       const saved = await api.setCodeRoot(root, { create: true });
       setScan(saved);
       return;
     }
-    if (step === 1) {
+    if (id === "agent") {
       setState(
         await api.setDefaultAgent({
           harness: choice,
@@ -1047,7 +1073,7 @@ export function Onboarding({
       );
       return;
     }
-    if (step === 2) {
+    if (id === "github") {
       await api.setSourceEnabled("github", githubEnabled);
       await api.ensureDefaultRules();
       return;
@@ -1100,7 +1126,7 @@ export function Onboarding({
   /**
    * The concepts screen's secondary action: finish exactly like Start, but
    * into the composer set up as the Rules page's "Edit in chat" does. The
-   * rules folder comes from the listing (the defaults exist since screen 3).
+   * rules folder comes from the listing (the defaults exist since the GitHub screen).
    */
   const writeFirstRule = async (): Promise<void> => {
     if (busy || !state) return;
@@ -1199,17 +1225,25 @@ export function Onboarding({
     if (!loaded) return;
     const content = contentRef.current;
     let target: HTMLElement | null | undefined;
-    if (step === 0) {
+    const id = stepId(step);
+    if (id === "code") {
       target = content?.querySelector<HTMLElement>(
         '[data-testid="onboarding-code-root"]',
       );
-    } else if (step === 1) {
+    } else if (id === "agent") {
       target =
         content?.querySelector<HTMLElement>(
           'input[name="onboarding-agent"]:checked',
         ) ??
         content?.querySelector<HTMLElement>('input[name="onboarding-agent"]');
-    } else if (step === 2) {
+    } else if (id === "review") {
+      // The capture switch keeps Enter = Next (the Recheck button would
+      // swallow it); while its setting still loads, the primary button.
+      target =
+        content?.querySelector<HTMLElement>(
+          '[data-testid="code-review-capture-browser"]:not(:disabled)',
+        ) ?? primaryRef.current;
+    } else if (id === "github") {
       target = githubToggleTarget();
     } else {
       target = primaryRef.current;
@@ -1221,7 +1255,7 @@ export function Onboarding({
   const ghReady = gh !== null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the status lands, not on every step change.
   useEffect(() => {
-    if (step !== 2 || !ghReady) return;
+    if (stepId(step) !== "github" || !ghReady) return;
     const active = document.activeElement;
     if (active && contentRef.current?.contains(active)) return;
     githubToggleTarget()?.focus();
@@ -1261,7 +1295,7 @@ export function Onboarding({
           >
             {!state ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : step === 0 ? (
+            ) : stepId(step) === "code" ? (
               <CodeStep
                 state={state}
                 root={root}
@@ -1274,7 +1308,7 @@ export function Onboarding({
                 onPreselect={setPreselect}
                 onUseSuggested={() => void switchToSuggestedRoot()}
               />
-            ) : step === 1 ? (
+            ) : stepId(step) === "agent" ? (
               <AgentStep
                 state={state}
                 detected={detected}
@@ -1289,7 +1323,9 @@ export function Onboarding({
                 bypass={bypass}
                 onBypass={setBypass}
               />
-            ) : step === 2 ? (
+            ) : stepId(step) === "review" ? (
+              <ReviewStep choice={choice} />
+            ) : stepId(step) === "github" ? (
               <GithubStep
                 status={gh}
                 enabled={githubEnabled}

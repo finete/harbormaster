@@ -7,7 +7,7 @@
 // open-url` → core `openTaskUrl` → `task-url-opened`) and the task's review
 // tab shows the page in an iframe. Sending the feedback ends the session:
 // the tab shows "Review sent" with Review again, which starts a new one.
-// The wizard's Agent step lists Plannotator as ready for Pi.
+// The wizard's code review step lists Plannotator as ready for Pi.
 // A Claude Code task (fake-claude.ts) covers the other harness's seam: with
 // no `/plannotator-review` skill the Review button is disabled; a skill
 // installed after the agent started enables it, the agent answers "Unknown
@@ -287,15 +287,17 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
   expect(existsSync(openLog)).toBe(false);
   expect(agentReceived()).not.toContain("inbox ");
 
-  // Settings (the wizard's Agent step): Plannotator reads ready for Pi.
+  // Settings (the wizard's code review step): Plannotator reads ready for Pi.
   await app.evaluate(({ Menu }) => {
     Menu.getApplicationMenu()?.getMenuItemById("welcome-setup")?.click();
   });
-  await window.getByTestId("onboarding-next").click();
-  await expect(window.getByTestId("onboarding")).toHaveAttribute(
-    "data-step",
-    "agent",
-  );
+  for (const step of ["agent", "review"]) {
+    await window.getByTestId("onboarding-next").click();
+    await expect(window.getByTestId("onboarding")).toHaveAttribute(
+      "data-step",
+      step,
+    );
+  }
   await expect(window.getByTestId("code-review-row-pi")).toHaveAttribute(
     "data-state",
     "ready",

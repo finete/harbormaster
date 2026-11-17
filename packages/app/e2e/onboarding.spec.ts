@@ -2,8 +2,9 @@
 // R14) end to end on a fresh state dir: no config → the wizard shows; a
 // root under a fake ~/Documents warns (HOME points at a temp dir); a temp
 // code root with two git repositories is scanned and one is picked; the
-// default agent is Claude Code (a fake `claude --version`); the GitHub
-// screen shows the account from a stubbed `gh auth status` and leaves the
+// default agent is Claude Code (a fake `claude --version`); the code
+// review step (its own screen, no longer on the agent step) shows the
+// Plannotator settings for the chosen agent; the GitHub screen shows the account from a stubbed `gh auth status` and leaves the
 // source on with the default rules written; Start lands in the workspace
 // with the New task composer open on the picked repository, and the first
 // task is created on Claude Code. Along the way: the primary button sits
@@ -168,7 +169,7 @@ test.afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("fresh state dir: the four-screen wizard sets everything up, Start opens the composer, and a relaunch skips it", async () => {
+test("fresh state dir: the five-screen wizard sets everything up, Start opens the composer, and a relaunch skips it", async () => {
   const first = await launch();
   const { window } = first;
   try {
@@ -258,14 +259,26 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
       "aria-checked",
       "true",
     );
+    // Code review is its own step now, not at the bottom of the agent step.
+    await expect(window.getByTestId("code-review-settings")).toHaveCount(0);
     await window.getByTestId("onboarding-next").click();
-    await expect(wizard).toHaveAttribute("data-step", "github");
+    await expect(wizard).toHaveAttribute("data-step", "review");
     expect(readConfig().launch).toMatchObject({
       defaultHarness: "claude-code",
       bypassPermissions: true,
     });
+    await expect(stepper).toHaveCount(5);
+    await expect(stepper.nth(2)).toHaveAttribute("data-state", "current");
 
-    // Screen 3: the gh account; GitHub stays on and the default rules exist.
+    // Screen 3: code review, for the agent just chosen (Claude Code).
+    await expect(window.getByTestId("code-review-settings")).toBeVisible();
+    await expect(window.getByTestId("code-review-summary")).toContainText(
+      "Claude Code",
+    );
+    await window.getByTestId("onboarding-next").click();
+    await expect(wizard).toHaveAttribute("data-step", "github");
+
+    // Screen 4: the gh account; GitHub stays on and the default rules exist.
     await expect(window.getByTestId("onboarding-gh-account")).toContainText(
       "octo-e2e",
     );
@@ -277,7 +290,7 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     expect(readConfig().sources?.github?.enabled).toBe(true);
     expect(existsSync(path.join(stateDir, "rules", "rules.yaml"))).toBe(true);
 
-    // Screen 4 → Start: the workspace with the composer open on beta.
+    // Screen 5 → Start: the workspace with the composer open on beta.
     await expect(window.getByTestId("onboarding-concepts")).toContainText(
       "rules.yaml",
     );
@@ -341,7 +354,7 @@ test("fresh state dir: the four-screen wizard sets everything up, Start opens th
     );
 
     // Setup screen → "Check setup": grouped doctor checks with statuses.
-    for (const step of ["agent", "github", "concepts"]) {
+    for (const step of ["agent", "review", "github", "concepts"]) {
       await second.window.getByTestId("onboarding-next").click();
       await expect(second.window.getByTestId("onboarding")).toHaveAttribute(
         "data-step",

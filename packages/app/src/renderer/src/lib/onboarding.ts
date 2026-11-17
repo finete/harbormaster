@@ -1,6 +1,6 @@
 // Pure helpers for the first-run wizard (components/Onboarding.tsx;
-// docs/release-plan.md "Onboarding (four screens)"). Window-free so they
-// are unit-testable under plain vitest. Core validates everything again
+// docs/release-plan.md "Onboarding (five screens)"). Window-free so they are unit-testable under plain vitest. Core
+// validates everything again
 // (`CoreCommands.setDefaultAgent`); these only shape the screens.
 
 import type { DetectedAgent } from "../../../preload/api";
@@ -21,10 +21,11 @@ export function isBuiltinAgent(id: string): id is BuiltinAgentId {
   return (BUILTIN_AGENT_IDS as readonly string[]).includes(id);
 }
 
-/** The wizard's four steps, in order: id (the `data-step` value) and the verb-first label. */
+/** The wizard's five steps, in order: id (the `data-step` value) and the verb-first label. */
 export const ONBOARDING_STEPS = [
   { id: "code", label: "Pick your repositories folder" },
   { id: "agent", label: "Choose your agent" },
+  { id: "review", label: "Set up code review" },
   { id: "github", label: "Connect GitHub" },
   { id: "concepts", label: "How it works" },
 ] as const;
