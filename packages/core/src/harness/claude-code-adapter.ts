@@ -41,6 +41,7 @@ import type {
   HarnessReviewCapability,
   LaunchSpec,
   PresenceStatus,
+  ProgramStatusReading,
   SessionLaunch,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
@@ -205,6 +206,35 @@ export function claudeMcpConfig(input: {
   };
 }
 
+/**
+ * Claude Code's message for "my turn is over, but background work I started
+ * is still running" (its own wording: `1 shell still running`,
+ * `2 shells, 1 monitor still running`, `1 background agent still running`,
+ * `1 cloud session still running`, ...).
+ */
+const CLAUDE_AWAITED_BACKGROUND =
+  /^\d+ [a-z][a-z -]*(?:, \d+ [a-z][a-z -]*)* still running$/i;
+
+/**
+ * Claude Code reports OSC 7501 `working` not only during a turn but also
+ * after one completed while a background shell / monitor / agent it started
+ * is still running (until that finishes). It is then back at its prompt,
+ * accepting input; it resumes by itself when the work reports back. Core
+ * records that as `idle` with Claude's message, not as a running turn.
+ */
+export function interpretClaudeProgramStatus(
+  report: ProgramStatusReading,
+): ProgramStatusReading {
+  if (
+    report.state === "working" &&
+    report.message !== undefined &&
+    CLAUDE_AWAITED_BACKGROUND.test(report.message.trim())
+  ) {
+    return { state: "idle", message: report.message.trim() };
+  }
+  return report;
+}
+
 export interface ClaudeCodeHarnessAdapterOptions extends PresenceReaderOptions {
   /** Absolute path of the `harbormaster` CLI; without it sessions start without hooks or tools. */
   cliPath?: string;
@@ -320,6 +350,10 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
 
   presence(taskId: string): Promise<PresenceStatus> {
     return this.readPresence(taskId);
+  }
+
+  interpretProgramStatus(report: ProgramStatusReading): ProgramStatusReading {
+    return interpretClaudeProgramStatus(report);
   }
 
   async stopHeadless(_taskId: string): Promise<void> {

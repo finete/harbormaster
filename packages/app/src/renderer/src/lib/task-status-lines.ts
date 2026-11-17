@@ -72,6 +72,31 @@ export function derivePresenceActivity(
   }
 }
 
+/**
+ * The activity line's text: `running…`, `your move`, `error: <why>`, or
+ * `idle`, plus the agent's note when it rests with one (Claude Code's
+ * `1 shell still running`: its turn is over, background work is not).
+ */
+export function presenceActivityLabel(
+  activity: PresenceActivity,
+  status:
+    | Pick<NonNullable<PresenceBadge["status"]>, "state" | "message">
+    | undefined,
+): string {
+  switch (activity) {
+    case "running":
+      return "running…";
+    case "your-move":
+      return "your move";
+    case "error":
+      return `error${status?.message ? `: ${status.message}` : ""}`;
+    case "idle":
+      return status?.state === "idle" && status.message
+        ? `idle · ${status.message}`
+        : "idle";
+  }
+}
+
 export type LaunchMarker = "queued" | "interrupted";
 
 /**

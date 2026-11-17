@@ -147,6 +147,12 @@ export interface PresenceStatus {
   runningTurn: boolean;
 }
 
+/** One program-status report's meaning: the state and its optional message. */
+export interface ProgramStatusReading {
+  state: "idle" | "working" | "blocked" | "done" | "error";
+  message?: string;
+}
+
 /**
  * One agent harness (Pi today; Claude Code/Codex/etc. later). Every
  * implementation is pure logic plus resource-access calls — no process
@@ -181,6 +187,14 @@ export interface HarnessAdapter {
 
   /** Current liveness/outcome snapshot for a task's session. */
   presence(taskId: string): Promise<PresenceStatus>;
+
+  /**
+   * Translates one of this harness's own program-status reports (OSC 7501)
+   * into core's meaning before it is recorded (`CoreCommands.reportPresence`).
+   * Optional: absent = recorded as reported. Claude Code, for one, reports
+   * `working` while its turn is over but a background shell still runs.
+   */
+  interpretProgramStatus?(report: ProgramStatusReading): ProgramStatusReading;
 
   /** Stop a headless run's process. Requires frontend/process-owner cooperation; not implemented until wave 4. */
   stopHeadless(taskId: string): Promise<void>;

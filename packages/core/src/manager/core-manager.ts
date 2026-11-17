@@ -40,6 +40,7 @@ import type {
   HarnessAdapter,
   HarnessModelCatalog,
   PresenceStatus,
+  ProgramStatusReading,
   ReviewTarget,
   SessionLaunch,
 } from "../contracts/harness.js";
@@ -3523,12 +3524,23 @@ export class CoreManager implements CoreCommands {
 
   async reportPresence(taskId: string, report: PresenceReport): Promise<void> {
     const presence = this.requirePresence();
+    // The task's harness may give its own reports a different meaning
+    // (Claude Code's "working" while only background work runs).
+    const task = await this.deps.tasks.getTask(taskId).catch(() => undefined);
+    const adapter = task
+      ? await this.harnessFor(task).catch(() => undefined)
+      : undefined;
+    const reported: ProgramStatusReading = {
+      state: report.state,
+      ...(report.message ? { message: report.message } : {}),
+    };
+    const reading = adapter?.interpretProgramStatus?.(reported) ?? reported;
     await presence.applyReport(taskId, (current) =>
       applyProgramStatus(current, {
         taskId,
         pid: report.pid,
-        state: report.state,
-        ...(report.message ? { message: report.message } : {}),
+        state: reading.state,
+        ...(reading.message ? { message: reading.message } : {}),
         at: report.at ?? this.deps.clock.now().toISOString(),
       }),
     );

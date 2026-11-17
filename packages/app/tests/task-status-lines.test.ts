@@ -4,6 +4,7 @@ import {
   deriveOutcomeLine,
   derivePresenceActivity,
   deriveProvenanceLabel,
+  presenceActivityLabel,
 } from "../src/renderer/src/lib/task-status-lines";
 
 describe("derivePresenceActivity (OSC 7501 states)", () => {
@@ -117,5 +118,26 @@ describe("deriveProvenanceLabel", () => {
     expect(
       deriveProvenanceLabel({ launchedFromTaskId: "gone" }, () => undefined),
     ).toBeUndefined();
+  });
+});
+
+describe("presenceActivityLabel", () => {
+  it("names each activity; an idle agent's note follows it", () => {
+    expect(presenceActivityLabel("running", { state: "working" })).toBe(
+      "running…",
+    );
+    expect(presenceActivityLabel("your-move", undefined)).toBe("your move");
+    expect(
+      presenceActivityLabel("error", { state: "error", message: "boom" }),
+    ).toBe("error: boom");
+    expect(presenceActivityLabel("idle", { state: "done", message: "x" })).toBe(
+      "idle",
+    );
+    expect(
+      presenceActivityLabel("idle", {
+        state: "idle",
+        message: "1 shell still running",
+      }),
+    ).toBe("idle · 1 shell still running");
   });
 });

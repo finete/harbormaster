@@ -19,6 +19,7 @@ import {
   deriveLaunchMarker,
   deriveOutcomeLine,
   derivePresenceActivity,
+  presenceActivityLabel,
 } from "../lib/task-status-lines";
 import { cn } from "../lib/utils";
 import { pushToast } from "../toast";
@@ -306,13 +307,8 @@ export function SidebarTaskRow({
   const waiting = messaging.waitingOnParent !== undefined;
   const presenceActivity = derivePresenceActivity(presence, waiting);
   const activity =
-    presenceActivity === "running"
-      ? "running…"
-      : presenceActivity === "your-move"
-        ? "your move"
-        : presenceActivity === "error"
-          ? `error${presence?.status?.message ? `: ${presence.status.message}` : ""}`
-          : presenceActivity;
+    presenceActivity &&
+    presenceActivityLabel(presenceActivity, presence?.status);
   const attention = presenceActivity === "your-move";
   const outcome = deriveOutcomeLine(presence);
   const launchMarker = deriveLaunchMarker(task);

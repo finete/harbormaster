@@ -11,7 +11,9 @@ import {
   ClaudeCodeHarnessAdapter,
   claudeEffort,
   claudeSessionArgs,
+  interpretClaudeProgramStatus,
 } from "../src/harness/claude-code-adapter.js";
+import { createCore } from "../src/index.js";
 
 const noPresence = new Proxy({} as PresenceAccess, {
   get: (_target, key) =>
@@ -214,5 +216,63 @@ describe("Claude Code access", () => {
     writeFileSync(join(dir, "projects", "-w-t1", "abc.jsonl"), "{}\n");
     expect(transcripts.exists("abc")).toBe(true);
     expect(transcripts.exists("../abc")).toBe(false);
+  });
+});
+
+describe("Claude Code program status", () => {
+  it.each([
+    "1 shell still running",
+    "2 shells still running",
+    "1 shell, 1 monitor still running",
+    "1 background agent still running",
+    "3 cloud sessions still running",
+  ])("a finished turn awaiting %j is idle, not a running turn", (message) => {
+    expect(interpretClaudeProgramStatus({ state: "working", message })).toEqual(
+      { state: "idle", message },
+    );
+  });
+
+  it.each([
+    { state: "working" as const },
+    { state: "working" as const, message: "Running the test suite" },
+    { state: "working" as const, message: "tests are still running" },
+    { state: "done" as const, message: "1 shell still running" },
+    { state: "blocked" as const, message: "approve Bash" },
+  ])("leaves %j as reported", (report) => {
+    expect(interpretClaudeProgramStatus(report)).toEqual(report);
+  });
+
+  it("reportPresence records a Claude task's background-only report as idle; a Pi task's as running", async () => {
+    const stateDir = tempDir();
+    const codeRoot = join(stateDir, "Code");
+    mkdirSync(codeRoot);
+    writeFileSync(join(stateDir, "config.json"), JSON.stringify({ codeRoot }));
+    const core = createCore({ stateDir });
+    const claude = await core.commands.createTask({
+      title: "Claude",
+      initialPrompt: "",
+      harness: "claude-code",
+    });
+    const pi = await core.commands.createTask({
+      title: "Pi",
+      initialPrompt: "",
+      harness: "pi",
+    });
+    const report = {
+      state: "working" as const,
+      message: "1 shell still running",
+      pid: process.pid,
+    };
+    await core.commands.reportPresence(claude.id, report);
+    await core.commands.reportPresence(pi.id, report);
+
+    const claudePresence = await core.commands.getPresence(claude.id);
+    expect(claudePresence.runningTurn).toBe(false);
+    expect(claudePresence.record?.status).toMatchObject({
+      state: "idle",
+      message: "1 shell still running",
+    });
+    expect((await core.commands.getPresence(pi.id)).runningTurn).toBe(true);
+    core.close();
   });
 });
