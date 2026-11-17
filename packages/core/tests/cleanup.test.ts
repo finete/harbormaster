@@ -231,6 +231,12 @@ describe("classifyWorktreeRemovalError", () => {
         new Error("fatal: not a git repository: /r/.git/worktrees/x"),
       ),
     ).toBe("orphan");
+    // git 2.43+ wording for the same case (seen on ubuntu-latest).
+    expect(
+      classifyWorktreeRemovalError(
+        new Error("fatal: '/w/task-orphan' is not a working tree"),
+      ),
+    ).toBe("orphan");
     expect(
       classifyWorktreeRemovalError(
         new Error("fatal: '/r' is a main working tree"),

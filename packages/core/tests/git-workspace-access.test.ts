@@ -483,7 +483,7 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     });
     await expect(
       worktrees.removeWorktree(repo, orphan.path, true),
-    ).rejects.toThrow(/not a git repository/);
+    ).rejects.toThrow(/not a git repository|is not a working tree/);
     await worktrees.deleteWorktreeDir(orphan.path);
     await worktrees.pruneWorktrees(repo);
     await expect(

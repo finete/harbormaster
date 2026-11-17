@@ -20,6 +20,7 @@ import type {
   RepositoryInfo,
   WorktreeInfo,
 } from "../contracts/workspace.js";
+import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
 import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
 
 /**
@@ -141,10 +142,11 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     try {
       ownerRoot = await this.owningCheckoutRoot(path);
     } catch (error) {
-      // A folder whose git metadata is gone ("not a git repository") is no
+      // A folder whose git metadata is gone ("not a git repository" /
+      // "is not a working tree", by git version) is no
       // worktree git can remove: surface that, so a forced cleanup deletes
       // the folder itself (`deleteWorktreeDir`) and prunes.
-      if (force && /not a git repository/i.test(errorText(error))) throw error;
+      if (force && ORPHAN_WORKTREE_ERROR.test(errorText(error))) throw error;
       ownerRoot = repo.root;
     }
     try {

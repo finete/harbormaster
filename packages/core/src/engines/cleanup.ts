@@ -9,6 +9,7 @@
 
 import type { OrphanWorktree } from "../contracts/commands.js";
 import type { Task, TaskCleanup, TaskPullRequest } from "../contracts/model.js";
+import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
 
 /** Done tasks older than this many days (default) are flagged archived. */
 export const DEFAULT_ARCHIVE_RETENTION_DAYS = 7;
@@ -172,8 +173,9 @@ export function cleanupNeedsAttention(
 /**
  * How a forced `removeWorktree` failure is handled: `missing` (the folder
  * is already gone, ENOENT: counts as cleaned, git's bookkeeping is pruned),
- * `orphan` (the folder's git metadata is gone, "not a git repository": the
- * folder is deleted and pruned), anything else is a real failure.
+ * `orphan` (the folder's git metadata is gone: git 2.39 says "not a git
+ * repository", git 2.43+ "is not a working tree"; the folder is deleted and
+ * pruned), anything else is a real failure.
  */
 export function classifyWorktreeRemovalError(
   error: unknown,
@@ -184,6 +186,6 @@ export function classifyWorktreeRemovalError(
       : undefined;
   const message = error instanceof Error ? error.message : String(error);
   if (code === "ENOENT" || /\bENOENT\b/.test(message)) return "missing";
-  if (/not a git repository/i.test(message)) return "orphan";
+  if (ORPHAN_WORKTREE_ERROR.test(message)) return "orphan";
   return "other";
 }
