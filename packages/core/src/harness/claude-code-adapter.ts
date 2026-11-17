@@ -98,7 +98,8 @@ export const CLAUDE_CODE_DESCRIPTOR: HarnessDescriptor = {
 
 /**
  * Claude Code's capabilities (P6): `--session-id` pre-assigns; 7501 only
- * after the probe, with its own dialect (see `interpretClaudeProgramStatus`);
+ * after the probe, with its own dialect (see `interpretClaudeProgramStatus`
+ * and the recorded fixtures under tests/fixtures/status/claude-code/);
  * hooks deliver steer and follow-up but fire only mid-turn, so an idle
  * session is woken by typing into the pane; fresh worktrees ask for folder
  * trust.
@@ -109,9 +110,15 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
     protocol: "osc7501",
     probe: true,
     states: ["idle", "working", "blocked", "done", "error"],
+    // Each names the recorded fixture that shows it
+    // (tests/fixtures/status/claude-code/<version>/<scenario>.txt) or says
+    // it is unrecorded (asserted by the contract test).
     quirks: [
-      "working + '<n> <kind> still running' after a turn = idle (background work)",
-      "done is reported twice; done→working flicker",
+      "working + '<n> <kind> still running' after a turn = idle (background work; also overridden by the Stop hook) [fixture: background-work]",
+      "the folder-trust dialog reports blocked (kind permission, 'trust this folder') before the first idle [fixture: startup]",
+      "Esc cancel ends in idle, not done [fixture: cancel]",
+      "a slash command such as /exit blips working→idle [fixture: exit]",
+      "done is reported twice; done→working flicker (seen in the app, not reproduced on 2.1.326) [unrecorded]",
     ],
   },
   delivery: {
@@ -274,7 +281,7 @@ export function claudeMcpConfig(input: {
  * `2 shells, 1 monitor still running`, `1 background agent still running`,
  * `1 cloud session still running`, ...).
  */
-const CLAUDE_AWAITED_BACKGROUND =
+export const CLAUDE_AWAITED_BACKGROUND =
   /^\d+ [a-z][a-z -]*(?:, \d+ [a-z][a-z -]*)* still running$/i;
 
 /**

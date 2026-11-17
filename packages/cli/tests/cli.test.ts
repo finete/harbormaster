@@ -30,6 +30,7 @@ import {
   EXIT_NOT_RUNNING,
   EXIT_OPEN_URL_FAILED,
   formatDoctorOutput,
+  hookTurnBoundary,
   inboxHookOutput,
   main,
   parseFlags,
@@ -186,6 +187,34 @@ describe("harbormaster inbox / hook", () => {
     const empty = io({ HARBORMASTER_TASK_ID: child });
     expect(await main(["hook", "inbox", "--mode", "follow-up"], empty)).toBe(0);
     expect(JSON.parse(empty.out())).toEqual({});
+  });
+
+  it("reports the hook's turn boundary to core (S5): Stop overrides a lingering working", async () => {
+    const task = await launch("Hooked work");
+    const working = {
+      state: "working" as const,
+      message: "Waiting",
+      pid: process.pid,
+    };
+    await core.commands.reportPresence(task, working);
+    const stop = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["hook", "inbox", "--mode", "follow-up"], stop)).toBe(0);
+    expect(JSON.parse(stop.out())).toEqual({});
+    expect(
+      (await core.commands.getPresence(task)).record?.status,
+    ).toMatchObject({ state: "idle", message: "Waiting" });
+    // A submitted prompt says a turn runs again.
+    const prompt = io({ HARBORMASTER_TASK_ID: task });
+    expect(await main(["hook", "inbox", "--mode", "catch-up"], prompt)).toBe(0);
+    expect((await core.commands.getPresence(task)).runningTurn).toBe(true);
+  });
+
+  it("maps each hook mode to its turn boundary", () => {
+    expect(hookTurnBoundary("steer", false)).toBe("tool");
+    expect(hookTurnBoundary("catch-up", true)).toBe("prompt");
+    expect(hookTurnBoundary("follow-up", false)).toBe("stop");
+    // A delivered follow-up keeps the turn going.
+    expect(hookTurnBoundary("follow-up", true)).toBe("prompt");
   });
 
   it("shapes each hook mode's JSON", () => {

@@ -23,6 +23,7 @@ import type {
   ToDoneConfirmation,
   ToDoneOptions,
   ToDoneResult,
+  TurnBoundaryReport,
   UpdateTaskInput,
 } from "../contracts/commands.js";
 import type {
@@ -221,6 +222,12 @@ import {
   resolveLaunchBypass,
   resolveNewTaskHarness,
 } from "../harness/registry.js";
+import {
+  readingUnderTurnBoundary,
+  type TurnTracking,
+  trackBoundary,
+  trackReport,
+} from "../harness/turn-boundary.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
@@ -388,6 +395,8 @@ export class CoreManager implements CoreCommands {
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
   private readonly doneCleanupFailures = new Map<string, string>();
+  /** Per task: the last 7501 reading and the last hook turn boundary (S5, `reportTurnBoundary`). */
+  private readonly turnTracking = new Map<string, TurnTracking>();
   /**
    * The last refresh pass's worktree state per Working task (see
    * engines/worktree-status.ts): read by the rules' `worktree.dirty` fact
@@ -3552,7 +3561,18 @@ export class CoreManager implements CoreCommands {
       state: report.state,
       ...(report.message ? { message: report.message } : {}),
     };
-    const reading = adapter?.interpretProgramStatus?.(reported) ?? reported;
+    const interpreted = adapter?.interpretProgramStatus?.(reported) ?? reported;
+    const tracking = trackReport(
+      this.turnTracking.get(taskId),
+      report.pid,
+      interpreted,
+    );
+    this.turnTracking.set(taskId, tracking);
+    // A hook already said the turn is over: a lingering `working` is idle.
+    const reading = readingUnderTurnBoundary(
+      interpreted,
+      tracking.lastBoundary,
+    );
     await presence.applyReport(taskId, (current) =>
       applyProgramStatus(current, {
         taskId,
@@ -3564,10 +3584,43 @@ export class CoreManager implements CoreCommands {
     );
   }
 
+  async reportTurnBoundary(
+    taskId: string,
+    boundary: TurnBoundaryReport,
+  ): Promise<void> {
+    const before = this.turnTracking.get(taskId);
+    const next = trackBoundary(before, boundary.kind);
+    this.turnTracking.set(taskId, next);
+    const pid = before?.pid;
+    const reading = before?.reading;
+    if (pid === undefined || !reading) return;
+    const was = readingUnderTurnBoundary(reading, before?.lastBoundary);
+    const now = readingUnderTurnBoundary(reading, next.lastBoundary);
+    if (was.state === now.state) return;
+    // The last report reads differently under the new boundary (`working`
+    // then `stop` → idle; `stop`, `working`, then `prompt` → working).
+    const presence = this.requirePresence();
+    const record = await presence.read(taskId);
+    if (!record || record.ended || record.pid !== pid) return;
+    const at = boundary.at ?? this.deps.clock.now().toISOString();
+    await presence.applyReport(taskId, (current) =>
+      current && (current.ended || current.pid !== pid)
+        ? current
+        : applyProgramStatus(current, {
+            taskId,
+            pid,
+            state: now.state,
+            ...(now.message ? { message: now.message } : {}),
+            at,
+          }),
+    );
+  }
+
   async endPresence(
     taskId: string,
     input: { pid: number; at?: string },
   ): Promise<void> {
+    this.turnTracking.delete(taskId);
     await this.requirePresence().end(
       taskId,
       input.pid,

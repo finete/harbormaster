@@ -285,7 +285,8 @@ export const PI_DESCRIPTOR: HarnessDescriptor = {
 /**
  * Pi's capabilities (P6): Harbormaster pre-assigns the session id
  * (`--session-id`); status is OSC 7501 without the probe round-trip
- * (`PI_PROGRAM_STATUS=1`); the Harbormaster Pi extension claims the inbox
+ * (`PI_PROGRAM_STATUS=1`; no dialect quirks: the recorded fixtures under
+ * tests/fixtures/status/pi/ follow the spec); the Harbormaster Pi extension claims the inbox
  * and delivers steer, follow-up and idle wake-ups itself.
  */
 export const PI_CAPABILITIES: HarnessCapabilities = {

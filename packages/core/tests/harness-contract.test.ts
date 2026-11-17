@@ -14,7 +14,14 @@
 //    real `ProgramStatusParser`.
 
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -33,7 +40,10 @@ import {
   deliveryAgreesWithMessaging,
   harnessCommandEnvName,
 } from "../src/harness/descriptor.js";
-import { PiHarnessAdapter } from "../src/harness/pi-adapter.js";
+import {
+  PI_CAPABILITIES,
+  PiHarnessAdapter,
+} from "../src/harness/pi-adapter.js";
 import { createHarnessRegistry } from "../src/harness/registry.js";
 import { ProgramStatusParser } from "../src/utilities/program-status.js";
 
@@ -233,8 +243,37 @@ describe.each(REGISTERED.map((adapter) => ({ name: adapter.id, adapter })))(
         expect(typeof capabilities.status.probe).toBe("boolean");
       }
     });
+
+    it("names a recorded fixture (or says unrecorded) in every status quirk (S3)", () => {
+      const recorded = recordedScenarios(adapter.id);
+      for (const quirk of capabilities.status.quirks) {
+        const fixture = /\[fixture: ([a-z-]+)\]/.exec(quirk)?.[1];
+        if (fixture) {
+          expect(recorded, `${adapter.id}: ${quirk}`).toContain(fixture);
+        } else {
+          expect(quirk, `${adapter.id}: names no fixture`).toMatch(
+            /\[unrecorded\]/,
+          );
+        }
+      }
+    });
   },
 );
+
+/** The scenario ids recorded for a harness under tests/fixtures/status/<id>/<version>/ (any version). */
+function recordedScenarios(harnessId: string): string[] {
+  const root = join(import.meta.dirname, "fixtures", "status", harnessId);
+  if (!existsSync(root)) return [];
+  return readdirSync(root).flatMap((version) =>
+    readdirSync(join(root, version))
+      .filter((file) => file.endsWith(".txt"))
+      .map((file) => file.slice(0, -".txt".length)),
+  );
+}
+
+it("declares Pi's status dialect quirk-free (S3)", () => {
+  expect(PI_CAPABILITIES.status.quirks).toEqual([]);
+});
 
 it("keeps the legacy command override names", () => {
   const registry = createHarnessRegistry();

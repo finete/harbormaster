@@ -50,6 +50,48 @@ the source of truth; so the registry becomes the source of truth first.
 | S4 | T4 gets a presence scenario per harness: "run `sleep 120` in the background, then reply" → the row must show idle / your move, never running. |
 | S5 | Claude follow-up fix: the per-session `Stop` hook is a wording-independent "turn over" signal; `Stop` without a later `UserPromptSubmit`/`PostToolUse` overrides a lingering 7501 `working`. The regex stays as the fast path. |
 
+Status-dialect notes (wave 2, claude-dialect lane):
+
+- **Recording (S1)**: `npm run build -w @harbormaster/core`, then
+  `node scripts/record-harness-status.mjs --harness <claude-code|pi> --scenario <id>|all [--version <x>]`
+  (scenario ids: `startup`, `turn`, `turn-tool`, `permission`, `cancel`,
+  `background-work`, `subagent`, `exit`; compaction is not scripted). It
+  builds the adapter's own launch spec, skips cmux shims on PATH, runs in a
+  throwaway git repo, answers the probe with `ProgramStatusParser`'s reply
+  (as `ptySessions.ts` does), answers Claude's folder-trust dialog, kills
+  the process and anything left in the repo (`sleep 120`), and writes
+  `<scenario>.txt` (raw bytes, ≤ 200 KB) + `<scenario>.json` (`prompts`,
+  parsed `reports` with timings, `notes`, and the reviewed `expected`
+  state sequence). Recorded: `claude-code/2.1.326/` all eight scripted
+  scenarios; `pi/1.3.0/` startup, turn, turn-tool, cancel,
+  background-work, exit (Pi has no permission prompts; subagent n/a).
+  Claude's `permission` scenario adds `--settings {"permissions":{"ask":["Write","Edit","Bash"]}}`
+  because a user allow-list otherwise suppresses the prompt (recorded in
+  the .json's `command`).
+- **Replay (S2)**: `packages/core/tests/status-dialect.test.ts` feeds every
+  fixture through the parser (whole and in 7-byte chunks) and the adapter,
+  asserts the .json's reports and `expected` states, and that Claude's
+  real `working` "1 shell still running" matches `CLAUDE_AWAITED_BACKGROUND`
+  (the `96c2985` regex) and is recorded idle. Pi's background-work ends in
+  `done` by itself.
+- **Quirks (S3)**: each Claude quirk names its fixture (`[fixture: <scenario>]`)
+  or says `[unrecorded]`; `harness-contract.test.ts` asserts the named
+  fixture exists. Observed on 2.1.326: trust dialog = `blocked`
+  (permission, "trust this folder"); Esc cancel ends `idle`, not `done`;
+  `/exit` blips `working→idle`; background work = `working` +
+  "<n> … still running". The earlier "done twice / done→working flicker"
+  did not reproduce (`[unrecorded]`). Pi 1.3.0: spec sequence, `[]`.
+- **Stop-hook override (S5)**: `harbormaster hook inbox --mode …` also
+  reports `turn_boundary` (an op over the CLI socket →
+  `CoreCommands.reportTurnBoundary`): PostToolUse = `tool`,
+  UserPromptSubmit = `prompt`, Stop = `stop` (or `prompt` when the hook
+  handed Claude a follow-up, which keeps the turn going). Core
+  (`harness/turn-boundary.ts`, `CoreManager.reportPresence` /
+  `reportTurnBoundary`) records a `working` as `idle` (message kept) while
+  the last boundary of the same process is `stop`, in either arrival order;
+  a later `prompt`/`tool` restores `working`. Boundaries are in-memory per
+  task and reset on a new pid / `endPresence`. Pi sends none.
+
 ### Codex (verified on codex-cli 0.169.0, real pty, 2026-11-17)
 
 | # | Decision | Evidence |

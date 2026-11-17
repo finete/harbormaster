@@ -457,6 +457,32 @@ const openUrl: OpDefinition = {
   },
 };
 
+const turnBoundary: OpDefinition = {
+  name: "turn_boundary",
+  title:
+    "Report the calling task's turn boundary from its agent's lifecycle hook (stop / prompt / tool)",
+  inputSchema: {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: ["stop", "prompt", "tool"] },
+    },
+    required: ["kind"],
+    additionalProperties: false,
+  },
+  async handler(args, commands, caller) {
+    const kind = str(args, "kind");
+    if (kind !== "stop" && kind !== "prompt" && kind !== "tool") {
+      throw new Error("kind must be stop, prompt or tool");
+    }
+    const taskId = callerTask(caller, "turn_boundary");
+    await commands.reportTurnBoundary(taskId, { kind });
+    return {
+      text: `Turn boundary ${kind} recorded`,
+      details: { taskId, kind },
+    };
+  },
+};
+
 const requestReview: OpDefinition = {
   name: "request_review",
   title:
@@ -622,6 +648,7 @@ export const OPS_CATALOG: readonly OpDefinition[] = [
   addonsList,
   doctor,
   openUrl,
+  turnBoundary,
   requestReview,
   usageList,
   usageRefresh,

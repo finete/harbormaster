@@ -1,0 +1,51 @@
+{
+  "harness": "claude-code",
+  "version": "2.1.326",
+  "scenario": "background-work",
+  "recordedAt": "2026-11-17T15:25:17.210Z",
+  "prompts": [
+    "Run `sleep 120` in the background, then reply with exactly the word DONE"
+  ],
+  "command": ["claude"],
+  "probesAnswered": 1,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 12971,
+  "reports": [
+    {
+      "state": "blocked",
+      "message": "trust this folder",
+      "kind": "permission",
+      "app": "claude-code",
+      "ms": 251
+    },
+    {
+      "state": "idle",
+      "ms": 1409
+    },
+    {
+      "state": "idle",
+      "app": "claude-code",
+      "ms": 1634
+    },
+    {
+      "state": "working",
+      "app": "claude-code",
+      "ms": 4235
+    },
+    {
+      "state": "working",
+      "message": "1 shell still running",
+      "app": "claude-code",
+      "ms": 8546
+    }
+  ],
+  "notes": ["answered the folder-trust dialog"],
+  "expected": {
+    "states": ["blocked", "idle", "working", "idle"],
+    "final": {
+      "state": "idle",
+      "message": "1 shell still running"
+    }
+  }
+}

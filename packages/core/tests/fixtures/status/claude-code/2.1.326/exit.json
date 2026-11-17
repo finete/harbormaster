@@ -1,0 +1,50 @@
+{
+  "harness": "claude-code",
+  "version": "2.1.326",
+  "scenario": "exit",
+  "recordedAt": "2026-11-17T15:34:43.616Z",
+  "prompts": [],
+  "command": ["claude"],
+  "probesAnswered": 1,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 3626,
+  "reports": [
+    {
+      "state": "blocked",
+      "message": "trust this folder",
+      "kind": "permission",
+      "app": "claude-code",
+      "ms": 624
+    },
+    {
+      "state": "idle",
+      "ms": 1811
+    },
+    {
+      "state": "idle",
+      "app": "claude-code",
+      "ms": 2085
+    },
+    {
+      "state": "working",
+      "app": "claude-code",
+      "ms": 4332
+    },
+    {
+      "state": "idle",
+      "ms": 4342
+    },
+    {
+      "state": "idle",
+      "ms": 4596
+    }
+  ],
+  "notes": ["answered the folder-trust dialog"],
+  "expected": {
+    "states": ["blocked", "idle", "working", "idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

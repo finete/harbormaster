@@ -7,7 +7,7 @@
 //
 //   harbormaster mcp                                  MCP stdio server
 //   harbormaster <tool> [--json '<args>'] [--<arg> <value>...] [--details]
-//   harbormaster hook inbox --mode steer|follow-up|catch-up
+//   harbormaster hook inbox --mode steer|follow-up|catch-up   (also reports the turn boundary, S5)
 //   harbormaster inbox claim --task <id> [--idle true|false]
 //   harbormaster inbox list [--priority|--other] [--json]
 //   harbormaster inbox resolve <id> [<button>]
@@ -186,6 +186,34 @@ export function inboxHookOutput(mode: HookMode, text: string): unknown {
   };
 }
 
+/**
+ * The turn boundary a hook reports to core (docs/harness-additions.md S5):
+ * PostToolUse = a tool ran, UserPromptSubmit = a prompt was submitted, Stop
+ * = the turn is over, unless this very hook handed Claude a follow-up
+ * (`decision: block` keeps the turn going).
+ */
+export function hookTurnBoundary(
+  mode: HookMode,
+  delivered: boolean,
+): "stop" | "prompt" | "tool" {
+  if (mode === "steer") return "tool";
+  if (mode === "catch-up") return "prompt";
+  return delivered ? "prompt" : "stop";
+}
+
+/** Best effort: a boundary that can't be reported (app down, older app) never fails the hook. */
+async function reportTurnBoundary(
+  socketPath: string,
+  caller: ToolCaller,
+  kind: "stop" | "prompt" | "tool",
+): Promise<void> {
+  try {
+    await callOp(socketPath, "turn_boundary", { kind }, caller);
+  } catch {
+    // Presence falls back to the program-status reports alone.
+  }
+}
+
 async function runHook(
   flags: Map<string, string>,
   socketPath: string,
@@ -201,6 +229,11 @@ async function runHook(
     io.stdout(`${JSON.stringify({})}\n`);
     return 0;
   }
+  // A running turn is known before the claim; Stop waits for its outcome.
+  const early =
+    mode === "follow-up"
+      ? undefined
+      : reportTurnBoundary(socketPath, caller, hookTurnBoundary(mode, false));
   let text: string;
   try {
     text = (
@@ -219,6 +252,8 @@ async function runHook(
     io.stderr(`${NOT_RUNNING_MESSAGE}\n`);
     text = "";
   }
+  await (early ??
+    reportTurnBoundary(socketPath, caller, hookTurnBoundary(mode, !!text)));
   io.stdout(`${JSON.stringify(inboxHookOutput(mode, text))}\n`);
   return 0;
 }

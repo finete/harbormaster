@@ -1,0 +1,60 @@
+{
+  "harness": "claude-code",
+  "version": "2.1.326",
+  "scenario": "subagent",
+  "recordedAt": "2026-11-17T15:38:28.081Z",
+  "prompts": [
+    "Use a subagent (the Task/Agent tool) to run `echo hi` and report its output, then reply with exactly the word DONE."
+  ],
+  "command": ["claude"],
+  "probesAnswered": 1,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 13108,
+  "reports": [
+    {
+      "state": "blocked",
+      "message": "trust this folder",
+      "kind": "permission",
+      "app": "claude-code",
+      "ms": 253
+    },
+    {
+      "state": "idle",
+      "ms": 1415
+    },
+    {
+      "state": "idle",
+      "app": "claude-code",
+      "ms": 1691
+    },
+    {
+      "state": "working",
+      "app": "claude-code",
+      "ms": 4238
+    },
+    {
+      "state": "working",
+      "message": "Running echo hi",
+      "app": "claude-code",
+      "ms": 6602
+    },
+    {
+      "state": "working",
+      "app": "claude-code",
+      "ms": 8061
+    },
+    {
+      "state": "done",
+      "app": "claude-code",
+      "ms": 13979
+    }
+  ],
+  "notes": ["answered the folder-trust dialog"],
+  "expected": {
+    "states": ["blocked", "idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

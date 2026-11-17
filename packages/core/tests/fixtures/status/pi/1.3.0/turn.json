@@ -1,0 +1,36 @@
+{
+  "harness": "pi",
+  "version": "1.3.0",
+  "scenario": "turn",
+  "recordedAt": "2026-11-17T15:41:14.469Z",
+  "prompts": ["Reply with exactly the word OK and nothing else."],
+  "command": ["pi"],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 37169,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "pi",
+      "ms": 1297
+    },
+    {
+      "state": "working",
+      "app": "pi",
+      "ms": 64958
+    },
+    {
+      "state": "done",
+      "app": "pi",
+      "ms": 67140
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

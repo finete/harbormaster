@@ -5,3 +5,4 @@ export * from "./descriptor.js";
 export * from "./pi-adapter.js";
 export * from "./presence-heuristics.js";
 export * from "./registry.js";
+export * from "./turn-boundary.js";

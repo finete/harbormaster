@@ -1,0 +1,26 @@
+{
+  "harness": "pi",
+  "version": "1.3.0",
+  "scenario": "startup",
+  "recordedAt": "2026-11-17T15:40:01.942Z",
+  "prompts": [],
+  "command": ["pi"],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 20700,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "pi",
+      "ms": 1367
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

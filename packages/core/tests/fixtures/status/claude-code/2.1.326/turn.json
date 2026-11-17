@@ -1,0 +1,47 @@
+{
+  "harness": "claude-code",
+  "version": "2.1.326",
+  "scenario": "turn",
+  "recordedAt": "2026-11-17T15:24:04.833Z",
+  "prompts": ["Reply with exactly the word OK and nothing else."],
+  "command": ["claude"],
+  "probesAnswered": 1,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 6080,
+  "reports": [
+    {
+      "state": "blocked",
+      "message": "trust this folder",
+      "kind": "permission",
+      "app": "claude-code",
+      "ms": 243
+    },
+    {
+      "state": "idle",
+      "ms": 1413
+    },
+    {
+      "state": "idle",
+      "app": "claude-code",
+      "ms": 1642
+    },
+    {
+      "state": "working",
+      "app": "claude-code",
+      "ms": 4239
+    },
+    {
+      "state": "done",
+      "app": "claude-code",
+      "ms": 5750
+    }
+  ],
+  "notes": ["answered the folder-trust dialog"],
+  "expected": {
+    "states": ["blocked", "idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

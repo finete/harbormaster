@@ -72,6 +72,21 @@ export interface PresenceReport {
   pid: number;
 }
 
+/**
+ * What a harness's lifecycle hook says about the turn
+ * (`CoreCommands.reportTurnBoundary`, docs/harness-additions.md S5):
+ * `stop` = the turn is over, `prompt` = a prompt was submitted, `tool` = a
+ * tool just ran (both: a turn is running).
+ */
+export type TurnBoundaryKind = "stop" | "prompt" | "tool";
+
+/** One hook turn boundary for `CoreCommands.reportTurnBoundary`. */
+export interface TurnBoundaryReport {
+  kind: TurnBoundaryKind;
+  /** ISO time of the boundary; defaults to core's clock. */
+  at?: string;
+}
+
 export interface ReopenTaskInput {
   /**
    * pi-home's "What should Pi do now?" answer. When non-empty it becomes the
@@ -707,6 +722,18 @@ export interface CoreCommands {
    * signal (see `endPresence`).
    */
   reportPresence(taskId: string, report: PresenceReport): Promise<void>;
+  /**
+   * A wording-independent turn boundary from the task's agent hooks
+   * (Claude Code's per-session `Stop` / `UserPromptSubmit` / `PostToolUse`;
+   * docs/harness-additions.md S5). A program-status `working` while the
+   * last boundary is `stop` (no `prompt` / `tool` since) is recorded as
+   * `idle` with its message, whichever arrived first. Harnesses without
+   * such hooks never call it.
+   */
+  reportTurnBoundary(
+    taskId: string,
+    boundary: TurnBoundaryReport,
+  ): Promise<void>;
   /** The task's agent process exited: end its attachment (a reported outcome survives as `ended`). */
   endPresence(
     taskId: string,
