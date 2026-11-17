@@ -49,6 +49,8 @@ import {
   selectRemoteProbes,
   socketCheck,
   stateFileCheck,
+  versionEndpointCheck,
+  versionEndpointTargets,
 } from "../src/engines/doctor.js";
 import { createCore } from "../src/index.js";
 import { DoctorRuntime } from "../src/manager/doctor-runtime.js";
@@ -1010,5 +1012,131 @@ describe("doctor runtime: repos.remote scope and network probes", () => {
       ["github.com/acme/gone", "fail"],
       ["github.com/acme/slow", "warn"],
     ]);
+  });
+});
+
+describe("repos.version-endpoints", () => {
+  const stage = (id: string, url: unknown, hook = "version-endpoint") => ({
+    id,
+    label: id,
+    hook,
+    options: { url },
+  });
+  const config = {
+    repositories: {
+      "github.com/acme/api": {
+        deployment: {
+          stages: [
+            stage("staging", "https://bob:pw@staging.example/version?k=1"),
+            stage("prod", "https://prod.example/version"),
+            stage("manual", "https://ignored.example/v", "none"),
+            stage("plain-http", "http://insecure.example/v"),
+          ],
+        },
+      },
+      "github.com/acme/web": {
+        deployment: { stages: [stage("prod", "https://prod.example/version")] },
+      },
+    },
+  };
+
+  it("targets each distinct https URL of a version-endpoint stage once", () => {
+    expect(versionEndpointTargets(config)).toEqual([
+      {
+        url: "https://bob:pw@staging.example/version?k=1",
+        stages: ["github.com/acme/api staging"],
+      },
+      {
+        url: "https://prod.example/version",
+        stages: ["github.com/acme/api prod", "github.com/acme/web prod"],
+      },
+    ]);
+  });
+
+  it("fails an untrusted certificate with the trust remediation, never leaking credentials", () => {
+    const [staging, prod] = versionEndpointTargets(config);
+    if (!staging || !prod) throw new Error("targets");
+    const result = versionEndpointCheck([
+      {
+        target: staging,
+        error: `GET ${staging.url} failed: fetch failed (SELF_SIGNED_CERT_IN_CHAIN: self signed certificate in certificate chain)`,
+      },
+      { target: prod, ms: 12 },
+    ]);
+    expect(result).toMatchObject({
+      id: "repos.version-endpoints",
+      group: "repos",
+      status: "fail",
+      summary:
+        "1 of 2 version endpoints failed (1 with an untrusted TLS certificate)",
+      items: [
+        {
+          name: "github.com/acme/api staging (https://staging.example/version)",
+          status: "fail",
+          summary: "TLS certificate not trusted",
+        },
+        { status: "ok", summary: "reachable", ms: 12 },
+      ],
+    });
+    expect(result.remediation).toContain("NODE_EXTRA_CA_CERTS");
+    expect(JSON.stringify(result)).not.toContain("pw@");
+  });
+
+  it("warns when offline, fails any other error, skips without stages", () => {
+    const [staging, prod] = versionEndpointTargets(config);
+    if (!staging || !prod) throw new Error("targets");
+    expect(
+      versionEndpointCheck([
+        {
+          target: prod,
+          error: `GET ${prod.url} failed: net::ERR_INTERNET_DISCONNECTED`,
+        },
+      ]).status,
+    ).toBe("warn");
+    const notFound = versionEndpointCheck([
+      { target: staging, error: `GET ${staging.url} failed: HTTP 404` },
+    ]);
+    expect(notFound.status).toBe("fail");
+    expect(notFound.items?.[0]?.summary).toBe(
+      "GET https://staging.example/version failed: HTTP 404",
+    );
+    expect(versionEndpointCheck([]).status).toBe("skip");
+  });
+
+  it("the doctor command fetches each URL through core's version access", async () => {
+    const stateDir = join(await tempDir(), "state");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "config.json"), JSON.stringify(config));
+    const fetched: string[] = [];
+    const core = createCore({
+      stateDir,
+      environment: fakeProbes(stateDir),
+      versions: {
+        fetchText: async (url: string) => {
+          fetched.push(url);
+          if (url.includes("staging")) {
+            throw new Error(
+              `GET ${url} failed: net::ERR_CERT_AUTHORITY_INVALID`,
+            );
+          }
+          return "v1.0.0+abc";
+        },
+      },
+    });
+    const report = await core.commands.doctor();
+    expect(fetched.sort()).toEqual([
+      "https://bob:pw@staging.example/version?k=1",
+      "https://prod.example/version",
+    ]);
+    const check = report.checks.find(
+      (item) => item.id === "repos.version-endpoints",
+    );
+    expect(check).toMatchObject({
+      status: "fail",
+      items: [
+        { status: "fail", summary: "TLS certificate not trusted" },
+        { status: "ok" },
+      ],
+    });
   });
 });

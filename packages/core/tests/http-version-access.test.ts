@@ -3,11 +3,9 @@
 
 import { createServer, type Server, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  HttpVersionAccess,
-  TLS_TRUST_HINT,
-} from "../src/access/http-version-access.js";
+import { HttpVersionAccess } from "../src/access/http-version-access.js";
 import { isConnectivityError } from "../src/engines/connectivity.js";
+import { TLS_TRUST_HINT } from "../src/utilities/tls-trust.js";
 
 function fakeFetch(text: string, ok = true, status = 200): typeof fetch {
   return vi.fn(async () => ({

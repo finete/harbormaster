@@ -10,3 +10,4 @@ export * from "./program-status.js";
 export * from "./run.js";
 export * from "./state-paths.js";
 export * from "./timed.js";
+export * from "./tls-trust.js";

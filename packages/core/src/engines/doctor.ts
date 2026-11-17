@@ -19,12 +19,18 @@ import {
   type RemoteProbe,
   type ToolSocketFacts,
 } from "../contracts/doctor.js";
+import type { GlobalConfig } from "../contracts/model.js";
 import type { ProbeOutcome } from "../contracts/onboarding.js";
 import type { RuleFile } from "../contracts/rules.js";
 import {
   comparePiExtension,
   readExtensionVersion,
 } from "../utilities/pi-extension.js";
+import {
+  isUntrustedCertificateError,
+  TLS_TRUST_HINT,
+} from "../utilities/tls-trust.js";
+import { isConnectivityError, isTransientError } from "./connectivity.js";
 import { parseCliVersion } from "./onboarding.js";
 
 /** Limit for the orphan-worktree scan (it sizes every orphan with `du`). */
@@ -701,6 +707,110 @@ export function remoteCheck(
     remediation: remediation || undefined,
     items,
   });
+}
+
+/** One deployment stage's version URL to probe; stages sharing a URL are probed once. */
+export interface VersionEndpointTarget {
+  url: string;
+  /** Every `repo stage` reading this URL, for the item name. */
+  stages: string[];
+}
+
+/**
+ * The https `options.url` of every `version-endpoint`-hooked deployment
+ * stage in `config`, one target per distinct URL, in config order.
+ */
+export function versionEndpointTargets(
+  config: GlobalConfig,
+): VersionEndpointTarget[] {
+  const byUrl = new Map<string, VersionEndpointTarget>();
+  for (const [repoId, repo] of Object.entries(config.repositories ?? {})) {
+    for (const stage of repo.deployment?.stages ?? []) {
+      const url = stage.options?.url;
+      if (stage.hook !== "version-endpoint") continue;
+      if (typeof url !== "string" || !/^https:\/\//i.test(url)) continue;
+      const name = `${repoId} ${stage.id}`;
+      const known = byUrl.get(url);
+      if (known) known.stages.push(name);
+      else byUrl.set(url, { url, stages: [name] });
+    }
+  }
+  return [...byUrl.values()];
+}
+
+/** `url` without credentials or query (`https://user:pw@host/v?k` → `https://host/v`), for display. */
+export function displayUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "(invalid URL)";
+  }
+}
+
+/** One probed version endpoint: the fetch's error message, or none when it answered. */
+export interface VersionEndpointResult {
+  target: VersionEndpointTarget;
+  error?: string;
+  ms?: number;
+}
+
+/**
+ * `repos.version-endpoints`: each deployment stage's version URL answers a
+ * GET through the same HTTP access the version-endpoint source uses (in the
+ * app: Chromium's network stack and the OS trust store). An untrusted
+ * certificate (a TLS-inspecting proxy) fails with the trust remediation;
+ * offline / timeout warns; any other error (HTTP 404, ...) fails. The
+ * worst item is the check's status. Credentials never reach the output.
+ */
+export function versionEndpointCheck(
+  results: readonly VersionEndpointResult[],
+): DoctorCheck {
+  const id = "repos.version-endpoints";
+  if (results.length === 0) {
+    return skippedCheck(id, "No version-endpoint deployment stages configured");
+  }
+  let tls = 0;
+  const items: DoctorCheckItem[] = results.map((result) => {
+    const name = `${result.target.stages.join(", ")} (${displayUrl(result.target.url)})`;
+    const timing = result.ms !== undefined ? { ms: result.ms } : {};
+    if (result.error === undefined) {
+      return { name, status: "ok", summary: "reachable", ...timing };
+    }
+    // The access's message embeds the full URL: keep it out of the output.
+    const reason = result.error
+      .split(result.target.url)
+      .join(displayUrl(result.target.url));
+    if (isUntrustedCertificateError(reason)) {
+      tls++;
+      return {
+        name,
+        status: "fail",
+        summary: "TLS certificate not trusted",
+        ...timing,
+      };
+    }
+    const offline = isConnectivityError(reason) || isTransientError(reason);
+    return {
+      name,
+      status: offline ? "warn" : "fail",
+      summary: firstLine(reason) ?? reason,
+      ...timing,
+    };
+  });
+  const status = worstStatus(items.map((item) => item.status));
+  const reachable = items.filter((item) => item.status === "ok").length;
+  const summary =
+    status === "ok"
+      ? `${reachable} version endpoint${reachable === 1 ? "" : "s"} reachable`
+      : `${items.length - reachable} of ${items.length} version endpoints failed${tls > 0 ? ` (${tls} with an untrusted TLS certificate)` : ""}`;
+  const remediation =
+    tls > 0
+      ? `${TLS_TRUST_HINT.charAt(0).toUpperCase()}${TLS_TRUST_HINT.slice(1)}. Check with \`curl -sI <url>\` (curl uses the keychain).`
+      : status === "ok"
+        ? undefined
+        : "Check the stage's options.url in config.json and the network (VPN, proxy).";
+  return check(id, status, summary, { remediation, items });
 }
 
 function gib(bytes: number): string {

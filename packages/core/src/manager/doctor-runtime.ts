@@ -11,6 +11,8 @@
 // most `NETWORK_PROBE_CONCURRENCY` `ls-remote`s at once, and only for the
 // repositories `selectRemoteProbes` picks (or every one with
 // `probeAllRemotes`), after `gh auth status` showed api.github.com answers.
+// Deployment version URLs are fetched through the same `VersionAccess` the
+// version-endpoint source uses, so a TLS-inspecting proxy shows up here.
 
 import type { OrphanWorktreeReport } from "../contracts/commands.js";
 import {
@@ -23,6 +25,7 @@ import {
   NETWORK_PROBE_TIMEOUT_MS,
   type RemoteProbe,
 } from "../contracts/doctor.js";
+import type { VersionAccess } from "../contracts/github.js";
 import { DEFAULT_HARNESS_ID, type GlobalConfig } from "../contracts/model.js";
 import type { RuleFile, RulesFileAccess } from "../contracts/rules.js";
 import type {
@@ -52,6 +55,9 @@ import {
   skippedCheck,
   socketCheck,
   stateFileCheck,
+  type VersionEndpointResult,
+  versionEndpointCheck,
+  versionEndpointTargets,
 } from "../engines/doctor.js";
 import { parseRuleFile } from "../engines/rules/rule-files.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
@@ -80,6 +86,8 @@ export interface DoctorRuntimeDependencies {
   repositories: (config: GlobalConfig) => Promise<RepositoryInfo[]>;
   /** The orphan-worktree scan (read-only). */
   orphans: () => Promise<OrphanWorktreeReport>;
+  /** GETs deployment version URLs (`repos.version-endpoints`); skipped without it. */
+  versions?: VersionAccess;
 }
 
 class DoctorTimeout extends Error {}
@@ -252,6 +260,7 @@ export class DoctorRuntime {
           "value" in result ? githubReachability(result.value) : "unknown",
         ),
       }),
+      this.versionEndpoints(config),
       config
         ? guarded("worktrees.orphans", DOCTOR_SCAN_TIMEOUT_MS, async () =>
             orphansCheck(await this.deps.orphans()),
@@ -347,6 +356,42 @@ export class DoctorRuntime {
           ),
         ),
     ];
+  }
+
+  /** `repos.version-endpoints`: one GET per distinct URL, `NETWORK_PROBE_CONCURRENCY` at a time. */
+  private versionEndpoints(
+    config: GlobalConfig | undefined,
+  ): Promise<DoctorCheck> {
+    const id = "repos.version-endpoints";
+    const versions = this.deps.versions;
+    if (!config) return instant(skippedCheck(id, "No usable config.json"));
+    if (!versions) return instant(skippedCheck(id, "HTTP is not configured"));
+    const targets = versionEndpointTargets(config);
+    const rounds = Math.ceil(targets.length / NETWORK_PROBE_CONCURRENCY);
+    return guarded(id, rounds * NETWORK_GUARD_MS + GUARD_SLACK_MS, async () => {
+      const results: VersionEndpointResult[] = targets.map((target) => ({
+        target,
+        error: `Timed out after ${Math.round(NETWORK_GUARD_MS / 1000)} s`,
+      }));
+      await forEachConcurrently(
+        targets,
+        NETWORK_PROBE_CONCURRENCY,
+        async (target, index) => {
+          const outcome = await settle(NETWORK_GUARD_MS, () =>
+            versions.fetchText(target.url),
+          );
+          results[index] =
+            "value" in outcome
+              ? { target, ms: outcome.ms }
+              : {
+                  target,
+                  ms: outcome.ms,
+                  error: outcome.error.replace(/^Could not check: /, ""),
+                };
+        },
+      );
+      return versionEndpointCheck(results);
+    });
   }
 
   /** `repos.remote`: the scoped `ls-remote`s, `NETWORK_PROBE_CONCURRENCY` at a time. */

@@ -14,6 +14,10 @@
 
 import type { VersionAccess } from "../contracts/github.js";
 import { LruMap } from "../utilities/lru-map.js";
+import {
+  isUntrustedCertificateError,
+  TLS_TRUST_HINT,
+} from "../utilities/tls-trust.js";
 
 export class HttpVersionAccess implements VersionAccess {
   /** LRU-capped: keyed by URL, so bounded in practice, but never unbounded. */
@@ -67,20 +71,10 @@ export function describeFetchError(error: unknown, timeoutMs: number): string {
   const message = error instanceof Error ? error.message : String(error);
   const cause = error instanceof Error ? describeCause(error.cause) : undefined;
   const text = cause ? `${message} (${cause})` : message;
-  return UNTRUSTED_CERTIFICATE.test(text) ? `${text}; ${TLS_TRUST_HINT}` : text;
+  return isUntrustedCertificateError(text)
+    ? `${text}; ${TLS_TRUST_HINT}`
+    : text;
 }
-
-/**
- * An HTTPS chain this process does not trust, from Node (`SELF_SIGNED_…`,
- * `UNABLE_TO_GET_ISSUER_…`) or Chromium (`net::ERR_CERT_AUTHORITY_INVALID`):
- * almost always a TLS-inspecting proxy re-signing traffic with a corporate
- * root CA. Expired or wrong-host certificates are a different problem.
- */
-const UNTRUSTED_CERTIFICATE =
-  /\b(?:SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|UNABLE_TO_GET_ISSUER_CERT(?:_LOCALLY)?|UNABLE_TO_VERIFY_LEAF_SIGNATURE|CERT_UNTRUSTED)\b|net::ERR_CERT_AUTHORITY_INVALID/;
-
-export const TLS_TRUST_HINT =
-  "the server's TLS certificate is not trusted (a TLS-inspecting proxy?): the app trusts root CAs in the macOS keychain; Node tools need NODE_EXTRA_CA_CERTS pointing at the proxy's CA bundle";
 
 function describeCause(cause: unknown): string | undefined {
   if (!(cause instanceof Error)) {

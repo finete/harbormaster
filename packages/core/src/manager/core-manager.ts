@@ -4263,6 +4263,7 @@ export class CoreManager implements CoreCommands {
       now: () => this.deps.clock.now(),
       repositories: (config) => this.allRepositories(config),
       orphans: () => this.scanOrphanWorktrees(),
+      versions: this.deps.versions,
     }).run(input ?? {});
   }
 

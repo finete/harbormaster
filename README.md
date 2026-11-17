@@ -173,7 +173,11 @@ updated task; the rest are listed as "not probed (no active task)".
 does not answer within 20 s is a warning, not a failure: a remote that
 advertises very many refs makes every `ls-remote`/fetch slow. When
 `gh auth status` shows api.github.com unreachable, github.com remotes are
-not probed. `--json` includes each check's time in `ms`.
+not probed. `repos.version-endpoints` GETs each deployment stage's version
+URL once; an untrusted TLS certificate (a TLS-inspecting corporate proxy) is
+a failure that says so. The app trusts the macOS keychain; the CLI checking
+with the app down uses Node, which needs `NODE_EXTRA_CA_CERTS`. `--json`
+includes each check's time in `ms`.
 - **Export Diagnostics…** (in the Harbormaster menu) zips the logs, a
 redacted config and version info into one file to attach to a bug report.
 - **More detail:** quit the app, then start it from a terminal with
