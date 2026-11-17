@@ -9,18 +9,34 @@
 // the totals line ("counting N more…"). A parent's figures lead with the
 // total including its subtasks (sorted on), own usage muted beside it. A
 // search box narrows the rows before totals, group-by and CSV. Export CSV
-// hands the table's rows to main, which asks where to save them.
+// hands the table's rows to main, which asks where to save them. Columns
+// are fixed-layout with user-resizable, persisted px widths
+// (lib/costs-columns.ts): drag a header's right edge, double-click it to
+// reset; the group-by table reuses the Task / Tokens / Est. $ widths.
 import { ChevronDown, Download, Gauge, Search, X } from "lucide-react";
-import type { JSX } from "react";
+import type { JSX, ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import type { TaskUsageRow } from "../../../preload/api";
+import {
+  COSTS_GROUP_COLUMNS,
+  COSTS_TABLE_COLUMNS,
+  type ColumnWidths,
+  type CostsColumnKey,
+  clampColumnWidth,
+  FALLBACK_CONTAINER_WIDTH,
+  readColumnWidths,
+  resetColumn,
+  resolveColumnWidths,
+  storeColumnWidths,
+} from "../lib/costs-columns";
 import { isTypingTarget } from "../lib/keyboard-guard";
 import {
   costFigure,
@@ -94,6 +110,7 @@ export function CostsView({
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const columns = useColumnWidths();
 
   // The range is resolved against "now" at each read, so a page left open
   // across midnight still means "this week" on the next push.
@@ -323,7 +340,10 @@ export function CostsView({
           <span data-testid="costs-counting">{` · counting ${counting} more…`}</span>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      <div
+        ref={columns.containerRef}
+        className="min-h-0 flex-1 overflow-auto px-3 pb-3"
+      >
         {rows === null ? null : shown.length === 0 &&
           search.trim() ? null : shown.length === 0 ? (
           <p
@@ -333,47 +353,58 @@ export function CostsView({
             No task usage in this range.
           </p>
         ) : groupBy === "task" ? (
-          <table className="w-full text-xs" data-testid="costs-table">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="py-1.5 pr-3 font-semibold">Task</th>
-                <th className="py-1.5 pr-3 font-semibold">Repo</th>
-                <th className="py-1.5 pr-3 font-semibold">Harness</th>
-                <th className="py-1.5 pr-3 font-semibold">Models</th>
-                <SortHeader
+          <ResizableTable
+            testId="costs-table"
+            columns={COSTS_TABLE_COLUMNS}
+            labels={{
+              task: "Task",
+              repo: "Repo",
+              harness: "Harness",
+              models: "Models",
+              tokens: (
+                <SortButton
                   label="Tokens"
                   active={sort === "tokens"}
                   onClick={() => setSort("tokens")}
                   testId="costs-sort-tokens"
                 />
-                <SortHeader
+              ),
+              cost: (
+                <SortButton
                   label="Est. $"
                   active={sort === "cost"}
                   onClick={() => setSort("cost")}
                   testId="costs-sort-cost"
                 />
-              </tr>
-            </thead>
+              ),
+            }}
+            sorted={{
+              tokens: sort === "tokens",
+              cost: sort === "cost",
+            }}
+            state={columns}
+          >
             <tbody>
               {shown.map((row) => (
                 <CostsRow key={row.taskId} row={row} onOpenTask={onOpenTask} />
               ))}
             </tbody>
-          </table>
+          </ResizableTable>
         ) : (
-          <table className="w-full text-xs" data-testid="costs-groups">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="py-1.5 pr-3 font-semibold">
-                  {GROUP_BY_OPTIONS.find((option) => option.value === groupBy)
-                    ?.label ?? ""}
-                </th>
-                <th className="py-1.5 pr-3 text-right font-semibold">Tasks</th>
-                <th className="py-1.5 pr-3 text-right font-semibold">Turns</th>
-                <th className="py-1.5 pr-3 text-right font-semibold">Tokens</th>
-                <th className="py-1.5 text-right font-semibold">Est. $</th>
-              </tr>
-            </thead>
+          <ResizableTable
+            testId="costs-groups"
+            columns={COSTS_GROUP_COLUMNS}
+            labels={{
+              task:
+                GROUP_BY_OPTIONS.find((option) => option.value === groupBy)
+                  ?.label ?? "",
+              groupTasks: "Tasks",
+              groupTurns: "Turns",
+              tokens: "Tokens",
+              cost: "Est. $",
+            }}
+            state={columns}
+          >
             <tbody>
               {groups.map((group) => (
                 <tr
@@ -382,25 +413,28 @@ export function CostsView({
                   data-key={group.key}
                   className="border-b border-border/60"
                 >
-                  <td className="max-w-0 truncate py-1.5 pr-3 font-mono text-foreground">
+                  <td
+                    className="truncate py-1.5 pr-3 font-mono text-foreground"
+                    title={group.key}
+                  >
                     {group.key}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-muted-foreground">
+                  <td className="truncate py-1.5 pr-3 text-right font-mono text-muted-foreground">
                     {group.tasks}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-muted-foreground">
+                  <td className="truncate py-1.5 pr-3 text-right font-mono text-muted-foreground">
                     {group.turns}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-foreground">
+                  <td className="truncate py-1.5 pr-3 text-right font-mono text-foreground">
                     {formatTokenCount(group.tokens)}
                   </td>
-                  <td className="py-1.5 text-right font-mono text-muted-foreground">
+                  <td className="truncate py-1.5 text-right font-mono text-muted-foreground">
                     {group.cost !== undefined ? formatCost(group.cost) : "—"}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ResizableTable>
         )}
       </div>
     </div>
@@ -463,7 +497,8 @@ function FilterChip({
   );
 }
 
-function SortHeader({
+/** A numeric header's sort toggle (the cell itself is a `ColumnHeader`). */
+function SortButton({
   label,
   active,
   onClick,
@@ -475,23 +510,253 @@ function SortHeader({
   testId: string;
 }): JSX.Element {
   return (
-    <th
-      className="py-1.5 pr-3 text-right font-semibold last:pr-0"
-      aria-sort={active ? "descending" : "none"}
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onClick}
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 uppercase tracking-wide hover:text-foreground",
+        active && "text-foreground",
+      )}
     >
-      <button
-        type="button"
-        data-testid={testId}
-        onClick={onClick}
+      <span className="truncate">{label}</span>
+      {active && <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />}
+    </button>
+  );
+}
+
+/** Columns right-aligned (numbers), in both tables. */
+const NUMERIC_COLUMNS: ReadonlySet<CostsColumnKey> = new Set([
+  "tokens",
+  "cost",
+  "groupTasks",
+  "groupTurns",
+]);
+
+interface ColumnWidthsState {
+  /** The scroll container the default widths are shares of. */
+  containerRef: (element: HTMLDivElement | null) => void;
+  containerWidth: number;
+  /** User-set widths (persisted); missing keys use their default. */
+  widths: ColumnWidths;
+  /** Live width while dragging (not persisted yet). */
+  setWidth: (key: CostsColumnKey, width: number) => void;
+  /** End of a drag: set and persist the final width. */
+  commit: (key: CostsColumnKey, width: number) => void;
+  /** Double-click: back to the default, persisted. */
+  reset: (key: CostsColumnKey) => void;
+}
+
+/** Persisted column widths + the measured container width they resolve against. */
+function useColumnWidths(): ColumnWidthsState {
+  const [widths, setWidths] = useState<ColumnWidths>(() =>
+    readColumnWidths(window.localStorage),
+  );
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+  const [containerWidth, setContainerWidth] = useState(
+    FALLBACK_CONTAINER_WIDTH,
+  );
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!container) return;
+    const measure = (): void => {
+      const style = window.getComputedStyle(container);
+      const inner =
+        container.clientWidth -
+        Number.parseFloat(style.paddingLeft) -
+        Number.parseFloat(style.paddingRight);
+      if (inner > 0) setContainerWidth(Math.floor(inner));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container]);
+
+  const setWidth = useCallback((key: CostsColumnKey, width: number) => {
+    setWidths((current) => ({ ...current, [key]: clampColumnWidth(width) }));
+  }, []);
+  const commit = useCallback((key: CostsColumnKey, width: number) => {
+    const next = { ...widthsRef.current, [key]: clampColumnWidth(width) };
+    widthsRef.current = next;
+    setWidths(next);
+    storeColumnWidths(window.localStorage, next);
+  }, []);
+  const reset = useCallback((key: CostsColumnKey) => {
+    const next = resetColumn(widthsRef.current, key);
+    widthsRef.current = next;
+    setWidths(next);
+    storeColumnWidths(window.localStorage, next);
+  }, []);
+
+  return {
+    containerRef: setContainer,
+    containerWidth,
+    widths,
+    setWidth,
+    commit,
+    reset,
+  };
+}
+
+/**
+ * A fixed-layout table whose header cells (all but the last) carry a resize
+ * handle on their right edge. Wider than its container → the container
+ * scrolls horizontally.
+ */
+function ResizableTable({
+  testId,
+  columns,
+  labels,
+  sorted,
+  state,
+  children,
+}: {
+  testId: string;
+  columns: readonly CostsColumnKey[];
+  labels: Partial<Record<CostsColumnKey, ReactNode>>;
+  /** `aria-sort` for sortable headers. */
+  sorted?: Partial<Record<CostsColumnKey, boolean>>;
+  state: ColumnWidthsState;
+  children: ReactNode;
+}): JSX.Element {
+  const resolved = resolveColumnWidths(
+    columns,
+    state.widths,
+    state.containerWidth,
+  );
+  const total = resolved.reduce((sum, width) => sum + width, 0);
+  return (
+    <table
+      className="table-fixed border-collapse text-xs"
+      style={{ width: total }}
+      data-testid={testId}
+    >
+      <colgroup>
+        {columns.map((key, index) => (
+          <col key={key} style={{ width: resolved[index] }} />
+        ))}
+      </colgroup>
+      <thead>
+        <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+          {columns.map((key, index) => {
+            const last = index === columns.length - 1;
+            const sortable = sorted !== undefined && key in sorted;
+            return (
+              <th
+                key={key}
+                data-testid={`costs-th-${key}`}
+                aria-sort={
+                  sortable ? (sorted[key] ? "descending" : "none") : undefined
+                }
+                className={cn(
+                  "relative py-1.5 font-semibold",
+                  !last && "pr-3",
+                  NUMERIC_COLUMNS.has(key) && "text-right",
+                )}
+              >
+                <div className="truncate">{labels[key]}</div>
+                {!last && (
+                  <ColumnResizeHandle
+                    column={key}
+                    width={resolved[index] ?? 0}
+                    onResize={state.setWidth}
+                    onCommit={state.commit}
+                    onReset={state.reset}
+                  />
+                )}
+              </th>
+            );
+          })}
+        </tr>
+      </thead>
+      {children}
+    </table>
+  );
+}
+
+/** Drag (pointer-captured) to resize a column; double-click resets it. */
+function ColumnResizeHandle({
+  column,
+  width,
+  onResize,
+  onCommit,
+  onReset,
+}: {
+  column: CostsColumnKey;
+  width: number;
+  onResize: (key: CostsColumnKey, width: number) => void;
+  onCommit: (key: CostsColumnKey, width: number) => void;
+  onReset: (key: CostsColumnKey) => void;
+}): JSX.Element {
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  // While dragging, nothing on the page selects and the cursor stays put
+  // even when the pointer runs ahead of the handle.
+  useEffect(() => {
+    if (!dragging) return;
+    const body = document.body.style;
+    const previous = { userSelect: body.userSelect, cursor: body.cursor };
+    body.userSelect = "none";
+    body.cursor = "col-resize";
+    return () => {
+      body.userSelect = previous.userSelect;
+      body.cursor = previous.cursor;
+    };
+  }, [dragging]);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { startX: event.clientX, startWidth: width };
+    setDragging(true);
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    onResize(column, drag.startWidth + event.clientX - drag.startX);
+  };
+  const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onCommit(column, drag.startWidth + event.clientX - drag.startX);
+  };
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a column splitter, not a rule
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize column"
+      data-testid={`costs-col-resize-${column}`}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onReset(column);
+      }}
+      className="group absolute -right-1.5 top-0 z-10 flex h-full w-3 cursor-col-resize touch-none select-none justify-center"
+    >
+      <span
         className={cn(
-          "inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground",
-          active && "text-foreground",
+          "h-full w-px bg-transparent transition-colors group-hover:bg-primary/50",
+          dragging && "bg-primary",
         )}
-      >
-        {label}
-        {active && <ChevronDown className="h-3 w-3" aria-hidden />}
-      </button>
-    </th>
+      />
+    </div>
   );
 }
 
@@ -539,10 +804,7 @@ function CostsRow({
       }}
       className="cursor-pointer border-b border-border/60 outline-none hover:bg-accent focus-visible:bg-accent"
     >
-      <td
-        className="max-w-0 truncate py-1.5 pr-3 text-foreground"
-        title={row.title}
-      >
+      <td className="truncate py-1.5 pr-3 text-foreground" title={row.title}>
         {row.title}
         {subtasks && (
           <span
@@ -554,28 +816,31 @@ function CostsRow({
         )}
       </td>
       <td
-        className="max-w-0 truncate py-1.5 pr-3 font-mono text-muted-foreground"
-        title={row.repository}
+        className="truncate py-1.5 pr-3 font-mono text-muted-foreground"
+        title={row.repository || undefined}
       >
         {row.repository || "—"}
       </td>
-      <td className="py-1.5 pr-3 font-mono text-muted-foreground">
+      <td
+        className="truncate py-1.5 pr-3 font-mono text-muted-foreground"
+        title={row.harness}
+      >
         {row.harness}
       </td>
       <td
-        className="max-w-0 truncate py-1.5 pr-3 font-mono text-muted-foreground"
+        className="truncate py-1.5 pr-3 font-mono text-muted-foreground"
         title={usage.byModel.map((model) => model.model).join(", ")}
       >
         {usage.byModel.map((model) => model.model).join(", ") || "—"}
       </td>
       <td
-        className="whitespace-nowrap py-1.5 pr-3 text-right font-mono text-foreground"
+        className="truncate py-1.5 pr-3 text-right font-mono text-foreground"
         data-testid="costs-row-tokens"
       >
         {tokenCell}
       </td>
       <td
-        className="whitespace-nowrap py-1.5 text-right font-mono text-muted-foreground"
+        className="truncate py-1.5 text-right font-mono text-muted-foreground"
         data-testid="costs-row-cost"
       >
         {cost ? <FigureText figure={cost} /> : "—"}

@@ -388,6 +388,53 @@ test("Export CSV saves the table's rows through main", async () => {
   await expect(view).toHaveCount(0);
 });
 
+test("Costs columns resize by dragging a header edge and keep their width across a reload", async () => {
+  const openCosts = async (): Promise<Locator> => {
+    await window.getByTestId("costs-button").click();
+    const view = window.getByTestId("costs-view");
+    await expect(view.getByTestId("costs-row")).toHaveCount(6 + BULK, {
+      timeout: 20_000,
+    });
+    return view;
+  };
+  const width = async (locator: Locator): Promise<number> =>
+    (await locator.boundingBox())?.width ?? 0;
+
+  let view = await openCosts();
+  const taskHeader = view.getByTestId("costs-th-task");
+  const before = await width(taskHeader);
+  expect(before).toBeGreaterThan(100);
+  const handle = view.getByTestId("costs-col-resize-task");
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("no Task resize handle");
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await window.mouse.move(x, y);
+  await window.mouse.down();
+  await window.mouse.move(x + 60, y, { steps: 4 });
+  await window.mouse.move(x + 120, y, { steps: 4 });
+  await window.mouse.up();
+  await expect.poll(() => width(taskHeader)).toBeCloseTo(before + 120, -1);
+  const resized = await width(taskHeader);
+  expect(
+    JSON.parse(
+      (await window.evaluate(() =>
+        window.localStorage.getItem("harbormaster.costs.columns"),
+      )) ?? "null",
+    ),
+  ).toEqual({ v: 1, widths: { task: Math.round(resized) } });
+
+  // A fresh renderer reads the width back.
+  await window.reload();
+  await window.waitForLoadState("domcontentloaded");
+  view = await openCosts();
+  await expect
+    .poll(() => width(view.getByTestId("costs-th-task")))
+    .toBeCloseTo(resized, 0);
+  await window.keyboard.press("Escape");
+  await expect(view).toHaveCount(0);
+});
+
 test("the workspace usage chip opens a breakdown and recounts on refresh; top cards show their usage", async () => {
   await window.getByTestId("board-button").click();
   // The three most expensive cards on the board always show their usage
