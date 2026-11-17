@@ -23,8 +23,12 @@ import type {
   TaskMessagingState,
   TaskState,
 } from "../../preload/api";
+import { configValuesStore } from "./lib/config-values";
 import {
-  notificationsDisabled,
+  legacyNotificationsValue,
+  NOTIFICATIONS_STORAGE_KEY,
+  notificationsEnabled,
+  notificationsMigration,
   notifyTransitionEvents,
 } from "./lib/notifications";
 import { createSharedStore } from "./lib/shared-store";
@@ -325,13 +329,59 @@ export function useTaskNotifications(
     };
   }, []);
 
+  // The `notifications.enabled` setting (docs/settings.md S11), live; and
+  // the one-time migration of the retired localStorage escape hatch once
+  // the first settings read lands.
+  useEffect(() => {
+    let migrated = false;
+    const migrate = (): void => {
+      const config = configValuesStore.getSnapshot();
+      if (migrated || !config) return;
+      migrated = true;
+      const storage = safeLocalStorage();
+      const decision = notificationsMigration(
+        legacyNotificationsValue(storage),
+        config.explicit.includes("notifications.enabled"),
+      );
+      const clear = (): void => {
+        try {
+          storage?.removeItem(NOTIFICATIONS_STORAGE_KEY);
+        } catch {
+          // best effort
+        }
+      };
+      if (decision.writeOff) {
+        window.harbormaster.core
+          .updateSettings({ "notifications.enabled": false })
+          .then(clear)
+          .catch(() => {
+            // Keep the legacy value; the next launch tries again.
+          });
+      } else if (decision.clearLegacy) {
+        clear();
+      }
+    };
+    const unsubscribe = configValuesStore.subscribe(migrate);
+    migrate();
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     previousRef.current = presenceStore.getSnapshot();
     const unsubscribe = presenceStore.subscribe(() => {
       const payload = presenceStore.getSnapshot();
       const previous = previousRef.current;
       previousRef.current = payload;
-      if (notificationsDisabled(window.localStorage)) return;
+      const config = configValuesStore.getSnapshot();
+      const enabled = notificationsEnabled(
+        {
+          value: config?.values["notifications.enabled"],
+          configured:
+            config?.explicit.includes("notifications.enabled") ?? false,
+        },
+        legacyNotificationsValue(safeLocalStorage()),
+      );
+      if (!enabled) return;
       const events = notifyTransitionEvents({
         previous,
         next: payload,
@@ -348,6 +398,14 @@ export function useTaskNotifications(
     });
     return unsubscribe;
   }, []);
+}
+
+function safeLocalStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 export function useManualRefresh(): { busy: boolean; refresh: () => void } {

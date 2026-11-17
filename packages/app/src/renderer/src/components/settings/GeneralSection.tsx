@@ -1,6 +1,6 @@
 // Settings → General (docs/settings.md "Settings in v1"): code folder (with
 // the same folder picker the wizard's code step uses), branch prefix,
-// terminal font size, and the automation state read-only with a link to
+// terminal font size, desktop notifications (S11), and the automation state read-only with a link to
 // the Rules page, where its switch lives (S13).
 
 import { FolderOpen } from "lucide-react";
@@ -52,6 +52,11 @@ export function GeneralSection({
         model={model}
         snapshot={snapshot}
         settingKey="terminal.fontSize"
+      />
+      <DescribedSetting
+        model={model}
+        snapshot={snapshot}
+        settingKey="notifications.enabled"
       />
       <SettingRow
         testId="setting-row-automation"

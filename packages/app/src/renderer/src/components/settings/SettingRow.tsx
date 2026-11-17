@@ -166,9 +166,15 @@ export function CommitField({
   className,
   placeholder,
   numeric = false,
+  format = valueText,
+  suffix,
 }: {
   value: SettingValue | null | undefined;
   parse(text: string): DraftResult;
+  /** The field text for a stored value (e.g. ms shown as minutes). */
+  format?: (value: SettingValue | null | undefined) => string;
+  /** A unit after the field (e.g. "min"). */
+  suffix?: string | undefined;
   /** Resolves a rejection message, else `undefined`. */
   onCommit(value: SettingValue | null): Promise<string | undefined>;
   onProblem(problem: string | undefined): void;
@@ -178,13 +184,14 @@ export function CommitField({
   placeholder?: string | undefined;
   numeric?: boolean;
 }): JSX.Element {
-  const [draft, setDraft] = useState(valueText(value));
+  const [draft, setDraft] = useState(format(value));
   const editing = useRef(false);
   const reverting = useRef(false);
   // A new stored value (a commit, a reset, a hand edit) replaces the field
   // text unless the user is mid-edit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the stored value only.
   useEffect(() => {
-    if (!editing.current) setDraft(valueText(value));
+    if (!editing.current) setDraft(format(value));
   }, [value]);
 
   const commit = (text: string): void => {
@@ -195,16 +202,16 @@ export function CommitField({
     }
     onProblem(undefined);
     if (isSameValue(value, parsed.value)) {
-      setDraft(valueText(value));
+      setDraft(format(value));
       return;
     }
     void onCommit(parsed.value).then((problem) => {
       onProblem(problem);
-      if (!problem) setDraft(valueText(parsed.value));
+      if (!problem) setDraft(format(parsed.value));
     });
   };
 
-  return (
+  const input = (
     <Input
       data-testid={testId}
       aria-label={label}
@@ -226,7 +233,7 @@ export function CommitField({
           commit(draft);
         } else if (event.key === "Escape") {
           reverting.current = true;
-          setDraft(valueText(value));
+          setDraft(format(value));
           onProblem(undefined);
           event.currentTarget.blur();
         }
@@ -240,6 +247,14 @@ export function CommitField({
         commit(draft);
       }}
     />
+  );
+  return suffix ? (
+    <span className="flex items-center gap-1.5">
+      {input}
+      <span className="text-[13px] text-muted-foreground">{suffix}</span>
+    </span>
+  ) : (
+    input
   );
 }
 
@@ -272,7 +287,7 @@ export function SelectField({
           data-testid={testId}
           data-value={value}
           aria-label={label}
-          className="max-w-[16rem] justify-between"
+          className="w-64 justify-between"
         >
           <span className="truncate">{current?.label ?? value}</span>
           <ChevronDown aria-hidden />
@@ -348,6 +363,7 @@ function SettingControl({
           testId={testId}
           label={setting.title}
           numeric={setting.type === "integer"}
+          suffix={setting.unit === "minutes" ? "min" : undefined}
           placeholder={setting.default === null ? "Default" : undefined}
         />
       );

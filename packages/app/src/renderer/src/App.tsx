@@ -2,6 +2,7 @@ import { PanelLeft, RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot, SettingSectionId } from "../../preload/api";
+import { AutomationPausedBanner } from "./components/AutomationPausedBanner";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
@@ -693,6 +694,7 @@ export function App({
                 </Button>
               </div>
             </header>
+            <AutomationPausedBanner onOpenRules={openRules} />
             <div className="min-h-0 flex-1">
               <Board
                 onSelectTask={selectTask}

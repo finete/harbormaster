@@ -555,6 +555,8 @@ export interface ReviewSupportPiece {
 export interface ReviewSupportHarness {
   /** adapter id */
   harness: string;
+  /** The adapter's display label (e.g. "Claude Code", a custom agent's label). */
+  label?: string;
   state: "ready" | "missing" | "outdated" | "unsupported";
   pieces: ReviewSupportPiece[];
 }

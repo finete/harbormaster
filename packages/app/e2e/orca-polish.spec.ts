@@ -232,7 +232,7 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     }).toPass({ timeout: 5_000 });
   });
 
-  test("a finished-while-unfocused transition fires the renderer->main notify IPC", async () => {
+  test("a finished-while-unfocused transition fires the renderer->main notify IPC (unless notifications are off)", async () => {
     await createScratchTask(window, "Notify Target");
     await createScratchTask(window, "Notify Looker");
 
@@ -294,6 +294,58 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     await window.evaluate(() => window.dispatchEvent(new Event("focus")));
     await target.click();
     await expect(target.getByTestId("sidebar-row-unread-dot")).toHaveCount(0);
+
+    // Desktop notifications off (the `notifications.enabled` setting,
+    // docs/settings.md S11): the same transition still marks the task
+    // unread, but the renderer no longer asks main to notify.
+    await createScratchTask(window, "Notify Muted");
+    const muted = rowLocator(window, "Notify Muted");
+    await expect(muted).toBeVisible();
+    const mutedId = await rowTaskId(muted);
+    await window.evaluate(() =>
+      window.harbormaster.core.updateSettings({
+        "notifications.enabled": false,
+      }),
+    );
+    await looker.click();
+    await expect(looker).toHaveAttribute("data-selected", "true");
+    await window.evaluate(() => window.dispatchEvent(new Event("blur")));
+    const mutedPid = await fakePiPid(stateDir, mutedId);
+    await presence.register({
+      taskId: mutedId,
+      sessionPath: "/tmp/fake-session-notify-muted.jsonl",
+      pid: mutedPid,
+      mode: "interactive",
+      at: new Date().toISOString(),
+    });
+    await presence.setTurnActive(
+      mutedId,
+      mutedPid,
+      true,
+      new Date().toISOString(),
+    );
+    await expect(muted.getByTestId("sidebar-row-spinner")).toBeVisible({
+      timeout: 10_000,
+    });
+    await presence.setTurnActive(
+      mutedId,
+      mutedPid,
+      false,
+      new Date().toISOString(),
+    );
+    await expect(muted.getByTestId("sidebar-row-unread-dot")).toBeVisible({
+      timeout: 10_000,
+    });
+    // "Nothing happens" is the behavior: give a notify IPC (which the
+    // positive case above sees within milliseconds) time to arrive.
+    await window.waitForTimeout(1_500);
+    expect(
+      stdout.some(
+        (line) =>
+          line.includes("app:notify received") && line.includes(mutedId),
+      ),
+    ).toBe(false);
+    await window.evaluate(() => window.dispatchEvent(new Event("focus")));
   });
 });
 

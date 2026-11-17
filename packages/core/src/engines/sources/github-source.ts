@@ -14,11 +14,14 @@ import type {
   SourceContext,
   SourcePullRequestFacts,
 } from "../../contracts/rules.js";
+import {
+  DEFAULT_GITHUB_SEARCH_INTERVAL_MS,
+  DEFAULT_GITHUB_WATCH_MENTIONS,
+  DEFAULT_GITHUB_WATCH_REVIEW_REQUESTS,
+} from "../../contracts/settings.js";
 import { taskSubject } from "../rules/snapshot-diff.js";
 
 export const GITHUB_SOURCE_ID = "github";
-
-const DEFAULT_SEARCH_INTERVAL_MS = 5 * 60_000;
 
 const UNBOUND_ENTITIES = {
   reviewRequest: "is:pr is:open review-requested:@me",
@@ -27,6 +30,7 @@ const UNBOUND_ENTITIES = {
 
 export const githubSource: Source = {
   id: GITHUB_SOURCE_ID,
+  title: "GitHub",
   interval: 0,
   settingsSchema: {
     type: "object",
@@ -34,16 +38,22 @@ export const githubSource: Source = {
     properties: {
       watchReviewRequests: {
         type: "boolean",
+        title: "Create a task when someone requests my review",
+        default: DEFAULT_GITHUB_WATCH_REVIEW_REQUESTS,
         description:
           "Emit github.reviewRequest.* for open PRs requesting your review.",
       },
       watchMentions: {
         type: "boolean",
+        title: "Create a task when a pull request mentions me",
+        default: DEFAULT_GITHUB_WATCH_MENTIONS,
         description: "Emit github.mention.* for open PRs that mention you.",
       },
       searchIntervalMs: {
         type: "integer",
+        title: "Check interval (ms)",
         minimum: 60000,
+        default: DEFAULT_GITHUB_SEARCH_INTERVAL_MS,
         description: "Minimum time between review-request/mention searches.",
       },
     },
@@ -123,8 +133,12 @@ async function unboundSnapshots(ctx: SourceContext): Promise<Snapshot[]> {
     Object.keys(UNBOUND_ENTITIES) as Array<keyof typeof UNBOUND_ENTITIES>
   ).filter((entity) =>
     entity === "reviewRequest"
-      ? ctx.settings.watchReviewRequests === true
-      : ctx.settings.watchMentions === true,
+      ? typeof ctx.settings.watchReviewRequests === "boolean"
+        ? ctx.settings.watchReviewRequests
+        : DEFAULT_GITHUB_WATCH_REVIEW_REQUESTS
+      : typeof ctx.settings.watchMentions === "boolean"
+        ? ctx.settings.watchMentions
+        : DEFAULT_GITHUB_WATCH_MENTIONS,
   );
   const search = ctx.services.github.searchPullRequests;
   if (wanted.length === 0 || !search) return [];
@@ -132,7 +146,7 @@ async function unboundSnapshots(ctx: SourceContext): Promise<Snapshot[]> {
   const interval =
     typeof ctx.settings.searchIntervalMs === "number"
       ? ctx.settings.searchIntervalMs
-      : DEFAULT_SEARCH_INTERVAL_MS;
+      : DEFAULT_GITHUB_SEARCH_INTERVAL_MS;
   const now = ctx.now();
   const due =
     !cursor.lastSearchAt ||

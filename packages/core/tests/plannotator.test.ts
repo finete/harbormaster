@@ -435,6 +435,7 @@ describe("reviewSupport", () => {
     const pi = support.harnesses.find((h) => h.harness === "pi");
     expect(pi).toEqual({
       harness: "pi",
+      label: "Pi",
       state: "missing",
       pieces: [
         expect.objectContaining({
@@ -457,8 +458,10 @@ describe("reviewSupport", () => {
       ["claude-skill", "curl -fsSL https://plannotator.ai/install.sh | bash"],
       ["claude-code", expect.any(String)],
     ]);
+    // Custom agents carry their own label (Settings → Code review lists it).
     expect(support.harnesses.find((h) => h.harness === "aider")).toEqual({
       harness: "aider",
+      label: "Aider",
       state: "unsupported",
       pieces: [],
     });

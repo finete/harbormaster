@@ -5,20 +5,31 @@ import { describe, expect, it } from "vitest";
 import type {
   HarnessModelCatalog,
   SettingDescription,
+  SettingsSource,
 } from "../src/preload/api";
 import {
+  autoFormSources,
   automationLine,
   configErrorText,
   integerHint,
   ipcErrorText,
   isExplicit,
   isSameValue,
+  minutesToMs,
   modelChoices,
+  msToMinutes,
   overriddenHint,
   parseIntegerDraft,
+  parseMinutesDraft,
+  parseSourceNumberDraft,
+  parseSourceTextDraft,
   parseStringDraft,
+  priorityFilterLine,
   SETTINGS_SECTIONS,
   settingsSection,
+  sourceFieldValue,
+  sourceFormFields,
+  sourceSettingKey,
   valueText,
 } from "../src/renderer/src/lib/settings-form";
 
@@ -48,16 +59,19 @@ function stringSetting(
 }
 
 describe("sections", () => {
-  it("lists only the built sections, General first", () => {
+  it("lists the sections most used first (S7)", () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       "general",
       "agents",
       "code-review",
+      "github",
+      "inbox",
     ]);
   });
-  it("falls back to General for an unknown or unbuilt section", () => {
+  it("falls back to General for an unknown section", () => {
     expect(settingsSection("agents")).toBe("agents");
-    expect(settingsSection("github")).toBe("general");
+    expect(settingsSection("github")).toBe("github");
+    expect(settingsSection("repositories")).toBe("general");
     expect(settingsSection(undefined)).toBe("general");
   });
 });
@@ -204,5 +218,177 @@ describe("modelChoices", () => {
   it("is undefined (free text) without models for the agent", () => {
     expect(modelChoices(catalogs, "claude-code", null)).toBeUndefined();
     expect(modelChoices(catalogs, "aider", null)).toBeUndefined();
+  });
+});
+
+const searchInterval: SettingDescription = {
+  key: "sources.github.settings.searchIntervalMs",
+  type: "integer",
+  default: 300_000,
+  min: 60_000,
+  max: 24 * 60 * 60_000,
+  unit: "ms",
+  title: "Check interval",
+  help: "",
+  section: "github",
+};
+
+describe("minutes shown for milliseconds (S10)", () => {
+  it("converts both ways", () => {
+    expect(msToMinutes(300_000)).toBe(5);
+    expect(msToMinutes(90_000)).toBe(2);
+    expect(msToMinutes(null)).toBeNull();
+    expect(msToMinutes("5")).toBeNull();
+    expect(minutesToMs(7)).toBe(420_000);
+  });
+
+  it("commits whole minutes inside the bounds as milliseconds", () => {
+    expect(parseMinutesDraft(" 10 ", searchInterval)).toEqual({
+      ok: true,
+      value: 600_000,
+    });
+    expect(parseMinutesDraft("1", searchInterval)).toEqual({
+      ok: true,
+      value: 60_000,
+    });
+    for (const bad of ["0", "1.5", "", "abc", "1441"]) {
+      expect(parseMinutesDraft(bad, searchInterval)).toEqual({
+        ok: false,
+        hint: "Enter a whole number of minutes from 1 to 1440.",
+      });
+    }
+  });
+});
+
+describe("add-on source forms from a JSON Schema (S10)", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      enabledFeature: { type: "boolean", title: "Watch drafts", default: true },
+      threshold: {
+        type: "integer",
+        minimum: 1,
+        maximum: 10,
+        description: "How many",
+        default: 3,
+      },
+      ratio: { type: "number" },
+      label: { type: "string", default: 5 },
+      mode: { type: "string", enum: ["fast", "slow"], default: "slow" },
+      tags: { type: "array", items: { type: "string" } },
+      either: { anyOf: [{ type: "string" }, { type: "number" }] },
+    },
+  };
+
+  it("maps each property to a control, using title / description / default", () => {
+    expect(sourceFormFields(schema)).toEqual([
+      {
+        name: "enabledFeature",
+        label: "Watch drafts",
+        kind: "boolean",
+        default: true,
+      },
+      {
+        name: "threshold",
+        label: "threshold",
+        help: "How many",
+        kind: "integer",
+        min: 1,
+        max: 10,
+        default: 3,
+      },
+      { name: "ratio", label: "ratio", kind: "number" },
+      // A default of the wrong kind is ignored.
+      { name: "label", label: "label", kind: "string" },
+      {
+        name: "mode",
+        label: "mode",
+        kind: "enum",
+        values: ["fast", "slow"],
+        default: "slow",
+      },
+      { name: "tags", label: "tags", kind: "file" },
+      { name: "either", label: "either", kind: "file" },
+    ]);
+    expect(sourceFormFields(undefined)).toEqual([]);
+    expect(sourceFormFields({ type: "object" })).toEqual([]);
+  });
+
+  it("parses number and text drafts (empty resets)", () => {
+    const integer = { kind: "integer" as const, min: 1, max: 10 };
+    expect(parseSourceNumberDraft("4", integer)).toEqual({
+      ok: true,
+      value: 4,
+    });
+    expect(parseSourceNumberDraft("", integer)).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(parseSourceNumberDraft("4.5", integer)).toEqual({
+      ok: false,
+      hint: "Enter a whole number from 1 to 10.",
+    });
+    expect(parseSourceNumberDraft("11", integer).ok).toBe(false);
+    expect(parseSourceNumberDraft("0.25", { kind: "number" })).toEqual({
+      ok: true,
+      value: 0.25,
+    });
+    expect(parseSourceNumberDraft("x", { kind: "number" })).toEqual({
+      ok: false,
+      hint: "Enter a number.",
+    });
+    expect(parseSourceTextDraft("  hi ")).toEqual({ ok: true, value: "hi" });
+    expect(parseSourceTextDraft("  ")).toEqual({ ok: true, value: null });
+  });
+
+  it("shows the configured value, else the schema default", () => {
+    const [toggle, threshold] = sourceFormFields(schema);
+    if (!toggle || !threshold) throw new Error("fields missing");
+    expect(sourceFieldValue({ settings: {} }, toggle)).toBe(true);
+    expect(
+      sourceFieldValue({ settings: { enabledFeature: false } }, toggle),
+    ).toBe(false);
+    expect(sourceFieldValue({ settings: { threshold: 7 } }, threshold)).toBe(7);
+  });
+
+  it("gives add-ons (and option-carrying built-ins other than github / version-endpoint) a form", () => {
+    const source = (
+      id: string,
+      builtin: boolean,
+      settingsSchema?: Record<string, unknown>,
+    ): SettingsSource => ({
+      id,
+      label: id,
+      builtin,
+      enabled: true,
+      enabledExplicit: false,
+      ...(settingsSchema ? { settingsSchema } : {}),
+      settings: {},
+      explicit: [],
+      problems: [],
+    });
+    expect(
+      autoFormSources([
+        source("harbormaster", true),
+        source("github", true, schema),
+        source("version-endpoint", true),
+        source("pinger", false),
+        source("weather", false, schema),
+        source("future-builtin", true, schema),
+      ]).map((entry) => entry.id),
+    ).toEqual(["pinger", "weather", "future-builtin"]);
+    expect(sourceSettingKey("pinger")).toBe("sources.pinger.enabled");
+    expect(sourceSettingKey("pinger", "threshold")).toBe(
+      "sources.pinger.settings.threshold",
+    );
+  });
+});
+
+describe("priorityFilterLine", () => {
+  it("says whether a custom filter is set", () => {
+    expect(priorityFilterLine(null)).toBe(
+      "Not set: each item's own priority applies",
+    );
+    expect(priorityFilterLine('item.kind == "rule"')).toBe("Custom filter set");
   });
 });

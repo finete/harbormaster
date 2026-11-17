@@ -205,6 +205,7 @@ import {
 import type { ResolvedMove } from "../engines/rules/evaluation.js";
 import { effectivePipeline } from "../engines/rules/views.js";
 import { shouldWatchSessionFile } from "../engines/session-file-check.js";
+import { builtinSources } from "../engines/sources/index.js";
 import {
   assertAllowedTransition,
   assertMayReturnToWorking,
@@ -229,7 +230,10 @@ import {
   RulesRuntime,
 } from "./rules-runtime.js";
 import { SessionFileWatch } from "./session-file-watch.js";
-import { SettingsRuntime } from "./settings-runtime.js";
+import {
+  SettingsRuntime,
+  type SettingsSourceListing,
+} from "./settings-runtime.js";
 import { UsageRuntime } from "./usage-runtime.js";
 
 export interface CoreManagerDependencies {
@@ -416,6 +420,7 @@ export class CoreManager implements CoreCommands {
       logger: this.log,
       harnesses: (config) => this.harnessOptions(config),
       rediscover: (config) => this.allRepositories(config),
+      sources: () => this.settingsSources(),
       ...(deps.onboarding ? { folders: deps.onboarding } : {}),
     });
     this.rules = deps.rules
@@ -4375,9 +4380,10 @@ export class CoreManager implements CoreCommands {
         ? [this.deps.harness]
         : [];
     return {
-      harnesses: harnesses.map((harness) =>
-        reviewSupportFor(harness, versions),
-      ),
+      harnesses: harnesses.map((harness) => ({
+        ...reviewSupportFor(harness, versions),
+        label: harness.label,
+      })),
       checkedAt: entry.checkedAt,
     };
   }
@@ -4453,6 +4459,43 @@ export class CoreManager implements CoreCommands {
 
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return this.settings.update(patch);
+  }
+
+  /** Registered sources for Settings (S10): the rules runtime's built-ins and loaded add-ons. */
+  private async settingsSources(): Promise<SettingsSourceListing[]> {
+    if (!this.rules) {
+      return builtinSources.map((source) => ({
+        id: source.id,
+        ...(source.title ? { title: source.title } : {}),
+        ...(source.settingsSchema
+          ? { settingsSchema: source.settingsSchema }
+          : {}),
+        builtin: true,
+      }));
+    }
+    const addons = await this.rules.listAddons();
+    return addons
+      .filter((addon) => addon.loaded)
+      .flatMap((addon) =>
+        addon.sources.map((source) => ({
+          id: source.id,
+          ...(source.title ? { title: source.title } : {}),
+          ...(source.settingsSchema
+            ? { settingsSchema: source.settingsSchema }
+            : {}),
+          builtin: addon.builtin,
+          ...(addon.builtin
+            ? {}
+            : {
+                addon: {
+                  name: addon.name,
+                  ...(addon.description
+                    ? { description: addon.description }
+                    : {}),
+                },
+              }),
+        })),
+      );
   }
 
   /** Watch config.json for hand edits (S4); the app calls this once at start. Not part of the command API. */

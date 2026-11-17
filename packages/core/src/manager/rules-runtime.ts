@@ -486,6 +486,9 @@ export class RulesRuntime {
       readOnly: true,
       sources: builtinSources.map((source) => ({
         id: source.id,
+        ...(typeof source.title === "string" && source.title.trim()
+          ? { title: source.title.trim() }
+          : {}),
         ...(source.interval !== undefined ? { interval: source.interval } : {}),
         ...(source.settingsSchema
           ? { settingsSchema: source.settingsSchema }

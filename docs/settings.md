@@ -30,7 +30,7 @@ inherited or locked.
 | S11 | **New settings:** **notifications** (on/off, replacing the hidden `harbormaster.notifications` localStorage escape hatch; `HARBORMASTER_NOTIFICATIONS=off` stays as the process-level kill switch) and **terminal font size** (General, default 13, applied live to open panes with a refit). Later: default "Open in" app, automatic worktree cleanup, light theme. |
 | S12 | **"Changed" markers now, search later.** A dot next to every setting that differs from its default, paired with reset. No search box in v1 (≈20 settings in 6 named sections). |
 | S13 | **Automation switch stays on the Rules page** (already exists, `setRulesEnabled`). Settings → General shows its state with a link ("Automation is on · Manage rules →"). The board shows an "Automation paused" banner while it is off. |
-| S14 | **Delivery in three steps**, each green on `main` before the next: (1) foundation, (2) Settings page + General / Agents / Code review + wizard reuse + menu, (3) GitHub & sources, Inbox & messaging, notifications, automation link + banner. |
+| S14 | **Delivery in three steps**, each green on `main` before the next: (1) foundation, (2) Settings page + General / Agents / Code review + wizard reuse + menu, (3) GitHub & sources, Inbox & messaging, notifications, automation link + banner. **Delivered** (all three steps; see the implementation notes below). |
 
 ## Settings in v1
 
@@ -133,3 +133,71 @@ inherited or locked.
   reset → hand edit live → invalid file banner → fixed → Edit in config.json
   → Esc). onboarding / plannotator specs reach the wizard / Code review via
   the Settings menu item.
+
+## Implementation notes (step 3: GitHub & sources, Inbox & messaging, notifications, banner)
+
+- **Source settings API (S10): the generic path, no new command.**
+  `updateSettings` accepts `sources.<id>.enabled` (boolean) and
+  `sources.<id>.settings.<property>` (boolean / number / string; `null`
+  removes it) for any registered source, described or not. Validation
+  (`engines/settings.ts`: `sourceSettingKey`, `validateSettingsPatch` with
+  `sources` + `sourceSettings` in its context): the source must be
+  registered, the property declared in its schema's `properties`, and the
+  source's whole settings object, merged with the patch, must pass its own
+  `settingsSchema` (ajv, `engines/rules/source-settings.ts`) — otherwise
+  nothing is written. Described github keys are checked by their
+  description *and* the schema. Anything non-scalar (arrays, objects)
+  stays "Edit in config.json".
+- **Read:** `SettingsSnapshot.sources: SettingsSource[]` — every registered
+  source (built-ins, then loaded add-ons; from the rules runtime's
+  `listAddons`, `builtinSources` on a core without rules): `id`, `label`
+  (the source's new optional `title`, else the id), `builtin`, `addon`
+  (name, description), `enabled`, `enabledExplicit`, `settingsSchema`,
+  `settings`, `explicit` property names, and `problems` (the configured
+  settings fail the schema: the source is off). Hand edits keep flowing via
+  `config-changed` → `getSettings`.
+- **GitHub defaults** live in `contracts/settings.ts`
+  (`DEFAULT_GITHUB_SEARCH_INTERVAL_MS`, `DEFAULT_GITHUB_WATCH_*`); the
+  github source applies exactly these and its schema carries them as
+  `default` plus `title`s (a unit test pins description = schema).
+- **GitHub & sources section** (`components/settings/GithubSection.tsx`):
+  account status from `onboarding.githubAuthStatus` (the wizard's GitHub
+  step's call) with Recheck; the github rows are `DescribedSetting`s; the
+  interval is a `CommitField` showing minutes (`format`) and committing ms
+  (`parseMinutesDraft`). Add-on sources (`autoFormSources`: every add-on
+  source, plus built-ins with options other than github / version-endpoint)
+  get a card with an on/off switch and rows from `sourceFormFields(schema)`:
+  boolean → switch, integer / number → number field (`minimum` /
+  `maximum`), string → text field (empty resets), string `enum` → select,
+  anything else → "Edit in config.json". Schema `title` is the row label
+  (else the property name), `description` the help, `default` the value
+  shown while unset. Changed dot + reset per property.
+- **Inbox & messaging section** (`InboxSection.tsx`): parent reply timeout
+  (with a "min" suffix for `unit: "minutes"`) and loop cap as described
+  rows; "Inbox priority filter" shows whether a custom filter is set (and
+  the expression) with only "Edit in config.json" (S1).
+- **Notifications (S11):** General → "Desktop notifications"
+  (`notifications.enabled`). `useTaskNotifications` reads it live from
+  `lib/config-values.ts` (a shared store of `getSettings` values /
+  explicit keys, re-read on every `config-changed`); decision
+  `notificationsEnabled` in `lib/notifications.ts`. One-time migration on
+  the first settings read (`notificationsMigration`): a legacy
+  `harbormaster.notifications = "off"` with the key unset writes
+  `notifications.enabled = false` via `updateSettings`, then the
+  localStorage key is removed (any other legacy value is just removed).
+  Main's `HARBORMASTER_NOTIFICATIONS=off` kill switch is unchanged. The
+  unread dot is not affected by the setting.
+- **Automation paused banner (S13):** `components/AutomationPausedBanner.tsx`
+  under the board header while `automation` is false ("Automation paused ·
+  Rules won't move cards", **Turn on** = `setRulesEnabled(true)`, **Open
+  Rules**); follows config.json live through the same store.
+- **Polish:** Code review lists agents by label (`ReviewSupportHarness.label`,
+  filled by core from the adapter, so custom agents show "Aider", not
+  "aider"); `SelectField` is `w-64`, the width of the text fields.
+- **e2e:** `e2e/settings.spec.ts` gained three tests on the same launch (fake
+  gh signed in as `octo-e2e`, a `pinger` add-on fixture in
+  `<stateDir>/addons/`): GitHub & sources (account, toggles,
+  minutes ⇄ ms incl. a hand edit, add-on form + schema bounds + reset);
+  Inbox & messaging + notifications switch; the board banner (hand edit off
+  → shown, on → gone, Turn on). `e2e/orca-polish.spec.ts`'s notify test
+  now also proves `notifications.enabled = false` sends no `app:notify`.

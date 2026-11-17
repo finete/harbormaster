@@ -10,6 +10,7 @@ import type {
   SettingDescription,
   SettingSectionId,
   SettingsSnapshot,
+  SettingsSource,
   SettingValue,
 } from "../../../preload/api";
 
@@ -19,14 +20,13 @@ export interface SettingsSectionInfo {
   label: string;
 }
 
-/**
- * The sections built so far, most used first (S7). GitHub & sources and
- * Inbox & messaging arrive in step 3 (S14); no empty placeholders.
- */
+/** The sections, most used first (S7). */
 export const SETTINGS_SECTIONS: readonly SettingsSectionInfo[] = [
   { id: "general", label: "General" },
   { id: "agents", label: "Agents" },
   { id: "code-review", label: "Code review" },
+  { id: "github", label: "GitHub & sources" },
+  { id: "inbox", label: "Inbox & messaging" },
 ];
 
 /** `id` when it names a built section, else the first one. */
@@ -183,4 +183,248 @@ export function modelChoices(
     choices.push({ value: current, label: `${current} (not listed)` });
   }
   return choices;
+}
+
+// --- Minutes shown for a stored millisecond value (S10) -------------------
+
+const MINUTE_MS = 60_000;
+
+/** A millisecond setting value as whole minutes (rounded) for its field. */
+export function msToMinutes(
+  value: SettingValue | null | undefined,
+): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.round(value / MINUTE_MS)
+    : null;
+}
+
+/** Minutes → the stored milliseconds. */
+export function minutesToMs(minutes: number): number {
+  return minutes * MINUTE_MS;
+}
+
+/**
+ * A minutes field's draft for a setting stored in ms (`unit: "ms"`): a
+ * whole number of minutes inside the setting's bounds (converted), at
+ * least 1; the committed value is milliseconds.
+ */
+export function parseMinutesDraft(
+  text: string,
+  setting: SettingDescription,
+): DraftResult {
+  const min = Math.max(1, Math.ceil((setting.min ?? MINUTE_MS) / MINUTE_MS));
+  const max =
+    setting.max !== undefined ? Math.floor(setting.max / MINUTE_MS) : undefined;
+  const hint =
+    max !== undefined
+      ? `Enter a whole number of minutes from ${min} to ${max}.`
+      : `Enter a whole number of minutes, at least ${min}.`;
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return { ok: false, hint };
+  const minutes = Number(trimmed);
+  if (minutes < min || (max !== undefined && minutes > max)) {
+    return { ok: false, hint };
+  }
+  return { ok: true, value: minutesToMs(minutes) };
+}
+
+// --- Add-on sources: forms drawn from a JSON Schema (S10) -----------------
+
+/** One property of a source's `settingsSchema`, as a form row. */
+export type SourceField =
+  | {
+      kind: "boolean" | "string";
+      name: string;
+      label: string;
+      help?: string;
+      default?: SettingValue;
+    }
+  | {
+      kind: "integer" | "number";
+      name: string;
+      label: string;
+      help?: string;
+      default?: SettingValue;
+      min?: number;
+      max?: number;
+    }
+  | {
+      kind: "enum";
+      name: string;
+      label: string;
+      help?: string;
+      default?: SettingValue;
+      values: string[];
+    }
+  /** Anything else (arrays, objects, unions): "Edit in config.json". */
+  | { kind: "file"; name: string; label: string; help?: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The form rows for a source's settings schema, in declaration order:
+ * boolean → switch, integer / number → number field (`minimum` /
+ * `maximum`), string → text field, a string `enum` → select, anything else
+ * → "Edit in config.json". The label is the property's `title`, else its
+ * name; `description` is the help text; a `default` of the right kind is
+ * kept (the value shown while unset).
+ */
+export function sourceFormFields(schema: unknown): SourceField[] {
+  const properties =
+    isRecord(schema) && isRecord(schema.properties) ? schema.properties : {};
+  return Object.entries(properties).map(([name, raw]) => {
+    const property = isRecord(raw) ? raw : {};
+    const label =
+      typeof property.title === "string" && property.title.trim()
+        ? property.title.trim()
+        : name;
+    const base = {
+      name,
+      label,
+      ...(typeof property.description === "string" && property.description
+        ? { help: property.description }
+        : {}),
+    };
+    const fallback = property.default;
+    const withDefault = (ok: boolean) =>
+      ok ? { default: fallback as SettingValue } : {};
+    if (
+      Array.isArray(property.enum) &&
+      property.enum.length > 0 &&
+      property.enum.every((value) => typeof value === "string")
+    ) {
+      const values = property.enum as string[];
+      return {
+        ...base,
+        kind: "enum",
+        values,
+        ...withDefault(
+          typeof fallback === "string" && values.includes(fallback),
+        ),
+      };
+    }
+    switch (property.type) {
+      case "boolean":
+        return {
+          ...base,
+          kind: "boolean",
+          ...withDefault(typeof fallback === "boolean"),
+        };
+      case "string":
+        return {
+          ...base,
+          kind: "string",
+          ...withDefault(typeof fallback === "string"),
+        };
+      case "integer":
+      case "number": {
+        const kind: "integer" | "number" = property.type;
+        return {
+          ...base,
+          kind,
+          ...(typeof property.minimum === "number"
+            ? { min: property.minimum }
+            : {}),
+          ...(typeof property.maximum === "number"
+            ? { max: property.maximum }
+            : {}),
+          ...withDefault(
+            typeof fallback === "number" &&
+              (kind === "number" || Number.isInteger(fallback)),
+          ),
+        };
+      }
+      default:
+        return { ...base, kind: "file" };
+    }
+  });
+}
+
+/** A number field's draft for a schema property (`integer` → whole numbers). */
+export function parseSourceNumberDraft(
+  text: string,
+  field: { kind: "integer" | "number"; min?: number; max?: number },
+): DraftResult {
+  const { min, max } = field;
+  const what = field.kind === "integer" ? "a whole number" : "a number";
+  const hint =
+    min !== undefined && max !== undefined
+      ? `Enter ${what} from ${min} to ${max}.`
+      : min !== undefined
+        ? `Enter ${what} of at least ${min}.`
+        : max !== undefined
+          ? `Enter ${what} up to ${max}.`
+          : `Enter ${what}.`;
+  const trimmed = text.trim();
+  if (trimmed === "") return { ok: true, value: null };
+  const pattern =
+    field.kind === "integer" ? /^-?\d+$/ : /^-?(\d+\.?\d*|\.\d+)$/;
+  if (!pattern.test(trimmed)) return { ok: false, hint };
+  const value = Number(trimmed);
+  if (
+    !Number.isFinite(value) ||
+    (min !== undefined && value < min) ||
+    (max !== undefined && value > max)
+  ) {
+    return { ok: false, hint };
+  }
+  return { ok: true, value };
+}
+
+/** A text field's draft for a schema property: trimmed; empty resets. */
+export function parseSourceTextDraft(text: string): DraftResult {
+  const trimmed = text.trim();
+  return { ok: true, value: trimmed === "" ? null : trimmed };
+}
+
+/** A configured settings value usable by a form control, else `undefined`. */
+export function sourceFieldValue(
+  source: Pick<SettingsSource, "settings">,
+  field: SourceField,
+): SettingValue | undefined {
+  const value = source.settings[field.name];
+  if (
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  return field.kind === "file" ? undefined : field.default;
+}
+
+/** Sources with their own hand-made panel or per-repository settings (S10). */
+const NOT_AUTO_FORM = new Set(["github", "version-endpoint"]);
+
+/**
+ * The sources that get an automatic form in GitHub & sources: every add-on
+ * source, and built-ins that have options (none today besides github,
+ * which has its own panel; version-endpoint is per-repository, file only).
+ */
+export function autoFormSources(
+  sources: readonly SettingsSource[] | undefined,
+): SettingsSource[] {
+  return (sources ?? []).filter(
+    (source) =>
+      !NOT_AUTO_FORM.has(source.id) &&
+      (!source.builtin || sourceFormFields(source.settingsSchema).length > 0),
+  );
+}
+
+/** `updateSettings` key for a source's on/off switch / one settings property. */
+export function sourceSettingKey(sourceId: string, property?: string): string {
+  return property === undefined
+    ? `sources.${sourceId}.enabled`
+    : `sources.${sourceId}.settings.${property}`;
+}
+
+/** The "Inbox priority filter" row's line (S1: edited in config.json only). */
+export function priorityFilterLine(
+  value: SettingValue | null | undefined,
+): string {
+  return typeof value === "string" && value.trim()
+    ? "Custom filter set"
+    : "Not set: each item's own priority applies";
 }

@@ -137,6 +137,7 @@ export type {
   SettingsHarnessOption,
   SettingsPatch,
   SettingsSnapshot,
+  SettingsSource,
   SettingType,
   SettingValue,
   Task,

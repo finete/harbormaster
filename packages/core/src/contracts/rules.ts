@@ -207,6 +207,8 @@ export interface SourceContext {
  */
 export interface Source {
   id: string;
+  /** Friendly name for the Settings page (defaults to `id`). */
+  title?: string;
   /** ms between snapshot polls; `0` = every refresh tick; absent = push only. */
   interval?: number;
   snapshot?(ctx: SourceContext): Promise<Snapshot[]>;
@@ -486,6 +488,7 @@ export interface AddonInfo {
   readOnly: boolean;
   sources: Array<{
     id: string;
+    title?: string;
     interval?: number;
     settingsSchema?: JsonSchema;
   }>;

@@ -1,14 +1,19 @@
 // Engine: the pure rules behind the settings description (docs/settings.md
 // S6): validating an `updateSettings` patch against `SETTINGS_DESCRIPTION`,
 // reading effective values / explicit keys, and diffing two configs into
-// the changed key paths that drive the manager's change reactions.
+// the changed key paths that drive the manager's change reactions. Event
+// source keys (`sources.<id>.enabled`, `sources.<id>.settings.<property>`)
+// are validated against the registered source and its own `settingsSchema`
+// (S10), described or not.
 
+import type { JsonSchema } from "../contracts/rules.js";
 import {
   SETTINGS_DESCRIPTION,
   type SettingDescription,
   type SettingsPatch,
   type SettingValue,
 } from "../contracts/settings.js";
+import { sourceSettingsProblems } from "./rules/source-settings.js";
 
 /** The described setting at `key`, if any. */
 export function settingDescription(
@@ -17,9 +22,41 @@ export function settingDescription(
   return SETTINGS_DESCRIPTION.find((entry) => entry.key === key);
 }
 
+/** A registered event source, for `sources.<id>.*` keys. */
+export interface SettingsSourceDefinition {
+  id: string;
+  settingsSchema?: JsonSchema;
+}
+
 export interface SettingsValidationContext {
   /** Registered agent ids (built-ins and custom), for `harness` settings. */
   harnessIds: readonly string[];
+  /** Registered event sources; `sources.<id>.*` keys must name one. */
+  sources?: readonly SettingsSourceDefinition[];
+  /** The source's current `sources.<id>.settings` (the patch is checked merged into it). */
+  sourceSettings?(sourceId: string): Readonly<Record<string, unknown>>;
+}
+
+/** What a `sources.<id>.…` key addresses: the on/off switch or one settings property. */
+export type SourceSettingKey =
+  | { sourceId: string; field: "enabled" }
+  | { sourceId: string; field: "settings"; property: string };
+
+/** Parse `sources.<id>.enabled` / `sources.<id>.settings.<property>`; anything else → `undefined`. */
+export function sourceSettingKey(key: string): SourceSettingKey | undefined {
+  const match = /^sources\.([^.]+)\.(?:(enabled)|settings\.([^.]+))$/.exec(key);
+  if (!match?.[1]) return undefined;
+  const sourceId = match[1];
+  if (match[2]) return { sourceId, field: "enabled" };
+  return match[3]
+    ? { sourceId, field: "settings", property: match[3] }
+    : undefined;
+}
+
+/** The property names a source's `settingsSchema` declares (`properties`). */
+export function schemaProperties(schema: JsonSchema | undefined): string[] {
+  const properties = schema?.properties;
+  return isRecord(properties) ? Object.keys(properties) : [];
 }
 
 export interface SettingsValidation {
@@ -42,21 +79,96 @@ export function validateSettingsPatch(
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     return { values, problems: ["Settings must be an object of key → value."] };
   }
+  // Per source: the settings properties this patch sets (null = removed).
+  const sourcePatches = new Map<string, Record<string, unknown>>();
   for (const [key, value] of Object.entries(patch)) {
     const setting = settingDescription(key);
-    if (!setting) {
+    const sourceKey = sourceSettingKey(key);
+    if (sourceKey) {
+      const problem = checkSourceKey(sourceKey, value, context, !!setting);
+      if (problem) {
+        problems.push(problem);
+        continue;
+      }
+    }
+    if (!setting && !sourceKey) {
       problems.push(`Unknown setting "${key}".`);
       continue;
     }
+    let next: SettingValue | null;
     if (value === null) {
-      values[key] = null;
-      continue;
+      next = null;
+    } else if (setting) {
+      const checked = checkValue(setting, value, context);
+      if (typeof checked === "object") {
+        problems.push(checked.problem);
+        continue;
+      }
+      next = checked;
+    } else {
+      next = value as SettingValue;
     }
-    const checked = checkValue(setting, value, context);
-    if (typeof checked === "object") problems.push(checked.problem);
-    else values[key] = checked;
+    values[key] = next;
+    if (sourceKey?.field === "settings") {
+      const entry = sourcePatches.get(sourceKey.sourceId) ?? {};
+      entry[sourceKey.property] = next;
+      sourcePatches.set(sourceKey.sourceId, entry);
+    }
+  }
+  // The source's own schema has the last word over its whole settings object.
+  if (problems.length === 0) {
+    for (const [sourceId, changes] of sourcePatches) {
+      const schema = context.sources?.find(
+        (source) => source.id === sourceId,
+      )?.settingsSchema;
+      const merged: Record<string, unknown> = {
+        ...(context.sourceSettings?.(sourceId) ?? {}),
+      };
+      for (const [property, value] of Object.entries(changes)) {
+        if (value === null) delete merged[property];
+        else merged[property] = value;
+      }
+      problems.push(
+        ...sourceSettingsProblems(sourceId, schema, merged).map((problem) =>
+          problem.replace(/^Config /, ""),
+        ),
+      );
+    }
   }
   return { values, problems };
+}
+
+/** A `sources.<id>.…` key's problem: unknown source / property, or a value of the wrong kind. */
+function checkSourceKey(
+  key: SourceSettingKey,
+  value: unknown,
+  context: SettingsValidationContext,
+  described: boolean,
+): string | undefined {
+  const source = context.sources?.find((entry) => entry.id === key.sourceId);
+  // Described github keys stay writable on a bare core without a source list.
+  if (!source) {
+    return described && !context.sources
+      ? undefined
+      : `Unknown source "${key.sourceId}".`;
+  }
+  if (value === null) return undefined;
+  if (key.field === "enabled") {
+    return typeof value === "boolean"
+      ? undefined
+      : `sources.${key.sourceId}.enabled must be on or off.`;
+  }
+  if (!schemaProperties(source.settingsSchema).includes(key.property)) {
+    return `Source ${key.sourceId} has no setting "${key.property}".`;
+  }
+  if (
+    typeof value !== "boolean" &&
+    typeof value !== "string" &&
+    !(typeof value === "number" && Number.isFinite(value))
+  ) {
+    return `sources.${key.sourceId}.settings.${key.property} must be on/off, a number or text (edit anything else in config.json).`;
+  }
+  return undefined;
 }
 
 function checkValue(

@@ -34,24 +34,61 @@ export function notifyTransitionEvents(
   });
 }
 
-/** localStorage key for the notifications escape hatch (no settings UI yet). */
+/**
+ * The retired localStorage escape hatch (`harbormaster.notifications =
+ * "off"`), replaced by the `notifications.enabled` setting (docs/settings.md
+ * S11). Read only to migrate it once, then removed.
+ */
 export const NOTIFICATIONS_STORAGE_KEY = "harbormaster.notifications";
 
 /**
- * Whether OS notifications are turned off via the `harbormaster.notifications
- * = "off"` localStorage escape hatch. Accepts any storage-shaped object (just
- * `getItem`) so it is testable without a real `Storage`; a storage read that
- * throws (private-browsing-style quota errors, a non-browser caller passing
- * `undefined`) is treated as "not disabled" rather than failing notifications
- * entirely.
+ * The legacy escape hatch's value, `null` when unset or unreadable (a
+ * storage read that throws, or no storage at all, never blocks
+ * notifications).
  */
-export function notificationsDisabled(
+export function legacyNotificationsValue(
   storage: Pick<Storage, "getItem"> | undefined,
-): boolean {
-  if (!storage) return false;
+): string | null {
+  if (!storage) return null;
   try {
-    return storage.getItem(NOTIFICATIONS_STORAGE_KEY) === "off";
+    return storage.getItem(NOTIFICATIONS_STORAGE_KEY);
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Settings state the notification decision reads. */
+export interface NotificationSettings {
+  /** Effective `notifications.enabled` (`undefined` until settings load). */
+  value: unknown;
+  /** Whether config.json sets `notifications.enabled`. */
+  configured: boolean;
+}
+
+/**
+ * Whether to show OS notifications: the `notifications.enabled` setting;
+ * until the one-time migration has run (config unset), a legacy "off" in
+ * localStorage still counts as off. Main's `HARBORMASTER_NOTIFICATIONS=off`
+ * kill switch applies on top, in the main process.
+ */
+export function notificationsEnabled(
+  settings: NotificationSettings,
+  legacy: string | null,
+): boolean {
+  if (settings.value === false) return false;
+  if (!settings.configured && legacy === "off") return false;
+  return true;
+}
+
+/**
+ * The one-time migration of the legacy escape hatch: a legacy "off" with
+ * the setting unset becomes `notifications.enabled = false` in config.json;
+ * any legacy value is then removed (the setting wins when both exist).
+ */
+export function notificationsMigration(
+  legacy: string | null,
+  configured: boolean,
+): { writeOff: boolean; clearLegacy: boolean } {
+  if (legacy === null) return { writeOff: false, clearLegacy: false };
+  return { writeOff: legacy === "off" && !configured, clearLegacy: true };
 }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  legacyNotificationsValue,
   NOTIFICATIONS_STORAGE_KEY,
-  notificationsDisabled,
+  notificationsEnabled,
+  notificationsMigration,
   notifyTransitionEvents,
 } from "../src/renderer/src/lib/notifications";
 
@@ -83,37 +85,78 @@ describe("notifyTransitionEvents", () => {
   });
 });
 
-describe("notificationsDisabled", () => {
+describe("legacyNotificationsValue", () => {
   function storageOf(value: string | null): Pick<Storage, "getItem"> {
     return { getItem: () => value };
   }
 
-  it("is false when the flag is unset", () => {
-    expect(notificationsDisabled(storageOf(null))).toBe(false);
+  it("reads the retired localStorage escape hatch", () => {
+    expect(legacyNotificationsValue(storageOf(null))).toBeNull();
+    expect(legacyNotificationsValue(storageOf("off"))).toBe("off");
+    expect(NOTIFICATIONS_STORAGE_KEY).toBe("harbormaster.notifications");
   });
 
-  it("is true when the flag is exactly 'off'", () => {
-    expect(notificationsDisabled(storageOf("off"))).toBe(true);
-  });
-
-  it("is false for any other value", () => {
-    expect(notificationsDisabled(storageOf("on"))).toBe(false);
-  });
-
-  it("is false when storage is unavailable", () => {
-    expect(notificationsDisabled(undefined)).toBe(false);
-  });
-
-  it("is false when storage access throws", () => {
+  it("is null when storage is unavailable or throws", () => {
+    expect(legacyNotificationsValue(undefined)).toBeNull();
     const throwing: Pick<Storage, "getItem"> = {
       getItem: () => {
         throw new Error("denied");
       },
     };
-    expect(notificationsDisabled(throwing)).toBe(false);
+    expect(legacyNotificationsValue(throwing)).toBeNull();
+  });
+});
+
+describe("notificationsEnabled (notifications.enabled, S11)", () => {
+  it("follows the setting", () => {
+    expect(notificationsEnabled({ value: true, configured: false }, null)).toBe(
+      true,
+    );
+    expect(notificationsEnabled({ value: false, configured: true }, null)).toBe(
+      false,
+    );
+    // Before settings load: on, unless the legacy hatch says off.
+    expect(
+      notificationsEnabled({ value: undefined, configured: false }, null),
+    ).toBe(true);
   });
 
-  it("uses the documented storage key", () => {
-    expect(NOTIFICATIONS_STORAGE_KEY).toBe("harbormaster.notifications");
+  it("a legacy 'off' counts until migrated, unless the setting is configured", () => {
+    expect(
+      notificationsEnabled({ value: true, configured: false }, "off"),
+    ).toBe(false);
+    expect(notificationsEnabled({ value: true, configured: true }, "off")).toBe(
+      true,
+    );
+    expect(notificationsEnabled({ value: true, configured: false }, "on")).toBe(
+      true,
+    );
+  });
+});
+
+describe("notificationsMigration", () => {
+  it("writes off and clears a legacy 'off' when the setting is unset", () => {
+    expect(notificationsMigration("off", false)).toEqual({
+      writeOff: true,
+      clearLegacy: true,
+    });
+  });
+
+  it("only clears the legacy value when the setting is set or the value is not 'off'", () => {
+    expect(notificationsMigration("off", true)).toEqual({
+      writeOff: false,
+      clearLegacy: true,
+    });
+    expect(notificationsMigration("on", false)).toEqual({
+      writeOff: false,
+      clearLegacy: true,
+    });
+  });
+
+  it("does nothing without a legacy value", () => {
+    expect(notificationsMigration(null, false)).toEqual({
+      writeOff: false,
+      clearLegacy: false,
+    });
   });
 });

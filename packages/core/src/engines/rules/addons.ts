@@ -133,6 +133,9 @@ function validateOne(
       readOnly: false,
       sources: sources.map((source) => ({
         id: source.id,
+        ...(typeof source.title === "string" && source.title.trim()
+          ? { title: source.title.trim() }
+          : {}),
         ...(source.interval !== undefined ? { interval: source.interval } : {}),
         ...(source.settingsSchema
           ? { settingsSchema: source.settingsSchema }

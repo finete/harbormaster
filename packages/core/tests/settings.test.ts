@@ -18,8 +18,10 @@ import {
   changedConfigKeys,
   explicitSettingKeys,
   settingsValues,
+  sourceSettingKey,
   validateSettingsPatch,
 } from "../src/engines/settings.js";
+import { githubSource } from "../src/engines/sources/github-source.js";
 import { type Core, createCore } from "../src/index.js";
 
 const context = { harnessIds: ["pi", "claude-code", "aider"] };
@@ -152,6 +154,106 @@ describe("validateSettingsPatch", () => {
     expect(affectsConfiguration(changed, "terminal.fontSize")).toBe(true);
     expect(affectsConfiguration(changed, "launch")).toBe(true);
     expect(affectsConfiguration(changed, "automation")).toBe(false);
+  });
+});
+
+describe("source settings (S10)", () => {
+  const pingerSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      threshold: { type: "integer", minimum: 1, title: "Threshold" },
+      mode: { type: "string", enum: ["fast", "slow"] },
+      tags: { type: "array", items: { type: "string" } },
+    },
+  };
+  const sourceContext = {
+    ...context,
+    sources: [
+      { id: "github", settingsSchema: githubSource.settingsSchema },
+      { id: "pinger", settingsSchema: pingerSchema },
+      { id: "harbormaster" },
+    ],
+    sourceSettings: (id: string) =>
+      id === "pinger" ? { mode: "fast" } : ({} as Record<string, unknown>),
+  };
+
+  it("parses source keys", () => {
+    expect(sourceSettingKey("sources.pinger.enabled")).toEqual({
+      sourceId: "pinger",
+      field: "enabled",
+    });
+    expect(sourceSettingKey("sources.pinger.settings.threshold")).toEqual({
+      sourceId: "pinger",
+      field: "settings",
+      property: "threshold",
+    });
+    expect(sourceSettingKey("sources.pinger")).toBeUndefined();
+    expect(sourceSettingKey("sources.pinger.settings.a.b")).toBeUndefined();
+    expect(sourceSettingKey("launch.maxConcurrent")).toBeUndefined();
+  });
+
+  it("accepts on/off and schema-valid properties of registered sources, and null resets", () => {
+    const result = validateSettingsPatch(
+      {
+        "sources.pinger.enabled": false,
+        "sources.pinger.settings.threshold": 3,
+        "sources.pinger.settings.mode": null,
+        "sources.harbormaster.enabled": true,
+        "sources.github.settings.searchIntervalMs": 120_000,
+      },
+      sourceContext,
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.values).toEqual({
+      "sources.pinger.enabled": false,
+      "sources.pinger.settings.threshold": 3,
+      "sources.pinger.settings.mode": null,
+      "sources.harbormaster.enabled": true,
+      "sources.github.settings.searchIntervalMs": 120_000,
+    });
+  });
+
+  it("rejects unknown sources / properties, non-scalar values and anything the source's schema refuses", () => {
+    const problems = (patch: Record<string, unknown>) =>
+      validateSettingsPatch(patch as never, sourceContext).problems.join("\n");
+    expect(problems({ "sources.nope.enabled": true })).toMatch(
+      /Unknown source "nope"/,
+    );
+    expect(problems({ "sources.pinger.enabled": "off" })).toMatch(/on or off/);
+    expect(problems({ "sources.pinger.settings.other": 1 })).toMatch(
+      /has no setting "other"/,
+    );
+    expect(problems({ "sources.harbormaster.settings.x": 1 })).toMatch(
+      /has no setting "x"/,
+    );
+    expect(problems({ "sources.pinger.settings.tags": ["a"] })).toMatch(
+      /config\.json/,
+    );
+    // The schema's own rules (minimum, enum), with the friendly path.
+    expect(problems({ "sources.pinger.settings.threshold": 0 })).toMatch(
+      /^sources\.pinger\.settings\.threshold must be >= 1/,
+    );
+    expect(problems({ "sources.pinger.settings.mode": "medium" })).toMatch(
+      /sources\.pinger\.settings\.mode must be equal to one of the allowed values/,
+    );
+    // A described github key is checked by its description and by the schema.
+    expect(
+      problems({ "sources.github.settings.watchMentions": "yes" }),
+    ).toMatch(/on or off/);
+  });
+
+  it("the github settings description matches the defaults the source applies", () => {
+    const properties = githubSource.settingsSchema?.properties as Record<
+      string,
+      { default?: unknown }
+    >;
+    for (const name of Object.keys(properties)) {
+      const setting = SETTINGS_DESCRIPTION.find(
+        (entry) => entry.key === `sources.github.settings.${name}`,
+      );
+      expect(setting?.default, name).toBe(properties[name]?.default);
+    }
   });
 });
 
@@ -420,6 +522,91 @@ describe("settings commands and change reactions", () => {
       changedKeys: ["codeRoot"],
       origin: "file",
     });
+  });
+
+  it("lists sources (built-ins and add-ons) and writes add-on settings checked against the add-on's schema", async () => {
+    const { core, root, configPath } = await setup();
+    const addonDir = join(root, "state", "addons", "pinger");
+    await mkdir(addonDir, { recursive: true });
+    await writeFile(
+      join(addonDir, "addon.json"),
+      JSON.stringify({
+        name: "pinger-addon",
+        version: "0.1.0",
+        description: "Pings things",
+        provides: { sources: ["pinger"] },
+      }),
+    );
+    await writeFile(
+      join(addonDir, "source.mjs"),
+      `export default {
+  id: "pinger",
+  title: "Pinger",
+  settingsSchema: {
+    type: "object",
+    properties: { threshold: { type: "integer", minimum: 1 } },
+  },
+  async snapshot() { return []; },
+};\n`,
+    );
+    const settings = await core.commands.getSettings();
+    expect(settings.sources.map((source) => source.id)).toEqual([
+      "harbormaster",
+      "github",
+      "version-endpoint",
+      "pinger",
+    ]);
+    expect(settings.sources.find((source) => source.id === "github")).toEqual(
+      expect.objectContaining({
+        label: "GitHub",
+        builtin: true,
+        enabled: true,
+      }),
+    );
+    expect(settings.sources.find((source) => source.id === "pinger")).toEqual({
+      id: "pinger",
+      label: "Pinger",
+      builtin: false,
+      addon: { name: "pinger-addon", description: "Pings things" },
+      enabled: true,
+      enabledExplicit: false,
+      settingsSchema: expect.objectContaining({ type: "object" }),
+      settings: {},
+      explicit: [],
+      problems: [],
+    });
+
+    const updated = await core.commands.updateSettings({
+      "sources.pinger.enabled": false,
+      "sources.pinger.settings.threshold": 4,
+    });
+    const pinger = updated.sources.find((source) => source.id === "pinger");
+    expect(pinger).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        enabledExplicit: true,
+        settings: { threshold: 4 },
+        explicit: ["threshold"],
+      }),
+    );
+    await expect(
+      core.commands.updateSettings({ "sources.pinger.settings.threshold": 0 }),
+    ).rejects.toThrow(/sources\.pinger\.settings\.threshold must be >= 1/);
+    await expect(
+      core.commands.updateSettings({ "sources.ghost.enabled": true }),
+    ).rejects.toThrow(/Unknown source "ghost"/);
+    let raw = JSON.parse(await readFile(configPath, "utf8"));
+    expect(raw.sources.pinger).toEqual({
+      enabled: false,
+      settings: { threshold: 4 },
+    });
+
+    await core.commands.updateSettings({
+      "sources.pinger.settings.threshold": null,
+      "sources.pinger.enabled": null,
+    });
+    raw = JSON.parse(await readFile(configPath, "utf8"));
+    expect(raw.sources).toBeUndefined();
   });
 
   it("an invalid hand edit reaches frontends as an error and getSettings keeps the last good values", async () => {

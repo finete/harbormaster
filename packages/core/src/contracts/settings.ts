@@ -12,6 +12,7 @@ import {
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
 } from "./model.js";
+import type { JsonSchema } from "./rules.js";
 
 /** Settings page sections, most used first (decision S7). */
 export type SettingSectionId =
@@ -62,8 +63,14 @@ export interface SettingDescription {
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 /** `notifications.enabled` default (S11). */
 export const DEFAULT_NOTIFICATIONS_ENABLED = true;
-/** The github source's search interval default (mirrors engines/sources/github-source.ts). */
+/**
+ * The github source's settings defaults (`sources.github.settings.*`).
+ * engines/sources/github-source.ts applies exactly these, so the Settings
+ * page's "changed" markers and reset agree with what the source does.
+ */
 export const DEFAULT_GITHUB_SEARCH_INTERVAL_MS = 5 * 60_000;
+export const DEFAULT_GITHUB_WATCH_REVIEW_REQUESTS = false;
+export const DEFAULT_GITHUB_WATCH_MENTIONS = false;
 
 /** Every UI-exposed setting that maps to a config key ("Settings in v1"). */
 export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
@@ -168,7 +175,7 @@ export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
   {
     key: "sources.github.settings.watchReviewRequests",
     type: "boolean",
-    default: false,
+    default: DEFAULT_GITHUB_WATCH_REVIEW_REQUESTS,
     title: "Create a task when someone requests my review",
     help: "Look for open pull requests that request your review.",
     section: "github",
@@ -176,8 +183,8 @@ export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
   {
     key: "sources.github.settings.watchMentions",
     type: "boolean",
-    default: false,
-    title: "Create a task when someone mentions me",
+    default: DEFAULT_GITHUB_WATCH_MENTIONS,
+    title: "Create a task when a pull request mentions me",
     help: "Look for open pull requests that mention you.",
     section: "github",
   },
@@ -245,6 +252,34 @@ export interface SettingsHarnessOption {
   custom: boolean;
 }
 
+/**
+ * One registered event source as the Settings page sees it (S10): built-in
+ * or from an add-on, its on/off state and its `settings` with the JSON
+ * Schema they are checked against. Written through `updateSettings` with
+ * the keys `sources.<id>.enabled` and `sources.<id>.settings.<property>`.
+ */
+export interface SettingsSource {
+  id: string;
+  /** The source's `title`, else its id. */
+  label: string;
+  /** Shipped with Harbormaster (`harbormaster`, `github`, `version-endpoint`). */
+  builtin: boolean;
+  /** The add-on providing it (absent for built-ins). */
+  addon?: { name: string; description?: string };
+  /** `sources.<id>.enabled !== false`. */
+  enabled: boolean;
+  /** `sources.<id>.enabled` is set in config.json. */
+  enabledExplicit: boolean;
+  /** JSON Schema for `settings` (properties may carry `title` / `description` / `default`). */
+  settingsSchema?: JsonSchema;
+  /** `sources.<id>.settings` as configured (empty when unset). */
+  settings: Record<string, unknown>;
+  /** Property names set in `sources.<id>.settings` (changed markers + reset). */
+  explicit: string[];
+  /** The configured settings fail the schema: the source is off until fixed. */
+  problems: string[];
+}
+
 /** `CoreCommands.getSettings`: everything the Settings page reads. */
 export interface SettingsSnapshot {
   description: readonly SettingDescription[];
@@ -256,6 +291,8 @@ export interface SettingsSnapshot {
   overriddenIn: Record<string, number>;
   /** Choices for `harness`-typed settings (built-ins, then custom agents). */
   harnesses: SettingsHarnessOption[];
+  /** Every registered event source (built-ins, then loaded add-ons), S10. */
+  sources: SettingsSource[];
   /** config.json currently fails to load; values are the last good config's (S4). */
   error?: ConfigFileError;
 }

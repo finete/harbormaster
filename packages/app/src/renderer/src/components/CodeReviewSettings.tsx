@@ -95,7 +95,9 @@ function HarnessRow({ entry }: { entry: ReviewSupportHarness }): JSX.Element {
       data-state={entry.state}
     >
       <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="font-medium">{harnessLabel(entry.harness)}</span>
+        <span className="font-medium">
+          {entry.label ?? harnessLabel(entry.harness)}
+        </span>
         <span
           className={cn(
             "flex items-center gap-1 text-xs",
@@ -140,6 +142,9 @@ export function CodeReviewSettings({
   const summary = defaultHarness
     ? harnessSupport(support, defaultHarness)
     : undefined;
+  const defaultLabel = defaultHarness
+    ? (summary?.label ?? harnessLabel(defaultHarness))
+    : "";
 
   return (
     <div
@@ -171,12 +176,12 @@ export function CodeReviewSettings({
           {!support
             ? "Checking Plannotator…"
             : !summary || summary.state === "unsupported"
-              ? `${harnessLabel(defaultHarness)} cannot start a Plannotator review.`
+              ? `${defaultLabel} cannot start a Plannotator review.`
               : summary.state === "ready"
-                ? `Plannotator review is ready for ${harnessLabel(defaultHarness)} ✓`
+                ? `Plannotator review is ready for ${defaultLabel} ✓`
                 : summary.state === "missing"
-                  ? `Plannotator is not set up for ${harnessLabel(defaultHarness)}: install it below to review an agent's changes in the app.`
-                  : `Plannotator needs an update for ${harnessLabel(defaultHarness)}: see below.`}
+                  ? `Plannotator is not set up for ${defaultLabel}: install it below to review an agent's changes in the app.`
+                  : `Plannotator needs an update for ${defaultLabel}: see below.`}
         </p>
       )}
       <div className="flex flex-col divide-y divide-border">

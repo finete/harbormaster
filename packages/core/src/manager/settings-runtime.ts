@@ -8,6 +8,7 @@
 
 import type { CoreLogger } from "../contracts/logger.js";
 import type { GlobalConfig } from "../contracts/model.js";
+import type { JsonSchema } from "../contracts/rules.js";
 import type { ConfigAccess, ConfigChange } from "../contracts/services.js";
 import {
   type ConfigFileError,
@@ -15,8 +16,10 @@ import {
   type SettingsHarnessOption,
   type SettingsPatch,
   type SettingsSnapshot,
+  type SettingsSource,
 } from "../contracts/settings.js";
 import { expandHome } from "../engines/onboarding.js";
+import { sourceSettingsProblems } from "../engines/rules/source-settings.js";
 import {
   affectsConfiguration,
   changedConfigKeys,
@@ -43,11 +46,26 @@ export interface SettingsRuntimeDeps {
   harnesses(config: GlobalConfig): SettingsHarnessOption[];
   /** Repository rediscovery under the config's `codeRoot` (warms the discovery cache). */
   rediscover(config: GlobalConfig): Promise<unknown>;
+  /**
+   * Registered event sources (built-ins, then loaded add-ons) for the
+   * GitHub & sources section and `sources.<id>.*` writes (S10); absent =
+   * no source list (described `sources.github.*` keys still validate).
+   */
+  sources?(): Promise<SettingsSourceListing[]>;
   /** Folder checks for `codeRoot`; absent = no existence check. */
   folders?: {
     homeDir(): string;
     isDirectory(path: string): Promise<boolean>;
   };
+}
+
+/** One registered source, as the rules runtime lists it. */
+export interface SettingsSourceListing {
+  id: string;
+  title?: string;
+  settingsSchema?: JsonSchema;
+  builtin: boolean;
+  addon?: { name: string; description?: string };
 }
 
 export class SettingsRuntime {
@@ -89,22 +107,43 @@ export class SettingsRuntime {
         (entry) => entry?.[field] !== undefined,
       ).length;
     }
+    const listings = (await this.listSources()) ?? [];
     return {
       description: SETTINGS_DESCRIPTION,
       values: settingsValues(config),
       explicit: explicitSettingKeys(raw),
       overriddenIn,
       harnesses: this.deps.harnesses(config),
+      sources: listings.map((listing) => sourceView(listing, config)),
       ...(error ? { error } : {}),
     };
+  }
+
+  /** The registered sources; `undefined` when this core has no source list (or it failed). */
+  private async listSources(): Promise<SettingsSourceListing[] | undefined> {
+    if (!this.deps.sources) return undefined;
+    try {
+      return await this.deps.sources();
+    } catch (error) {
+      this.deps.logger.warn("config", "listing sources failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
   }
 
   async update(patch: SettingsPatch): Promise<SettingsSnapshot> {
     const access = this.deps.config;
     if (!access.applySettings) throw new Error("settings are not writable");
     const config = await access.load();
+    const touchesSources = Object.keys(patch ?? {}).some((key) =>
+      key.startsWith("sources."),
+    );
+    const sources = touchesSources ? await this.listSources() : undefined;
     const { values, problems } = validateSettingsPatch(patch, {
       harnessIds: this.deps.harnesses(config).map((option) => option.id),
+      ...(sources ? { sources } : {}),
+      sourceSettings: (id) => config.sources?.[id]?.settings ?? {},
     });
     const root = values.codeRoot;
     if (typeof root === "string" && this.deps.folders) {
@@ -188,4 +227,31 @@ export class SettingsRuntime {
       }
     }
   }
+}
+
+/** A source's Settings view from its listing and the current config. */
+function sourceView(
+  listing: SettingsSourceListing,
+  config: GlobalConfig,
+): SettingsSource {
+  const entry = config.sources?.[listing.id];
+  const settings = { ...(entry?.settings ?? {}) };
+  return {
+    id: listing.id,
+    label: listing.title ?? listing.id,
+    builtin: listing.builtin,
+    ...(listing.addon ? { addon: listing.addon } : {}),
+    enabled: entry?.enabled !== false,
+    enabledExplicit: entry?.enabled !== undefined,
+    ...(listing.settingsSchema
+      ? { settingsSchema: listing.settingsSchema }
+      : {}),
+    settings,
+    explicit: Object.keys(settings),
+    problems: sourceSettingsProblems(
+      listing.id,
+      listing.settingsSchema,
+      settings,
+    ),
+  };
 }

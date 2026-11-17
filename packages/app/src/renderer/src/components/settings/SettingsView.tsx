@@ -11,6 +11,8 @@ import {
   Bot,
   FileDiff,
   FileJson,
+  Github,
+  Inbox,
   RotateCw,
   Settings2,
   SlidersHorizontal,
@@ -28,11 +30,15 @@ import { SidebarNavItem } from "../ui/sidebar-nav";
 import { AgentsSection } from "./AgentsSection";
 import { CodeReviewSection } from "./CodeReviewSection";
 import { GeneralSection } from "./GeneralSection";
+import { GithubSection } from "./GithubSection";
+import { InboxSection } from "./InboxSection";
 
 const SECTION_ICONS: Partial<Record<SettingSectionId, ReactNode>> = {
   general: <SlidersHorizontal />,
   agents: <Bot />,
   "code-review": <FileDiff />,
+  github: <Github />,
+  inbox: <Inbox />,
 };
 
 /** "Edit in config.json": in the last used editor, else the first installed one, else the OS default. */
@@ -212,6 +218,18 @@ export function SettingsView({
               />
             ) : section === "agents" ? (
               <AgentsSection
+                model={model}
+                snapshot={snapshot}
+                onEditConfig={editConfig}
+              />
+            ) : section === "github" ? (
+              <GithubSection
+                model={model}
+                snapshot={snapshot}
+                onEditConfig={editConfig}
+              />
+            ) : section === "inbox" ? (
+              <InboxSection
                 model={model}
                 snapshot={snapshot}
                 onEditConfig={editConfig}
