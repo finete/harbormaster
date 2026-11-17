@@ -9,9 +9,10 @@
 // the tab shows "Review sent" with Review again, which starts a new one.
 // The wizard's code review step lists Plannotator as ready for Pi.
 // A Claude Code task (fake-claude.ts) covers the other harness's seam: with
-// no `/plannotator-review` skill the Review button is disabled; a skill
-// installed after the agent started enables it, the agent answers "Unknown
-// command" and the review tab says so instead of spinning.
+// no `/plannotator-review` skill the Review button is disabled; installing
+// the skill enables it; removed again before the click (Claude re-reads
+// skills live: contract row claude.command.skill-live-remove), the agent
+// answers "Unknown command" and the review tab says so instead of spinning.
 //
 // `plannotator` is a fake on PATH (fake-plannotator.ts) unless
 // HARBORMASTER_REAL_PLANNOTATOR=1, which runs the same flow against the
@@ -204,8 +205,7 @@ test("Claude Code: no /plannotator-review skill disables Review; a rejected comm
   const review = window.getByTestId(`review-button-main-${claudeTaskId}`);
   await expect(review).toBeDisabled();
 
-  // Installed after the agent started: support reads ready (re-probed on
-  // window focus), but the running session does not know the command.
+  // Installed: support reads ready (re-probed on window focus).
   const skill = path.join(claudeConfig, "skills", "plannotator-review");
   mkdirSync(skill, { recursive: true });
   writeFileSync(
@@ -221,6 +221,9 @@ test("Claude Code: no /plannotator-review skill disables Review; a rejected comm
       { timeout: 30_000 },
     )
     .toBe(true);
+  // Removed again (no focus, so support still reads ready): the running
+  // session no longer knows the command.
+  rmSync(skill, { recursive: true, force: true });
   await review.click();
 
   await expect

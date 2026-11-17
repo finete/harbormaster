@@ -1,12 +1,29 @@
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect } from "@playwright/test";
+import { PI_CONTRACT as P } from "./contracts/pi";
+import { notReplayed } from "./contracts/types";
+
+// Every behavior below replays a row of contracts/pi.ts (checked by
+// tests/fake-contract-coverage.test.ts); the rows' strings are inlined
+// into the scripts, so the fakes say exactly what the pinned binary says.
+const READY = P.row("pi.env.program-status").facts;
+const PROBE = P.row("pi.status.probe-when-unset").facts;
+const TURN = P.row("pi.status.turn").facts;
+notReplayed(
+  "pi.prompt.after-dashdash",
+  "no fake reads its initial prompt; T1 (harness-contract.test.ts) holds the argv shape",
+);
+notReplayed(
+  "pi.prompt.at-file",
+  "as pi.prompt.after-dashdash: the adapter's '@' shield is a T1 assertion",
+);
 
 const PID_FILE = ".fake-pi.pid";
 
 /**
- * A stand-in `pi` (for `HARBORMASTER_PI_COMMAND`) that ignores its
- * arguments and runs a plain shell. A started chat (repository-less task)
+ * A stand-in `pi` (for `HARBORMASTER_PI_COMMAND`) that accepts the launch
+ * argv (rows asserted by T3), ignores it and runs a plain shell. A started chat (repository-less task)
  * gets a scratch workspace and so launches the harness in its primary pane;
  * specs that only need *a* live pane use this so the real `pi` never runs.
  *
@@ -16,6 +33,11 @@ const PID_FILE = ".fake-pi.pid";
  * presence-reporting extension, or the app distrusts it.
  */
 export function writeShellPi(dir: string): string {
+  P.row("pi.argv.session-id");
+  P.row("pi.argv.session");
+  P.row("pi.argv.fork");
+  // `exec`: the pane's pid is the agent's own.
+  P.row("pi.process.pid");
   const fakePi = path.join(dir, "fake-pi-shell");
   writeFileSync(
     fakePi,
@@ -56,14 +78,17 @@ export const STATUS_CONTROL_FILE = ".fake-pi-status";
 export const PROBE_ANSWER_FILE = ".fake-pi-probe-answer";
 
 /**
- * A stand-in `pi` that speaks the Program Status Protocol (OSC 7501) like a
- * real agent: it sends the feature-detection probe and records the
- * terminal's answer (hex) in {@link PROBE_ANSWER_FILE} (it blocks until
- * answered, so an unanswered probe never reports anything), then emits
- * whatever report body the test writes into {@link STATUS_CONTROL_FILE}
- * (e.g. `state=working`). Pid recorded like {@link writeShellPi}.
+ * A stand-in `pi` that speaks the Program Status Protocol (OSC 7501) like
+ * the real one: with `PI_PROGRAM_STATUS=1` (every Harbormaster launch) it
+ * reports `idle` at once and never probes; without it, it sends the probe,
+ * records the terminal's answer (hex) in {@link PROBE_ANSWER_FILE} and
+ * reports only once answered. Then it emits whatever report body the test
+ * writes into {@link STATUS_CONTROL_FILE} (e.g. `state=working`), tagged
+ * `app=pi` like Pi's own reports. Pid recorded like {@link writeShellPi}.
  */
 export function writeStatusPi(dir: string): string {
+  // Bodies the test writes: turn states (keyless) and blocked/error (model).
+  P.row("pi.status.blocked-error");
   const fakePi = path.join(dir, "fake-pi-status");
   writeFileSync(
     fakePi,
@@ -71,12 +96,15 @@ export function writeStatusPi(dir: string): string {
       "#!/bin/sh",
       `echo $$ > "$PWD/${PID_FILE}"`,
       "stty raw -echo",
-      "printf '\\033]7501;?\\007'",
-      `head -c 9 | od -An -tx1 | tr -d ' \\n' > "$PWD/${PROBE_ANSWER_FILE}"`,
+      `if [ "$${READY.env}" != "${READY.value}" ]; then`,
+      `  printf '%b\\007' '${PROBE.probe.replace("\u001b", "\\033")}'`,
+      `  head -c 9 | od -An -tx1 | tr -d ' \\n' > "$PWD/${PROBE_ANSWER_FILE}"`,
+      "fi",
+      `printf '\\033]7501;%s\\007' '${READY.firstReport}'`,
       "while :; do",
       `  if [ -f "$PWD/${STATUS_CONTROL_FILE}" ]; then`,
       `    body=$(cat "$PWD/${STATUS_CONTROL_FILE}"); rm -f "$PWD/${STATUS_CONTROL_FILE}"`,
-      `    printf '\\033]7501;%s\\007' "$body"`,
+      `    printf '\\033]7501;%s:${TURN.app}\\007' "$body"`,
       "  fi",
       "  sleep 0.1",
       "done",
@@ -98,18 +126,23 @@ export function writeStatusPi(dir: string): string {
  * launched child) just idle.
  */
 export function writeMcpPi(dir: string, logFile: string): string {
+  // The inbox extension (autoloaded) registers HARBORMASTER_MCP_SERVER and
+  // Pi spawns it at session start; the model then calls the tools.
+  P.row("pi.extension.autoload");
+  const server = P.row("pi.extension.mcp-server").facts;
+  P.row("pi.tools.mcp-call");
   const fakePi = path.join(dir, "fake-pi-mcp.mjs");
   const script = String.raw`#!/usr/bin/env node
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 const LOG = ${JSON.stringify(logFile)};
-process.stdout.write("\x1b]7501;state=idle\x07fake pi ready\r\n");
+process.stdout.write("\x1b]7501;${READY.firstReport}\x07fake pi ready\r\n");
 setInterval(() => {}, 1 << 30);
 try { mkdirSync(LOG + ".lock"); } catch { await new Promise(() => {}); }
 const log = { tools: [], calls: [], cli: null, error: null };
 try {
-  const config = JSON.parse(process.env.HARBORMASTER_MCP_SERVER ?? "null");
-  if (!config) throw new Error("no HARBORMASTER_MCP_SERVER");
+  const config = JSON.parse(process.env.${server.env} ?? "null");
+  if (!config) throw new Error("no ${server.env}");
   log.config = config;
   const child = spawn(config.command, config.args ?? [], {
     cwd: config.cwd,
@@ -194,12 +227,19 @@ writeFileSync(LOG, JSON.stringify(log, null, 2));
  * command, exactly the gap that made the Review button type instead.
  */
 export function writeReviewPi(dir: string, logFile: string): string {
+  // Plannotator's extension command, handled locally (Enter submits).
+  P.row("pi.command.extension");
+  const review = P.row("pi.review.plannotator").facts;
+  // Any other typed line goes to the model: no local "Unknown command".
+  P.row("pi.command.unknown-slash");
+  P.row("pi.extension.inbox");
   const fakePi = path.join(dir, "fake-pi-review.mjs");
   const script = String.raw`#!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 const LOG = ${JSON.stringify(logFile)};
-process.stdout.write("\x1b]7501;state=idle\x07fake review pi ready\r\n");
+process.stdout.write("\x1b]7501;${READY.firstReport}\x07fake review pi ready\r\n");
+const REVIEW = ${JSON.stringify(review)};
 let line = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -210,8 +250,8 @@ process.stdin.on("data", (chunk) => {
     line = line.slice(index + 1);
     if (!typed) continue;
     appendFileSync(LOG, "typed " + JSON.stringify(typed) + "\n");
-    if (typed.startsWith("/plannotator-review")) {
-      spawn("plannotator", ["review"], { stdio: ["ignore", "inherit", "inherit"] });
+    if (typed.split(/\s+/)[0] === REVIEW.command) {
+      spawn(REVIEW.runs[0], REVIEW.runs.slice(1), { stdio: ["ignore", "inherit", "inherit"] });
     }
   }
 });
@@ -244,6 +284,7 @@ export interface PiUsageTurn {
 
 /** A Pi-format assistant entry carrying `usage` + `cost`, exactly as Pi writes it (docs/costs.md "Harness file facts"). */
 export function piUsageEntry(turn: PiUsageTurn, timestamp: string): string {
+  P.row("pi.session-file.usage");
   const { model, cost, ...buckets } = turn;
   return JSON.stringify({
     type: "message",
@@ -278,9 +319,10 @@ export function writePiUsageSession(
 ): void {
   const at = (index: number) =>
     new Date(Date.now() - 60_000 + index * 1_000).toISOString();
+  const header = P.row("pi.session-file.layout").facts.header;
   const lines = [
     JSON.stringify({
-      type: "session",
+      ...header,
       id: sessionId,
       timestamp: at(0),
       cwd: path.dirname(file),
@@ -293,4 +335,13 @@ export function writePiUsageSession(
     ...turns.map((turn, index) => piUsageEntry(turn, at(index + 2))),
   ];
   writeFileSync(file, `${lines.join("\n")}\n`);
+}
+
+/** A `pi` that only answers `--version`, bare semver like the real one (onboarding/doctor detection). */
+export function writeVersionPi(dir: string, version: string): string {
+  P.row("pi.version");
+  const file = path.join(dir, "fake-pi-version");
+  writeFileSync(file, ["#!/bin/sh", `echo '${version}'`, ""].join("\n"));
+  chmodSync(file, 0o755);
+  return file;
 }
