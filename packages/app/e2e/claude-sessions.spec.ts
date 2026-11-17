@@ -135,6 +135,9 @@ test("an interactive Claude Code pane: agent dropdown, probe answered, 7501 driv
 
   const row = window.getByTestId(`sidebar-task-row-${task.id}`);
   await expect(row).toContainText("claude-code");
+  // Claude is idle at its prompt after the probe (row claude.status.ready);
+  // a turn reports working (claude.status.turn).
+  controlFakeClaude(stateDir, task.id, "working");
   await expect(row.getByTestId("sidebar-row-spinner")).toBeVisible({
     timeout: 10_000,
   });

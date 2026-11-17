@@ -41,6 +41,7 @@ import {
 } from "@playwright/test";
 import { submitAs } from "./composer";
 import { writeFakeClaude } from "./fake-claude";
+import { writeVersionPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -109,14 +110,6 @@ function readConfig(): Record<string, unknown> & {
   onboardingCompletedAt?: string;
 } {
   return JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8"));
-}
-
-/** A `pi` that only answers `--version` (the relaunch's doctor check). */
-function writeVersionPi(): string {
-  const file = path.join(root, "fake-pi-version");
-  writeFileSync(file, ["#!/bin/sh", "echo 'pi 0.0.9-e2e'", ""].join("\n"));
-  chmodSync(file, 0o755);
-  return file;
 }
 
 async function launch(
@@ -340,7 +333,7 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
   // Relaunch: straight into the app; Settings… → "Run setup again" reopens
   // the wizard.
   const second = await launch({
-    HARBORMASTER_PI_COMMAND: writeVersionPi(),
+    HARBORMASTER_PI_COMMAND: writeVersionPi(root, "0.0.9"),
     GIT_ALLOW_PROTOCOL: "file",
     FAKE_GH_AUTH_DELAY: "2",
   });

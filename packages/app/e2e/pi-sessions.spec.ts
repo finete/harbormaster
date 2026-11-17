@@ -26,12 +26,7 @@ import {
 } from "@playwright/test";
 import { dragTo } from "./board-gestures";
 import { chooseWhere, submitAs } from "./composer";
-import {
-  fakePiPid,
-  PROBE_ANSWER_FILE,
-  STATUS_CONTROL_FILE,
-  writeStatusPi,
-} from "./fake-pi";
+import { fakePiPid, STATUS_CONTROL_FILE, writeStatusPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -170,7 +165,7 @@ test.describe("a missing pi binary falls back to a plain shell with a dismissibl
   });
 });
 
-test.describe("OSC 7501 program status drives the badges: probe answered, working spinner, blocked your move, done idle, error warning", () => {
+test.describe("OSC 7501 program status drives the badges (no probe: PI_PROGRAM_STATUS=1): working spinner, blocked your move, done idle, error warning", () => {
   let app: ElectronApplication;
   let window: Page;
   let root: string;
@@ -226,17 +221,9 @@ test.describe("OSC 7501 program status drives the badges: probe answered, workin
     const report = (body: string): void =>
       writeFileSync(path.join(scratch, STATUS_CONTROL_FILE), body);
 
-    // The probe was answered by the app's pty layer (the fake blocks on it).
-    await expect
-      .poll(() => {
-        try {
-          return readFileSync(path.join(scratch, PROBE_ANSWER_FILE), "utf8");
-        } catch {
-          return "";
-        }
-      })
-      .toBe("1b5d373530313b3f07");
-
+    // No probe here: Pi with PI_PROGRAM_STATUS=1 reports without one
+    // (contract row pi.env.program-status); claude-sessions.spec.ts proves
+    // the app answers the probe.
     report("state=working");
     await expect(row.getByTestId("sidebar-row-spinner")).toBeVisible({
       timeout: 10_000,
