@@ -330,6 +330,26 @@ export interface HarnessAdapter {
    * harness has no usage reader (the task's usage is `unavailable`).
    */
   readSessionUsage?(sessionPath: string): Promise<SessionUsage | undefined>;
+
+  /**
+   * The CLI command that delivers `text` to the live session `sessionId`
+   * from outside the agent (docs/harness-additions.md X5: Codex's `codex
+   * queue`), for a follow-up or to wake an idle session. The app (the
+   * process owner) runs it and confirms the delivery; core never spawns.
+   * Optional: absent or `undefined` = no such channel (inbox hooks, the
+   * extension or typing deliver instead).
+   */
+  deliverCommand?(
+    kind: "followUp" | "wakeIdle",
+    sessionId: string,
+    text: string,
+  ): HarnessDeliverCommand | undefined;
+}
+
+/** A harness CLI invocation that hands a message to a running session from outside (Codex: `codex queue`). */
+export interface HarnessDeliverCommand {
+  command: string;
+  args: string[];
 }
 
 /** A session file's expected location: some file in `dir` whose name ends with `fileSuffix`. */

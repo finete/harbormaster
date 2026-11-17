@@ -153,6 +153,7 @@ test.beforeAll(() => {
     HARBORMASTER_CLAUDE_COMMAND: fakeClaude,
     // Pi is "not installed" here: detection must say so, not hang.
     HARBORMASTER_PI_COMMAND: path.join(root, "no-such-pi"),
+    HARBORMASTER_CODEX_COMMAND: path.join(root, "no-such-codex"),
     HARBORMASTER_GH_COMMAND: writeFakeGh(),
     HARBORMASTER_UPDATE_CHECK: "off",
   };
@@ -226,12 +227,15 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     ).toBeVisible();
     await expect(stepper.nth(1)).toHaveAttribute("data-state", "current");
 
-    // Screen 2: exactly Pi and Claude Code (no "Other CLI"); Pi is
-    // missing and shows its install command, Claude Code is found with
-    // where and which version.
+    // Screen 2: exactly the built-ins, Pi, Claude Code and Codex (no
+    // "Other CLI"); Pi and Codex are missing and show their install
+    // commands, Claude Code is found with where and which version.
     await expect(
       window.getByTestId("onboarding-agent-options").getByRole("radio"),
-    ).toHaveCount(2);
+    ).toHaveCount(3);
+    await expect(
+      window.getByTestId("onboarding-agent-codex-install"),
+    ).toContainText("npm install -g @openai/codex");
     await expect(window.getByText("Other CLI")).toHaveCount(0);
     await expect(
       window.getByTestId("onboarding-agent-claude-code-status"),

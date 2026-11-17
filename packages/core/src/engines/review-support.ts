@@ -21,6 +21,7 @@ export const REVIEW_MINIMUMS: Record<ReviewPieceId, string | undefined> = {
   "claude-plugin": "0.28.52",
   "claude-skill": undefined,
   "claude-code": "2.1.287",
+  "codex-skill": undefined,
 };
 
 const LABELS: Record<ReviewPieceId, string> = {
@@ -29,6 +30,7 @@ const LABELS: Record<ReviewPieceId, string> = {
   "claude-plugin": "Plannotator Claude Code plugin",
   "claude-skill": "Plannotator /plannotator-review skill for Claude Code",
   "claude-code": "Claude Code",
+  "codex-skill": "Plannotator $plannotator-review skill for Codex",
 };
 
 const BINARY_INSTALL = "curl -fsSL https://plannotator.ai/install.sh | bash";
@@ -53,6 +55,9 @@ const FIXES: Record<ReviewPieceId, { install: string; upgrade: string }> = {
     install: "curl -fsSL https://claude.ai/install.sh | bash",
     upgrade: "claude update",
   },
+  // The install script writes the skills into ~/.agents/skills, which
+  // Codex reads (as well as $CODEX_HOME/skills).
+  "codex-skill": { install: BINARY_INSTALL, upgrade: BINARY_INSTALL },
 };
 
 /** The Claude plugin id Plannotator ships as. */
@@ -182,6 +187,7 @@ export interface ReviewVersions {
   "claude-plugin"?: string;
   "claude-skill"?: string;
   "claude-code"?: string;
+  "codex-skill"?: string;
 }
 
 /**

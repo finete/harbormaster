@@ -49,6 +49,7 @@ import type {
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
 import type { SessionUsage } from "../contracts/usage.js";
+import { canonicalPath } from "../utilities/canonical-path.js";
 import {
   applyOpenUrlEnv,
   baseLaunchEnv,
@@ -119,6 +120,7 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
       "Esc cancel ends in idle, not done [fixture: cancel]",
       "a slash command such as /exit blips working→idle [fixture: exit]",
       "done is reported twice; done→working flicker (seen in the app, not reproduced on 2.1.326) [unrecorded]",
+      "the 7501 probe must be answered within ~1 s: answered at 1 s it reports, unanswered by ~2 s it never reports in that session, not even after a late answer (contract row claude.status.probe) [unrecorded]",
     ],
   },
   delivery: {
@@ -340,12 +342,12 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     this.configDir = options.configDir;
   }
 
-  /** `<configDir>/projects/<cwd slug>/<sessionId>.jsonl`. */
+  /** `<configDir>/projects/<slug of the resolved cwd>/<sessionId>.jsonl` (Claude slugs `process.cwd()`: `/tmp` → `/private/tmp` on macOS). */
   expectedSessionFile(
     cwd: string,
     sessionId: string,
   ): ExpectedSessionFile | undefined {
-    const slug = claudeProjectSlug(cwd);
+    const slug = claudeProjectSlug(canonicalPath(cwd));
     if (!slug) return undefined;
     return {
       dir: join(this.configDir ?? claudeConfigDir(), "projects", slug),

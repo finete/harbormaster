@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CLAUDE_CODE_CONTRACT } from "../e2e/contracts/claude-code";
+import { CODEX_CONTRACT } from "../e2e/contracts/codex";
 import { PI_CONTRACT } from "../e2e/contracts/pi";
 import type { ContractRow } from "../e2e/contracts/types";
 
@@ -39,6 +40,7 @@ const CASES: Array<{
 }> = [
   { fake: "fake-claude.ts", contract: CLAUDE_CODE_CONTRACT },
   { fake: "fake-pi.ts", contract: PI_CONTRACT },
+  { fake: "fake-codex.ts", contract: CODEX_CONTRACT },
 ];
 
 describe.each(CASES)(
@@ -85,8 +87,17 @@ describe.each(CASES)(
 
 describe("contract tables", () => {
   it("ids are unique, prefixed by harness, and facts are JSON values", () => {
-    for (const contract of [CLAUDE_CODE_CONTRACT, PI_CONTRACT]) {
-      const prefix = contract.harness === "claude-code" ? "claude." : "pi.";
+    const prefixes: Record<string, string> = {
+      "claude-code": "claude.",
+      pi: "pi.",
+      codex: "codex.",
+    };
+    for (const contract of [
+      CLAUDE_CODE_CONTRACT,
+      PI_CONTRACT,
+      CODEX_CONTRACT,
+    ]) {
+      const prefix = prefixes[contract.harness] ?? "?";
       for (const row of contract.rows) {
         expect(row.id.startsWith(prefix), row.id).toBe(true);
         expect(JSON.parse(JSON.stringify(row.facts))).toEqual(row.facts);
@@ -101,5 +112,6 @@ describe("contract tables", () => {
     expect(T3).toContain(
       `"@earendil-works/pi-coding-agent@${PI_CONTRACT.version}"`,
     );
+    expect(T3).toContain(`"@openai/codex@${CODEX_CONTRACT.version}"`);
   });
 });

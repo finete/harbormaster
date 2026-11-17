@@ -389,4 +389,11 @@ export interface ReviewSupportProbeAccess {
    * without it Claude answers "Unknown command".
    */
   claudeReviewSkill(): Promise<string | undefined>;
+  /**
+   * The `plannotator-review` skill's `SKILL.md` text where Codex finds
+   * user skills (`$CODEX_HOME/skills`, then `~/.agents/skills`, where
+   * Plannotator's install script puts it), if installed. Codex runs it as
+   * `$plannotator-review` (docs/harness-additions.md X9).
+   */
+  codexReviewSkill(): Promise<string | undefined>;
 }

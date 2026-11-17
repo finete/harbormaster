@@ -29,11 +29,13 @@ exists.
 
 | File | What goes there |
 |---|---|
-| `packages/core/src/harness/<id>-adapter.ts` | The `HarnessAdapter`: `descriptor` (id, label, binary aliases in lookup order, `commandEnv` from `harnessCommandEnvName(id)`, install/upgrade one-liners, `versionArgs` + `parseVersion`, `minVersion`, `verifiedVersion`, `configDir`, `reviewPieces`, `isShim`), `capabilities` (must agree with `messaging`), launch spec, presence, `interpretProgramStatus`. Shared helpers: `harness/descriptor.ts`, `harness/adapter-common.ts`. |
+| `packages/core/src/harness/<id>-adapter.ts` | The `HarnessAdapter`: `descriptor` (id, label, binary aliases in lookup order, `commandEnv` from `harnessCommandEnvName(id)`, install/upgrade one-liners, `versionArgs` + `parseVersion`, `minVersion`, `verifiedVersion`, `configDir`, `reviewPieces`, `isShim`), `capabilities` (must agree with `messaging`), launch spec, presence, `interpretProgramStatus`. Shared helpers: `harness/descriptor.ts`, `harness/adapter-common.ts`, `harness/toml-value.ts` (CLIs configured with TOML `-c` overrides). A harness that picks its own session ids declares `capabilities.sessionId: "learned"` (core then persists no placeholder id; a session-start hook reports the real one through the `session_start` op); one that can hand a message to a live session from outside implements `deliverCommand(kind, sessionId, text)` (the app runs it, see `main/harness-delivery.ts`; Codex: `codex queue`). `expectedSessionFile` receives the cwd as given; resolve it with `canonicalPath` (agents key their files by the real path). |
 | `packages/core/src/access/<id>-*.ts` | Its resource access: model catalog, transcripts, session usage reader. |
 | `packages/core/src/harness/registry.ts` | One line in `createHarnessRegistry`'s built-in list. |
 | `packages/app/e2e/contracts/<id>.ts`, `packages/app/e2e/fake-<id>.ts`, `packages/app/e2e/<id>-sessions.spec.ts` | Contract table, the fake replaying it, the T2 spec. |
-| `packages/core/tests/fixtures/status/<id>/<version>/*.txt` | Recorded 7501 dialect fixtures (S1). |
+| `packages/core/tests/fixtures/status/<id>/<version>/*.txt` | Recorded 7501 dialect fixtures (S1): `scripts/record-harness-status.mjs --harness <id> --scenario all [--command <pinned binary>]`. |
+| `packages/app/tests/real-cli-smoke.test.ts` | T3: `PINNED` entry + one `rowIt` per keyless row (keyless model stubs: Messages API for Claude/Pi, Responses API for Codex). |
+| `packages/app/e2e/real-smoke.spec.ts` | T4 cases for the harness (Setup ready, Review, the S4 presence scenario). |
 
 `packages/core/tests/harness-contract.test.ts` picks the adapter up from the
 registry by itself ("descriptor complete": every field filled,

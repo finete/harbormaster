@@ -113,6 +113,11 @@ import {
   isAllowedExternalUrl,
 } from "./external-url";
 import {
+  deliverableMessages,
+  HarnessDeliveries,
+  queueTextFor,
+} from "./harness-delivery";
+import {
   decideStartup,
   describeStartupDecision,
   type StartupDecision,
@@ -176,12 +181,16 @@ import {
 } from "./ptySessions";
 import { canonicalLocalPath, isAllowedRevealPath } from "./reveal-path";
 import {
+  agentAtPrompt,
   createCommandRejectedMatcher,
   decideReviewTransport,
   QueuedReviews,
   REVIEW_REJECT_WATCH_MS,
   type ReviewDelivery,
+  type ReviewPresence,
   typeCommand,
+  typedCommandText,
+  typeText,
 } from "./review-transport";
 import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
@@ -485,6 +494,10 @@ async function harnessForTask(taskId: string): Promise<HarnessAdapter> {
 // presence right away instead of waiting out the poll interval.
 setProgramStatusListener({
   onReport: (taskId, pid, report) => {
+    // A queued delivery (`codex queue`) is confirmed by the turn it starts.
+    if (report.state === "working") {
+      void harnessDeliveries.confirm(taskId).catch(() => {});
+    }
     void core.commands
       .reportPresence(taskId, {
         state: report.state,
@@ -516,7 +529,7 @@ async function typeReviewCommand(
   const stopWatching = watchReviewRejection(taskId, command);
   const typed = await typeCommand(
     (data) => writeToPrimarySession(taskId, data),
-    command,
+    typedCommandText(command),
   );
   // The user's own submit (the button), like Enter in the pane.
   if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
@@ -549,6 +562,126 @@ function watchReviewRejection(taskId: string, command: string): () => void {
   return stop;
 }
 
+// Follow-ups, idle wake-ups and the Review command through the harness's
+// own deliver command (Codex: `codex queue`, docs/harness-additions.md X5),
+// see harness-delivery.ts: pending until the agent's next turn confirms it,
+// else typed after a minute at its prompt.
+const harnessDeliveries = new HarnessDeliveries({
+  now: () => Date.now(),
+  run: (command) =>
+    new Promise((resolve) => {
+      execFile(
+        command.command,
+        command.args,
+        { timeout: 15_000, maxBuffer: 256 * 1024 },
+        (error, _stdout, stderr) => {
+          if (error) {
+            console.error(
+              `[delivery] ${basename(command.command)} ${command.args[0] ?? ""} failed: ${
+                String(stderr || error.message)
+                  .trim()
+                  .split("\n")[0]
+              }`,
+            );
+          }
+          resolve(!error);
+        },
+      );
+    }),
+  claim: async (taskId, messageIds) =>
+    (
+      await core.commands.claimInboxMessages(taskId, {
+        idle: true,
+        messageIds,
+      })
+    ).length,
+  type: async (taskId, text) => {
+    const typed = await typeText(
+      (data) => writeToPrimarySession(taskId, data),
+      text,
+    );
+    if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
+    return typed;
+  },
+  onEvent: (event, details) =>
+    console.log(`[delivery] ${event} ${JSON.stringify(details)}`),
+});
+
+/**
+ * Hands the Review command to the agent through its deliver command when
+ * the harness has one and knows its session (`messageId` = the pending
+ * message it settles, if any); whether it did. Otherwise the caller types.
+ */
+async function queueReviewCommand(
+  taskId: string,
+  command: string,
+  messageId: string | undefined,
+): Promise<boolean> {
+  const deliver = await core.commands
+    .harnessDeliverCommand(taskId, "wakeIdle", command)
+    .catch(() => undefined);
+  if (!deliver) return false;
+  return harnessDeliveries.send(
+    taskId,
+    deliver,
+    command,
+    messageId ? [messageId] : [],
+  );
+}
+
+/**
+ * One wake pass for harnesses with a deliver command: every task whose
+ * agent sits at its prompt in a live pane of ours and has pending messages
+ * gets them as one queued delivery; overdue ones fall back to typing.
+ */
+let deliveryPassRunning = false;
+async function runHarnessDeliveryPass(
+  presence: Record<string, ReviewPresence | undefined>,
+): Promise<void> {
+  if (deliveryPassRunning) return;
+  deliveryPassRunning = true;
+  try {
+    const state = (taskId: string) => ({
+      pane: Boolean(lookupPanePid(taskId)),
+      atPrompt: agentAtPrompt(presence[taskId]),
+    });
+    await harnessDeliveries.tick(state);
+    const ready = Object.keys(presence).filter((taskId) => {
+      const { pane, atPrompt } = state(taskId);
+      return pane && atPrompt && !harnessDeliveries.has(taskId);
+    });
+    if (ready.length === 0) return;
+    const pendingTargets = new Set(
+      await core.commands.listTasksWithPendingMessages(),
+    );
+    for (const taskId of ready) {
+      if (!pendingTargets.has(taskId)) continue;
+      const messages = deliverableMessages(
+        taskId,
+        await core.commands.listMessages({ taskId }),
+      );
+      if (messages.length === 0) continue;
+      const text = queueTextFor(messages);
+      const deliver = await core.commands.harnessDeliverCommand(
+        taskId,
+        "wakeIdle",
+        text,
+      );
+      if (!deliver) continue;
+      await harnessDeliveries.send(
+        taskId,
+        deliver,
+        text,
+        messages.map((message) => message.id),
+      );
+    }
+  } catch (error) {
+    console.error("[delivery] pass failed:", error);
+  } finally {
+    deliveryPassRunning = false;
+  }
+}
+
 const queuedReviews = new QueuedReviews({
   claim: async (taskId, messageId) =>
     (
@@ -557,7 +690,10 @@ const queuedReviews = new QueuedReviews({
         messageIds: [messageId],
       })
     ).length > 0,
-  type: typeReviewCommand,
+  // Claimed already: a harness with a deliver command gets it that way.
+  type: async (taskId, command) =>
+    (await queueReviewCommand(taskId, command, undefined)) ||
+    typeReviewCommand(taskId, command),
   onError: (taskId, error) =>
     console.error(`[review] queued review for ${taskId} failed:`, error),
 });
@@ -576,10 +712,31 @@ async function requestReviewFromButton(input: {
     : undefined;
   const transport = decideReviewTransport({ pane: !!pane, presence });
   if (transport === "type") {
+    // A harness with a deliver command (Codex) gets the command that way,
+    // as a pending message settled by its next turn (X5, X9).
     const { command } = await core.commands.requestReview({
       ...request,
       deliver: "none",
     });
+    const deliver = await core.commands
+      .harnessDeliverCommand(input.taskId, "wakeIdle", command)
+      .catch(() => undefined);
+    if (deliver) {
+      const result = await core.commands.requestReview({
+        ...request,
+        deliver: "message",
+      });
+      const ids = result.messageId ? [result.messageId] : [];
+      if (await harnessDeliveries.send(input.taskId, deliver, command, ids)) {
+        void core.commands.recordUserInput(input.taskId).catch(() => {});
+        return { command, delivery: "typed" };
+      }
+      if (result.messageId) {
+        queuedReviews.add(input.taskId, result.messageId, command);
+        return { command, delivery: "queued" };
+      }
+      return { command, delivery: "message" };
+    }
     if (await typeReviewCommand(input.taskId, command)) {
       return { command, delivery: "typed" };
     }
@@ -1443,6 +1600,8 @@ async function pollPresenceTick(): Promise<number> {
     pane: Boolean(lookupPanePid(taskId)),
     presence: payload[taskId],
   }));
+  // Messages for an idle agent with a deliver command (Codex: `codex queue`).
+  void runHarnessDeliveryPass(payload);
   // Warm closed-tab sessions: remember who is mid-turn (never evicted), and
   // end any whose task left the active set (Done, deleted) so a merged
   // task's worktree cleanup isn't blocked by a lingering pi.

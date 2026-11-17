@@ -1,4 +1,5 @@
 export * from "./atomic-json.js";
+export * from "./canonical-path.js";
 export * from "./concurrency.js";
 export * from "./core-log.js";
 export * from "./defaults.js";

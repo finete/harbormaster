@@ -1,0 +1,63 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "cancel",
+  "recordedAt": "2026-11-17T16:36:57.765Z",
+  "prompts": [
+    "Count from 1 to 300, one number per line, with no other text. Do not use any tools."
+  ],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 18406,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 3365
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3499
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 5268
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6834
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 9546
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle", "working", "idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

@@ -39,6 +39,7 @@ import type {
 } from "../contracts/github.js";
 import type {
   HarnessAdapter,
+  HarnessDeliverCommand,
   HarnessDescriptorInfo,
   HarnessModelCatalog,
   PresenceStatus,
@@ -1259,6 +1260,21 @@ export class CoreManager implements CoreCommands {
     return this.sessionFiles.check();
   }
 
+  async harnessDeliverCommand(
+    taskId: string,
+    kind: "followUp" | "wakeIdle",
+    text: string,
+  ): Promise<HarnessDeliverCommand | undefined> {
+    const task = await this.deps.tasks.getTask(taskId);
+    if (!task || (!this.deps.harness && !this.deps.harnesses)) return undefined;
+    const adapter = await this.harnessFor(task);
+    if (!adapter.deliverCommand) return undefined;
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    // A learned id is only real once the harness reported its file.
+    if (!binding?.sessionId || !binding.sessionPath) return undefined;
+    return adapter.deliverCommand(kind, binding.sessionId, text);
+  }
+
   private async decideSessionLaunch(
     taskId: string,
   ): Promise<SessionLaunch | undefined> {
@@ -1282,16 +1298,30 @@ export class CoreManager implements CoreCommands {
       if (next) task = next;
     }
 
+    // A harness that picks its own session ids (Codex: `sessionId:
+    // "learned"`) reports them from its session-start hook
+    // (`recordTaskSession`, which always records id + file). Until then the
+    // binding holds no id: a pre-assigned one would be resumed by a harness
+    // that never heard of it. An id without a recorded file is such a
+    // placeholder (a reopen pre-assigns one) and is ignored.
+    const learned = await this.harnessLearnsSessionIds(task);
+    const boundSessionId =
+      learned && !binding.sessionPath ? undefined : binding.sessionId;
+
     // First launch after `reopenTask`: hand the pending fork out exactly
     // once, so later launches resume the forked session instead of forking
     // the previous cycle again.
     if (binding.forkFromSessionPath) {
       const forkFrom = binding.forkFromSessionPath;
-      const sessionId = binding.sessionId ?? this.deps.ids.next();
-      const { forkFromSessionPath: _consumed, ...rest } = binding;
+      const sessionId = boundSessionId ?? this.deps.ids.next();
+      const {
+        forkFromSessionPath: _consumed,
+        sessionId: _placeholder,
+        ...rest
+      } = binding;
       await this.deps.bindings.replaceBinding({
         ...rest,
-        sessionId,
+        ...(learned ? {} : { sessionId }),
         updatedAt: now,
       });
       return (await this.deps.sessions.exists(forkFrom))
@@ -1299,7 +1329,7 @@ export class CoreManager implements CoreCommands {
         : { mode: "new", sessionId };
     }
 
-    if (binding.sessionId) {
+    if (boundSessionId) {
       const sessionPath =
         binding.sessionPath &&
         (await this.deps.sessions.exists(binding.sessionPath))
@@ -1307,7 +1337,7 @@ export class CoreManager implements CoreCommands {
           : undefined;
       return {
         mode: "resume",
-        sessionId: binding.sessionId,
+        sessionId: boundSessionId,
         ...(sessionPath ? { sessionPath } : {}),
       };
     }
@@ -1337,12 +1367,14 @@ export class CoreManager implements CoreCommands {
     if (task.initialPromptDeliveredAt) return { mode: "continue" };
 
     // A recorded file that is gone must not survive next to the fresh id:
-    // a later resume would open it under an id it does not carry.
-    const { sessionPath: _gone, ...fresh } = binding;
+    // a later resume would open it under an id it does not carry. A
+    // harness that learns its ids gets none persisted (see above); the id
+    // handed out is only a placeholder for the launch decision.
+    const { sessionPath: _gone, sessionId: _placeholder, ...fresh } = binding;
     const sessionId = this.deps.ids.next();
     await this.deps.bindings.replaceBinding({
       ...fresh,
-      sessionId,
+      ...(learned ? {} : { sessionId }),
       updatedAt: now,
     });
     // First-ever launch: pass the task's model/thinking through to the
@@ -1383,6 +1415,18 @@ export class CoreManager implements CoreCommands {
     };
   }
 
+  /** Whether the task's harness reports its own session ids (`capabilities.sessionId === "learned"`). */
+  private async harnessLearnsSessionIds(task: Task): Promise<boolean> {
+    if (!this.deps.harness && !this.deps.harnesses) return false;
+    try {
+      return (
+        (await this.harnessFor(task)).capabilities?.sessionId === "learned"
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async recordTaskSession(
     taskId: string,
     input: RecordTaskSessionInput,
@@ -1414,7 +1458,15 @@ export class CoreManager implements CoreCommands {
     if (!input.sessionId || !input.sessionPath) return false;
     const binding = await this.deps.bindings.getBindingForTask(taskId);
     if (!binding) return false;
-    if (binding.sessionId) {
+    // A learned-id harness's binding id without a recorded file is a
+    // placeholder (see decideSessionLaunch): the first report binds.
+    const task = await this.deps.tasks.getTask(taskId);
+    const placeholder =
+      !!binding.sessionId &&
+      !binding.sessionPath &&
+      !!task &&
+      (await this.harnessLearnsSessionIds(task));
+    if (binding.sessionId && !placeholder) {
       if (binding.sessionId !== input.sessionId) {
         // Another conversation started inside the task's pane (e.g. Pi's
         // /new): the binding stays authoritative, like pi-home's. Unless it
@@ -4615,13 +4667,15 @@ const REVIEW_SUPPORT_CACHE_MS = 60_000;
 async function probeReviewVersions(
   probes: ReviewSupportProbeAccess,
 ): Promise<ReviewVersions> {
-  const [binary, manifest, plugins, claude, skill] = await Promise.all([
-    probes.plannotatorVersion(),
-    probes.piExtensionManifest(),
-    probes.claudePluginList(),
-    probes.claudeVersion(),
-    probes.claudeReviewSkill(),
-  ]);
+  const [binary, manifest, plugins, claude, skill, codexSkill] =
+    await Promise.all([
+      probes.plannotatorVersion(),
+      probes.piExtensionManifest(),
+      probes.claudePluginList(),
+      probes.claudeVersion(),
+      probes.claudeReviewSkill(),
+      probes.codexReviewSkill(),
+    ]);
   const versions: ReviewVersions = {};
   const found = {
     binary: parseSemver(binary),
@@ -4629,6 +4683,7 @@ async function probeReviewVersions(
     "claude-plugin": claudePluginVersion(plugins),
     "claude-code": parseSemver(claude),
     "claude-skill": skill?.trim() ? "found" : undefined,
+    "codex-skill": codexSkill?.trim() ? "found" : undefined,
   } as const;
   for (const [id, version] of Object.entries(found)) {
     if (version) versions[id as keyof ReviewVersions] = version;

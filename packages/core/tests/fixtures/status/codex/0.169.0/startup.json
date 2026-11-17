@@ -1,0 +1,51 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "startup",
+  "recordedAt": "2026-11-17T16:32:30.749Z",
+  "prompts": [],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 12760,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 3370
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3501
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 6677
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

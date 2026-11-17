@@ -8,11 +8,22 @@
 //
 // What it drives, offscreen, on a local clone of this repository (origin
 // github.com/finete/harbormaster, so the refresh loop's PR lookups are
-// real): a Pi task and a Claude Code task, each with a dirty worktree;
-// their panes start the real agents; the Review button must bring up a
-// real Plannotator page in the task's review tab. Claude runs the skill
-// through its model (a few tokens). Then a refresh tick through real gh
-// must raise no warning toast, and main must log no uncaughtException.
+// real): a Pi task, a Claude Code task and a Codex task, each with a dirty
+// worktree; their panes start the real agents; the Review button must
+// bring up a real Plannotator page in the task's review tab. Claude and
+// Codex run the skill through their model (a few tokens). Codex also runs
+// the presence scenario (docs/harness-additions.md S4): a turn that leaves
+// `sleep 120` running in the background must end at "your move", never
+// spinning; its Review then goes through `codex queue` (X5, X9). Then a
+// refresh tick through real gh must raise no warning toast, and main must
+// log no uncaughtException.
+//
+// Codex: this machine may have no real `codex` on PATH (only a terminal
+// shim), so the Codex cases run only with HARBORMASTER_REAL_SMOKE_CODEX=<path
+// to a codex binary> (e.g. the real-CLI tier's pinned install,
+// <prefix>/node_modules/.bin/codex); without it they are skipped with that
+// message and the marker does not list codex. Codex uses the real
+// ~/.codex (its login); trusting the worktree there is Codex's own write.
 //
 // State, worktrees and the Electron profile live in a temp dir. Agent
 // session files land in the real ~/.pi / ~/.claude (the agents need the
@@ -55,10 +66,16 @@ const REPO_ID = "github.com/finete/harbormaster";
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const repoRoot = path.join(__dirname, "..", "..", "..");
 const cliBin = path.join(repoRoot, "packages", "cli", "bin", "harbormaster.js");
+/** A real Codex binary for the Codex cases (see the header); absent = skipped. */
+const CODEX = process.env.HARBORMASTER_REAL_SMOKE_CODEX || undefined;
+const CODEX_SKIP =
+  "Codex: set HARBORMASTER_REAL_SMOKE_CODEX=<path to a real codex> (e.g. <real-CLI prefix>/node_modules/.bin/codex) to run the Codex cases";
 /** Built-in harnesses this smoke covers (recorded in the marker). */
-const HARNESSES = ["pi", "claude-code"] as const;
-/** Number of `test(...)` cases below; the marker needs every one passed. */
-const SMOKE_TESTS = 4;
+const HARNESSES = CODEX
+  ? (["pi", "claude-code", "codex"] as const)
+  : (["pi", "claude-code"] as const);
+/** Number of `test(...)` cases that run below; the marker needs every one passed. */
+const SMOKE_TESTS = CODEX ? 6 : 4;
 const MARKER = path.join(repoRoot, ".real-smoke-ok");
 /**
  * The PATH a Dock launch would see for agents: a terminal multiplexer's
@@ -76,7 +93,11 @@ let app: ElectronApplication;
 let window: Page;
 let root: string;
 let stateDir: string;
-const tasks: Record<"pi" | "claude", string> = { pi: "", claude: "" };
+const tasks: Record<"pi" | "claude" | "codex", string> = {
+  pi: "",
+  claude: "",
+  codex: "",
+};
 const mainProcessErrors: string[] = [];
 const mainLog: string[] = [];
 let passedTests = 0;
@@ -143,12 +164,25 @@ function missingLogins(): string[] {
   } catch (error) {
     missing.push(`pi (${(error as Error).message}; run \`pi\` and /login)`);
   }
+  if (CODEX) {
+    try {
+      execFileSync(CODEX, ["login", "status"], {
+        encoding: "utf8",
+        timeout: 60_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      missing.push(
+        `codex (${(error as Error).message.split("\n")[0]}; run \`codex login\`)`,
+      );
+    }
+  }
   return missing;
 }
 
 test.afterEach(() => {
   if (test.info().status === "passed") passedTests += 1;
-  else failedTests += 1;
+  else if (test.info().status !== "skipped") failedTests += 1;
 });
 
 test.beforeAll(async () => {
@@ -178,15 +212,17 @@ test.beforeAll(async () => {
     JSON.stringify({ automation: false, codeRoot, branchPrefix: "smoke/" }),
   );
   const seed = createCore({ stateDir });
-  for (const harness of ["pi", "claude-code"] as const) {
+  for (const harness of HARNESSES) {
     const task = await seed.commands.createTask({
       title: `Real smoke ${harness}`,
       initialPrompt: "",
       repositoryId: REPO_ID,
       harness,
+      // Codex: cheap turns (the scenario does not depend on the effort).
+      ...(harness === "codex" ? { thinking: "low" as const } : {}),
       start: true,
     });
-    tasks[harness === "pi" ? "pi" : "claude"] = task.id;
+    tasks[harness === "claude-code" ? "claude" : harness] = task.id;
     const binding = await seed.commands.getTaskWorkspace(task.id);
     if (!binding?.worktreePath) throw new Error(`no worktree for ${harness}`);
     writeFileSync(
@@ -205,6 +241,7 @@ test.beforeAll(async () => {
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PI_EXTENSIONS_DIR: path.join(root, "pi-extensions"),
       HARBORMASTER_CLI_PATH: cliBin,
+      ...(CODEX ? { HARBORMASTER_CODEX_COMMAND: CODEX } : {}),
     },
   });
   const onChunk = (chunk: Buffer): void => {
@@ -246,10 +283,38 @@ function plannotatorServersUnder(dir: string): number[] {
   return pids;
 }
 
+/** Every process whose cwd is under `dir` (the scenario's `sleep 120`, an agent's leftovers). */
+function processesUnder(dir: string): number[] {
+  try {
+    return execFileSync("lsof", ["-t", "-a", "-d", "cwd", "+D", dir], {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .map(Number)
+      .filter((pid) => pid > 0 && pid !== process.pid);
+  } catch {
+    return []; // none (lsof exits 1)
+  }
+}
+
+/** How many `sleep 120` processes run on this machine (the S4 scenario's). */
+function sleepsRunning(): number {
+  try {
+    return execFileSync("pgrep", ["-f", "^sleep 120$"], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean).length;
+  } catch {
+    return 0; // none (pgrep exits 1)
+  }
+}
+
 test.afterAll(async () => {
   await app?.close().catch(() => {});
   if (root) {
-    for (const pid of plannotatorServersUnder(realpathSync(root))) {
+    for (const pid of [
+      ...plannotatorServersUnder(realpathSync(root)),
+      ...processesUnder(realpathSync(root)),
+    ]) {
       try {
         process.kill(pid);
       } catch {
@@ -310,6 +375,16 @@ async function openAndSettle(
     .poll(
       async () => {
         const text = await screenText(taskId);
+        // Codex: "Trust this folder?", option 1 "Trust and continue" selected.
+        if (
+          /Trust this folder\?/.test(text) &&
+          /Trust and continue/.test(text)
+        ) {
+          trustDialog = true;
+          await workspace.locator(".xterm").first().click();
+          await window.keyboard.press("Enter");
+          return false;
+        }
         if (/Yes, I trust this folder/.test(text)) {
           trustDialog = true;
           const selected = text
@@ -370,7 +445,7 @@ async function reviewShowsRealPlannotator(taskId: string): Promise<void> {
   await expect(page.locator("body")).not.toBeEmpty({ timeout: 30_000 });
 }
 
-test("Setup reads Plannotator ready for Pi and Claude Code on this machine", async () => {
+test("Setup reads Plannotator ready for Pi, Claude Code (and Codex) on this machine", async () => {
   const support = await window.evaluate(() =>
     window.harbormaster.core.reviewSupport({ refresh: true }),
   );
@@ -382,6 +457,16 @@ test("Setup reads Plannotator ready for Pi and Claude Code on this machine", asy
     byHarness["claude-code"]?.state,
     JSON.stringify(byHarness["claude-code"]),
   ).toBe("ready");
+  if (CODEX) {
+    // Binary + the $plannotator-review skill (codex-skill, X9).
+    expect(byHarness.codex?.state, JSON.stringify(byHarness.codex)).toBe(
+      "ready",
+    );
+    expect(byHarness.codex?.pieces.map((piece) => piece.id)).toEqual([
+      "binary",
+      "codex-skill",
+    ]);
+  }
 });
 
 test("Pi: Review opens the real Plannotator page in the review tab", async () => {
@@ -401,6 +486,94 @@ test("Claude Code: Review opens the real Plannotator page in the review tab", as
     description: String(trustDialog),
   });
   await reviewShowsRealPlannotator(tasks.claude);
+});
+
+test("Codex: a turn leaving `sleep 120` in the background ends at your move, never running (S4)", async () => {
+  test.skip(!CODEX, CODEX_SKIP);
+  const taskId = tasks.codex;
+  const core = createCore({ stateDir });
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${taskId}`).click();
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  await expect(workspace.getByTestId("terminal-tab").first()).toBeVisible();
+  // Ready = Codex's first 7501 idle, which follows the folder-trust answer
+  // (the dialog itself reports nothing; its prompt line shows behind it).
+  await expect
+    .poll(
+      async () => {
+        const text = await screenText(taskId);
+        if (
+          /Trust this folder\?/.test(text) &&
+          /Trust and continue/.test(text)
+        ) {
+          await workspace.locator(".xterm").first().click();
+          await window.keyboard.press("Enter");
+          return "trust";
+        }
+        return (
+          (await core.commands.getPresence(taskId)).record?.status?.state ??
+          "none"
+        );
+      },
+      { timeout: 90_000, intervals: [1_000] },
+    )
+    .toBe("idle");
+  await workspace.locator(".xterm").first().click();
+  await window.keyboard.type(
+    "Run `sleep 120` in the background, then reply with exactly the word DONE",
+  );
+  await window.waitForTimeout(300); // Enter on its own, like a person
+  await window.keyboard.press("Enter");
+  // The turn runs, then ends: done (OSC 9 carries the reply) while the
+  // background sleep keeps running.
+  await expect
+    .poll(async () => (await core.commands.getPresence(taskId)).runningTurn, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const presence = await core.commands.getPresence(taskId);
+        return presence.runningTurn
+          ? "running"
+          : (presence.record?.status?.state ?? "none");
+      },
+      { timeout: 180_000, intervals: [1_000] },
+    )
+    .toMatch(/^(done|idle)$/);
+  // Whether the sleep outlives the turn depends on how the model starts
+  // it: kept as a Codex "background terminal" it runs on (the recorded
+  // background-work fixture: still `done`), as `sleep 120 &` in a one-shot
+  // shell it dies with that shell (seen in the app's pane). Recorded, not
+  // asserted; the presence verdict below is the scenario.
+  const screen = await screenText(taskId);
+  test.info().annotations.push({
+    type: "codex-background-work",
+    description:
+      sleepsRunning() > 0 || /background terminal running/.test(screen)
+        ? "still running after the turn"
+        : "ended with the turn",
+  });
+  const row = window.getByTestId(`sidebar-task-row-${taskId}`);
+  // The behavior is "it stays at rest while sleep runs": watch a while.
+  await window.waitForTimeout(10_000);
+  await expect(row.getByTestId("sidebar-row-spinner")).toHaveCount(0);
+  expect((await core.commands.getPresence(taskId)).runningTurn).toBe(false);
+  // SessionStart bound the task to Codex's own session (X3).
+  const binding = await core.commands.getTaskWorkspace(taskId);
+  expect(binding?.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(binding?.sessionPath).toContain(`-${binding?.sessionId}.jsonl`);
+});
+
+test("Codex: Review queues $plannotator-review and opens the real Plannotator page", async () => {
+  test.skip(!CODEX, CODEX_SKIP);
+  const taskId = tasks.codex;
+  await reviewShowsRealPlannotator(taskId);
+  // Through `codex queue` (X5), not keystrokes.
+  expect(mainLog.join("")).toMatch(
+    new RegExp(`\\[delivery\\] queued \\{"taskId":"${taskId}"`),
+  );
 });
 
 test("a refresh tick through real gh raises no warning toast", async () => {
