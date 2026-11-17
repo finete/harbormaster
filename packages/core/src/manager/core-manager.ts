@@ -4117,7 +4117,28 @@ export class CoreManager implements CoreCommands {
 
   async detectAgents(): Promise<DetectedAgent[]> {
     const probes = this.requireOnboarding();
-    return Promise.all(
+    const config = await this.deps.config.load();
+    // Custom agents (config.json `agents.custom[]`, the Settings list, S9):
+    // only located on PATH; an arbitrary CLI may not answer `--version`.
+    const custom = Promise.all(
+      (config.agents?.custom ?? []).map(
+        async (agent): Promise<DetectedAgent> => {
+          const path = await probes
+            .resolveCommand(agent.command)
+            .catch(() => undefined);
+          return {
+            id: agent.id,
+            label: agent.label,
+            command: agent.command,
+            custom: true,
+            ...(path
+              ? { path, available: true }
+              : { available: false, error: "not found" }),
+          };
+        },
+      ),
+    );
+    const builtin = Promise.all(
       probes.builtinAgentCommands().map(async (agent) => {
         const [outcome, path] = await Promise.all([
           probes.cliVersion(agent.command),
@@ -4141,6 +4162,7 @@ export class CoreManager implements CoreCommands {
         };
       }),
     );
+    return [...(await builtin), ...(await custom)];
   }
 
   async setDefaultAgent(input: SetDefaultAgentInput): Promise<OnboardingState> {

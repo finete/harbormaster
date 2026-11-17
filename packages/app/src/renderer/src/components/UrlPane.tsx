@@ -129,7 +129,7 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
         <ul className="max-w-sm space-y-1 text-xs">
           <li>
             Plannotator's commands aren't installed for {harnessLabel(harness)}.
-            Welcome / Setup… shows the install command.
+            Settings → Code review shows the install command.
           </li>
           <li>
             Installed already? Restart the agent: it reads its commands when it
@@ -159,7 +159,8 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
           <span className="font-mono">{command}</span> — check its terminal.
         </li>
         <li>
-          Plannotator not set up for {harnessLabel(harness)}? Welcome / Setup…
+          Plannotator not set up for {harnessLabel(harness)}? Settings → Code
+          review.
         </li>
       </ul>
       <Button

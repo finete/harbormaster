@@ -287,17 +287,12 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
   expect(existsSync(openLog)).toBe(false);
   expect(agentReceived()).not.toContain("inbox ");
 
-  // Settings (the wizard's code review step): Plannotator reads ready for Pi.
+  // Settings → Code review (the same component as the wizard's code review
+  // step): Plannotator reads ready for Pi.
   await app.evaluate(({ Menu }) => {
-    Menu.getApplicationMenu()?.getMenuItemById("welcome-setup")?.click();
+    Menu.getApplicationMenu()?.getMenuItemById("settings")?.click();
   });
-  for (const step of ["agent", "review"]) {
-    await window.getByTestId("onboarding-next").click();
-    await expect(window.getByTestId("onboarding")).toHaveAttribute(
-      "data-step",
-      step,
-    );
-  }
+  await window.getByTestId("settings-nav-code-review").click();
   await expect(window.getByTestId("code-review-row-pi")).toHaveAttribute(
     "data-state",
     "ready",

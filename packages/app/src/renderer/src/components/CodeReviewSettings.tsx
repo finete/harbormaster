@@ -147,7 +147,7 @@ export function CodeReviewSettings({
       data-testid="code-review-settings"
     >
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Code review</p>
+        <p className="text-sm font-medium">Plannotator review</p>
         <Button
           variant="ghost"
           size="sm"

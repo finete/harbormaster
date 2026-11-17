@@ -1,7 +1,7 @@
 import { PanelLeft, RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PresenceSnapshot } from "../../preload/api";
+import type { PresenceSnapshot, SettingSectionId } from "../../preload/api";
 import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
@@ -17,6 +17,7 @@ import {
   RulesView,
 } from "./components/RulesView";
 import { Sidebar } from "./components/Sidebar";
+import { SettingsView } from "./components/settings/SettingsView";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -66,12 +67,17 @@ import {
 } from "./lib/workspace-persistence";
 import { pushToast } from "./toast";
 
-type View = "board" | "workspace" | "inbox" | "rules" | "costs";
+type View = "board" | "workspace" | "inbox" | "rules" | "costs" | "settings";
 /** The pages shown in place of the task workspace (the sidebar stays). */
-type Page = "inbox" | "rules" | "costs";
+type Page = "inbox" | "rules" | "costs" | "settings";
 
 function isPage(view: View): view is Page {
-  return view === "inbox" || view === "rules" || view === "costs";
+  return (
+    view === "inbox" ||
+    view === "rules" ||
+    view === "costs" ||
+    view === "settings"
+  );
 }
 
 /**
@@ -90,6 +96,8 @@ function isPage(view: View): view is Page {
  *   no rule sheet open) goes back to the previous view.
  * - "costs": per-task token usage (docs/costs.md), like the Rules page:
  *   sidebar Costs row; Esc goes back to the previous view.
+ * - "settings": the Settings page (docs/settings.md), like the Costs page:
+ *   Cmd/Ctrl+, or the app menu's "Settings…"; Esc goes back.
  */
 /** How often the renderer re-runs the (slow, `du`-backed) orphan-worktree scan. */
 const ORPHAN_SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -106,8 +114,11 @@ export interface ComposerRequest extends DraftPrefill {
 
 export function App({
   composerRequest,
+  onRunSetup,
 }: {
   composerRequest?: ComposerRequest | undefined;
+  /** Settings → "Run setup again": the first-run wizard over the app. */
+  onRunSetup?: (() => void) | undefined;
 } = {}): JSX.Element {
   const [view, setView] = useState<View>("workspace");
   // The view the inbox / Rules page returns to (Esc, or its shortcut again).
@@ -124,6 +135,17 @@ export function App({
   const openInbox = useCallback(() => togglePage("inbox"), [togglePage]);
   const openRules = useCallback(() => togglePage("rules"), [togglePage]);
   const openCosts = useCallback(() => togglePage("costs"), [togglePage]);
+  // Cmd/Ctrl+, and the menu item both land here (either may fire for one
+  // keystroke): opening is idempotent, never a toggle.
+  const openSettings = useCallback(() => {
+    setView((current) => {
+      if (current === "settings") return current;
+      if (!isPage(current)) viewBeforePage.current = current;
+      return "settings";
+    });
+  }, []);
+  const [settingsSection, setSettingsSection] =
+    useState<SettingSectionId>("general");
   const leavePage = useCallback(() => {
     setView((current) => (isPage(current) ? viewBeforePage.current : current));
   }, []);
@@ -479,6 +501,11 @@ export function App({
       // (e.g. Ctrl on mac — let it reach the pty).
       if (isMac && event.ctrlKey && !event.metaKey) return;
       const key = event.key.toLowerCase();
+      if (key === "," && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        openSettings();
+        return;
+      }
       if (key === "b") {
         event.preventDefault();
         setView((current) => (current === "board" ? "workspace" : "board"));
@@ -505,7 +532,13 @@ export function App({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [takeover, openDraft, openInbox, openRules]);
+  }, [takeover, openDraft, openInbox, openRules, openSettings]);
+
+  // The app menu's "Settings…" (main sends it to every window).
+  useEffect(
+    () => window.harbormaster.app.onShowSettings(openSettings),
+    [openSettings],
+  );
 
   // Cmd/Ctrl+W, intercepted in main before Electron's menu can close the
   // window: close the focused task workspace while in the workspace view.
@@ -737,6 +770,16 @@ export function App({
                   setView("workspace");
                 }}
                 onBack={leavePage}
+              />
+            )}
+            {view === "settings" && (
+              <SettingsView
+                section={settingsSection}
+                onSectionChange={setSettingsSection}
+                active={view === "settings" && takeover === null}
+                onBack={leavePage}
+                onOpenRules={openRules}
+                onRunSetup={() => onRunSetup?.()}
               />
             )}
             <div

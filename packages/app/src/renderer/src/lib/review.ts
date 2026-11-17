@@ -16,7 +16,7 @@ import { createSharedStore } from "./shared-store";
 import { taskUrls } from "./task-urls";
 
 /** Where the code review row lives (decision 5, Code review step of the wizard). */
-export const REVIEW_SETUP_HINT = "Set up code review in Welcome / Setup…";
+export const REVIEW_SETUP_HINT = "Set up code review in Settings → Code review";
 
 export type ReviewTargetKind = "local" | "pr";
 

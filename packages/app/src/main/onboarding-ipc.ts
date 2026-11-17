@@ -6,7 +6,7 @@
 // the wizard never blocks on them.
 
 import type { CoreCommands, SetDefaultAgentInput } from "@harbormaster/core";
-import { BrowserWindow, type IpcMain } from "electron";
+import type { IpcMain } from "electron";
 
 /**
  * Whether the wizard shows at startup: never finished (no
@@ -58,12 +58,4 @@ export function registerOnboardingIpc(
     commands.ensureDefaultRules(),
   );
   ipcMain.handle("onboarding:complete", () => commands.completeOnboarding());
-}
-
-/** The "Welcome / Setup…" menu item: every window reopens the wizard. */
-export function showOnboardingInWindows(): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed() || win.webContents.isDestroyed()) continue;
-    win.webContents.send("onboarding:show");
-  }
 }

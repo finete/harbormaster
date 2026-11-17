@@ -844,7 +844,7 @@ export interface CoreCommands {
     path: string,
     options?: { create?: boolean },
   ): Promise<CodeRootScan>;
-  /** `pi --version` / `claude --version`, each with a short timeout. */
+  /** `pi --version` / `claude --version`, each with a short timeout; then each custom agent's command located on PATH. */
   detectAgents(): Promise<DetectedAgent[]>;
   /**
    * Save the default agent (`launch.defaultHarness`), optionally adding a

@@ -98,3 +98,38 @@ inherited or locked.
   `setCaptureAgentBrowser`) are unchanged and flow through the same reactions.
 - **Terminal font size** is live already: `renderer/src/lib/terminal-font-size.ts`
   feeds `createTerminalOptions({ fontSize })` and refits open panes.
+
+## Implementation notes (step 2: page, General / Agents / Code review, menu)
+
+- **Page:** `view === "settings"` in `App.tsx` (`isPage`; Esc / "Done" go
+  back). Opened by Cmd/Ctrl+, (renderer keydown, idempotent) and the app
+  menu's **Settings…** (`id: "settings"`, accelerator `CmdOrCtrl+,`; main
+  sends `app:show-settings`, preload `app.onShowSettings`). The old
+  "Welcome / Setup…" item and the `onboarding:show` channel are gone; the
+  footer's **Run setup again** opens the wizard overlay (`OnboardingGate`
+  passes `onRunSetup` into `App`). First-launch behaviour is unchanged.
+- **Components:** `components/settings/` — `SettingsView` (section nav,
+  config.json problem banner, footer), one component per section
+  (`GeneralSection`, `AgentsSection`, `CodeReviewSection`), and
+  `SettingRow.tsx` (`SettingRow` / `SettingsCard` presentational, shared with
+  the wizard's permission switch; `DescribedSetting` draws a row from
+  `SETTINGS_DESCRIPTION`: boolean → Switch, integer / string → `CommitField`
+  committing on Enter/blur, enum / harness → `SelectField`; changed dot,
+  reset → `null`, inline rejection). Model: `lib/use-settings.ts`
+  (`getSettings` re-read on every `config-changed`; newest read wins). Pure
+  helpers: `lib/settings-form.ts` (tests/settings-form.test.ts).
+- **Edit in config.json:** IPC `app:openConfigFile(appId?)`; main resolves
+  the path itself and opens it in the last-used / first installed "Open in"
+  editor, else `shell.openPath`. `HARBORMASTER_OPEN_IN_STUB` records it.
+- **Custom agents:** `detectAgents()` now appends `agents.custom[]` entries
+  (`custom: true`, located on PATH only, never run); the Agents list uses it.
+  The wizard still shows only the built-ins plus "Keep <custom>".
+- **Default model:** a select from `listModels()` for the default agent
+  ("Agent default" = reset, an unlisted configured model kept); free text
+  when the catalog has no models.
+- **Code review:** `CodeReviewSettings` with the current default agent (its
+  inner heading is now "Plannotator review").
+- **e2e:** `e2e/settings.spec.ts` (Cmd+, → range hint → commit → dot/reset →
+  reset → hand edit live → invalid file banner → fixed → Edit in config.json
+  → Esc). onboarding / plannotator specs reach the wizard / Code review via
+  the Settings menu item.

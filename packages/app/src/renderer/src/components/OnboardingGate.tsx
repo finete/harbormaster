@@ -1,7 +1,7 @@
 // Decides between the first-run wizard and the normal UI
 // (docs/release-plan.md "Onboarding (five screens)"). On first run the
 // wizard is the whole window and the app is not mounted yet (nothing
-// restores or spawns behind it); "Welcome / Setup…" from the menu shows it
+// restores or spawns behind it); Settings → "Run setup again" shows it
 // over the running app instead, so open panes stay alive. "Start" enters
 // the app with the New task composer open on the picked repository; "Write
 // your first rule with your agent" opens it prefilled for the rules folder.
@@ -36,17 +36,6 @@ export function OnboardingGate(): JSX.Element {
     };
   }, []);
 
-  useEffect(
-    () =>
-      window.harbormaster.onboarding.onShow(() => {
-        setPhase((current) => {
-          if (current === "app") setOverlay(true);
-          return current === "checking" ? "wizard" : current;
-        });
-      }),
-    [],
-  );
-
   const finish = (result: OnboardingResult): void => {
     setComposerRequest((previous) => ({
       id: (previous?.id ?? 0) + 1,
@@ -61,7 +50,12 @@ export function OnboardingGate(): JSX.Element {
   }
   return (
     <>
-      {phase === "app" && <App composerRequest={composerRequest} />}
+      {phase === "app" && (
+        <App
+          composerRequest={composerRequest}
+          onRunSetup={() => setOverlay(true)}
+        />
+      )}
       {(phase === "wizard" || overlay) && (
         <Onboarding
           closable={phase === "app"}

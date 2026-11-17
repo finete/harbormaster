@@ -713,6 +713,14 @@ export interface HarbormasterApi {
      */
     openIn(path: string, appId: string): Promise<OpenInResult>;
     /**
+     * Settings → "Edit in config.json": main opens core's config file in
+     * catalog editor `appId` (when given and an editor), else in the OS
+     * default app. The renderer never names or touches the file.
+     */
+    openConfigFile(appId?: string): Promise<OpenInResult>;
+    /** The "Settings…" menu item (Cmd/Ctrl+,): open the Settings page. */
+    onShowSettings(listener: () => void): () => void;
+    /**
      * Forwards an uncaught renderer error or unhandled promise rejection to
      * main, logged as `[renderer] ...` in `<userData>/logs/main.log` (see
      * app-log.ts) — a packaged app's renderer devtools are never open, so
@@ -744,8 +752,6 @@ export interface OnboardingApi {
   setSourceEnabled(sourceId: string, enabled: boolean): Promise<void>;
   ensureDefaultRules(): Promise<{ created: boolean }>;
   complete(): Promise<OnboardingState>;
-  /** The "Welcome / Setup…" menu item. */
-  onShow(listener: () => void): () => void;
 }
 
 /** One "Open in …" target (see main/open-in.ts's catalog). */

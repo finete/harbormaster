@@ -11,7 +11,8 @@
 // inside the card, Enter in the typed path advances, Esc goes back, the
 // stepper checks off done steps, and the agent step offers exactly Pi and
 // Claude Code (Pi missing, with its install command). A relaunch goes
-// straight to the app; "Welcome / Setup…" reopens the wizard over it, and
+// straight to the app; Settings… → "Run setup again" reopens the wizard over
+// it, and
 // its "Check setup" runs the doctor: a Pi that answers `--version` reads ok
 // while git may not use https there (GIT_ALLOW_PROTOCOL=file), so
 // `repos.remote` fails for beta: no task is active, so the doctor probes
@@ -301,7 +302,7 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
       "Start Harbormaster",
     );
     await expect(window.getByTestId("onboarding-reopen-hint")).toContainText(
-      "Welcome / Setup…",
+      "run this setup again",
     );
     await window.getByTestId("onboarding-start").click();
     await expect(wizard).toHaveCount(0);
@@ -336,7 +337,8 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     await first.app.close().catch(() => {});
   }
 
-  // Relaunch: straight into the app; the menu item reopens the wizard.
+  // Relaunch: straight into the app; Settings… → "Run setup again" reopens
+  // the wizard.
   const second = await launch({
     HARBORMASTER_PI_COMMAND: writeVersionPi(),
     GIT_ALLOW_PROTOCOL: "file",
@@ -346,8 +348,9 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     await expect(second.window.getByTestId("workspace-view")).toBeVisible();
     await expect(second.window.getByTestId("onboarding")).toHaveCount(0);
     await second.app.evaluate(({ Menu }) => {
-      Menu.getApplicationMenu()?.getMenuItemById("welcome-setup")?.click();
+      Menu.getApplicationMenu()?.getMenuItemById("settings")?.click();
     });
+    await second.window.getByTestId("settings-run-setup").click();
     await expect(second.window.getByTestId("onboarding")).toBeVisible();
     await expect(second.window.getByTestId("onboarding-code-root")).toHaveValue(
       codeRoot,

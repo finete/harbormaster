@@ -57,7 +57,7 @@ export interface CodeRootScan {
   repositories: ScannedRepository[];
 }
 
-/** One built-in agent CLI as detected on this machine (`CoreCommands.detectAgents`). */
+/** One agent CLI as detected on this machine (`CoreCommands.detectAgents`): the built-ins, then custom agents. */
 export interface DetectedAgent {
   /** Harness id: `pi` or `claude-code`. */
   id: string;
@@ -72,6 +72,11 @@ export interface DetectedAgent {
   version?: string;
   /** Why it is unavailable (not found, timed out, …). */
   error?: string;
+  /**
+   * A custom agent from `agents.custom[]` (after the built-ins): only
+   * located (`available` = `command` resolves), never run.
+   */
+  custom?: boolean;
 }
 
 /** `gh auth status` as seen by core (`CoreCommands.githubAuthStatus`). */

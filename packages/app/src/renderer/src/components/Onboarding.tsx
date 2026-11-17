@@ -3,8 +3,8 @@
 // code review (Plannotator), GitHub, concepts. One
 // centered card (stepper on the left, the step on the right, Back and the
 // primary button in the card's own footer), shown as the whole window
-// before the normal UI on first run, and over it from the "Welcome /
-// Setup…" menu item. Keyboard: Enter = primary (unless the focused control
+// before the normal UI on first run, and over it from Settings → "Run
+// setup again". Keyboard: Enter = primary (unless the focused control
 // uses Enter), Cmd/Ctrl+Enter = primary always, Esc = Back (on the first
 // step it closes the menu-opened overlay; first run ignores it).
 //
@@ -50,6 +50,7 @@ import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
 import { CodeReviewSettings } from "./CodeReviewSettings";
 import { SetupCheckResults, useSetupCheck } from "./SetupCheck";
+import { SettingRow, SettingsCard } from "./settings/SettingRow";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Kbd } from "./ui/kbd";
@@ -590,23 +591,20 @@ function AgentStep({
           so messages reach its sessions.
         </p>
       )}
-      <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3">
-        <Switch
-          checked={bypass}
-          onChange={onBypass}
-          testId="onboarding-bypass"
-          label="Launched tasks run with permissions bypassed"
-        />
-        <div className="text-sm">
-          <p className="font-medium">
-            Launched tasks run with permissions bypassed
-          </p>
-          <p className="text-muted-foreground">
-            Tasks run in disposable worktrees and you review every change before
-            it merges; panes you open keep your own settings.
-          </p>
-        </div>
-      </div>
+      {/* The same row as Settings → Agents (S3); saved with the agent on Next. */}
+      <SettingsCard>
+        <SettingRow
+          title="Skip permission prompts for launched tasks"
+          help="Tasks run in disposable worktrees and you review every change before it merges; panes you open keep your own settings."
+        >
+          <Switch
+            checked={bypass}
+            onChange={onBypass}
+            testId="onboarding-bypass"
+            label="Skip permission prompts for launched tasks"
+          />
+        </SettingRow>
+      </SettingsCard>
     </div>
   );
 }
@@ -825,7 +823,8 @@ function ConceptsStep({
         data-testid="onboarding-reopen-hint"
         className="text-xs text-muted-foreground"
       >
-        You can reopen this from the Harbormaster menu (Welcome / Setup…).
+        You can change all of this later in Settings ({modKeyLabel()},), and run
+        this setup again from there.
       </p>
       <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
         <div className="min-w-0">

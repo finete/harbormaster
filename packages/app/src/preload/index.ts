@@ -444,6 +444,13 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("app:openInApps"),
     openIn: (path: string, appId: string): Promise<OpenInResult> =>
       ipcRenderer.invoke("app:openIn", path, appId),
+    openConfigFile: (appId?: string): Promise<OpenInResult> =>
+      ipcRenderer.invoke("app:openConfigFile", appId),
+    onShowSettings: (listener: () => void): (() => void) => {
+      const handler = (): void => listener();
+      ipcRenderer.on("app:show-settings", handler);
+      return () => ipcRenderer.removeListener("app:show-settings", handler);
+    },
     reportError: (error: {
       message: string;
       stack?: string | undefined;
@@ -467,11 +474,6 @@ const api: HarbormasterApi = {
     ensureDefaultRules: () =>
       ipcRenderer.invoke("onboarding:ensureDefaultRules"),
     complete: () => ipcRenderer.invoke("onboarding:complete"),
-    onShow: (listener) => {
-      const handler = (): void => listener();
-      ipcRenderer.on("onboarding:show", handler);
-      return () => ipcRenderer.removeListener("onboarding:show", handler);
-    },
   } satisfies OnboardingApi,
   terminalHost: {
     resolveClipboardPaste: (): Promise<string | null> =>

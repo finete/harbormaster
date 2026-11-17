@@ -433,6 +433,30 @@ describe("onboarding commands", () => {
     ]);
     const catalogs = await core.commands.listModels();
     expect(catalogs.map((catalog) => catalog.harness)).toContain("aider");
+    // Custom agents follow the built-ins in detection, located only.
+    await core.commands.setDefaultAgent({
+      harness: "cc2",
+      customAgent: { id: "cc2", label: "Claude 2", command: "claude" },
+    });
+    const detected = await core.commands.detectAgents();
+    expect(detected.slice(2)).toEqual([
+      {
+        id: "aider",
+        label: "Aider",
+        command: "aider",
+        custom: true,
+        available: false,
+        error: "not found",
+      },
+      {
+        id: "cc2",
+        label: "Claude 2",
+        command: "claude",
+        custom: true,
+        path: "/opt/bin/claude",
+        available: true,
+      },
+    ]);
   });
 
   it("reports gh auth, toggles the github source, writes default rules, completes", async () => {

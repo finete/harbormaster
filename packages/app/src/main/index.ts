@@ -128,10 +128,7 @@ import {
   isMessagesLogChange,
   PRUNE_INTERVAL_MS,
 } from "./messaging-push";
-import {
-  registerOnboardingIpc,
-  showOnboardingInWindows,
-} from "./onboarding-ipc";
+import { registerOnboardingIpc } from "./onboarding-ipc";
 import {
   availableOpenInApps,
   buildOpenInArgv,
@@ -1992,6 +1989,10 @@ function registerShellIpc(): void {
   // "Open in …" (see open-in.ts): the apps on this host that can open a
   // task's worktree folder, probed once per process (an app installed
   // mid-session shows up after a restart).
+  ipcMain.handle("app:openConfigFile", (_event, appId: unknown) =>
+    openConfigFile(appId),
+  );
+
   ipcMain.handle("app:openInApps", (): OpenInAppSummary[] => {
     openInAppsCache ??= openInStubFile()
       ? // E2E stub: the whole catalog, so tests never depend on what the
@@ -2059,6 +2060,42 @@ function registerShellIpc(): void {
 }
 
 let openInAppsCache: OpenInAppSummary[] | undefined;
+
+/**
+ * Settings → "Edit in config.json" (docs/settings.md S1): open core's
+ * config file, in catalog editor `appId` when given one, else in the OS
+ * default app for `.json`. Main resolves the path itself (the renderer
+ * never names or touches the file). With HARBORMASTER_OPEN_IN_STUB=<file>
+ * the argv is appended to <file> instead (`["open-path", file]` for the
+ * OS default).
+ */
+async function openConfigFile(appId: unknown): Promise<OpenInResult> {
+  const file = resolveStatePaths(activeStateDir).configFile;
+  if (!existsSync(file)) {
+    return { ok: false, error: "config.json does not exist yet" };
+  }
+  const stub = openInStubFile();
+  const editor = getOpenInApp(appId);
+  if (editor?.kind === "editor") {
+    const argv = buildOpenInArgv(editor, file, currentOpenInPlatform());
+    if (argv.ok) {
+      if (stub) {
+        appendFileSync(
+          stub,
+          `${JSON.stringify([argv.command, ...argv.args])}\n`,
+        );
+        return { ok: true };
+      }
+      return runOpenInArgv(argv.command, argv.args, editor.label);
+    }
+  }
+  if (stub) {
+    appendFileSync(stub, `${JSON.stringify(["open-path", file])}\n`);
+    return { ok: true };
+  }
+  const error = await shell.openPath(file);
+  return error ? { ok: false, error } : { ok: true };
+}
 
 function openInStubFile(): string | undefined {
   return process.env.HARBORMASTER_OPEN_IN_STUB || undefined;
@@ -2373,11 +2410,13 @@ function installApplicationMenu(): void {
     label: "Export Diagnostics…",
     click: exportDiagnosticsFromMenu,
   };
-  // Reopens the first-run wizard (docs/release-plan.md "Onboarding").
-  const setupItem: MenuItemConstructorOptions = {
-    id: "welcome-setup",
-    label: "Welcome / Setup…",
-    click: showOnboardingInWindows,
+  // The Settings page (docs/settings.md S2/S3); its footer reopens the
+  // first-run wizard ("Run setup again").
+  const settingsItem: MenuItemConstructorOptions = {
+    id: "settings",
+    label: "Settings…",
+    accelerator: "CmdOrCtrl+,",
+    click: showSettingsInWindows,
   };
   const template: MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin"
@@ -2386,7 +2425,8 @@ function installApplicationMenu(): void {
             label: app.name,
             submenu: [
               { role: "about" },
-              setupItem,
+              { type: "separator" },
+              settingsItem,
               { type: "separator" },
               exportItem,
               { type: "separator" },
@@ -2424,7 +2464,7 @@ function installApplicationMenu(): void {
       submenu: [
         ...(process.platform === "darwin"
           ? []
-          : [{ ...setupItem, id: "welcome-setup-help" }]),
+          : [{ ...settingsItem, id: "settings-help" }]),
         {
           id: "export-diagnostics-help",
           label: "Export Diagnostics…",
@@ -2439,6 +2479,14 @@ function installApplicationMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** The "Settings…" menu item (Cmd/Ctrl+,): every window opens its Settings page. */
+function showSettingsInWindows(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) continue;
+    win.webContents.send("app:show-settings");
+  }
 }
 
 function registerReleaseIpc(): void {

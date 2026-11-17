@@ -39,8 +39,8 @@ four-screen setup walks you through:
 3. **GitHub**: if `gh auth status` is logged in, card moves for your PRs and
 
    review tasks for other people's PRs are switched on. Otherwise run
-    `gh auth login` and re-run the setup from the Harbormaster menu
-    (Welcome / Setup…).
+    `gh auth login` and re-run the setup from Settings (Harbormaster menu →
+    Settings…, `Cmd+,`) → Run setup again.
 4. **How it works**: the four concepts below, one screen.
 
 ### Upgrade
@@ -159,7 +159,7 @@ and terminal activity). `[health] spike`, `[pass]` and `[ipc] slow` lines
 mark moments the app was busy. An identical line repeated within a minute is
 written once, followed by a `… repeated N times` note.
 - **`harbormaster doctor`** (or **Check setup** on the Setup screen,
-Harbormaster menu → Welcome / Setup…) checks tools, agents, state files,
+Settings → Run setup again) checks tools, agents, state files,
 repositories, disk, the tool socket and PATH; it works with the app down and
 exits 1 when a check fails. Local probes time out after 5 s, network probes
 (`gh auth status`, `git ls-remote`) after 20 s, at most 5 at a time.
