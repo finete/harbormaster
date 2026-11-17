@@ -83,21 +83,31 @@ export class LocalEnvironmentProbeAccess implements EnvironmentProbeAccess {
     return process.platform;
   }
 
-  commands(): { git: string; gh: string; pi: string; claude: string } {
+  commands(): { git: string; gh: string } {
     return {
       git: "git",
       gh: this.env.HARBORMASTER_GH_COMMAND || "gh",
-      pi: this.env.HARBORMASTER_PI_COMMAND || "pi",
-      claude: this.env.HARBORMASTER_CLAUDE_COMMAND || "claude",
     };
+  }
+
+  commandOverride(envNames: readonly string[]): string | undefined {
+    return this.cli.commandOverride(envNames);
   }
 
   async resolveCommand(command: string): Promise<string | undefined> {
     return this.cli.resolveCommand(command).catch(() => undefined);
   }
 
+  async resolveCommandAll(command: string): Promise<string[]> {
+    return this.cli.resolveCommandAll(command).catch(() => []);
+  }
+
   commandVersion(command: string): Promise<ProbeOutcome> {
-    return this.cli.cliVersion(command);
+    return this.cli.runVersion(command, ["--version"]);
+  }
+
+  runVersion(command: string, args: readonly string[]): Promise<ProbeOutcome> {
+    return this.cli.runVersion(command, args);
   }
 
   githubAuthStatus(): Promise<ProbeOutcome> {

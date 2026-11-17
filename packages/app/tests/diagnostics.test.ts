@@ -253,8 +253,7 @@ describe("buildDiagnosticsZip", () => {
           node: "20.0.0",
           platform: "darwin",
           path: "/usr/bin",
-          pi: {},
-          claude: {},
+          agents: [],
         }),
       }),
     );
@@ -395,14 +394,21 @@ describe("buildEnvironmentInfo", () => {
       platform: "darwin",
       path: "/usr/bin:/bin",
       shell: "/bin/zsh",
-      pi: { resolved: "/usr/local/bin/pi", version: "pi 1.0.0" },
-      claude: { resolved: undefined, version: undefined },
+      agents: [
+        {
+          id: "pi",
+          command: "pi",
+          resolved: "/usr/local/bin/pi",
+          version: "pi 1.0.0",
+        },
+        { id: "claude-code", command: "claude" },
+      ],
       piExtensionPath: extFile,
     });
     expect(info.app).toBe("1.2.3");
     expect(info.path).toBe("/usr/bin:/bin");
     expect(info.shell).toBe("/bin/zsh");
-    expect(info.pi.resolved).toBe("/usr/local/bin/pi");
+    expect(info.agents[0]?.resolved).toBe("/usr/local/bin/pi");
     expect(info.piExtension?.name).toBe("harbormaster-inbox.ts");
   });
 
@@ -413,8 +419,7 @@ describe("buildEnvironmentInfo", () => {
       node: "20.0.0",
       platform: "darwin",
       path: "",
-      pi: {},
-      claude: {},
+      agents: [],
       piExtensionPath: "/does/not/exist",
     });
     expect(info.piExtension).toBeUndefined();
@@ -652,8 +657,7 @@ describe("buildDiagnosticsZip manifest, limits and home replacement", () => {
       platform: "darwin",
       path: `${home}/bin:/usr/bin`,
       shell: "/bin/zsh",
-      pi: { resolved: `${home}/.local/bin/pi` },
-      claude: {},
+      agents: [{ id: "pi", command: "pi", resolved: `${home}/.local/bin/pi` }],
     }),
     now: NOW,
   });

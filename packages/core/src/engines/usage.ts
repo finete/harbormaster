@@ -12,7 +12,11 @@
 //   its sessions only when every session with turns had a cost; otherwise
 //   absent (never a partial sum).
 
-import type { Task, WorkspaceBinding } from "../contracts/model.js";
+import {
+  DEFAULT_HARNESS_ID,
+  type Task,
+  type WorkspaceBinding,
+} from "../contracts/model.js";
 import type {
   ModelUsage,
   SessionUsage,
@@ -31,8 +35,8 @@ import {
 
 export { totalTokens } from "../utilities/usage-accumulator.js";
 
-/** Harness id a task runs on when it names none (`DEFAULT_HARNESS_ID`). */
-const DEFAULT_HARNESS = "pi";
+/** Harness id a task runs on when it names none. */
+const DEFAULT_HARNESS = DEFAULT_HARNESS_ID;
 
 function subtractModel(
   usage: ModelUsage,

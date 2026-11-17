@@ -3,7 +3,7 @@
 // bundle's `doctor.json`) reads, and the read-only machine probes behind it.
 // Plain data only, so the result crosses the socket / IPC unchanged.
 
-import type { ProbeOutcome } from "./onboarding.js";
+import type { AgentCommandProbeAccess, ProbeOutcome } from "./onboarding.js";
 
 /**
  * Wall-clock limit for one local doctor probe: a command lookup, a
@@ -45,6 +45,8 @@ export interface DoctorCheck {
   ms?: number;
   /** Per-item results under the check (`repos.remote`: one per probed repository). */
   items?: DoctorCheckItem[];
+  /** For an agent CLI check (`agents.<harness id>`): the command's name, for the plain summary's `<command>: <version>` line. */
+  agentCommand?: string;
 }
 
 /** One item under a check (a repository's `ls-remote`). */
@@ -138,13 +140,13 @@ export interface RemoteProbe {
  * Resource Access for the doctor's machine probes. Every verb is read-only,
  * bounded by a short timeout, and never throws: failures come back as data.
  */
-export interface EnvironmentProbeAccess {
+export interface EnvironmentProbeAccess extends AgentCommandProbeAccess {
   /** The PATH this process resolves commands on. */
   processPath(): string;
   /** The host platform (`darwin`, `linux`). */
   platform(): string;
-  /** The commands the checks probe (e2e overrides included). */
-  commands(): { git: string; gh: string; pi: string; claude: string };
+  /** The tool commands the checks probe (e2e overrides included); agents come from the harness descriptors. */
+  commands(): { git: string; gh: string };
   /** The absolute file `command` runs (PATH lookup for a bare name), if any. */
   resolveCommand(command: string): Promise<string | undefined>;
   /** `<command> --version`. */

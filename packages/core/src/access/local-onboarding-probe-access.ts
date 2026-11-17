@@ -1,5 +1,5 @@
 // Resource Access: the first-run wizard's machine probes (docs/release-plan.md
-// "Onboarding (four screens)"). Runs `<agent> --version` and `gh auth
+// "Onboarding (four screens)"). Runs an agent's version command and `gh auth
 // status` through the shared process runner with a short timeout, so a CLI
 // that hangs (a login prompt, a slow network check) never stalls the
 // wizard; the outcome is raw text, parsed by `engines/onboarding.ts`.
@@ -58,29 +58,21 @@ export class LocalOnboardingProbeAccess implements OnboardingProbeAccess {
     await mkdir(path, { recursive: true });
   }
 
-  builtinAgentCommands(): Array<{
-    id: string;
-    label: string;
-    command: string;
-  }> {
-    // The same overrides the adapters launch with (e2e fakes).
-    return [
-      {
-        id: "pi",
-        label: "Pi",
-        command: this.env.HARBORMASTER_PI_COMMAND || "pi",
-      },
-      {
-        id: "claude-code",
-        label: "Claude Code",
-        command: this.env.HARBORMASTER_CLAUDE_COMMAND || "claude",
-      },
-    ];
+  commandOverride(envNames: readonly string[]): string | undefined {
+    for (const name of envNames) {
+      const value = this.env[name]?.trim();
+      if (value) return value;
+    }
+    return undefined;
   }
 
   async resolveCommand(command: string): Promise<string | undefined> {
+    return (await this.resolveCommandAll(command))[0];
+  }
+
+  async resolveCommandAll(command: string): Promise<string[]> {
     const trimmed = command.trim();
-    if (!trimmed) return undefined;
+    if (!trimmed) return [];
     const home = this.homeDir();
     const candidates = trimmed.includes("/")
       ? [
@@ -94,6 +86,7 @@ export class LocalOnboardingProbeAccess implements OnboardingProbeAccess {
           .split(delimiter)
           .filter(Boolean)
           .map((dir) => join(dir, trimmed));
+    const found: string[] = [];
     for (const candidate of candidates) {
       const executable = await stat(candidate).then(
         (info) => info.isFile(),
@@ -104,14 +97,17 @@ export class LocalOnboardingProbeAccess implements OnboardingProbeAccess {
         () => true,
         () => false,
       );
-      if (runnable) return candidate;
+      if (runnable && !found.includes(candidate)) found.push(candidate);
     }
-    return undefined;
+    return found;
   }
 
-  async cliVersion(command: string): Promise<ProbeOutcome> {
+  async runVersion(
+    command: string,
+    args: readonly string[],
+  ): Promise<ProbeOutcome> {
     return toProbe(
-      await runOutcome(command, ["--version"], { timeoutMs: this.timeoutMs }),
+      await runOutcome(command, [...args], { timeoutMs: this.timeoutMs }),
     );
   }
 

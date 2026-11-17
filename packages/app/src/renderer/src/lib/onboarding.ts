@@ -5,11 +5,6 @@
 
 import type { DetectedAgent } from "../../../preload/api";
 
-/** The built-in agents' harness ids (the only two the wizard offers). */
-export const BUILTIN_AGENT_IDS = ["pi", "claude-code"] as const;
-
-export type BuiltinAgentId = (typeof BUILTIN_AGENT_IDS)[number];
-
 /**
  * The wizard's agent choice: a harness id. Normally a built-in; a custom
  * agent id only when it already is the configured default (config.json),
@@ -17,8 +12,12 @@ export type BuiltinAgentId = (typeof BUILTIN_AGENT_IDS)[number];
  */
 export type AgentChoice = string;
 
-export function isBuiltinAgent(id: string): id is BuiltinAgentId {
-  return (BUILTIN_AGENT_IDS as readonly string[]).includes(id);
+/** Whether `id` is one of the registered built-in agents (`builtinIds`, from core's harness descriptors). */
+export function isBuiltinAgent(
+  id: string,
+  builtinIds: readonly string[],
+): boolean {
+  return builtinIds.includes(id);
 }
 
 /** The wizard's five steps, in order: id (the `data-step` value) and the verb-first label. */
@@ -30,14 +29,11 @@ export const ONBOARDING_STEPS = [
   { id: "concepts", label: "How it works" },
 ] as const;
 
-/** The one-line install command shown when a built-in agent is not found. */
-export const AGENT_INSTALL_HINTS: Record<BuiltinAgentId, string> = {
-  pi: "npm install -g @earendil-works/pi-coding-agent",
-  // https://code.claude.com/docs/en/setup (native installer, macOS/Linux).
-  "claude-code": "curl -fsSL https://claude.ai/install.sh | bash",
-};
-
-/** "found at <path> · v<version>" (either part may be missing), or undefined when not found. */
+/**
+ * "found at <path> · v<version>" (either part may be missing), plus the
+ * version floor when it is not plain ok ("older than the minimum 2.1.295",
+ * "newer than tested (2.1.322)"), or undefined when not found.
+ */
 export function agentFoundLine(
   agent: DetectedAgent,
   displayPath: (path: string) => string = (path) => path,
@@ -47,25 +43,50 @@ export function agentFoundLine(
     agent.path ? `found at ${displayPath(agent.path)}` : "found",
     ...(agent.version ? [`v${agent.version}`] : []),
   ];
+  if (agent.floor === "below-min" && agent.minVersion) {
+    parts.push(`older than the minimum ${agent.minVersion}`);
+  } else if (agent.floor === "newer-than-verified" && agent.verifiedVersion) {
+    parts.push(`newer than tested (${agent.verifiedVersion})`);
+  }
   return parts.join(" · ");
+}
+
+/** The command a row offers: install when not found, upgrade when below the minimum, else none. */
+export function agentFixCommand(
+  agent: DetectedAgent,
+): { kind: "install" | "upgrade"; command: string } | undefined {
+  if (!agent.available) {
+    return agent.installHint
+      ? { kind: "install", command: agent.installHint }
+      : undefined;
+  }
+  if (agent.floor === "below-min") {
+    const command = agent.upgradeHint ?? agent.installHint;
+    return command ? { kind: "upgrade", command } : undefined;
+  }
+  return undefined;
 }
 
 /**
  * The radio the agent screen starts on: the configured default when it is
  * a built-in that was found (or a custom agent already configured), else
- * the first detected built-in (Pi before Claude Code), else the
+ * the first detected built-in (registry order), else the
  * configured default anyway.
  */
 export function initialAgentChoice(
   configured: string,
   detected: readonly DetectedAgent[],
+  builtinIds: readonly string[],
 ): AgentChoice {
-  if (!isBuiltinAgent(configured)) return configured;
+  if (!isBuiltinAgent(configured, builtinIds)) return configured;
   const found = detected.filter((agent) => agent.available);
   if (found.length === 0 || found.some((agent) => agent.id === configured)) {
     return configured;
   }
-  return found.find((agent) => isBuiltinAgent(agent.id))?.id ?? configured;
+  return (
+    found.find((agent) => isBuiltinAgent(agent.id, builtinIds))?.id ??
+    configured
+  );
 }
 
 /** What the wizard's window-level key handler should do with a keydown. */

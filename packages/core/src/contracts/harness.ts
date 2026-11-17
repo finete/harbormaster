@@ -12,7 +12,11 @@
 // honest about what it can do today.
 
 import type { HarnessMessagingCapabilities } from "./messaging.js";
-import type { PresenceRecord, ThinkingLevel } from "./model.js";
+import type {
+  PresenceRecord,
+  ReviewSupportPiece,
+  ThinkingLevel,
+} from "./model.js";
 import type { SessionUsage } from "./usage.js";
 
 /** One model a harness can run, for the composer's Agent · Model picker. */
@@ -154,6 +158,107 @@ export interface ProgramStatusReading {
 }
 
 /**
+ * Everything outside `harness/` needs to know about an agent CLI
+ * (docs/harness-additions.md P2): onboarding, doctor, diagnostics, Settings
+ * labels and review support iterate the registry's descriptors instead of
+ * naming agents. Plain data plus three pure functions.
+ */
+export interface HarnessDescriptor {
+  /** Stable id stored on tasks (`Task.harness`); equals `HarnessAdapter.id`. */
+  readonly id: string;
+  /** Display label (`"Claude Code"`). */
+  readonly label: string;
+  /**
+   * The CLI's invocations in lookup order, each an argv prefix: the binary
+   * then any subcommand words (`["claude"]`, `["cursor", "agent"]`). Never
+   * empty for a built-in.
+   */
+  readonly commands: readonly (readonly string[])[];
+  /**
+   * Env vars that replace the command (first one set wins; e2e fakes):
+   * `HARBORMASTER_<ID>_COMMAND` (see `harnessCommandEnvName`), plus any
+   * legacy name.
+   */
+  readonly commandEnv: readonly string[];
+  /** Shell one-liner that installs the CLI. */
+  readonly installHint: string;
+  /** Shell one-liner that upgrades an installed CLI; absent = `installHint`. */
+  readonly upgradeHint?: string;
+  /** One sentence on what Harbormaster sets up for this agent by itself (the wizard shows it). */
+  readonly setupNote?: string;
+  /** Arguments appended to a command to print its version (`["--version"]`). */
+  readonly versionArgs: readonly string[];
+  /** The version in the `versionArgs` output (`x.y.z`), when there is one. */
+  parseVersion(output: string): string | undefined;
+  /** Oldest version Harbormaster works with; absent = no floor (custom agents). */
+  readonly minVersion?: string;
+  /** Newest version the real-CLI tier ran against; above it doctor says "newer than tested". */
+  readonly verifiedVersion?: string;
+  /** The CLI's own config/state directory (`~/.claude`), when it has one. */
+  configDir(env: NodeJS.ProcessEnv, home: string): string | undefined;
+  /** Review-support pieces (`engines/review-support.ts`) this harness needs for a Plannotator review, in display order; `[]` = none. */
+  readonly reviewPieces: readonly ReviewSupportPiece["id"][];
+  /**
+   * Whether a PATH hit is a terminal-multiplexer shim (cmux writes
+   * `…/cmux-cli-shims/<uuid>/claude`), not the agent itself: lookup skips
+   * it and doctor reports "only a terminal shim was found".
+   */
+  isShim(resolvedPath: string): boolean;
+}
+
+/** The descriptor's plain-data part, as it crosses the command API (`CoreCommands.listHarnessDescriptors`). */
+export interface HarnessDescriptorInfo {
+  id: string;
+  label: string;
+  commands: string[][];
+  installHint: string;
+  upgradeHint?: string;
+  setupNote?: string;
+  minVersion?: string;
+  verifiedVersion?: string;
+  reviewPieces: ReviewSupportPiece["id"][];
+  /** A built-in adapter (not `agents.custom[]`). */
+  builtin: boolean;
+  /** Whether the harness can start a Plannotator review at all. */
+  review: boolean;
+}
+
+/** A delivery kind (docs/task-messaging.md): mid-turn steer, after-turn follow-up, waking an idle session, catch-up on the next prompt. */
+export type HarnessDeliveryKind = "steer" | "followUp" | "wakeIdle" | "catchUp";
+
+/**
+ * What a harness does, as data (docs/harness-additions.md P6), read by the
+ * contract suite and by core's refusal logic. Must agree with
+ * `HarnessAdapter.messaging` (asserted by the contract test).
+ */
+export interface HarnessCapabilities {
+  /** `preassign`: core picks the session id and passes it on launch; `learned`: the harness reports it (a hook). */
+  sessionId: "preassign" | "learned";
+  status: {
+    /** Where presence comes from. */
+    protocol: "osc7501" | "hooks" | "none";
+    /** Whether it reports only after the terminal answers the 7501 probe. */
+    probe: boolean;
+    /** The states it actually reports. */
+    states: readonly ProgramStatusReading["state"][];
+    /** Where its dialect differs from the 7501 spec; `[]` when it does not. */
+    quirks: readonly string[];
+  };
+  delivery: {
+    steer: boolean;
+    followUp: boolean;
+    /** Whether a message reaches a session sitting idle at its prompt without typing into the pty. */
+    wakeIdle: boolean;
+    /** The mechanism per kind (`"PostToolUse hook"`); absent = not delivered that way. */
+    channels: Partial<Record<HarnessDeliveryKind, string>>;
+  };
+  /** Whether a fresh worktree shows a folder-trust dialog the user answers in the pane. */
+  trustPrompt: boolean;
+  /** Whether it can start a Plannotator review (`HarnessAdapter.review`). */
+  review: boolean;
+}
+
+/**
  * One agent harness (Pi today; Claude Code/Codex/etc. later). Every
  * implementation is pure logic plus resource-access calls — no process
  * spawning in core (see /AGENTS.md: accessor separation is a hard rule).
@@ -168,6 +273,11 @@ export interface HarnessAdapter {
    * for "<command> not found" messages. Optional for test fakes.
    */
   readonly command?: string;
+
+  /** Install/version/lookup facts (P2): what doctor, onboarding and diagnostics iterate. */
+  readonly descriptor: HarnessDescriptor;
+  /** What this harness does, as data (P6). */
+  readonly capabilities: HarnessCapabilities;
 
   /** The models this harness can run, for the composer's picker. Never throws: failures come back as `error`. */
   listModels(): Promise<HarnessModelCatalog>;

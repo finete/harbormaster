@@ -9,6 +9,8 @@
 import type {
   BuildLaunchSpecInput,
   HarnessAdapter,
+  HarnessCapabilities,
+  HarnessDescriptor,
   HarnessModelCatalog,
   HarnessReviewCapability,
   LaunchSpec,
@@ -23,6 +25,12 @@ import {
   type PresenceReaderOptions,
   templateReviewCommand,
 } from "./adapter-common.js";
+import {
+  harnessCommandEnvName,
+  harnessLaunchCommand,
+  isTerminalShim,
+  parseVersionOutput,
+} from "./descriptor.js";
 
 export const NO_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
   receive: false,
@@ -30,6 +38,47 @@ export const NO_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
   followUp: false,
   images: false,
 };
+
+/**
+ * A custom agent's descriptor (P2): its one configured command, no install
+ * one-liner of ours, and never a version floor (an arbitrary CLI may not
+ * even answer `--version`). Review needs the Plannotator binary only when
+ * the config declares a `reviewCommand`.
+ */
+export function customAgentDescriptor(
+  config: CustomAgentConfig,
+): HarnessDescriptor {
+  return {
+    id: config.id,
+    label: config.label,
+    commands: [[config.command]],
+    commandEnv: [harnessCommandEnvName(config.id)],
+    installHint: `Install ${config.label} so \`${config.command}\` is on PATH.`,
+    versionArgs: ["--version"],
+    parseVersion: parseVersionOutput,
+    configDir: () => undefined,
+    reviewPieces: config.reviewCommand?.trim() ? ["binary"] : [],
+    isShim: isTerminalShim,
+  };
+}
+
+/** A custom agent's capabilities (P6): 7501 if it speaks it, nothing delivered. */
+export function customAgentCapabilities(
+  config: CustomAgentConfig,
+): HarnessCapabilities {
+  return {
+    sessionId: "preassign",
+    status: {
+      protocol: "osc7501",
+      probe: true,
+      states: ["idle", "working", "blocked", "done", "error"],
+      quirks: [],
+    },
+    delivery: { steer: false, followUp: false, wakeIdle: false, channels: {} },
+    trustPrompt: false,
+    review: Boolean(config.reviewCommand?.trim()),
+  };
+}
 
 export interface CustomHarnessAdapterOptions extends PresenceReaderOptions {
   cliPath?: string;
@@ -39,6 +88,8 @@ export class CustomHarnessAdapter implements HarnessAdapter {
   readonly id: string;
   readonly label: string;
   readonly command: string;
+  readonly descriptor: HarnessDescriptor;
+  readonly capabilities: HarnessCapabilities;
   readonly messaging: HarnessMessagingCapabilities = {
     ...NO_MESSAGING_CAPABILITIES,
   };
@@ -54,6 +105,8 @@ export class CustomHarnessAdapter implements HarnessAdapter {
     this.id = config.id;
     this.label = config.label;
     this.command = config.command;
+    this.descriptor = customAgentDescriptor(config);
+    this.capabilities = customAgentCapabilities(config);
     this.readPresence = createPresenceReader(options);
     this.cliPath = options.cliPath;
     const template = config.reviewCommand?.trim();
@@ -78,7 +131,7 @@ export class CustomHarnessAdapter implements HarnessAdapter {
     const prompt = input.initialPrompt?.trim() ? input.initialPrompt : "";
     const passPrompt = (this.config.promptArg ?? "positional") === "positional";
     return {
-      command: this.config.command,
+      command: harnessLaunchCommand(this),
       args: [
         ...(this.config.args ?? []),
         ...(prompt && passPrompt ? [prompt] : []),

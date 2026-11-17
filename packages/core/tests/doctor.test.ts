@@ -25,7 +25,9 @@ import {
 } from "../src/contracts/doctor.js";
 import type { ProbeOutcome } from "../src/contracts/onboarding.js";
 import type { RuleFile } from "../src/contracts/rules.js";
+import { agentVersionFloor } from "../src/engines/agent-version.js";
 import {
+  agentCheck,
   classifyRemoteProbe,
   codeRootCheck,
   commandCheck,
@@ -52,7 +54,12 @@ import {
   versionEndpointCheck,
   versionEndpointTargets,
 } from "../src/engines/doctor.js";
-import { createCore } from "../src/index.js";
+import {
+  CLAUDE_CODE_DESCRIPTOR,
+  createCore,
+  PI_DESCRIPTOR,
+} from "../src/index.js";
+import { probeAgentCommand } from "../src/manager/agent-probe.js";
 import { DoctorRuntime } from "../src/manager/doctor-runtime.js";
 import {
   comparePiExtension,
@@ -91,6 +98,134 @@ const timedOut: ProbeOutcome = {
 
 const ext = (version: number, body = "x"): string =>
   `export const HARBORMASTER_INBOX_EXTENSION_VERSION = ${version};\n${body}\n`;
+
+describe("agentCheck: version floors (P7)", () => {
+  // Claude Code: minVersion 2.1.295, verifiedVersion 2.1.322.
+  const at = (version: string) => ({
+    command: "claude",
+    path: "/opt/bin/claude",
+    outcome: ok(`${version} (Claude Code)`),
+    version,
+  });
+
+  it("compares against minVersion and verifiedVersion", () => {
+    const floors = { minVersion: "2.1.295", verifiedVersion: "2.1.322" };
+    expect(agentVersionFloor("2.1.294", floors)).toBe("below-min");
+    expect(agentVersionFloor("2.1.295", floors)).toBe("ok");
+    expect(agentVersionFloor("2.1.322", floors)).toBe("ok");
+    expect(agentVersionFloor("2.1.330", floors)).toBe("newer-than-verified");
+    expect(agentVersionFloor(undefined, floors)).toBe("unknown");
+    expect(agentVersionFloor("0.0.1", {})).toBe("ok");
+  });
+
+  it("below the minimum: fail for the default agent, warn otherwise, with the upgrade command", () => {
+    const below = agentCheck({
+      descriptor: CLAUDE_CODE_DESCRIPTOR,
+      probe: at("2.1.200"),
+      isDefault: true,
+    });
+    expect(below).toMatchObject({
+      id: "agents.claude-code",
+      status: "fail",
+      summary: "Claude Code 2.1.200 is older than the minimum 2.1.295",
+      remediation: "Upgrade Claude Code: `claude update`.",
+      agentCommand: "claude",
+    });
+    expect(
+      agentCheck({
+        descriptor: CLAUDE_CODE_DESCRIPTOR,
+        probe: at("2.1.200"),
+        isDefault: false,
+      }).status,
+    ).toBe("warn");
+  });
+
+  it("at the floors: ok; above verified: ok, newer than tested", () => {
+    expect(
+      agentCheck({
+        descriptor: CLAUDE_CODE_DESCRIPTOR,
+        probe: at("2.1.322"),
+        isDefault: true,
+      }),
+    ).toMatchObject({ status: "ok", summary: "Claude Code 2.1.322" });
+    expect(
+      agentCheck({
+        descriptor: CLAUDE_CODE_DESCRIPTOR,
+        probe: at("2.1.295"),
+        isDefault: true,
+      }).status,
+    ).toBe("ok");
+    expect(
+      agentCheck({
+        descriptor: CLAUDE_CODE_DESCRIPTOR,
+        probe: at("2.1.400"),
+        isDefault: true,
+      }),
+    ).toMatchObject({
+      status: "ok",
+      summary: "Claude Code 2.1.400, newer than tested (2.1.322)",
+    });
+  });
+
+  it("only a terminal shim, or nothing at all: missing with the install command", () => {
+    const shim = agentCheck({
+      descriptor: CLAUDE_CODE_DESCRIPTOR,
+      probe: {
+        command: "claude",
+        shim: "/var/folders/x/T/cmux-cli-shims/abc/claude",
+      },
+      isDefault: true,
+    });
+    expect(shim).toMatchObject({
+      status: "fail",
+      summary: "Claude Code: only a terminal shim was found",
+    });
+    expect(shim.remediation).toContain("claude.ai/install.sh");
+    expect(
+      agentCheck({
+        descriptor: PI_DESCRIPTOR,
+        probe: { command: "pi" },
+        isDefault: false,
+      }),
+    ).toMatchObject({ status: "warn", summary: "Pi is not on PATH" });
+  });
+
+  it("lookup skips a shim on PATH and runs the real binary; a shim alone is reported", async () => {
+    const shimPath = "/var/folders/x/T/cmux-cli-shims/abc/claude";
+    const ran: string[] = [];
+    const probes = {
+      commandOverride: () => undefined,
+      resolveCommandAll: async () => [shimPath, "/Users/me/.local/bin/claude"],
+      runVersion: async (command: string, args: readonly string[]) => {
+        ran.push([command, ...args].join(" "));
+        return ok("2.1.322 (Claude Code)");
+      },
+    };
+    expect(await probeAgentCommand(CLAUDE_CODE_DESCRIPTOR, probes)).toEqual({
+      command: "claude",
+      path: "/Users/me/.local/bin/claude",
+      outcome: ok("2.1.322 (Claude Code)"),
+      version: "2.1.322",
+    });
+    expect(ran).toEqual(["/Users/me/.local/bin/claude --version"]);
+    expect(
+      await probeAgentCommand(CLAUDE_CODE_DESCRIPTOR, {
+        ...probes,
+        resolveCommandAll: async () => [shimPath],
+      }),
+    ).toEqual({ command: "claude", shim: shimPath });
+    // The env override (e2e fakes) wins over the aliases.
+    const overridden = await probeAgentCommand(CLAUDE_CODE_DESCRIPTOR, {
+      ...probes,
+      commandOverride: (names) =>
+        names.includes("HARBORMASTER_CLAUDE_COMMAND")
+          ? "/tmp/fake-claude"
+          : undefined,
+      resolveCommandAll: async (command) => [command],
+    });
+    expect(overridden.path).toBe("/tmp/fake-claude");
+  });
+});
 
 describe("commandCheck", () => {
   const base = {
@@ -563,22 +698,20 @@ describe("report rendering", () => {
     appVersion: "0.2.4",
     checks: orderDoctorChecks([
       diskCheck(DISK_WARN_BYTES * 2, "/s"),
-      commandCheck({
-        id: "agents.pi",
-        label: "Pi",
-        command: "pi",
-        resolved: "/b/pi",
-        outcome: ok("1.3.0"),
-        whenMissing: "fail",
-        install: "-",
+      agentCheck({
+        descriptor: PI_DESCRIPTOR,
+        probe: {
+          command: "pi",
+          path: "/b/pi",
+          outcome: ok("1.3.0"),
+          version: "1.3.0",
+        },
+        isDefault: true,
       }),
-      commandCheck({
-        id: "agents.claude",
-        label: "Claude Code",
-        command: "claude",
-        outcome: notFound,
-        whenMissing: "warn",
-        install: "Install Claude Code.",
+      agentCheck({
+        descriptor: CLAUDE_CODE_DESCRIPTOR,
+        probe: { command: "claude" },
+        isDefault: false,
       }),
       githubAuthCheck(failed(), true),
     ]),
@@ -588,7 +721,7 @@ describe("report rendering", () => {
     expect(report.checks.map((check) => check.id)).toEqual([
       "tools.gh-auth",
       "agents.pi",
-      "agents.claude",
+      "agents.claude-code",
       "disk.free",
     ]);
     expect(formatDoctorReport(report)).toBe(
@@ -599,9 +732,9 @@ describe("report rendering", () => {
         "",
         "Agents",
         "  ✓ agents.pi  Pi 1.3.0",
-        "  ! agents.claude  Claude Code is not on PATH",
+        "  ! agents.claude-code  Claude Code is not on PATH",
         "      Looked for `claude`.",
-        "      → Install Claude Code.",
+        "      → Install Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`), then reopen Harbormaster.",
         "",
         "Disk",
         "  ✓ disk.free  10.0 GiB free",
@@ -640,7 +773,7 @@ describe("report rendering", () => {
         "claude: Claude Code is not on PATH",
         "doctor:",
         "  ✗ tools.gh-auth: gh is not logged in",
-        "  ! agents.claude: Claude Code is not on PATH",
+        "  ! agents.claude-code: Claude Code is not on PATH",
       ].join("\n"),
     );
   });
@@ -676,8 +809,11 @@ function fakeProbes(
     },
   });
   return Object.assign(Object.create(real) as EnvironmentProbeAccess, {
+    commandOverride: () => undefined,
     resolveCommand: async (command: string) => `/bin/${command}`,
+    resolveCommandAll: async (command: string) => [`/bin/${command}`],
     commandVersion: async (command: string) => ok(`${command} 1.0.0`),
+    runVersion: async (command: string) => ok(`${command} 2.1.300`),
     githubAuthStatus: async () => ok(),
     remoteReachable: async () => ({ ok: true, timedOut: false }),
     ...overrides,
@@ -714,10 +850,8 @@ describe("doctor command", () => {
     const core = createCore({
       stateDir,
       environment: fakeProbes(stateDir, {
-        resolveCommand: async (command) =>
-          command === "claude" ? undefined : `/bin/${command}`,
-        commandVersion: async (command) =>
-          command === "claude" ? notFound : ok(`${command} 2.0.0`),
+        resolveCommandAll: async (command) =>
+          command === "claude" ? [] : [`/bin/${command}`],
       }),
     });
     const report = await core.commands.doctor({ appVersion: "9.9.9" });
@@ -730,7 +864,7 @@ describe("doctor command", () => {
     expect(byId.get("repos.codeRoot")?.status).toBe("ok");
     expect(byId.get("repos.discovered")?.status).toBe("warn");
     expect(byId.get("repos.remote")?.status).toBe("skip");
-    expect(byId.get("agents.claude")?.status).toBe("warn");
+    expect(byId.get("agents.claude-code")?.status).toBe("warn");
     expect(byId.get("agents.pi-extension")?.status).toBe("warn");
     expect(byId.get("worktrees.orphans")?.status).toBe("ok");
     expect(byId.get("path.loginShell")?.status).toBe("skip");
@@ -836,8 +970,11 @@ describe("doctor runtime: repos.remote scope and network probes", () => {
     const probes = {
       processPath: () => "/usr/bin",
       platform: () => "darwin",
-      commands: () => ({ git: "git", gh: "gh", pi: "pi", claude: "claude" }),
+      commands: () => ({ git: "git", gh: "gh" }),
+      commandOverride: () => undefined,
       resolveCommand: async (command: string) => `/bin/${command}`,
+      resolveCommandAll: async (command: string) => [`/bin/${command}`],
+      runVersion: async (command: string) => ok(`${command} 1.0.0`),
       commandVersion: async (command: string) => ok(`${command} 1.0.0`),
       githubAuthStatus: async () => ok(),
       piExtension: async () => ({ dir: "/e", installedPath: "/e/x.ts" }),
@@ -865,6 +1002,7 @@ describe("doctor runtime: repos.remote scope and network probes", () => {
     } as EnvironmentProbeAccess;
     return new DoctorRuntime({
       probes,
+      agents: [],
       config: { load: async () => ({ codeRoot: "/c" }) } as never,
       tasks: { listTasks: async () => options.tasks ?? [] } as never,
       bindings: { listBindings: async () => [] } as never,

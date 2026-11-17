@@ -13,7 +13,7 @@
 // Claude Code (Pi missing, with its install command). A relaunch goes
 // straight to the app; Settings… → "Run setup again" reopens the wizard over
 // it, and
-// its "Check setup" runs the doctor: a Pi that answers `--version` reads ok
+// its "Check setup" runs the doctor: a Pi older than its minimum version warns
 // while git may not use https there (GIT_ALLOW_PROTOCOL=file), so
 // `repos.remote` fails for beta: no task is active, so the doctor probes
 // only the most recently updated task's repository (beta) and lists alpha
@@ -365,9 +365,14 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
       );
     }
     await second.window.getByTestId("onboarding-check-setup").click();
+    // The fake Pi is below Pi's minVersion (P7): not the default agent
+    // (Claude Code is), so warn, with Pi's own upgrade command.
     const pi = second.window.getByTestId("doctor-check-agents.pi");
-    await expect(pi).toHaveAttribute("data-status", "ok");
-    await expect(pi).toContainText("Pi 0.0.9-e2e");
+    await expect(pi).toHaveAttribute("data-status", "warn");
+    await expect(pi).toContainText("Pi 0.0.9 is older than the minimum 1.0.0");
+    await expect(pi).toContainText(
+      "npm install -g @earendil-works/pi-coding-agent@latest",
+    );
     const remote = second.window.getByTestId("doctor-check-repos.remote");
     await expect(remote).toHaveAttribute("data-status", "fail");
     await expect(
@@ -385,7 +390,7 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     await expect(
       second.window.getByTestId("setup-check-running-repos"),
     ).toContainText("probing remotes (up to 20 s)");
-    await expect(pi).toHaveAttribute("data-status", "ok");
+    await expect(pi).toHaveAttribute("data-status", "warn");
     await second.window.getByTestId("onboarding-close").click();
     await expect(second.window.getByTestId("onboarding")).toHaveCount(0);
     await expect(second.window.getByTestId("workspace-view")).toBeVisible();

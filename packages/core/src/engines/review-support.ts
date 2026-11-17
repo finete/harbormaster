@@ -185,30 +185,27 @@ export interface ReviewVersions {
 }
 
 /**
- * Which pieces a harness needs for a Plannotator review: Pi runs the Pi
- * extension (its own server), Claude Code the binary + plugin + the
- * `/plannotator-review` skill (the command itself) + a recent enough
- * Claude Code; any other harness with a review command runs the
- * binary. A harness that cannot start a review needs nothing (`unsupported`).
+ * Which pieces a harness needs for a Plannotator review: its descriptor's
+ * `reviewPieces` (Pi: the Pi extension; Claude Code: binary + plugin +
+ * `/plannotator-review` skill + a recent enough Claude Code; a custom agent
+ * with a review command: the binary). A harness that cannot start a review
+ * needs nothing (`unsupported`).
  */
 export function reviewPiecesFor(harness: {
-  id: string;
   review?: unknown;
+  descriptor: { reviewPieces: readonly ReviewPieceId[] };
 }): ReviewPieceId[] {
   if (!harness.review) return [];
-  switch (harness.id) {
-    case "pi":
-      return ["pi-extension"];
-    case "claude-code":
-      return ["binary", "claude-plugin", "claude-skill", "claude-code"];
-    default:
-      return ["binary"];
-  }
+  return [...harness.descriptor.reviewPieces];
 }
 
 /** One harness's review support from the probed versions. */
 export function reviewSupportFor(
-  harness: { id: string; review?: unknown },
+  harness: {
+    id: string;
+    review?: unknown;
+    descriptor: { reviewPieces: readonly ReviewPieceId[] };
+  },
   versions: ReviewVersions,
 ): ReviewSupportHarness {
   return reviewHarness(

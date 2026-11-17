@@ -17,9 +17,6 @@ export const PROTECTED_HOME_FOLDERS: readonly ProtectedHomeFolder[] = [
   "Downloads",
 ];
 
-/** Agent ids a custom CLI may never take (the built-in adapters). */
-export const BUILTIN_AGENT_IDS: readonly string[] = ["pi", "claude-code"];
-
 /** `~` / `~/x` → absolute under `home`; anything else resolved as-is. */
 export function expandHome(path: string, home: string): string {
   const trimmed = path.trim();
@@ -78,13 +75,18 @@ export function fallbackCodeRoot(home: string): string {
  * Problems with a custom agent before it is written to `agents.custom[]`:
  * a lowercase id (letters, digits, `-`, `_`) that is not a built-in, a
  * label, and a command (a bare name or an absolute path). Empty = valid.
+ * `builtinIds`: the registered built-in adapters' ids (a custom CLI may
+ * never take one).
  */
-export function customAgentProblems(agent: {
-  id: string;
-  label: string;
-  command: string;
-  args?: readonly string[];
-}): string[] {
+export function customAgentProblems(
+  agent: {
+    id: string;
+    label: string;
+    command: string;
+    args?: readonly string[];
+  },
+  builtinIds: readonly string[],
+): string[] {
   const problems: string[] = [];
   const id = agent.id.trim();
   if (!id) problems.push("The agent needs an id.");
@@ -92,7 +94,7 @@ export function customAgentProblems(agent: {
     problems.push(
       "The agent id may use only lowercase letters, digits, - and _.",
     );
-  } else if (BUILTIN_AGENT_IDS.includes(id)) {
+  } else if (builtinIds.includes(id)) {
     problems.push(`"${id}" is a built-in agent; pick another id.`);
   }
   if (!agent.label.trim()) problems.push("The agent needs a label.");

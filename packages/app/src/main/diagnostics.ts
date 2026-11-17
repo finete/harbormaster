@@ -757,9 +757,20 @@ export interface EnvironmentInfo {
   arch: string;
   path: string;
   shell?: string;
-  pi: { resolved?: string; version?: string };
-  claude: { resolved?: string; version?: string };
+  /** Every built-in agent (the harness registry), in registration order. */
+  agents: EnvironmentAgentInfo[];
   piExtension?: ExtensionFileInfo;
+}
+
+/** One agent CLI in `environment.json`: its launch command, where it resolves, and its `--version` output. */
+export interface EnvironmentAgentInfo {
+  /** Harness id. */
+  id: string;
+  command: string;
+  resolved?: string;
+  /** The resolved file is a terminal multiplexer's shim, not the agent. */
+  shim?: boolean;
+  version?: string;
 }
 
 export interface BuildEnvironmentInfoInput {
@@ -769,8 +780,7 @@ export interface BuildEnvironmentInfoInput {
   platform: string;
   path: string;
   shell?: string;
-  pi: { resolved?: string; version?: string };
-  claude: { resolved?: string; version?: string };
+  agents: EnvironmentAgentInfo[];
   /** Path to the installed Pi inbox extension file (see agent-tooling.ts's `piExtensionsDir`/`PI_EXTENSION_FILE`); only its stat (name/mtime/size) is read. */
   piExtensionPath?: string;
 }
@@ -790,8 +800,7 @@ export function buildEnvironmentInfo(
     arch: process.arch,
     path: input.path,
     ...(input.shell ? { shell: input.shell } : {}),
-    pi: input.pi,
-    claude: input.claude,
+    agents: input.agents,
     ...(piExtension ? { piExtension } : {}),
   };
 }

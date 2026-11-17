@@ -19,6 +19,7 @@ import {
   type RemoteProbe,
   type ToolSocketFacts,
 } from "../contracts/doctor.js";
+import type { HarnessDescriptor } from "../contracts/harness.js";
 import type { GlobalConfig } from "../contracts/model.js";
 import type { ProbeOutcome } from "../contracts/onboarding.js";
 import type { RuleFile } from "../contracts/rules.js";
@@ -30,6 +31,11 @@ import {
   isUntrustedCertificateError,
   TLS_TRUST_HINT,
 } from "../utilities/tls-trust.js";
+import {
+  type AgentProbe,
+  agentUpgradeHint,
+  agentVersionFloor,
+} from "./agent-version.js";
 import { isConnectivityError, isTransientError } from "./connectivity.js";
 import { parseCliVersion } from "./onboarding.js";
 
@@ -165,6 +171,98 @@ export function commandCheck(input: CommandCheckInput): DoctorCheck {
     `${label} ${version ?? "(version not reported)"}`,
     resolved ? { detail: resolved } : {},
   );
+}
+
+/** Facts for an agent CLI check (`agents.<harness id>`). */
+export interface AgentCheckInput {
+  descriptor: Pick<
+    HarnessDescriptor,
+    | "id"
+    | "label"
+    | "installHint"
+    | "upgradeHint"
+    | "minVersion"
+    | "verifiedVersion"
+    | "versionArgs"
+  >;
+  probe: AgentProbe;
+  /** The default agent's problems fail; other agents' warn. */
+  isDefault: boolean;
+}
+
+/**
+ * One built-in agent (docs/harness-additions.md P7): found (skipping
+ * terminal shims), its version command answers, and the version against
+ * the descriptor's floors. Below `minVersion` → fail for the default agent,
+ * warn otherwise, with its upgrade command; above `verifiedVersion` → ok,
+ * "newer than tested".
+ */
+export function agentCheck(input: AgentCheckInput): DoctorCheck {
+  const { descriptor, probe } = input;
+  const id = `agents.${descriptor.id}`;
+  const label = descriptor.label;
+  const severity = input.isDefault ? "fail" : "warn";
+  const agentCommand = probe.command.split(" ")[0] ?? probe.command;
+  const versionCommand = [probe.command, ...descriptor.versionArgs].join(" ");
+  const done = (item: DoctorCheck): DoctorCheck => ({ ...item, agentCommand });
+  const install = `Install ${label} (\`${descriptor.installHint}\`), then reopen Harbormaster.`;
+  if (probe.shim && !probe.path) {
+    return done(
+      check(id, severity, `${label}: only a terminal shim was found`, {
+        detail: `${probe.shim} is a terminal multiplexer's wrapper, not ${label}.`,
+        remediation: `${install} If it is installed, add its folder to your login shell's PATH.`,
+      }),
+    );
+  }
+  const outcome = probe.outcome;
+  if (!probe.path || !outcome || outcome.notFound) {
+    return done(
+      check(id, severity, `${label} is not on PATH`, {
+        detail: `Looked for \`${probe.command}\`.`,
+        remediation: install,
+      }),
+    );
+  }
+  if (outcome.timedOut) {
+    return done(
+      check(
+        id,
+        "skip",
+        `${versionCommand} timed out after ${seconds(LOCAL_PROBE_TIMEOUT_MS)}`,
+        { detail: probe.path },
+      ),
+    );
+  }
+  if (!outcome.ok) {
+    return done(
+      check(id, "warn", `${versionCommand} failed`, {
+        detail: [probe.path, firstLine(outcome.output)]
+          .filter(Boolean)
+          .join("\n"),
+        remediation: `Run \`${versionCommand}\` in a terminal to see why.`,
+      }),
+    );
+  }
+  const version = probe.version;
+  const floor = agentVersionFloor(version, descriptor);
+  if (floor === "below-min") {
+    return done(
+      check(
+        id,
+        severity,
+        `${label} ${version} is older than the minimum ${descriptor.minVersion}`,
+        {
+          detail: probe.path,
+          remediation: `Upgrade ${label}: \`${agentUpgradeHint(descriptor)}\`.`,
+        },
+      ),
+    );
+  }
+  const summary =
+    floor === "newer-than-verified"
+      ? `${label} ${version}, newer than tested (${descriptor.verifiedVersion})`
+      : `${label} ${version ?? "(version not reported)"}`;
+  return done(check(id, "ok", summary, { detail: probe.path }));
 }
 
 /** gh's wording for "could not reach the API" (as opposed to "not logged in"). */
@@ -1000,13 +1098,8 @@ export function formatDoctorReport(report: DoctorReport): string {
   return lines.join("\n");
 }
 
-/** The version a passing `--version` check reported (`agents.pi` → `0.9.1`), if any. */
-function reportedVersion(
-  report: Pick<DoctorReport, "checks">,
-  id: string,
-): string {
-  const item = report.checks.find((entry) => entry.id === id);
-  if (!item) return "not checked";
+/** The version a passing agent check reported (`agents.pi` → `0.9.1`), else its summary. */
+function reportedVersion(item: DoctorCheck): string {
   if (item.status !== "ok") return item.summary;
   return parseCliVersion(item.summary) ?? item.summary;
 }
@@ -1022,8 +1115,9 @@ export function doctorPlainSummary(
   const appVersion = facts.appVersion ?? report.appVersion ?? "unknown";
   const lines = [
     `Harbormaster ${appVersion}${facts.os ? ` on ${facts.os}` : ""}`,
-    `pi: ${reportedVersion(report, "agents.pi")}`,
-    `claude: ${reportedVersion(report, "agents.claude")}`,
+    ...report.checks
+      .filter((item) => item.agentCommand)
+      .map((item) => `${item.agentCommand}: ${reportedVersion(item)}`),
   ];
   const problems = orderDoctorChecks(report.checks).filter(
     (item) => item.status === "fail" || item.status === "warn",

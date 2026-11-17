@@ -14,6 +14,7 @@ import type {
   ReviewSupportHarness,
   ReviewSupportPiece,
 } from "../../../preload/api";
+import { harnessLabelFrom, useHarnessDescriptors } from "../lib/harnesses";
 import {
   harnessSupport,
   recheckReviewSupport,
@@ -23,16 +24,6 @@ import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-
-const HARNESS_LABELS: Record<string, string> = {
-  pi: "Pi",
-  "claude-code": "Claude Code",
-  codex: "Codex",
-};
-
-export function harnessLabel(id: string): string {
-  return HARNESS_LABELS[id] ?? id;
-}
 
 const STATE_TEXT: Record<ReviewSupportHarness["state"], string> = {
   ready: "Ready",
@@ -95,9 +86,7 @@ function HarnessRow({ entry }: { entry: ReviewSupportHarness }): JSX.Element {
       data-state={entry.state}
     >
       <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="font-medium">
-          {entry.label ?? harnessLabel(entry.harness)}
-        </span>
+        <span className="font-medium">{entry.label ?? entry.harness}</span>
         <span
           className={cn(
             "flex items-center gap-1 text-xs",
@@ -123,6 +112,7 @@ export function CodeReviewSettings({
   defaultHarness?: string;
 }): JSX.Element {
   const support = useReviewSupport();
+  const descriptors = useHarnessDescriptors();
   const [capture, setCapture] = useState<boolean | null>(null);
   useEffect(() => {
     void window.harbormaster.core
@@ -143,7 +133,7 @@ export function CodeReviewSettings({
     ? harnessSupport(support, defaultHarness)
     : undefined;
   const defaultLabel = defaultHarness
-    ? (summary?.label ?? harnessLabel(defaultHarness))
+    ? (summary?.label ?? harnessLabelFrom(descriptors, defaultHarness))
     : "";
 
   return (

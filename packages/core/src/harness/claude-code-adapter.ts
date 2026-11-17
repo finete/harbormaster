@@ -36,6 +36,8 @@ import type {
   BuildLaunchSpecInput,
   ExpectedSessionFile,
   HarnessAdapter,
+  HarnessCapabilities,
+  HarnessDescriptor,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
   HarnessReviewCapability,
@@ -57,14 +59,74 @@ import {
   shellQuote,
 } from "./adapter-common.js";
 import {
+  harnessCommandEnvName,
+  harnessLaunchCommand,
+  isTerminalShim,
+  parseVersionOutput,
+} from "./descriptor.js";
+import {
   HARBORMASTER_MCP_SERVER_NAME,
   piMcpServerConfig,
 } from "./pi-adapter.js";
 
-/** Overrides the launched command (and only the command) for e2e, like `HARBORMASTER_PI_COMMAND`. */
-const CLAUDE_COMMAND_ENV = "HARBORMASTER_CLAUDE_COMMAND";
-
 export const CLAUDE_CODE_HARNESS_ID = "claude-code";
+
+/**
+ * Claude Code's install/version facts (P2). Floor 2.1.295: the first
+ * release that speaks OSC 7501 (presence); verified 2.1.322 (this header).
+ * `HARBORMASTER_CLAUDE_COMMAND` stays as the legacy e2e override name.
+ */
+export const CLAUDE_CODE_DESCRIPTOR: HarnessDescriptor = {
+  id: CLAUDE_CODE_HARNESS_ID,
+  label: "Claude Code",
+  commands: [["claude"]],
+  commandEnv: [
+    harnessCommandEnvName(CLAUDE_CODE_HARNESS_ID),
+    "HARBORMASTER_CLAUDE_COMMAND",
+  ],
+  // https://code.claude.com/docs/en/setup (native installer, macOS/Linux).
+  installHint: "curl -fsSL https://claude.ai/install.sh | bash",
+  upgradeHint: "claude update",
+  versionArgs: ["--version"],
+  parseVersion: parseVersionOutput,
+  minVersion: "2.1.295",
+  verifiedVersion: "2.1.322",
+  configDir: (env, home) => env.CLAUDE_CONFIG_DIR || join(home, ".claude"),
+  reviewPieces: ["binary", "claude-plugin", "claude-skill", "claude-code"],
+  isShim: isTerminalShim,
+};
+
+/**
+ * Claude Code's capabilities (P6): `--session-id` pre-assigns; 7501 only
+ * after the probe, with its own dialect (see `interpretClaudeProgramStatus`);
+ * hooks deliver steer and follow-up but fire only mid-turn, so an idle
+ * session is woken by typing into the pane; fresh worktrees ask for folder
+ * trust.
+ */
+export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
+  sessionId: "preassign",
+  status: {
+    protocol: "osc7501",
+    probe: true,
+    states: ["idle", "working", "blocked", "done", "error"],
+    quirks: [
+      "working + '<n> <kind> still running' after a turn = idle (background work)",
+      "done is reported twice; done→working flicker",
+    ],
+  },
+  delivery: {
+    steer: true,
+    followUp: true,
+    wakeIdle: false,
+    channels: {
+      steer: "PostToolUse hook",
+      followUp: "Stop hook (block)",
+      catchUp: "UserPromptSubmit hook",
+    },
+  },
+  trustPrompt: true,
+  review: true,
+};
 
 /** Hooks deliver text: steer (PostToolUse), followUp (Stop block), catch-up (UserPromptSubmit). No inline images: the text names the copied file. */
 export const CLAUDE_CODE_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities =
@@ -250,6 +312,8 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   readonly id = CLAUDE_CODE_HARNESS_ID;
   readonly label = "Claude Code";
   readonly command = "claude";
+  readonly descriptor: HarnessDescriptor = CLAUDE_CODE_DESCRIPTOR;
+  readonly capabilities: HarnessCapabilities = CLAUDE_CODE_CAPABILITIES;
   readonly messaging: HarnessMessagingCapabilities = {
     ...CLAUDE_CODE_MESSAGING_CAPABILITIES,
   };
@@ -332,7 +396,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       );
     }
     return {
-      command: process.env[CLAUDE_COMMAND_ENV] || this.command,
+      command: harnessLaunchCommand(this),
       args: [
         ...claudeSessionArgs(input.session, (id) =>
           this.transcripts.exists(id),

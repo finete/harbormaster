@@ -5,6 +5,7 @@
 import type { DoctorInput, DoctorReport } from "./doctor.js";
 import type { PullRequestPreview } from "./github.js";
 import type {
+  HarnessDescriptorInfo,
   HarnessModelCatalog,
   PresenceStatus,
   SessionLaunch,
@@ -420,6 +421,12 @@ export interface CoreCommands {
   listBranches(repositoryId: string): Promise<string[]>;
   /** One catalog per registered harness, for the composer's Agent · Model picker. */
   listModels(): Promise<HarnessModelCatalog[]>;
+  /**
+   * Every registered agent's descriptor (built-ins, then the config's
+   * custom agents): labels, install/upgrade one-liners, version floors.
+   * No probing; what frontends use instead of naming agents.
+   */
+  listHarnessDescriptors(): Promise<HarnessDescriptorInfo[]>;
   /**
    * The workspace binding for a task, if one was created for it: a git
    * worktree/branch for repository-backed tasks, a scratch directory
@@ -844,7 +851,7 @@ export interface CoreCommands {
     path: string,
     options?: { create?: boolean },
   ): Promise<CodeRootScan>;
-  /** `pi --version` / `claude --version`, each with a short timeout; then each custom agent's command located on PATH. */
+  /** Each built-in agent's version command (descriptor aliases, terminal shims skipped) with a short timeout and its version floor; then each custom agent's command located on PATH. */
   detectAgents(): Promise<DetectedAgent[]>;
   /**
    * Save the default agent (`launch.defaultHarness`), optionally adding a

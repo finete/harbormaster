@@ -26,8 +26,13 @@ import type {
   SessionLaunch,
 } from "../src/contracts/harness.js";
 import type { PresenceAccess } from "../src/contracts/services.js";
+import { compareSemver } from "../src/engines/review-support.js";
 import { ClaudeCodeHarnessAdapter } from "../src/harness/claude-code-adapter.js";
 import { CustomHarnessAdapter } from "../src/harness/custom-adapter.js";
+import {
+  deliveryAgreesWithMessaging,
+  harnessCommandEnvName,
+} from "../src/harness/descriptor.js";
 import { PiHarnessAdapter } from "../src/harness/pi-adapter.js";
 import { createHarnessRegistry } from "../src/harness/registry.js";
 import { ProgramStatusParser } from "../src/utilities/program-status.js";
@@ -139,6 +144,108 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index === -1 ? undefined : args[index + 1];
 }
+
+// --- Descriptor + capabilities (docs/harness-additions.md P2/P6) ----------
+
+const REGISTERED = createHarnessRegistry({ presence: noPresence }).list([
+  { id: "any", label: "Any CLI", command: "any-cli" },
+  {
+    id: "reviewer",
+    label: "Reviewer CLI",
+    command: "/opt/bin/reviewer",
+    reviewCommand: "/review {url}",
+  },
+]);
+
+describe.each(REGISTERED.map((adapter) => ({ name: adapter.id, adapter })))(
+  "descriptor complete: $name",
+  ({ adapter }) => {
+    const builtin = createHarnessRegistry()
+      .list()
+      .some((entry) => entry.id === adapter.id);
+    const { descriptor, capabilities } = adapter;
+
+    it("fills every field", () => {
+      expect(descriptor.id).toBe(adapter.id);
+      expect(descriptor.label).toBe(adapter.label);
+      expect(descriptor.commands.length).toBeGreaterThan(0);
+      for (const argv of descriptor.commands) {
+        expect(argv.length).toBeGreaterThan(0);
+        for (const word of argv) expect(word.trim()).toBe(word);
+        expect(argv[0]?.length).toBeGreaterThan(0);
+      }
+      expect(descriptor.commandEnv).toContain(
+        harnessCommandEnvName(adapter.id),
+      );
+      expect(descriptor.installHint.trim().length).toBeGreaterThan(0);
+      expect(descriptor.versionArgs.length).toBeGreaterThan(0);
+      expect(descriptor.parseVersion("tool v1.2.3 (build)")).toBe("1.2.3");
+      expect(descriptor.parseVersion("no version here")).toBeUndefined();
+      expect(typeof descriptor.configDir({}, "/home/me")).toMatch(
+        builtin ? /^string$/ : /^(string|undefined)$/,
+      );
+      expect(Array.isArray(descriptor.reviewPieces)).toBe(true);
+      expect(
+        descriptor.isShim("/var/folders/ab/T/cmux-cli-shims/1234/claude"),
+      ).toBe(true);
+      expect(descriptor.isShim("/Users/me/.local/bin/claude")).toBe(false);
+      if (builtin) {
+        // Built-ins carry floors; custom agents never do.
+        expect(descriptor.minVersion).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(descriptor.verifiedVersion).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(descriptor.configDir({}, "/home/me")).toMatch(/^\/home\/me\//);
+      } else {
+        expect(descriptor.minVersion).toBeUndefined();
+        expect(descriptor.verifiedVersion).toBeUndefined();
+      }
+      if (descriptor.minVersion && descriptor.verifiedVersion) {
+        expect(
+          compareSemver(descriptor.minVersion, descriptor.verifiedVersion),
+        ).toBeLessThanOrEqual(0);
+      }
+    });
+
+    it("needs review pieces exactly when it can start a review", () => {
+      expect(descriptor.reviewPieces.length > 0).toBe(Boolean(adapter.review));
+      expect(capabilities.review).toBe(Boolean(adapter.review));
+    });
+
+    it("declares capabilities consistent with its messaging", () => {
+      expect(["preassign", "learned"]).toContain(capabilities.sessionId);
+      expect(["osc7501", "hooks", "none"]).toContain(
+        capabilities.status.protocol,
+      );
+      expect(Array.isArray(capabilities.status.quirks)).toBe(true);
+      for (const state of capabilities.status.states) {
+        expect(["idle", "working", "blocked", "done", "error"]).toContain(
+          state,
+        );
+      }
+      const { delivery } = capabilities;
+      expect(deliveryAgreesWithMessaging(delivery, adapter.messaging)).toBe(
+        true,
+      );
+      // A delivered kind names its channel; an undelivered one has none.
+      expect(Boolean(delivery.channels.steer)).toBe(delivery.steer);
+      expect(Boolean(delivery.channels.followUp)).toBe(delivery.followUp);
+      expect(Boolean(delivery.channels.wakeIdle)).toBe(delivery.wakeIdle);
+      if (capabilities.status.protocol === "osc7501") {
+        expect(typeof capabilities.status.probe).toBe("boolean");
+      }
+    });
+  },
+);
+
+it("keeps the legacy command override names", () => {
+  const registry = createHarnessRegistry();
+  expect(registry.get("pi")?.descriptor.commandEnv).toContain(
+    "HARBORMASTER_PI_COMMAND",
+  );
+  expect(registry.get("claude-code")?.descriptor.commandEnv).toEqual([
+    "HARBORMASTER_CLAUDE_CODE_COMMAND",
+    "HARBORMASTER_CLAUDE_COMMAND",
+  ]);
+});
 
 describe.each(SUBJECTS)("agent contract: $name", (subject) => {
   const adapter = subject.make({ cliPath: CLI });

@@ -46,7 +46,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hasReceivedOutput, setHasReceivedOutput] = useState(false);
   const [fellBackToShell, setFellBackToShell] = useState(false);
-  const [missingCommand, setMissingCommand] = useState("pi");
+  const [missingCommand, setMissingCommand] = useState("The agent's command");
   const [worktreeMissing, setWorktreeMissing] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
 

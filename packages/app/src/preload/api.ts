@@ -20,6 +20,7 @@ import type {
   DetectedAgent,
   DoctorReport,
   GithubAuthStatus,
+  HarnessDescriptorInfo,
   HarnessModelCatalog,
   InboxItem,
   InboxPriorityInput,
@@ -94,6 +95,7 @@ export type {
   DoctorReport,
   DoctorStatus,
   GithubAuthStatus,
+  HarnessDescriptorInfo,
   HarnessModel,
   HarnessModelCatalog,
   InboxButton,
@@ -421,6 +423,8 @@ export interface HarbormasterApi {
     listBranches(repositoryId: string): Promise<string[]>;
     /** See `CoreCommands.listModels`. */
     listModels(): Promise<HarnessModelCatalog[]>;
+    /** Every registered agent's descriptor (labels, install hints, version floors). See `CoreCommands.listHarnessDescriptors`. */
+    listHarnessDescriptors(): Promise<HarnessDescriptorInfo[]>;
     /** Runs `git status` (fresh `dirty`): never on a periodic path. See `CoreCommands.getTaskWorkspace`. */
     getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined>;
     /** Working tasks' dirtiness from the last refresh pass (no git per call). See `CoreCommands.listWorktreeStatus`. */

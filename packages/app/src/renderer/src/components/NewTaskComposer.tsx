@@ -9,6 +9,7 @@ import type {
   Task,
 } from "../../../preload/api";
 import { shellEscapePaths } from "../../../shared/shell-escape";
+import { DEFAULT_HARNESS_ID } from "../lib/harnesses";
 import {
   alternateAction,
   defaultAction,
@@ -180,7 +181,7 @@ export function NewTaskComposer({
     parentHarness ??
     launchSettings?.defaultHarness ??
     catalogs[0]?.harness ??
-    "pi";
+    DEFAULT_HARNESS_ID;
   const effectiveHarness = draft.harness || defaultHarness;
   const bypass =
     draft.bypassPermissions ?? launchSettings?.bypassPermissions ?? true;

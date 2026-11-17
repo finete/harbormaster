@@ -31,14 +31,15 @@ import type {
   CodeRootScan,
   DetectedAgent,
   GithubAuthStatus,
+  HarnessDescriptorInfo,
   OnboardingState,
 } from "../../../preload/api";
+import { DEFAULT_HARNESS_ID, loadHarnessDescriptors } from "../lib/harnesses";
 import type { DraftPrefill } from "../lib/new-task-draft";
 import {
-  AGENT_INSTALL_HINTS,
   type AgentChoice,
+  agentFixCommand,
   agentFoundLine,
-  BUILTIN_AGENT_IDS,
   initialAgentChoice,
   isBuiltinAgent,
   ONBOARDING_STEPS,
@@ -421,11 +422,6 @@ function CodeStep({
 
 // --- Screen 2: default agent -------------------------------------------------
 
-const AGENT_LABELS: Record<(typeof BUILTIN_AGENT_IDS)[number], string> = {
-  pi: "Pi",
-  "claude-code": "Claude Code",
-};
-
 function AgentCard({
   id,
   label,
@@ -468,6 +464,7 @@ function AgentCard({
 
 function AgentStep({
   state,
+  agents,
   detected,
   detecting,
   onRescan,
@@ -477,6 +474,8 @@ function AgentStep({
   onBypass,
 }: {
   state: OnboardingState;
+  /** The built-in agents (core's harness descriptors), in registry order. */
+  agents: HarnessDescriptorInfo[];
   detected: DetectedAgent[] | null;
   detecting: boolean;
   onRescan(): void;
@@ -489,11 +488,16 @@ function AgentStep({
   const display = (path: string) => tildePath(path, state.homeDir);
   // A custom agent (config.json) that already is the default stays
   // pickable, so reopening the wizard never silently replaces it.
-  const configuredCustom = isBuiltinAgent(state.defaultHarness)
+  const builtinIds = agents.map((entry) => entry.id);
+  const configuredCustom = isBuiltinAgent(state.defaultHarness, builtinIds)
     ? undefined
     : state.customAgents.find((entry) => entry.id === state.defaultHarness);
-  const chosen = isBuiltinAgent(choice) ? agent(choice) : undefined;
-  const piInPlay = choice === "pi" || agent("pi")?.available;
+  const chosen = isBuiltinAgent(choice, builtinIds) ? agent(choice) : undefined;
+  // What Harbormaster sets up by itself for an agent in play (chosen or found).
+  const setupNotes = agents.filter(
+    (entry) =>
+      entry.setupNote && (choice === entry.id || agent(entry.id)?.available),
+  );
   return (
     <div className="flex flex-col gap-4">
       <StepHeader title={stepLabel("agent")}>
@@ -523,35 +527,41 @@ function AgentStep({
           data-testid="onboarding-agent-options"
           className="flex flex-col gap-2"
         >
-          {BUILTIN_AGENT_IDS.map((id) => {
+          {agents.map(({ id, label }) => {
             const found = agent(id);
             const line = found ? agentFoundLine(found, display) : undefined;
+            const fix = found ? agentFixCommand(found) : undefined;
             return (
               <AgentCard
                 key={id}
                 id={id}
-                label={AGENT_LABELS[id]}
+                label={label}
                 checked={choice === id}
                 onSelect={() => onChoice(id)}
               >
                 <span
                   data-testid={`onboarding-agent-${id}-status`}
+                  data-floor={found?.floor}
                   className={cn(
                     "truncate text-xs",
-                    line ? "text-status-ok" : "text-muted-foreground",
+                    !line
+                      ? "text-muted-foreground"
+                      : found?.floor === "below-min"
+                        ? "text-status-needsYou"
+                        : "text-status-ok",
                   )}
                   title={found?.path ?? found?.command}
                 >
                   {!found ? "Detecting…" : (line ?? found.error ?? "not found")}
                 </span>
-                {found && !found.available && (
+                {fix && (
                   <span
-                    data-testid={`onboarding-agent-${id}-install`}
+                    data-testid={`onboarding-agent-${id}-${fix.kind}`}
                     className="text-xs text-muted-foreground"
                   >
-                    Install:{" "}
+                    {fix.kind === "install" ? "Install" : "Upgrade"}:{" "}
                     <code className="select-all rounded bg-muted px-1 py-0.5 text-[11px] text-foreground">
-                      {AGENT_INSTALL_HINTS[id]}
+                      {fix.command}
                     </code>
                   </span>
                 )}
@@ -578,19 +588,19 @@ function AgentStep({
           className="flex items-start gap-2 text-xs text-status-needsYou"
         >
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
-          {AGENT_LABELS[chosen.id as keyof typeof AGENT_LABELS] ?? chosen.label}{" "}
-          is not installed yet; install it before you start your first task.
+          {chosen.label} is not installed yet; install it before you start your
+          first task.
         </p>
       )}
-      {piInPlay && (
+      {setupNotes.map((entry) => (
         <p
-          data-testid="onboarding-pi-extension"
+          key={entry.id}
+          data-testid={`onboarding-setup-note-${entry.id}`}
           className="text-xs text-muted-foreground"
         >
-          Pi gets Harbormaster's small inbox extension installed automatically,
-          so messages reach its sessions.
+          {entry.setupNote}
         </p>
-      )}
+      ))}
       {/* The same row as Settings → Agents (S3); saved with the agent on Next. */}
       <SettingsCard>
         <SettingRow
@@ -889,7 +899,10 @@ export function Onboarding({
   // Screen 2.
   const [detected, setDetected] = useState<DetectedAgent[] | null>(null);
   const [detecting, setDetecting] = useState(false);
-  const [choice, setChoice] = useState<AgentChoice>("pi");
+  const [choice, setChoice] = useState<AgentChoice>(DEFAULT_HARNESS_ID);
+  // The built-in agents from core's harness descriptors (loaded with the state).
+  const [builtins, setBuiltins] = useState<HarnessDescriptorInfo[]>([]);
+  const builtinIdsRef = useRef<string[]>([]);
   const choiceTouched = useRef(false);
   const [bypass, setBypass] = useState(true);
 
@@ -965,7 +978,9 @@ export function Onboarding({
           if (seq !== detectSeq.current) return;
           setDetected(agents);
           if (!choiceTouched.current) {
-            setChoice(initialAgentChoice(configured, agents));
+            setChoice(
+              initialAgentChoice(configured, agents, builtinIdsRef.current),
+            );
           }
         })
         .catch((cause: unknown) => {
@@ -981,19 +996,25 @@ export function Onboarding({
   // Load the starting state, then kick off every probe in the background.
   useEffect(() => {
     let cancelled = false;
-    void api.getState().then((loaded) => {
+    void Promise.all([
+      api.getState(),
+      loadHarnessDescriptors().catch(() => []),
+    ]).then(([loaded, descriptors]) => {
       if (cancelled) return;
+      const builtinAgents = descriptors.filter((entry) => entry.builtin);
+      builtinIdsRef.current = builtinAgents.map((entry) => entry.id);
+      setBuiltins(builtinAgents);
       setState(loaded);
       setRoot(loaded.codeRoot);
       runScan(loaded.codeRoot);
       setBypass(loaded.bypassPermissions);
       // A stale custom default (no longer in config.json) falls back to Pi.
       const configured =
-        isBuiltinAgent(loaded.defaultHarness) ||
+        isBuiltinAgent(loaded.defaultHarness, builtinIdsRef.current) ||
         loaded.customAgents.some((agent) => agent.id === loaded.defaultHarness)
           ? loaded.defaultHarness
-          : "pi";
-      setChoice(initialAgentChoice(configured, []));
+          : DEFAULT_HARNESS_ID;
+      setChoice(initialAgentChoice(configured, [], builtinIdsRef.current));
       detectAgents(configured);
     });
     checkGithub();
@@ -1310,6 +1331,7 @@ export function Onboarding({
             ) : stepId(step) === "agent" ? (
               <AgentStep
                 state={state}
+                agents={builtins}
                 detected={detected}
                 detecting={detecting}
                 onRescan={() => detectAgents(choice)}

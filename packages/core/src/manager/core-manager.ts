@@ -38,6 +38,7 @@ import type {
 } from "../contracts/github.js";
 import type {
   HarnessAdapter,
+  HarnessDescriptorInfo,
   HarnessModelCatalog,
   PresenceStatus,
   ProgramStatusReading,
@@ -145,6 +146,7 @@ import type {
   RepositoryInfo,
   WorktreeInfo,
 } from "../contracts/workspace.js";
+import { detectedAgent } from "../engines/agent-version.js";
 import {
   builtinAwaitingKinds,
   describeAwaitingKind,
@@ -184,12 +186,10 @@ import {
   selectMessagesToPrune,
 } from "../engines/messaging.js";
 import {
-  BUILTIN_AGENT_IDS,
   codeRootCandidates,
   customAgentProblems,
   expandHome,
   fallbackCodeRoot,
-  parseCliVersion,
   parseGhAuthStatus,
   protectedHomeFolder,
   toScannedRepositories,
@@ -214,6 +214,7 @@ import {
 import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { awaitsUsageBackfill, buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
+import { harnessDescriptorInfo } from "../harness/descriptor.js";
 import { applyProgramStatus } from "../harness/presence-heuristics.js";
 import {
   type HarnessRegistry,
@@ -224,6 +225,7 @@ import { forEachConcurrently } from "../utilities/concurrency.js";
 import type { CoreEventBus } from "../utilities/event-bus.js";
 import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
 import { elapsedMs, logErrorMessage, timed } from "../utilities/timed.js";
+import { probeAgentCommand } from "./agent-probe.js";
 import { DoctorRuntime } from "./doctor-runtime.js";
 import {
   type ActionResult,
@@ -573,6 +575,22 @@ export class CoreManager implements CoreCommands {
       return this.deps.harnesses.list(config.agents?.custom ?? []);
     }
     return this.deps.harness ? [this.deps.harness] : [];
+  }
+
+  /** The built-in agents (registration order), without the config's custom ones. */
+  private builtinHarnesses(): HarnessAdapter[] {
+    if (this.deps.harnesses) return this.deps.harnesses.list();
+    return this.deps.harness ? [this.deps.harness] : [];
+  }
+
+  async listHarnessDescriptors(): Promise<HarnessDescriptorInfo[]> {
+    const config = await this.deps.config.load();
+    const builtin = new Set(
+      this.builtinHarnesses().map((adapter) => adapter.id),
+    );
+    return this.harnessList(config).map((adapter) =>
+      harnessDescriptorInfo(adapter, builtin.has(adapter.id)),
+    );
   }
 
   /** The adapter a task runs on (its `harness`, else Pi, else the presence adapter). */
@@ -4156,28 +4174,12 @@ export class CoreManager implements CoreCommands {
       ),
     );
     const builtin = Promise.all(
-      probes.builtinAgentCommands().map(async (agent) => {
-        const [outcome, path] = await Promise.all([
-          probes.cliVersion(agent.command),
-          probes.resolveCommand(agent.command).catch(() => undefined),
-        ]);
-        const located = path ? { path } : {};
-        if (outcome.ok) {
-          const version = parseCliVersion(outcome.output);
-          return {
-            ...agent,
-            ...located,
-            available: true,
-            ...(version ? { version } : {}),
-          };
-        }
-        return {
-          ...agent,
-          ...located,
-          available: false,
-          error: probeError(outcome, "not found"),
-        };
-      }),
+      this.builtinHarnesses().map(async (adapter) =>
+        detectedAgent(
+          adapter.descriptor,
+          await probeAgentCommand(adapter.descriptor, probes),
+        ),
+      ),
     );
     return [...(await builtin), ...(await custom)];
   }
@@ -4187,7 +4189,10 @@ export class CoreManager implements CoreCommands {
     if (!harness) throw new Error("Choose a default agent.");
     let customAgent: CustomAgentConfig | undefined;
     if (input.customAgent) {
-      const problems = customAgentProblems(input.customAgent);
+      const problems = customAgentProblems(
+        input.customAgent,
+        this.builtinHarnesses().map((adapter) => adapter.id),
+      );
       if (problems.length > 0) throw new Error(problems.join(" "));
       if (input.customAgent.id.trim() !== harness) {
         throw new Error("The default agent must be the custom agent's id.");
@@ -4202,7 +4207,9 @@ export class CoreManager implements CoreCommands {
           ? { promptArg: input.customAgent.promptArg }
           : {}),
       };
-    } else if (!BUILTIN_AGENT_IDS.includes(harness)) {
+    } else if (
+      !this.builtinHarnesses().some((adapter) => adapter.id === harness)
+    ) {
       const config = await this.deps.config.load();
       if (!config.agents?.custom?.some((agent) => agent.id === harness)) {
         throw new Error(`Unknown agent "${harness}".`);
@@ -4268,6 +4275,7 @@ export class CoreManager implements CoreCommands {
     if (!probes) throw new Error("doctor is not configured");
     return new DoctorRuntime({
       probes,
+      agents: this.builtinHarnesses().map((adapter) => adapter.descriptor),
       config: this.deps.config,
       tasks: this.deps.tasks,
       bindings: this.deps.bindings,
@@ -4533,7 +4541,11 @@ export class CoreManager implements CoreCommands {
       }));
     }
     return [
-      ...BUILTIN_AGENT_IDS.map((id) => ({ id, label: id, custom: false })),
+      ...this.builtinHarnesses().map((adapter) => ({
+        id: adapter.id,
+        label: adapter.label,
+        custom: false,
+      })),
       ...custom.map((agent) => ({
         id: agent.id,
         label: agent.label,

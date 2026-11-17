@@ -13,6 +13,7 @@ import { Loader2, MessageSquareCode } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useBoard, usePresenceMap } from "../core-client";
+import { DEFAULT_HARNESS_ID, useHarnessLabel } from "../lib/harnesses";
 import {
   reviewWaitState,
   startReview,
@@ -20,7 +21,6 @@ import {
   useReviewRequest,
 } from "../lib/review";
 import { useNow } from "../lib/use-now";
-import { harnessLabel } from "./CodeReviewSettings";
 import { Button } from "./ui/button";
 
 export interface UrlPanelParams {
@@ -66,7 +66,7 @@ function useTaskHarness(taskId: string): string {
         if (task) return taskHarness(task);
       }
     }
-    return "pi";
+    return DEFAULT_HARNESS_ID;
   }, [columns, taskId]);
 }
 
@@ -86,6 +86,7 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
   }, [agentWorking, request?.at]);
   const state = reviewWaitState({ request, clockFrom, now, agentWorking });
   const harness = request?.harness ?? boardHarness;
+  const harnessLabel = useHarnessLabel(harness);
 
   async function tryAgain(): Promise<void> {
     if (requesting) return;
@@ -123,13 +124,13 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
       <Placeholder testId="url-pane-rejected">
         <MessageSquareCode className="h-5 w-5" />
         <p className="text-foreground">
-          {harnessLabel(harness)} doesn't know{" "}
+          {harnessLabel} doesn't know{" "}
           <span className="font-mono">{commandName}</span>
         </p>
         <ul className="max-w-sm space-y-1 text-xs">
           <li>
-            Plannotator's commands aren't installed for {harnessLabel(harness)}.
-            Settings → Code review shows the install command.
+            Plannotator's commands aren't installed for {harnessLabel}. Settings
+            → Code review shows the install command.
           </li>
           <li>
             Installed already? Restart the agent: it reads its commands when it
@@ -159,8 +160,7 @@ function ReviewWaiting({ taskId }: { taskId: string }): JSX.Element {
           <span className="font-mono">{command}</span> — check its terminal.
         </li>
         <li>
-          Plannotator not set up for {harnessLabel(harness)}? Settings → Code
-          review.
+          Plannotator not set up for {harnessLabel}? Settings → Code review.
         </li>
       </ul>
       <Button

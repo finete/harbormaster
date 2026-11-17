@@ -12,6 +12,7 @@ import type {
   Task,
 } from "../../../preload/api";
 import { describeThrown, pushToast } from "../toast";
+import { DEFAULT_HARNESS_ID } from "./harnesses";
 import { createSharedStore } from "./shared-store";
 import { taskUrls } from "./task-urls";
 
@@ -22,7 +23,7 @@ export type ReviewTargetKind = "local" | "pr";
 
 /** The task's agent (tasks from before agents were recorded ran Pi). */
 export function taskHarness(task: Pick<Task, "harness">): string {
-  return task.harness ?? "pi";
+  return task.harness ?? DEFAULT_HARNESS_ID;
 }
 
 export function harnessSupport(

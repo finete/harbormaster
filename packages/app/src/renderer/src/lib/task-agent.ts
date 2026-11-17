@@ -2,6 +2,7 @@
 // sidebar row's "pi · claude-opus-4-8 · your move". See
 // /docs/new-task-composer.md "Task rows".
 import type { Task } from "../../../preload/api";
+import { DEFAULT_HARNESS_ID } from "./harnesses";
 
 /** `provider/name` -> `name`. */
 export function shortModelName(id: string): string {
@@ -25,6 +26,6 @@ export function taskAgentLabel(
   task: Pick<Task, "harness" | "model" | "launch" | "sessionModel">,
 ): string {
   const model = taskModel(task);
-  const harness = task.harness ?? "pi";
+  const harness = task.harness ?? DEFAULT_HARNESS_ID;
   return model ? `${harness} · ${shortModelName(model)}` : harness;
 }

@@ -26,6 +26,7 @@ import {
   type RemoteProbe,
 } from "../contracts/doctor.js";
 import type { VersionAccess } from "../contracts/github.js";
+import type { HarnessDescriptor } from "../contracts/harness.js";
 import { DEFAULT_HARNESS_ID, type GlobalConfig } from "../contracts/model.js";
 import type { RuleFile, RulesFileAccess } from "../contracts/rules.js";
 import type {
@@ -35,6 +36,7 @@ import type {
 } from "../contracts/services.js";
 import type { RepositoryInfo } from "../contracts/workspace.js";
 import {
+  agentCheck,
   codeRootCheck,
   commandCheck,
   configCheck,
@@ -60,7 +62,9 @@ import {
   versionEndpointTargets,
 } from "../engines/doctor.js";
 import { parseRuleFile } from "../engines/rules/rule-files.js";
+import { PI_HARNESS_ID } from "../harness/pi-adapter.js";
 import { forEachConcurrently } from "../utilities/concurrency.js";
+import { probeAgentCommand } from "./agent-probe.js";
 
 /** Slack on top of a probe's own timeout before the doctor gives up on it. */
 const GUARD_SLACK_MS = 1_000;
@@ -76,6 +80,8 @@ function onGithub(repositoryId: string): boolean {
 
 export interface DoctorRuntimeDependencies {
   probes: EnvironmentProbeAccess;
+  /** The built-in agents' descriptors (the harness registry): one `agents.<id>` check each. */
+  agents: readonly HarnessDescriptor[];
   config: ConfigAccess;
   tasks: TaskStateAccess;
   bindings: WorkspaceBindingAccess;
@@ -186,13 +192,19 @@ export class DoctorRuntime {
         });
       });
 
-    const pi = command(
-      "agents.pi",
-      "Pi",
-      commands.pi,
-      defaultHarness === "pi" ? "fail" : "warn",
-      "Install Pi (`npm install -g @earendil-works/pi-coding-agent`), then reopen Harbormaster.",
+    const agents = new Map(
+      this.deps.agents.map((descriptor) => [
+        descriptor.id,
+        guarded(`agents.${descriptor.id}`, probe, async () =>
+          agentCheck({
+            descriptor,
+            probe: await probeAgentCommand(descriptor, probes),
+            isDefault: descriptor.id === defaultHarness,
+          }),
+        ),
+      ]),
     );
+    const pi = agents.get(PI_HARNESS_ID);
     const checks = await Promise.all([
       command(
         "tools.git",
@@ -216,20 +228,18 @@ export class DoctorRuntime {
             }
           : { ...skippedCheck("tools.gh-auth", result.error), ms: result.ms },
       ),
-      pi,
-      command(
-        "agents.claude",
-        "Claude Code",
-        commands.claude,
-        defaultHarness === "claude-code" ? "fail" : "warn",
-        "Install Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`), then reopen Harbormaster.",
-      ),
-      guarded("agents.pi-extension", probe, async () =>
-        piExtensionCheck(
-          await probes.piExtension(),
-          (await pi).status === "ok",
-        ),
-      ),
+      ...agents.values(),
+      // The Harbormaster Pi extension is Pi's inbox glue: checked when Pi is registered.
+      ...(pi
+        ? [
+            guarded("agents.pi-extension", probe, async () =>
+              piExtensionCheck(
+                await probes.piExtension(),
+                (await pi).status === "ok",
+              ),
+            ),
+          ]
+        : []),
       instant(configCheck(configCheckInput(configState))),
       guarded("state.tasks", probe, async () =>
         stateFileCheck(

@@ -37,12 +37,19 @@ const report: DoctorReport = {
       summary: "gh is not logged in",
       remediation: "Run `gh auth login` in a terminal.",
     },
-    { group: "agents", id: "agents.pi", status: "ok", summary: "Pi 1.3.0" },
     {
       group: "agents",
-      id: "agents.claude",
+      id: "agents.pi",
+      status: "ok",
+      summary: "Pi 1.3.0",
+      agentCommand: "pi",
+    },
+    {
+      group: "agents",
+      id: "agents.claude-code",
       status: "warn",
       summary: "Claude Code is not on PATH",
+      agentCommand: "claude",
     },
     {
       group: "repos",
@@ -137,7 +144,7 @@ describe("doctor-ipc", () => {
         "claude: Claude Code is not on PATH",
         "doctor:",
         "  ✗ tools.gh-auth: gh is not logged in",
-        "  ! agents.claude: Claude Code is not on PATH",
+        "  ! agents.claude-code: Claude Code is not on PATH",
         "  ✗ repos.remote: 1 of 1 remote unreachable",
       ].join("\n"),
     );
@@ -159,7 +166,7 @@ describe("doctor-view", () => {
       ]),
     ).toEqual([
       ["Tools", ["tools.gh-auth"]],
-      ["Agents", ["agents.pi", "agents.claude"]],
+      ["Agents", ["agents.pi", "agents.claude-code"]],
       ["Repositories", ["repos.remote"]],
     ]);
   });

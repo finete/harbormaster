@@ -243,7 +243,7 @@ const launchTask: ToolDefinition = {
       harness: {
         type: "string",
         description:
-          'Agent to run the task on ("pi", "claude-code", or a configured custom agent id). Omit to use the launching task\'s agent for a "child", else the repository/app default.',
+          'Agent id to run the task on: a built-in agent or a configured custom agent (an unknown id fails with the list of available ones). Omit to use the launching task\'s agent for a "child", else the repository/app default.',
       },
       bypassPermissions: {
         type: "boolean",

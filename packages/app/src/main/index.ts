@@ -47,7 +47,9 @@ import {
   execFileRunner,
   type HarnessAdapter,
   HttpVersionAccess,
+  harnessLaunchCommand,
   isConnectivityError,
+  PI_HARNESS_ID,
   parsePullRequestUrl,
   probeSocketOwner,
   resolveSocketPath,
@@ -317,16 +319,9 @@ console.log(`[main] Harbormaster ${app.getVersion()} starting`);
 installIpcTiming(ipcMain);
 // After the tee, so it lands in main.log. Logged once, every run (including e2e, which keeps the PATH it was
 // given so its fake binaries stay first): the actual PATH a launch
-// resolves commands against, and where `pi`/`claude` were found on it (or
-// that they weren't) — exactly the two things "nothing happened, no pi
-// session ever created" needs to rule in or out.
+// resolves commands against; where each agent's command was found on it
+// is logged once the agent registry exists (below).
 console.log(`[main] PATH: ${process.env.PATH ?? ""}`);
-console.log(
-  `[main] pi resolved to: ${resolveCommandPath(process.env.HARBORMASTER_PI_COMMAND || "pi") ?? "not found"}`,
-);
-console.log(
-  `[main] claude resolved to: ${resolveCommandPath(process.env.HARBORMASTER_CLAUDE_COMMAND || "claude") ?? "not found"}`,
-);
 process.on("unhandledRejection", (reason) => {
   console.error("[main] unhandledRejection:", reason);
 });
@@ -444,6 +439,37 @@ const harnesses = createHarnessRegistry({
 // Presence is the same for every agent (OSC 7501 reports + pid liveness),
 // so one adapter reads it for all tasks.
 const harness = harnesses.resolve(undefined);
+
+/** Each built-in agent's launch command and where it resolves on this PATH (a terminal shim is named as such). */
+function builtinAgentCommands(): Array<{
+  id: string;
+  /** The descriptor's own command name (`claude`), for log lines. */
+  name: string;
+  command: string;
+  resolved?: string;
+  shim?: boolean;
+}> {
+  return harnesses.list().map((adapter) => {
+    const command = harnessLaunchCommand(adapter);
+    const resolved = resolveCommandPath(command);
+    return {
+      id: adapter.id,
+      name: adapter.descriptor.commands[0]?.join(" ") ?? adapter.id,
+      command,
+      ...(resolved ? { resolved } : {}),
+      ...(resolved && adapter.descriptor.isShim(resolved)
+        ? { shim: true }
+        : {}),
+    };
+  });
+}
+// Where each agent's command was found (or that it wasn't): exactly what
+// "nothing happened, no session ever created" needs to rule in or out.
+for (const agent of builtinAgentCommands()) {
+  console.log(
+    `[main] ${agent.name} resolved to: ${agent.resolved ?? "not found"}${agent.shim ? " (a terminal shim, not the agent)" : ""}`,
+  );
+}
 
 /** The adapter a task's pane launches with: the task's own agent (custom agents come from the current config). */
 async function harnessForTask(taskId: string): Promise<HarnessAdapter> {
@@ -610,7 +636,8 @@ function ensurePiExtensionInstalled(): void {
   ) {
     return;
   }
-  if (!commandExists(env.HARBORMASTER_PI_COMMAND || "pi")) return;
+  const pi = harnesses.get(PI_HARNESS_ID);
+  if (!pi || !commandExists(harnessLaunchCommand(pi, env))) return;
   try {
     const outcome = installPiExtension({
       sourcePath: resolvePiExtensionSource(toolingLocations),
@@ -798,6 +825,9 @@ function registerCoreIpc(): void {
     core.commands.listBranches(repositoryId),
   );
   ipcMain.handle("core:listModels", () => core.commands.listModels());
+  ipcMain.handle("core:listHarnessDescriptors", () =>
+    core.commands.listHarnessDescriptors(),
+  );
   // The composer's "Open folder…" (see /docs/new-task-composer.md "Where"):
   // a native directory picker. e2e sets HARBORMASTER_E2E_PICK_FOLDER to
   // answer it without a real dialog (an empty value = cancelled).
@@ -2320,16 +2350,12 @@ async function exportDiagnostics(): Promise<string | null> {
     target = result.filePath;
   }
   const cli = cliPathForTools();
-  const piCommand = process.env.HARBORMASTER_PI_COMMAND || "pi";
-  const claudeCommand = process.env.HARBORMASTER_CLAUDE_COMMAND || "claude";
-  const piResolved = resolveCommandPath(piCommand);
-  const claudeResolved = resolveCommandPath(claudeCommand);
-  const [tasksSummary, state, piVersion, claudeVersion, doctor, reviewSupport] =
+  const agentCommands = builtinAgentCommands();
+  const [tasksSummary, state, agentVersions, doctor, reviewSupport] =
     await Promise.all([
       buildTasksSummary(core.commands).catch(() => undefined),
       buildDiagnosticsState(core.commands).catch(() => undefined),
-      commandVersion(piResolved),
-      commandVersion(claudeResolved),
+      Promise.all(agentCommands.map((agent) => commandVersion(agent.resolved))),
       doctorForDiagnostics(core.commands, doctorFacts),
       core.commands.reviewSupport({ refresh: true }).catch(() => undefined),
     ]);
@@ -2367,14 +2393,16 @@ async function exportDiagnostics(): Promise<string | null> {
       platform: process.platform,
       path: process.env.PATH ?? "",
       ...(process.env.SHELL ? { shell: process.env.SHELL } : {}),
-      pi: {
-        ...(piResolved ? { resolved: piResolved } : {}),
-        ...(piVersion ? { version: piVersion } : {}),
-      },
-      claude: {
-        ...(claudeResolved ? { resolved: claudeResolved } : {}),
-        ...(claudeVersion ? { version: claudeVersion } : {}),
-      },
+      agents: agentCommands.map((agent, index) => {
+        const version = agentVersions[index];
+        return {
+          id: agent.id,
+          command: agent.command,
+          ...(agent.resolved ? { resolved: agent.resolved } : {}),
+          ...(agent.shim ? { shim: true } : {}),
+          ...(version ? { version } : {}),
+        };
+      }),
       piExtensionPath: join(piExtensionsDir(process.env), PI_EXTENSION_FILE),
     }),
   });

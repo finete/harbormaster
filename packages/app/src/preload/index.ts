@@ -16,6 +16,7 @@ import type {
   CreateTaskInput,
   DoctorReport,
   HarbormasterApi,
+  HarnessDescriptorInfo,
   HarnessModelCatalog,
   InboxItem,
   InboxPriorityInput,
@@ -159,6 +160,8 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:listBranches", repositoryId),
     listModels: (): Promise<HarnessModelCatalog[]> =>
       ipcRenderer.invoke("core:listModels"),
+    listHarnessDescriptors: (): Promise<HarnessDescriptorInfo[]> =>
+      ipcRenderer.invoke("core:listHarnessDescriptors"),
     getTaskWorkspace: (taskId: string): Promise<TaskWorkspace | undefined> =>
       ipcRenderer.invoke("core:getTaskWorkspace", taskId),
     listWorktreeStatus: (): Promise<Record<string, WorktreeStatus>> =>

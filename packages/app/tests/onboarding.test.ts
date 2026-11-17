@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { DetectedAgent } from "../src/preload/api";
 import {
-  AGENT_INSTALL_HINTS,
+  agentFixCommand,
   agentFoundLine,
   initialAgentChoice,
   ONBOARDING_STEPS,
@@ -23,34 +23,42 @@ const agent = (
   ...extra,
 });
 
+/** The built-in ids as core's harness descriptors list them. */
+const BUILTINS = ["pi", "claude-code"];
+
 describe("initialAgentChoice", () => {
   it("keeps the configured agent when it was found or nothing was detected yet", () => {
-    expect(initialAgentChoice("pi", [])).toBe("pi");
+    expect(initialAgentChoice("pi", [], BUILTINS)).toBe("pi");
     expect(
-      initialAgentChoice("claude-code", [
-        agent("pi", true),
-        agent("claude-code", true),
-      ]),
+      initialAgentChoice(
+        "claude-code",
+        [agent("pi", true), agent("claude-code", true)],
+        BUILTINS,
+      ),
     ).toBe("claude-code");
   });
 
   it("moves to the first detected built-in when the configured one is missing", () => {
     expect(
-      initialAgentChoice("pi", [
-        agent("pi", false),
-        agent("claude-code", true),
-      ]),
+      initialAgentChoice(
+        "pi",
+        [agent("pi", false), agent("claude-code", true)],
+        BUILTINS,
+      ),
     ).toBe("claude-code");
     expect(
-      initialAgentChoice("pi", [
-        agent("pi", false),
-        agent("claude-code", false),
-      ]),
+      initialAgentChoice(
+        "pi",
+        [agent("pi", false), agent("claude-code", false)],
+        BUILTINS,
+      ),
     ).toBe("pi");
   });
 
   it("keeps a configured custom agent (the wizard no longer offers a form for one)", () => {
-    expect(initialAgentChoice("aider", [agent("pi", true)])).toBe("aider");
+    expect(initialAgentChoice("aider", [agent("pi", true)], BUILTINS)).toBe(
+      "aider",
+    );
   });
 });
 
@@ -72,13 +80,36 @@ describe("agent detection lines", () => {
     expect(agentFoundLine(agent("pi", false))).toBeUndefined();
   });
 
-  it("has a one-line install command per built-in", () => {
-    expect(AGENT_INSTALL_HINTS.pi).toBe(
-      "npm install -g @earendil-works/pi-coding-agent",
+  it("shows the version floor and offers install or upgrade from the descriptor", () => {
+    const claude = (extra: Partial<DetectedAgent>) =>
+      agent("claude-code", true, {
+        version: "2.1.200",
+        minVersion: "2.1.295",
+        verifiedVersion: "2.1.322",
+        installHint: "curl -fsSL https://claude.ai/install.sh | bash",
+        upgradeHint: "claude update",
+        ...extra,
+      });
+    expect(agentFoundLine(claude({ floor: "below-min" }))).toBe(
+      "found · v2.1.200 · older than the minimum 2.1.295",
     );
-    expect(AGENT_INSTALL_HINTS["claude-code"]).toBe(
-      "curl -fsSL https://claude.ai/install.sh | bash",
+    expect(
+      agentFoundLine(
+        claude({ version: "2.1.400", floor: "newer-than-verified" }),
+      ),
+    ).toBe("found · v2.1.400 · newer than tested (2.1.322)");
+    expect(agentFoundLine(claude({ version: "2.1.322", floor: "ok" }))).toBe(
+      "found · v2.1.322",
     );
+    expect(agentFixCommand(claude({ floor: "below-min" }))).toEqual({
+      kind: "upgrade",
+      command: "claude update",
+    });
+    expect(agentFixCommand(claude({ floor: "ok" }))).toBeUndefined();
+    expect(agentFixCommand(claude({ available: false }))).toEqual({
+      kind: "install",
+      command: "curl -fsSL https://claude.ai/install.sh | bash",
+    });
   });
 
   it("labels the five steps verb-first", () => {

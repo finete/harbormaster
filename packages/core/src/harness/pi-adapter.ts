@@ -13,6 +13,8 @@ import type {
   BuildLaunchSpecInput,
   ExpectedSessionFile,
   HarnessAdapter,
+  HarnessCapabilities,
+  HarnessDescriptor,
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
   HarnessReviewCapability,
@@ -29,6 +31,12 @@ import {
   resolveStatePaths,
 } from "../utilities/state-paths.js";
 import { applyOpenUrlEnv, plannotatorSlashReview } from "./adapter-common.js";
+import {
+  harnessCommandEnvName,
+  harnessLaunchCommand,
+  isTerminalShim,
+  parseVersionOutput,
+} from "./descriptor.js";
 import {
   derivePresenceStatus,
   type PresenceLivenessOptions,
@@ -72,8 +80,6 @@ const STATE_DIR_ENV = "HARBORMASTER_STATE_DIR";
 const SESSION_ID_ENV = "HARBORMASTER_SESSION_ID";
 /** The exact session file this pane opened, when it opened one: identifies the pane's own session even when core does not know (or has a stale) id for it. */
 const SESSION_PATH_ENV = "HARBORMASTER_SESSION_PATH";
-/** Overrides the launched command (and only the command) for e2e: a tiny fake binary stands in for `pi`. */
-const PI_COMMAND_ENV = "HARBORMASTER_PI_COMMAND";
 /** The app's local tool socket (see `transport/`): what the CLI, the MCP server and the extension talk to. */
 const SOCKET_ENV = "HARBORMASTER_SOCKET";
 /** Absolute path of the `harbormaster` CLI. */
@@ -239,10 +245,77 @@ export const PI_MESSAGING_CAPABILITIES: HarnessMessagingCapabilities = {
   images: true,
 };
 
+export const PI_HARNESS_ID = "pi";
+
+/** Pi's agent dir for `env`/`home` (pure twin of `defaultPiAgentDir`). */
+function piAgentDir(env: NodeJS.ProcessEnv, home: string): string {
+  const fromEnv = env.PI_CODING_AGENT_DIR;
+  if (!fromEnv) return join(home, ".pi", "agent");
+  if (fromEnv === "~") return home;
+  if (fromEnv.startsWith("~/")) return join(home, fromEnv.slice(2));
+  return fromEnv;
+}
+
+const PI_INSTALL = "npm install -g @earendil-works/pi-coding-agent";
+
+/**
+ * Pi's install/version facts (P2). The floor is the 1.0 line the adapter's
+ * flags were verified against (`--session-id`, `--fork`, `PI_PROGRAM_STATUS`);
+ * `verifiedVersion` is the release used day to day when this was written.
+ */
+export const PI_DESCRIPTOR: HarnessDescriptor = {
+  id: PI_HARNESS_ID,
+  label: "Pi",
+  commands: [["pi"]],
+  // `HARBORMASTER_PI_COMMAND`: e2e points it at a tiny fake binary.
+  commandEnv: [harnessCommandEnvName(PI_HARNESS_ID)],
+  installHint: PI_INSTALL,
+  upgradeHint: `${PI_INSTALL}@latest`,
+  setupNote:
+    "Pi gets Harbormaster's small inbox extension installed automatically, so messages reach its sessions.",
+  versionArgs: ["--version"],
+  parseVersion: parseVersionOutput,
+  minVersion: "1.1.0",
+  verifiedVersion: "1.5.2",
+  configDir: piAgentDir,
+  reviewPieces: ["pi-extension"],
+  isShim: isTerminalShim,
+};
+
+/**
+ * Pi's capabilities (P6): Harbormaster pre-assigns the session id
+ * (`--session-id`); status is OSC 7501 without the probe round-trip
+ * (`PI_PROGRAM_STATUS=1`); the Harbormaster Pi extension claims the inbox
+ * and delivers steer, follow-up and idle wake-ups itself.
+ */
+export const PI_CAPABILITIES: HarnessCapabilities = {
+  sessionId: "preassign",
+  status: {
+    protocol: "osc7501",
+    probe: false,
+    states: ["idle", "working", "blocked", "done", "error"],
+    quirks: [],
+  },
+  delivery: {
+    steer: true,
+    followUp: true,
+    wakeIdle: true,
+    channels: {
+      steer: "Harbormaster Pi extension (steer)",
+      followUp: "Harbormaster Pi extension (followUp)",
+      wakeIdle: "Harbormaster Pi extension (inbox poll while idle)",
+    },
+  },
+  trustPrompt: false,
+  review: true,
+};
+
 export class PiHarnessAdapter implements HarnessAdapter {
-  readonly id = "pi";
+  readonly id = PI_HARNESS_ID;
   readonly label = "Pi";
   readonly command = "pi";
+  readonly descriptor: HarnessDescriptor = PI_DESCRIPTOR;
+  readonly capabilities: HarnessCapabilities = PI_CAPABILITIES;
   readonly messaging: HarnessMessagingCapabilities = {
     ...PI_MESSAGING_CAPABILITIES,
   };
@@ -337,7 +410,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
     return {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
       // instead of a real `pi` install; unset (the normal case) runs `pi`.
-      command: process.env[PI_COMMAND_ENV] || "pi",
+      command: harnessLaunchCommand(this),
       args: [
         ...piSessionArgs(input.session),
         ...piPromptArgs(input.initialPrompt),

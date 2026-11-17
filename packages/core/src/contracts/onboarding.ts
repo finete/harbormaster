@@ -57,9 +57,20 @@ export interface CodeRootScan {
   repositories: ScannedRepository[];
 }
 
+/** A detected version against the harness's floors (docs/harness-additions.md P7). */
+export type AgentVersionFloor =
+  /** Older than `minVersion`: upgrade (`upgradeHint`). */
+  | "below-min"
+  /** Within `[minVersion, verifiedVersion]` (or no floor declared). */
+  | "ok"
+  /** Newer than `verifiedVersion`: works as far as we know, not tested. */
+  | "newer-than-verified"
+  /** No version could be read. */
+  | "unknown";
+
 /** One agent CLI as detected on this machine (`CoreCommands.detectAgents`): the built-ins, then custom agents. */
 export interface DetectedAgent {
-  /** Harness id: `pi` or `claude-code`. */
+  /** Harness id (a registered adapter's id). */
   id: string;
   label: string;
   /** The command that was probed. */
@@ -77,6 +88,16 @@ export interface DetectedAgent {
    * located (`available` = `command` resolves), never run.
    */
   custom?: boolean;
+  /** Set when the only PATH hit was a terminal-multiplexer shim (its path); `available` is then false. */
+  shim?: string;
+  /** `version` against `minVersion` / `verifiedVersion` (built-ins only). */
+  floor?: AgentVersionFloor;
+  minVersion?: string;
+  verifiedVersion?: string;
+  /** The harness's install one-liner (shown when not available). */
+  installHint?: string;
+  /** The harness's upgrade one-liner (shown when `floor` is `below-min`). */
+  upgradeHint?: string;
 }
 
 /** `gh auth status` as seen by core (`CoreCommands.githubAuthStatus`). */
@@ -112,22 +133,32 @@ export interface ProbeOutcome {
 }
 
 /**
+ * The probes behind locating an agent CLI from its descriptor (shared by
+ * the wizard and doctor): env overrides, every PATH hit (so a terminal shim
+ * can be skipped), and running its version command.
+ */
+export interface AgentCommandProbeAccess {
+  /** The value of the first of `envNames` that is set (e2e fake overrides). */
+  commandOverride(envNames: readonly string[]): string | undefined;
+  /** Every executable file `command` resolves to, in PATH order (just the path itself for a path). */
+  resolveCommandAll(command: string): Promise<string[]>;
+  /** `<command> <args…>` with the probe timeout. */
+  runVersion(command: string, args: readonly string[]): Promise<ProbeOutcome>;
+}
+
+/**
  * Resource Access for the wizard's machine probes: the home folder, folder
  * existence, and the agent / `gh` CLIs (each run with a short timeout, off
  * the caller's event loop where the host installed a process runner).
  */
-export interface OnboardingProbeAccess {
+export interface OnboardingProbeAccess extends AgentCommandProbeAccess {
   /** The user's home folder. */
   homeDir(): string;
   isDirectory(path: string): Promise<boolean>;
   /** `mkdir -p` (the wizard's "Use ~/Code instead" when it does not exist yet). */
   createDirectory(path: string): Promise<void>;
-  /** The built-in agents' CLI commands (e2e overrides included). */
-  builtinAgentCommands(): Array<{ id: string; label: string; command: string }>;
   /** The absolute file `command` runs (PATH lookup for a bare name); undefined when none is executable. */
   resolveCommand(command: string): Promise<string | undefined>;
-  /** `<command> --version`. */
-  cliVersion(command: string): Promise<ProbeOutcome>;
   /** `gh auth status`. */
   githubAuthStatus(): Promise<ProbeOutcome>;
 }

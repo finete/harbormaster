@@ -30,6 +30,7 @@ import {
   protectedHomeFolder,
   toScannedRepositories,
 } from "../src/engines/onboarding.js";
+import { createHarnessRegistry } from "../src/harness/registry.js";
 import { createCore } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -71,38 +72,57 @@ describe("protectedHomeFolder", () => {
 });
 
 describe("custom agent ids", () => {
+  const BUILTINS = createHarnessRegistry()
+    .list()
+    .map((adapter) => adapter.id);
+
   it("accepts a lowercase id that is not a built-in", () => {
     expect(
-      customAgentProblems({ id: "aider", label: "Aider", command: "aider" }),
+      customAgentProblems(
+        { id: "aider", label: "Aider", command: "aider" },
+        BUILTINS,
+      ),
     ).toEqual([]);
     expect(
-      customAgentProblems({
-        id: "my_agent-2",
-        label: "Mine",
-        command: "/usr/local/bin/mine",
-        args: ["--yes"],
-      }),
+      customAgentProblems(
+        {
+          id: "my_agent-2",
+          label: "Mine",
+          command: "/usr/local/bin/mine",
+          args: ["--yes"],
+        },
+        BUILTINS,
+      ),
     ).toEqual([]);
   });
 
   it("rejects built-in, malformed and empty ids, empty labels and relative command paths", () => {
     expect(
-      customAgentProblems({ id: "pi", label: "P", command: "x" })[0],
+      customAgentProblems({ id: "pi", label: "P", command: "x" }, BUILTINS)[0],
     ).toMatch(/built-in/);
     expect(
-      customAgentProblems({ id: "claude-code", label: "C", command: "x" })[0],
+      customAgentProblems(
+        { id: "claude-code", label: "C", command: "x" },
+        BUILTINS,
+      )[0],
     ).toMatch(/built-in/);
     expect(
-      customAgentProblems({ id: "My Agent", label: "M", command: "x" })[0],
+      customAgentProblems(
+        { id: "My Agent", label: "M", command: "x" },
+        BUILTINS,
+      )[0],
     ).toMatch(/lowercase/);
     expect(
-      customAgentProblems({ id: "", label: "M", command: "x" })[0],
+      customAgentProblems({ id: "", label: "M", command: "x" }, BUILTINS)[0],
     ).toMatch(/needs an id/);
-    expect(customAgentProblems({ id: "a", label: " ", command: "x" })).toEqual([
-      "The agent needs a label.",
-    ]);
     expect(
-      customAgentProblems({ id: "a", label: "A", command: "bin/a" })[0],
+      customAgentProblems({ id: "a", label: " ", command: "x" }, BUILTINS),
+    ).toEqual(["The agent needs a label."]);
+    expect(
+      customAgentProblems(
+        { id: "a", label: "A", command: "bin/a" },
+        BUILTINS,
+      )[0],
     ).toMatch(/absolute/);
   });
 });
@@ -279,14 +299,13 @@ describe("onboarding commands", () => {
       createDirectory: async (path) => {
         await mkdir(path, { recursive: true });
       },
-      builtinAgentCommands: () => [
-        { id: "pi", label: "Pi", command: "pi" },
-        { id: "claude-code", label: "Claude Code", command: "claude" },
-      ],
+      commandOverride: () => undefined,
       resolveCommand: async (command) =>
         command === "claude" ? "/opt/bin/claude" : undefined,
-      cliVersion: async (command) =>
-        command === "claude"
+      resolveCommandAll: async (command) =>
+        command === "claude" ? ["/opt/bin/claude"] : [],
+      runVersion: async (command, args) =>
+        command === "/opt/bin/claude" && args.join(" ") === "--version"
           ? outcome({ ok: true, output: "2.1.322 (Claude Code)" })
           : outcome({ notFound: true }),
       githubAuthStatus: async () =>
@@ -377,6 +396,10 @@ describe("onboarding commands", () => {
         command: "pi",
         available: false,
         error: "not found",
+        minVersion: "1.0.0",
+        verifiedVersion: "1.3.0",
+        installHint: "npm install -g @earendil-works/pi-coding-agent",
+        upgradeHint: "npm install -g @earendil-works/pi-coding-agent@latest",
       },
       {
         id: "claude-code",
@@ -385,6 +408,11 @@ describe("onboarding commands", () => {
         path: "/opt/bin/claude",
         available: true,
         version: "2.1.322",
+        floor: "ok",
+        minVersion: "2.1.295",
+        verifiedVersion: "2.1.322",
+        installHint: "curl -fsSL https://claude.ai/install.sh | bash",
+        upgradeHint: "claude update",
       },
     ]);
     const state = await core.commands.setDefaultAgent({
@@ -536,14 +564,20 @@ describe("LocalOnboardingProbeAccess", () => {
       },
       timeoutMs: 5_000,
     });
-    expect(access.builtinAgentCommands().map((agent) => agent.command)).toEqual(
-      ["/nonexistent/pi", claude],
+    expect(
+      access.commandOverride([
+        "HARBORMASTER_CLAUDE_CODE_COMMAND",
+        "HARBORMASTER_CLAUDE_COMMAND",
+      ]),
+    ).toBe(claude);
+    expect(access.commandOverride(["HARBORMASTER_NOPE_COMMAND"])).toBe(
+      undefined,
     );
-    expect(await access.cliVersion(claude)).toMatchObject({
+    expect(await access.runVersion(claude, ["--version"])).toMatchObject({
       ok: true,
       output: "2.1.322 (Claude Code)",
     });
-    expect(await access.cliVersion("/nonexistent/pi")).toMatchObject({
+    expect(await access.runVersion("/nonexistent/pi", [])).toMatchObject({
       ok: false,
       notFound: true,
     });
@@ -560,9 +594,16 @@ describe("LocalOnboardingProbeAccess", () => {
     expect(await onPath.resolveCommand("cli")).toBe(claude);
     expect(await onPath.resolveCommand(claude)).toBe(claude);
     expect(await onPath.resolveCommand("no-such-cli")).toBeUndefined();
+    // Every PATH hit, in order (a terminal shim first is skipped by the caller).
+    const twice = new LocalOnboardingProbeAccess({
+      env: { PATH: [bin, "/nonexistent", bin].join(delimiter) },
+    });
+    expect(await twice.resolveCommandAll("cli")).toEqual([claude]);
     expect(await onPath.resolveCommand("/nonexistent/pi")).toBeUndefined();
     const impatient = new LocalOnboardingProbeAccess({ timeoutMs: 300 });
-    expect(await impatient.cliVersion(await script("sleep 5"))).toMatchObject({
+    expect(
+      await impatient.runVersion(await script("sleep 5"), ["--version"]),
+    ).toMatchObject({
       ok: false,
       timedOut: true,
     });
