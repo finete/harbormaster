@@ -369,7 +369,7 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     // (Claude Code is), so warn, with Pi's own upgrade command.
     const pi = second.window.getByTestId("doctor-check-agents.pi");
     await expect(pi).toHaveAttribute("data-status", "warn");
-    await expect(pi).toContainText("Pi 0.0.9 is older than the minimum 1.0.0");
+    await expect(pi).toContainText("Pi 0.0.9 is older than the minimum 1.1.0");
     await expect(pi).toContainText(
       "npm install -g @earendil-works/pi-coding-agent@latest",
     );
