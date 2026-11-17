@@ -51,6 +51,32 @@ export function buildLineageIndex(tasks: Iterable<Task>): LineageIndex {
   return { childrenByParent, taskById };
 }
 
+/**
+ * The tasks `task` may be re-parented under (core's `setTaskParent`), in
+ * `pool` order: none when `task` has children of its own (one level only);
+ * else every non-archived task in `pool` that is not `task`, not its current
+ * parent, and not itself a child.
+ */
+export function parentCandidates(
+  task: Task,
+  pool: Iterable<Task>,
+  index: LineageIndex,
+): Task[] {
+  if ((index.childrenByParent.get(task.id)?.length ?? 0) > 0) return [];
+  const candidates: Task[] = [];
+  for (const other of pool) {
+    if (
+      other.id !== task.id &&
+      other.id !== task.parentTaskId &&
+      !other.parentTaskId &&
+      !other.archivedAt
+    ) {
+      candidates.push(other);
+    }
+  }
+  return candidates;
+}
+
 /** How `hoistChildrenIntoParentGroups` reads and rebuilds a caller's group shape. */
 export interface LineageGroupAccess<G, T> {
   items(group: G): readonly T[];

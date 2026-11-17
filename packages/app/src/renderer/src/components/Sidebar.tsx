@@ -80,6 +80,7 @@ import {
   buildLineageIndex,
   type LineageRow,
   layoutLineageRows,
+  parentCandidates,
 } from "../lib/task-lineage";
 import { deriveMessagingChips } from "../lib/task-messaging-chips";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
@@ -91,6 +92,7 @@ import {
   useOpenInApps,
 } from "../lib/use-open-in";
 import { cn } from "../lib/utils";
+import { describeThrown, pushToast } from "../toast";
 import {
   type ContextMenuItem,
   SidebarRowContextMenu,
@@ -638,6 +640,22 @@ export function Sidebar({
       });
   }, []);
 
+  // --- Re-parenting (core's setTaskParent) -----------------------------------
+  // The board re-renders from core's board-changed push. A stale "dragged
+  // out of its parent" mark would keep a newly nested child top-level, so
+  // it is dropped on every successful change.
+  const setParent = (taskId: string, parentTaskId: string | null): void => {
+    void window.harbormaster.core
+      .setTaskParent(taskId, parentTaskId)
+      .then(() => {
+        if (!detachedIds.has(taskId)) return;
+        const next = new Set(detachedIds);
+        next.delete(taskId);
+        onDetachedChange(next);
+      })
+      .catch((error: unknown) => pushToast(describeThrown(error)));
+  };
+
   // --- Context menu (Orca polish item 6) ------------------------------------
   const openContextMenu = useCallback(
     (taskId: string, x: number, y: number): void => {
@@ -689,6 +707,31 @@ export function Sidebar({
         },
       },
     ];
+    // Re-parent among the tasks open on the rail (one level only).
+    const candidates = parentCandidates(
+      task,
+      rows.map((row) => row.task),
+      lineageIndex,
+    );
+    items.push({
+      key: "move-under",
+      label: task.parentTaskId ? "Move to another parent…" : "Make child of…",
+      disabled: candidates.length === 0,
+      separatorBefore: true,
+      onSelect: () => {},
+      submenu: candidates.map((candidate) => ({
+        key: `parent-${candidate.id}`,
+        label: candidate.title,
+        onSelect: () => setParent(task.id, candidate.id),
+      })),
+    });
+    if (task.parentTaskId) {
+      items.push({
+        key: "remove-parent",
+        label: "Remove from parent",
+        onSelect: () => setParent(task.id, null),
+      });
+    }
     if (contextMenu?.worktreePath) {
       const worktreePath = contextMenu.worktreePath;
       items.push({

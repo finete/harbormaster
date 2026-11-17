@@ -2125,6 +2125,41 @@ export class CoreManager implements CoreCommands {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  async setTaskParent(
+    taskId: string,
+    parentTaskId: string | null,
+  ): Promise<Task> {
+    const task = await this.requireTask(taskId);
+    if ((task.parentTaskId ?? null) === parentTaskId) return task;
+    const now = this.deps.clock.now().toISOString();
+    if (parentTaskId === null) {
+      const { parentTaskId: _dropped, ...rest } = task;
+      const next: Task = { ...rest, updatedAt: now };
+      await this.deps.tasks.replaceTask(next);
+      await this.publishTaskChange(next);
+      return next;
+    }
+    if (parentTaskId === taskId) {
+      throw new Error("A task cannot be its own parent");
+    }
+    const parent = await this.deps.tasks.getTask(parentTaskId);
+    if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
+    if (parent.parentTaskId) {
+      throw new Error(
+        `${parent.title} is itself a child task; tasks nest one level only`,
+      );
+    }
+    if ((await this.listChildren(taskId)).length > 0) {
+      throw new Error(
+        `${task.title} has children of its own; tasks nest one level only`,
+      );
+    }
+    const next: Task = { ...task, parentTaskId: parent.id, updatedAt: now };
+    await this.deps.tasks.replaceTask(next);
+    await this.publishTaskChange(next);
+    return next;
+  }
+
   async getLaunchSettings(repositoryId?: string): Promise<LaunchSettings> {
     const config = await this.deps.config.load();
     const repository = repositoryId

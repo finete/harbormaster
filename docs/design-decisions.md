@@ -72,7 +72,10 @@ in Orca): `child` (nested under the launcher, pollable with
 level only) or `standalone` (display-only `launchedFromTaskId`
 provenance). Every launch gets its own task, worktree, branch, and session;
 a same-repository child may opt into `baseBranch: "parent"` (stacked
-work). `mode` mirrors the composer's Task / Review / Chat switch: `review`
+work). Lineage is not fixed at launch: `setTaskParent` nests an existing
+task under another (or un-nests it) under the same one-level rule, as
+lineage only (branch, worktree, and session stay put); the rail's row
+context menu drives it ("Make child of…" / "Remove from parent"). `mode` mirrors the composer's Task / Review / Chat switch: `review`
 binds the launch to an existing PR (`pullRequest` + `role`, worktree on the
 PR head; a reviewer's kickoff forbids commit/push/PR), `chat` runs in place
 with no worktree (`inPlace`). Launched tasks run as ordinary interactive Pi sessions in app-owned

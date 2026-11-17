@@ -9,6 +9,7 @@ import {
   hiddenNestedChildIds,
   hoistChildrenIntoParentGroups,
   layoutLineageRows,
+  parentCandidates,
 } from "../src/renderer/src/lib/task-lineage";
 
 const T0 = "2025-01-01T00:00:00.000Z";
@@ -401,5 +402,28 @@ describe("lineage wins over repo within a column", () => {
     });
     expect(result).toEqual(groups);
     expect(result[0]).toBe(groups[0]);
+  });
+});
+
+describe("parentCandidates", () => {
+  const parent = task({ id: "p" });
+  const child = task({ id: "c", parentTaskId: "p" });
+  const loose = task({ id: "l" });
+  const other = task({ id: "o" });
+  const archived = task({ id: "a", archivedAt: T0 });
+  const pool = [parent, child, loose, other, archived];
+  const index = buildLineageIndex(pool);
+  const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+
+  it("offers every standalone, non-archived task but itself", () => {
+    expect(ids(parentCandidates(loose, pool, index))).toEqual(["p", "o"]);
+  });
+
+  it("skips a child's current parent", () => {
+    expect(ids(parentCandidates(child, pool, index))).toEqual(["l", "o"]);
+  });
+
+  it("offers nothing to a task that has children (one level only)", () => {
+    expect(parentCandidates(parent, pool, index)).toEqual([]);
   });
 });

@@ -203,6 +203,11 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:launchTask", input),
     listChildren: (parentTaskId: string): Promise<Task[]> =>
       ipcRenderer.invoke("core:listChildren", parentTaskId),
+    setTaskParent: (
+      taskId: string,
+      parentTaskId: string | null,
+    ): Promise<Task> =>
+      ipcRenderer.invoke("core:setTaskParent", taskId, parentTaskId),
     listTaskUsage: (query?: TaskUsageQuery): Promise<TaskUsageRow[]> =>
       ipcRenderer.invoke("core:listTaskUsage", query),
     refreshTaskUsage: (taskId: string): Promise<TaskUsage | undefined> =>

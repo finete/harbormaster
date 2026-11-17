@@ -484,6 +484,17 @@ export interface CoreCommands {
   markLaunchesInterrupted(taskIds: string[]): Promise<void>;
   /** Every task with `parentTaskId === parentTaskId`, any state, oldest first. */
   listChildren(parentTaskId: string): Promise<Task[]>;
+  /**
+   * Re-parent an existing task: nest it under `parentTaskId`
+   * (`Task.parentTaskId`), or make it standalone again with `null`. Same
+   * one-level rule as `createTask`/`launchTask`: rejects an unknown task or
+   * parent, the task itself as parent, a parent that is itself a child, and
+   * a task that already has children of its own. Setting the parent it
+   * already has (or clearing an absent one) is a no-op that returns the task
+   * unchanged. Lineage only: the task's branch, worktree, and session are
+   * untouched (`baseBranch: "parent"` is a launch-time choice).
+   */
+  setTaskParent(taskId: string, parentTaskId: string | null): Promise<Task>;
   /** Current effective launch settings (`GlobalConfig.launch`, defaulted), for a frontend to show/enforce the concurrency cap without touching config files. */
   getLaunchSettings(repositoryId?: string): Promise<LaunchSettings>;
   /**

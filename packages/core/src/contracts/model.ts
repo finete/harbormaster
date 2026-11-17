@@ -239,11 +239,13 @@ export interface Task {
   lastError?: string;
   /**
    * Set for a `child`-launched task (see `CoreCommands.launchTask`): the
-   * launching task's id. Nested under the parent on the board; the parent
+   * launching task's id; `createTask`'s `parentTaskId` and
+   * `CoreCommands.setTaskParent` set (or clear) it too. Nested under the parent on the board; the parent
    * can poll it (`listChildren`) and a Done parent with active children
    * asks for confirmation (`toDone`'s `activeChildren` case). One level
    * only — a task with `parentTaskId` set can never itself become a parent
-   * (`launchTask` rejects a `child` relation from it).
+   * (`launchTask` rejects a `child` relation from it, `setTaskParent` a
+   * parent that is itself a child or a task that has children).
    */
   parentTaskId?: string;
   /**

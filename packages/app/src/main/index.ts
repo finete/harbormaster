@@ -911,6 +911,11 @@ function registerCoreIpc(): void {
   ipcMain.handle("core:listChildren", (_event, parentTaskId: string) =>
     core.commands.listChildren(parentTaskId),
   );
+  ipcMain.handle(
+    "core:setTaskParent",
+    (_event, taskId: string, parentTaskId: string | null) =>
+      core.commands.setTaskParent(taskId, parentTaskId),
+  );
   // Costs (docs/costs.md): read-only usage rows and the popover's
   // one-task recompute (which persists and pushes board-changed itself).
   ipcMain.handle(

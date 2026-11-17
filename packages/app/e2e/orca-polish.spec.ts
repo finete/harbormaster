@@ -149,6 +149,31 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
     await expect(window.getByTestId("sidebar-pinned-section")).toHaveCount(0);
   });
 
+  test("the context menu re-parents an existing task and removes it from its parent again", async () => {
+    await createScratchTask(window, "Orca Parent");
+    await createScratchTask(window, "Orca Kid");
+    const parentId = await rowTaskId(rowLocator(window, "Orca Parent"));
+    const menu = window.getByTestId("sidebar-row-context-menu");
+    const childCount = window.getByTestId(
+      `sidebar-row-lineage-toggle-${parentId}`,
+    );
+    await expect(childCount).toHaveCount(0);
+
+    await rowLocator(window, "Orca Kid").click({ button: "right" });
+    await menu.getByTestId("sidebar-row-context-menu-item-move-under").click();
+    await menu
+      .getByTestId(`sidebar-row-context-menu-item-parent-${parentId}`)
+      .click();
+    await expect(menu).toHaveCount(0);
+    await expect(childCount).toHaveText(/1 child/);
+
+    await rowLocator(window, "Orca Kid").click({ button: "right" });
+    await menu
+      .getByTestId("sidebar-row-context-menu-item-remove-parent")
+      .click();
+    await expect(childCount).toHaveCount(0);
+  });
+
   test("double-clicking a row's title renames it; the board card picks up the new title", async () => {
     const row = rowLocator(window, "Orca Beta");
     await expect(row).toBeVisible();

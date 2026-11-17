@@ -189,6 +189,48 @@ describe("createCore", () => {
     expect(updated.state).toBe("backlog");
   });
 
+  it("setTaskParent nests an existing task, un-nests it, and keeps one level", async () => {
+    const make = (title: string) =>
+      core.commands.createTask({ title, initialPrompt: title });
+    const parent = await make("Parent");
+    const loose = await make("Loose");
+    const other = await make("Other");
+
+    const nested = await core.commands.setTaskParent(loose.id, parent.id);
+    expect(nested.parentTaskId).toBe(parent.id);
+    expect((await core.commands.getTask(loose.id))?.parentTaskId).toBe(
+      parent.id,
+    );
+    expect(await core.commands.listChildren(parent.id)).toEqual([nested]);
+    // Same parent again: a no-op.
+    expect(await core.commands.setTaskParent(loose.id, parent.id)).toEqual(
+      nested,
+    );
+
+    // One level only, both directions, and never self.
+    await expect(
+      core.commands.setTaskParent(other.id, loose.id),
+    ).rejects.toThrow(/itself a child/);
+    await expect(
+      core.commands.setTaskParent(parent.id, other.id),
+    ).rejects.toThrow(/children of its own/);
+    await expect(
+      core.commands.setTaskParent(other.id, other.id),
+    ).rejects.toThrow(/its own parent/);
+    await expect(
+      core.commands.setTaskParent(other.id, "missing"),
+    ).rejects.toThrow(/Task not found/);
+
+    // Move under another parent, then back to standalone.
+    const moved = await core.commands.setTaskParent(loose.id, other.id);
+    expect(moved.parentTaskId).toBe(other.id);
+    expect(await core.commands.listChildren(parent.id)).toEqual([]);
+    const freed = await core.commands.setTaskParent(loose.id, null);
+    expect(freed.parentTaskId).toBeUndefined();
+    expect("parentTaskId" in freed).toBe(false);
+    expect(await core.commands.listChildren(other.id)).toEqual([]);
+  });
+
   it("deleteTask removes the task from the board", async () => {
     const task = await core.commands.createTask({
       title: "Ship phase 1",
