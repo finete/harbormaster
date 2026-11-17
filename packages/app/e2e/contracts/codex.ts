@@ -166,7 +166,7 @@ export const CODEX_CONTRACT = defineContract("codex", CODEX_CONTRACT_VERSION, [
     kind: "argv",
     needsModel: false,
     detail:
-      "Codex's default sandbox for an interactive (non-bypass) session blocks the network, a local listen() included (EPERM), so `plannotator review` fails ('port … already in use'). Every Harbormaster launch adds `-c sandbox_workspace_write.network_access=true` (X12); the approvals policy is unchanged.",
+      "Codex's default sandbox for an interactive (non-bypass) session blocks the network on macOS (seatbelt), a local listen() included (EPERM), so `plannotator review` fails ('port … already in use'); on Linux a loopback bind is not blocked (ubuntu-latest). Every Harbormaster launch adds `-c sandbox_workspace_write.network_access=true` (X12) on every platform; the approvals policy is unchanged.",
     facts: {
       override: "sandbox_workspace_write.network_access=true",
       mode: 'sandbox_mode="workspace-write"',

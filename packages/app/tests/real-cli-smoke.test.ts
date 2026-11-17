@@ -2152,7 +2152,12 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
           return String((error as { stdout?: string }).stdout ?? "").trim();
         }
       };
-      expect(listen([])).toContain(facts.denied);
+      // The denial is macOS's seatbelt sandbox (the case X12 fixes); on
+      // Linux Codex's sandbox does not block a loopback bind (observed on
+      // ubuntu-latest), so only the macOS half asserts the denial.
+      if (process.platform === "darwin") {
+        expect(listen([])).toContain(facts.denied);
+      }
       expect(listen(["-c", facts.override])).toContain("listening");
       // Every launch carries it.
       const args = adapter().buildLaunchSpec(
