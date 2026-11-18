@@ -315,22 +315,24 @@ describe("PiHarnessAdapter", () => {
       expect(status.runningTurn).toBe(false);
     });
 
-    it("reports not-live once the heartbeat is stale, using the injected clock", async () => {
+    it("an idle agent with an old heartbeat stays live while its process runs (the pid, not the heartbeat, ends it)", async () => {
+      // OSC 7501 reports carry no heartbeat, so an idle agent may not report
+      // for hours (decision #18). This used a fixed pid 123 and expected
+      // "not live": that held only while pid 123 happened to be free, and
+      // flaked on CI runners where it was taken.
       const presence = new SessionPresenceAccess(join(dir, "presence"));
       const start = new Date("2026-01-01T00:00:00.000Z");
       await presence.register({
         taskId: "task-1",
         sessionPath: "/sessions/task-1.jsonl",
-        pid: 123,
+        pid: process.pid,
         mode: "interactive",
         at: start.toISOString(),
       });
 
       const later = new FixedClock(new Date(start.getTime() + 4 * 60_000));
       const adapter = new PiHarnessAdapter({ presence, clock: later });
-      const status = await adapter.presence("task-1");
-      expect(status.live).toBe(false);
-      expect(status.runningTurn).toBe(false);
+      expect((await adapter.presence("task-1")).live).toBe(true);
     });
 
     it("reflects runningTurn when a turn is active and live", async () => {

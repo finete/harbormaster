@@ -2231,7 +2231,12 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
       const facts = X.row("codex.status.no-probe").facts;
       expect(o.idle?.raw).not.toContain(facts.probe);
       expect(o.idle?.probes).toBe(0);
-      expect(o.idle?.reports()[0]).toBe(facts.ready);
+      // Settles at idle once the prompt is up. On a loaded CI runner Codex
+      // sometimes reports a brief `working` while it starts (seen twice,
+      // Nov 2026; a re-run passed), so the first report is not pinned.
+      const reports = o.idle?.reports() ?? [];
+      expect(reports).toContain(facts.ready);
+      expect(reports.at(-1)).toBe(facts.ready);
     });
 
     rowIt("codex.status.turn", () => {
