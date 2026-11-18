@@ -139,7 +139,10 @@ export interface DeriveMessagingStatesInput {
  * child-to-parent question (not rejected/failed) until: a parent-to-child
  * message to that child is delivered after it; the user typed into the child
  * after it; the parent is Done, gone or not live; or `now >= deliveredAt +
- * timeout`. Tasks with nothing to report are omitted.
+ * timeout`. The parent's `childQuestionsWaiting` counts only questions it
+ * has not replied to yet: a reply sent after the question (still pending
+ * while the child finishes its turn) already answers it from the parent's
+ * side. Tasks with nothing to report are omitted.
  */
 export function deriveMessagingStates(
   input: DeriveMessagingStatesInput,
@@ -238,9 +241,23 @@ export function deriveMessagingStates(
       ...(question.deliveredAt ? { deliveredAt: question.deliveredAt } : {}),
       ...(expiresAt ? { expiresAt } : {}),
     };
-    const parentState = stateOf(parentId);
-    parentState.childQuestionsWaiting =
-      (parentState.childQuestionsWaiting ?? 0) + 1;
+    // Replied, not yet delivered (the child is mid-turn): the child still
+    // waits for it, but the parent has nothing left to answer.
+    const replied = input.messages.some(
+      (message) =>
+        message.route === "parent-to-child" &&
+        message.targetTaskId === child.id &&
+        message.sender.kind === "task" &&
+        message.sender.taskId === parentId &&
+        message.status !== "rejected" &&
+        message.status !== "failed" &&
+        ms(message.createdAt) > askedAt,
+    );
+    if (!replied) {
+      const parentState = stateOf(parentId);
+      parentState.childQuestionsWaiting =
+        (parentState.childQuestionsWaiting ?? 0) + 1;
+    }
   }
 
   return [...states.values()];

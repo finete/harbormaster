@@ -231,6 +231,17 @@ describe("deriveMessagingStates", () => {
     expect(
       state({ messages: [question(), pending] }, "c")?.waitingOnParent,
     ).toBeDefined();
+    // ...but the parent replied: its "child asked a question" is over.
+    expect(
+      state({ messages: [question(), pending] }, "p")?.childQuestionsWaiting,
+    ).toBeUndefined();
+    // A failed reply answers nothing.
+    const failed = message("p", "c", "parent-to-child", 4, {
+      status: "failed",
+    });
+    expect(
+      state({ messages: [question(), failed] }, "p")?.childQuestionsWaiting,
+    ).toBe(1);
     const stale = message("p", "c", "parent-to-child", 0, {
       status: "delivered",
       deliveredAt: at(0.5),
