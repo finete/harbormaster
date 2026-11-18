@@ -142,8 +142,12 @@ describe("reviewer tasks", () => {
     const worktree = (await f.core.commands.getTaskWorkspace(task.id))
       ?.worktreePath as string;
     expect(await git(["rev-parse", "HEAD"], worktree)).toBe(f.head);
-    expect(await git(["branch", "--show-current"], worktree)).toBe(
-      "bob/feature",
+    // Detached at the PR's head: the branch itself is never taken (an
+    // author's worktree may hold it) nor created locally.
+    expect(await git(["branch", "--show-current"], worktree)).toBe("");
+    expect(await git(["branch", "--list", "bob/feature"], f.checkout)).toBe("");
+    expect((await f.core.commands.getTaskWorkspace(task.id))?.detached).toBe(
+      true,
     );
 
     const kinds = await f.core.commands.listAwaitingKinds(task.id);
@@ -203,6 +207,41 @@ describe("reviewer tasks", () => {
     });
     expect(f.logger.find("worktree.remove ok")[0]?.fields.worktreePath).toBe(
       worktree,
+    );
+  });
+
+  it("a reviewer checks the PR out even while the author's worktree holds its branch, and Done never deletes that branch", async () => {
+    const f = await fixture();
+    // The author's own task: the PR branch checked out in its worktree,
+    // and behind the PR (the PR moved on since).
+    await git(["branch", "-q", "bob/feature", "main"], f.checkout);
+    const authorTree = join(f.checkout, "..", "author-tree");
+    await git(["worktree", "add", "-q", authorTree, "bob/feature"], f.checkout);
+    const local = await git(["rev-parse", "bob/feature"], f.checkout);
+
+    const task = await f.core.commands.createTask({
+      title: "Review bob's change",
+      initialPrompt: "",
+      repositoryId: f.repo.id,
+      pullRequest: 7,
+      start: true,
+    });
+    const worktree = (await f.core.commands.getTaskWorkspace(task.id))
+      ?.worktreePath as string;
+    expect(worktree).not.toBe(authorTree);
+    // The PR as GitHub has it, not the stale local branch.
+    expect(await git(["rev-parse", "HEAD"], worktree)).toBe(f.head);
+    expect(local).not.toBe(f.head);
+
+    await f.core.commands.refresh();
+    await f.core.commands.toAwait(task.id, "author-response");
+    f.pullRequests.pr = { ...f.pullRequests.pr, state: "CLOSED", closed: true };
+    await f.core.commands.refresh();
+    expect((await f.core.commands.getTask(task.id))?.state).toBe("done");
+    // The author's branch and worktree are untouched.
+    expect(await git(["rev-parse", "bob/feature"], f.checkout)).toBe(local);
+    expect(await git(["branch", "--show-current"], authorTree)).toBe(
+      "bob/feature",
     );
   });
 

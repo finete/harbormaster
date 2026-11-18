@@ -871,16 +871,16 @@ test("Review mode: a pasted PR URL resolves into a PR card, Repository / Base / 
       role: "reviewer",
       state: "working",
     });
-  // Started: its worktree is on the PR head.
+  // Started: its worktree is on the PR head, detached (a reviewer never
+  // takes the branch, which an author's worktree may hold).
   const binding = await window.evaluate(
     (id) => window.harbormaster.core.getTaskWorkspace(id),
     taskId,
   );
   const worktree = binding?.worktreePath ?? "";
   expect(git(["rev-parse", "HEAD"], worktree).trim()).toBe(reviewHead);
-  expect(git(["branch", "--show-current"], worktree).trim()).toBe(
-    "octo/parser",
-  );
+  expect(git(["branch", "--show-current"], worktree).trim()).toBe("");
+  expect(binding?.detached).toBe(true);
 });
 
 // Last in this file on purpose: it walks "Started Work" through the board.

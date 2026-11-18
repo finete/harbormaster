@@ -91,7 +91,12 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     repo: RepositoryInfo,
     branch: string,
     pullRequestNumber: number,
-  ): Promise<{ worktree: WorktreeInfo; createdBranch: boolean }> {
+    options: { detached?: boolean } = {},
+  ): Promise<{
+    worktree: WorktreeInfo;
+    createdBranch: boolean;
+    detached?: boolean;
+  }> {
     // `pull/<n>/head` works for same-repository and fork PRs alike.
     await run(
       "git",
@@ -102,6 +107,24 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
     const head = (
       await run("git", ["rev-parse", "FETCH_HEAD"], repo.root)
     ).trim();
+    if (options.detached) {
+      // A reviewer reads the PR as GitHub has it now, without taking the
+      // branch: git checks a branch out in one worktree only (the author's
+      // task may hold it), and a local copy may lag behind the PR.
+      let path = this.taskWorktreePath(repo, `review-${branch}`);
+      for (let n = 2; await pathExists(path); n++) {
+        path = this.taskWorktreePath(repo, `review-${branch}-${n}`);
+      }
+      await mkdir(dirname(path), { recursive: true });
+      await run("git", ["worktree", "add", "--detach", path, head], repo.root, {
+        timeoutMs: LONG_RUN_TIMEOUT_MS,
+      });
+      return {
+        worktree: await this.inspect(path),
+        createdBranch: false,
+        detached: true,
+      };
+    }
     if (!(await this.branchExists(repo, branch))) {
       return {
         worktree: await this.createTaskWorktree(repo, branch, head),

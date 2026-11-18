@@ -280,6 +280,27 @@ test.beforeAll(async () => {
   }
   await seed.commands.setTaskParent(messaging.claude, messaging.pi);
 
+  // The Codex pin lags the latest release on purpose; unpinned it opens
+  // with an "Update available" dialog ahead of everything (0.169.0 vs
+  // 0.170.0, Nov 2026). A wrapper turns the check off for this run only
+  // (`-c` overrides the user's ~/.codex config without writing it).
+  let codexCommand = CODEX;
+  if (CODEX) {
+    codexCommand = path.join(root, "codex");
+    writeFileSync(
+      codexCommand,
+      [
+        "#!/bin/sh",
+        // Only sessions get the override: `codex queue` refuses config
+        // overrides ("remove configuration overrides or use --remote").
+        `case "$1" in queue|login|logout|mcp|exec|--version) exec ${JSON.stringify(CODEX)} "$@" ;; esac`,
+        `exec ${JSON.stringify(CODEX)} -c check_for_update_on_startup=false "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+  }
+
   app = await electron.launch({
     args: [mainEntry],
     env: {
@@ -290,7 +311,7 @@ test.beforeAll(async () => {
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PI_EXTENSIONS_DIR: path.join(root, "pi-extensions"),
       HARBORMASTER_CLI_PATH: cliBin,
-      ...(CODEX ? { HARBORMASTER_CODEX_COMMAND: CODEX } : {}),
+      ...(codexCommand ? { HARBORMASTER_CODEX_COMMAND: codexCommand } : {}),
       ...(CURSOR ? { HARBORMASTER_CURSOR_COMMAND: CURSOR } : {}),
     },
   });

@@ -126,7 +126,17 @@ export interface GitWorktreeAccess {
     repo: RepositoryInfo,
     branch: string,
     pullRequestNumber: number,
-  ): Promise<{ worktree: WorktreeInfo; createdBranch: boolean }>;
+    /**
+     * `detached`: a reviewer's checkout, the PR's fetched head on a
+     * detached HEAD in its own worktree (never the branch itself, which an
+     * author's worktree may hold and a stale local copy may lag behind).
+     */
+    options?: { detached?: boolean },
+  ): Promise<{
+    worktree: WorktreeInfo;
+    createdBranch: boolean;
+    detached?: boolean;
+  }>;
   /**
    * Remove a worktree. Refuses when the worktree has uncommitted changes
    * (staged, unstaged, or untracked) unless `force` is true. A folder that

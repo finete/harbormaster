@@ -255,6 +255,13 @@ test("a launched Claude Code child: bypass, hooks + MCP on argv, a parent's mess
   const messages = await core.commands.listMessages({ taskId: child.id });
   expect(messages.map((message) => message.status)).toContain("delivered");
   expect(readFakeClaude(stateDir, child.id)?.typed).toEqual([]);
+  // The block ran one more turn and its second Stop hook; only once that
+  // turn is over is the child idle (a message sent earlier rides that hook).
+  await expect
+    .poll(() => readFakeClaude(stateDir, child.id)?.hooks.length ?? 0, {
+      timeout: 20_000,
+    })
+    .toBe(2);
 
   // Idle at its prompt, Claude fires no hook on its own: main types the
   // message into the pane (the pty typing channel), with no help from the

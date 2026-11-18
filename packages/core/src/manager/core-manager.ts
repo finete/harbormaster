@@ -896,6 +896,7 @@ export class CoreManager implements CoreCommands {
         },
         baseRef ?? repo.defaultBranch,
         pr?.number,
+        pr?.role,
       );
     } else if (startNow && where.kind === "folder") {
       await this.provisionInPlaceWorkspace(id, where.path, now, {
@@ -1087,12 +1088,15 @@ export class CoreManager implements CoreCommands {
     baseRef: string = repo.defaultBranch,
     /** Check out this pull request's head as `branch` instead (PR-bound tasks). */
     pullRequestNumber?: number,
+    /** A reviewer's PR checkout: the head on a detached HEAD, the branch untouched (`checkoutPullRequest`'s `detached`). */
+    pullRequestRole?: PullRequestRole,
   ): Promise<void> {
     // Branch collision, dirty baseRef, missing repo, ... — createTaskWorktree
     // itself guarantees no leftover directory/bookkeeping on failure, so
     // there is nothing to clean up on this path beyond rethrowing.
     let worktree: WorktreeInfo;
     let createdBranch = true;
+    let detached = false;
     if (pullRequestNumber !== undefined) {
       if (!this.deps.worktrees.checkoutPullRequest) {
         throw new Error("Pull-request checkouts are not supported here");
@@ -1101,9 +1105,11 @@ export class CoreManager implements CoreCommands {
         repo,
         branch,
         pullRequestNumber,
+        pullRequestRole === "reviewer" ? { detached: true } : {},
       );
       worktree = checkout.worktree;
       createdBranch = checkout.createdBranch;
+      detached = checkout.detached === true;
     } else {
       worktree = await this.deps.worktrees.createTaskWorktree(
         repo,
@@ -1133,7 +1139,9 @@ export class CoreManager implements CoreCommands {
       taskId,
       worktreePath: worktree.path,
       branch,
-      detached: false,
+      // A detached reviewer checkout never owns `branch`: Done and delete
+      // must not delete it (someone else's branch, maybe checked out).
+      detached,
       createdAt: now,
       updatedAt: now,
     };
@@ -1796,7 +1804,7 @@ export class CoreManager implements CoreCommands {
         // Best-effort from here: the task's own worktree is gone, so the
         // delete goes through; leftovers surface in the orphan scan.
         await this.removeReviewCheckouts(repo, path, protectedPaths);
-        if (task.branch) {
+        if (task.branch && !binding.detached) {
           await this.deleteMergedBranch(repo, task.branch, task.pr);
         }
       }
@@ -2218,6 +2226,7 @@ export class CoreManager implements CoreCommands {
         },
         baseRef ?? repo.defaultBranch,
         bound?.pr.number,
+        bound?.pr.role,
       );
       await this.publishTaskChange(next);
       return next;
@@ -2926,7 +2935,7 @@ export class CoreManager implements CoreCommands {
           protectedPaths,
         );
         if (reviewWarning) addWarning(reviewWarning);
-        if (shouldDeleteBranch(task.pr)) {
+        if (shouldDeleteBranch(task.pr) && !binding.detached) {
           const branchWarning = await this.deleteTaskBranch(repo, task.branch);
           if (branchWarning) addWarning(branchWarning);
         }
@@ -3043,7 +3052,8 @@ export class CoreManager implements CoreCommands {
       ...(repoBacked
         ? {
             // The user confirmed either a merged branch or the unmerged line.
-            deleteBranch: true,
+            // A detached reviewer checkout never owned the branch.
+            deleteBranch: !binding?.detached,
             ...(binding?.worktreePath
               ? { worktreePath: binding.worktreePath }
               : {}),
@@ -3396,11 +3406,9 @@ export class CoreManager implements CoreCommands {
           binding.worktreePath,
           protectedPaths,
         );
-        const branchFailure = await this.deleteMergedBranch(
-          repo,
-          task.branch,
-          task.pr,
-        );
+        const branchFailure = binding.detached
+          ? undefined
+          : await this.deleteMergedBranch(repo, task.branch, task.pr);
         failure =
           [reviewFailure, branchFailure].filter(Boolean).join("; ") ||
           undefined;
