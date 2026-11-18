@@ -160,15 +160,21 @@ test.beforeAll(async () => {
     [
       "#!/bin/sh",
       'printf "cwd:%s pid:%s\\n" "$PWD" "$$" >> "$PI_INVOKE_LOG"',
+      // Like a managed Mac's endpoint security (SentinelOne, Nov 2026): an
+      // interpreter + script started with any 943+ char argument is
+      // SIGKILLed at exec, before it runs.
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template
+      'for arg; do [ "${#arg}" -ge 943 ] && kill -9 $$; done',
       // The killed-early child: its first launch (the one carrying the
-      // prompt) dies of SIGKILL before writing any session, as an
-      // endpoint-security kill did on a managed Mac; later launches log
-      // the prompt they were given (the last argument after `--`).
+      // prompt) also dies of SIGKILL before writing any session; later
+      // launches log the prompt they were given: the text after `--`, or
+      // the contents of an attached `@<file>`.
       'case "$PWD" in *killed-early*)',
       '  prompt=""; seen=""',
-      '  for arg; do [ -n "$seen" ] && prompt="$arg"; [ "$arg" = "--" ] && seen=1; done',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion, not a template
+      '  for arg; do if [ -n "$seen" ]; then case "$arg" in @*) prompt="$prompt$(cat "${arg#@}")";; *) prompt="$prompt$arg";; esac; fi; [ "$arg" = "--" ] && seen=1; done',
       '  if [ -n "$seen" ] && [ ! -e "$PWD/.killed-once" ]; then : > "$PWD/.killed-once"; kill -9 $$; fi',
-      '  printf "cwd:%s prompt:%s\\n" "$PWD" "$prompt" >> "$PI_INVOKE_LOG" ;;',
+      '  printf "cwd:%s prompt:%s" "$PWD" "$prompt" | tr "\\n" " " >> "$PI_INVOKE_LOG"; echo >> "$PI_INVOKE_LOG" ;;',
       "esac",
       // The child-under-test behaves like fullscreen pi: alt screen + mouse
       // tracking (?1002h) + SGR encoding (?1006h), logging every byte the
@@ -440,15 +446,16 @@ test("a background launch killed before its session began still delivers its pro
   setMaxConcurrent(5);
   await openLaunchComposer("subtask");
   await window.getByTestId("new-task-title-input").fill("Killed Early");
-  await window
-    .getByTestId("new-task-prompt-input")
-    .fill("Review the payout evidence");
+  // Long enough that on the command line it would be killed at exec.
+  const brief = `Review the payout evidence. ${"Context for the review. ".repeat(60)}`;
+  await window.getByTestId("new-task-prompt-input").fill(brief);
   await window.getByTestId("new-task-submit").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
 
   // The first pi died with the prompt; the next one (the pane opened on
   // the rail) must start the conversation again with that same prompt,
-  // not resume an empty session.
+  // not resume an empty session. Neither launch may carry the long brief
+  // as an argument (the fake is killed for it): it arrives as a file.
   await expect
     .poll(
       () =>
@@ -457,5 +464,7 @@ test("a background launch killed before its session began still delivers its pro
         ) ?? "",
       { timeout: 15_000 },
     )
-    .toMatch(/prompt:Review the payout evidence/);
+    .toMatch(
+      /prompt:Review the payout evidence\. (Context for the review\. ){60}/,
+    );
 });

@@ -4,13 +4,16 @@
 // identical for every agent). The Pi adapter predates this module and keeps
 // its own copy of the same markers.
 
+import { join } from "node:path";
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
-import type {
-  BuildLaunchSpecInput,
-  HarnessReviewCapability,
-  PresenceStatus,
-  ReviewTarget,
-  SessionLaunch,
+import {
+  type BuildLaunchSpecInput,
+  type HarnessReviewCapability,
+  INLINE_PROMPT_MAX_CHARS,
+  type LaunchSpec,
+  type PresenceStatus,
+  type ReviewTarget,
+  type SessionLaunch,
 } from "../contracts/harness.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
 import { SystemClock } from "../utilities/defaults.js";
@@ -111,6 +114,35 @@ export function mcpIdentityEnv(
     if (value !== undefined) identity[key] = value;
   }
   return identity;
+}
+
+/** `<stateDir>/prompts/<taskId>.md`: where a long initial prompt is written. */
+export function promptFilePath(stateDir: string, taskId: string): string {
+  const safe = taskId.replace(/[^A-Za-z0-9._-]/g, "_");
+  return join(resolveStatePaths(stateDir).promptsDir, `${safe}.md`);
+}
+
+/** The short instruction pointing an agent at its prompt file (harnesses with no file attachment). */
+export function readPromptFileInstruction(path: string): string {
+  return `Read the file ${path} and follow it as your task brief.`;
+}
+
+/**
+ * The one place a launch's initial prompt becomes arguments, for every
+ * adapter: a short prompt stays inline (`inline(prompt)`); a longer one
+ * goes into `promptFile` and only a reference to it (`fromFile(path)`)
+ * reaches the command line, so no argument nears `MAX_LAUNCH_ARG_CHARS`.
+ */
+export function deliverInitialPrompt(
+  input: Pick<BuildLaunchSpecInput, "initialPrompt" | "stateDir" | "taskId">,
+  inline: (prompt: string) => string[],
+  fromFile: (path: string) => string[],
+): { args: string[]; promptFile?: NonNullable<LaunchSpec["promptFile"]> } {
+  const prompt = input.initialPrompt;
+  if (!prompt?.trim()) return { args: [] };
+  if (prompt.length <= INLINE_PROMPT_MAX_CHARS) return { args: inline(prompt) };
+  const path = promptFilePath(input.stateDir, input.taskId);
+  return { args: fromFile(path), promptFile: { path, text: prompt } };
 }
 
 /** POSIX single-quote a word for a `sh -c` command line (hook commands). */

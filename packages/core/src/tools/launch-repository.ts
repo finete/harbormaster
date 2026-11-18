@@ -158,7 +158,10 @@ export interface ResolvedLaunchMode {
 export function resolveLaunchMode(args: LaunchModeArgs): ResolvedLaunchMode {
   const mode = args.mode ?? "task";
   const repositoryArg = args.repository?.trim() || undefined;
-  const prArg = args.pullRequest?.trim() || undefined;
+  // "none": the caller confirmed a task that only mentions a PR (see
+  // `pullRequestMention`) is not about working on it.
+  const prRaw = args.pullRequest?.trim() || undefined;
+  const prArg = prRaw?.toLowerCase() === "none" ? undefined : prRaw;
   if (args.role && !prArg) {
     throw new Error("role only applies together with pullRequest");
   }
@@ -205,4 +208,24 @@ export function resolveLaunchMode(args: LaunchModeArgs): ResolvedLaunchMode {
     pullRequest: number,
     ...(role ? { role } : {}),
   };
+}
+
+/**
+ * The pull request a launch's title or prompt points at, if any: a GitHub
+ * PR URL, or "PR #12" / "pull request 12" next to the word "review". A
+ * launch that names one but passes no `pullRequest` almost always meant to
+ * review or continue it (agents skip the tool's fields and describe the PR
+ * in prose instead): it gets a fresh branch off the default branch, never
+ * sees the PR's code, and shows no PR link.
+ */
+export function pullRequestMention(
+  title: string,
+  prompt: string,
+): string | undefined {
+  const text = `${title}\n${prompt}`;
+  const url = text.match(/https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/);
+  if (url) return url[0];
+  if (!/\breview/i.test(text)) return undefined;
+  const numbered = text.match(/\b(?:PR|pull request)\s*#?(\d+)/i);
+  return numbered ? `#${numbered[1]}` : undefined;
 }

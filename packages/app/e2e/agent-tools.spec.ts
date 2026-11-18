@@ -112,6 +112,7 @@ test("a task session calls the catalog through MCP and the CLI; the CLI reports 
   expect(log.tools).toEqual([
     "report_status",
     "launch_task",
+    "review_pull_request",
     "subtask_status",
     "find_tasks",
     "send_to_task",

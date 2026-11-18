@@ -133,6 +133,8 @@ export function writeMcpPi(dir: string, logFile: string): string {
   P.row("pi.tools.mcp-call");
   const fakePi = path.join(dir, "fake-pi-mcp.mjs");
   const script = String.raw`#!/usr/bin/env node
+// A managed Mac (SentinelOne) SIGKILLs an interpreter + script started with a 943+ char argument.
+if (process.argv.slice(2).some((arg) => arg.length >= 943)) process.kill(process.pid, "SIGKILL");
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 const LOG = ${JSON.stringify(logFile)};
@@ -235,6 +237,8 @@ export function writeReviewPi(dir: string, logFile: string): string {
   P.row("pi.extension.inbox");
   const fakePi = path.join(dir, "fake-pi-review.mjs");
   const script = String.raw`#!/usr/bin/env node
+// A managed Mac (SentinelOne) SIGKILLs an interpreter + script started with a 943+ char argument.
+if (process.argv.slice(2).some((arg) => arg.length >= 943)) process.kill(process.pid, "SIGKILL");
 import { execFile, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 const LOG = ${JSON.stringify(logFile)};

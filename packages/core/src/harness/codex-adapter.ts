@@ -64,8 +64,10 @@ import {
   applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
+  deliverInitialPrompt,
   mcpIdentityEnv,
   type PresenceReaderOptions,
+  readPromptFileInstruction,
   SESSION_ID_ENV,
   shellQuote,
 } from "./adapter-common.js";
@@ -402,6 +404,10 @@ export class CodexHarnessAdapter implements HarnessAdapter {
     const session = codexSessionArgs(input.session, (id) =>
       this.transcripts.exists(id),
     );
+    const prompt = deliverInitialPrompt(input, codexPromptArgs, (path) => [
+      "--",
+      readPromptFileInstruction(path),
+    ]);
     return {
       command: harnessLaunchCommand(this),
       args: [
@@ -415,10 +421,11 @@ export class CodexHarnessAdapter implements HarnessAdapter {
           : []),
         ...session.options,
         ...session.subcommand,
-        ...codexPromptArgs(input.initialPrompt),
+        ...prompt.args,
       ],
       cwd: input.workspacePath,
       env,
+      ...(prompt.promptFile ? { promptFile: prompt.promptFile } : {}),
     };
   }
 

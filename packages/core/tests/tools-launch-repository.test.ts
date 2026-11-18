@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
+import type {
+  CoreCommands,
+  LaunchTaskInput,
+} from "../src/contracts/commands.js";
 import type { RepositoryInfo } from "../src/contracts/workspace.js";
+import { dispatchToolCall } from "../src/tools/catalog.js";
 import {
   buildLaunchResultText,
   launchRepositoryLabel,
   looksLikeCloneUrl,
+  pullRequestMention,
   repositoryShortName,
   resolveLaunchMode,
   resolveLaunchRepository,
@@ -208,5 +214,96 @@ describe("resolveLaunchMode", () => {
       resolveLaunchMode({ repository: "w", role: "author" }),
     ).toThrow(/role only applies/);
     expect(() => resolveLaunchMode({})).toThrow(/repository is required/);
+  });
+});
+
+describe("pullRequestMention", () => {
+  it("finds a PR URL anywhere, or a numbered PR next to the word review", () => {
+    expect(
+      pullRequestMention(
+        "Test review",
+        "Look at https://github.com/arnac-io/arnac/pull/26873 please",
+      ),
+    ).toBe("https://github.com/arnac-io/arnac/pull/26873");
+    expect(pullRequestMention("Review PR #26873", "go")).toBe("#26873");
+    expect(pullRequestMention("CR", "please review pull request 12")).toBe(
+      "#12",
+    );
+    expect(pullRequestMention("Fix PR #12 flake", "no reviewing")).toBe("#12");
+    expect(pullRequestMention("Fix the build", "PR #12 broke it")).toBe(
+      undefined,
+    );
+    expect(pullRequestMention("Fix the build", "just do it")).toBe(undefined);
+  });
+});
+
+describe("launch_task / review_pull_request (tool calls)", () => {
+  function fakeCommands(launched: LaunchTaskInput[]): CoreCommands {
+    return {
+      listRepositories: async () => [repo("github.com/arnac-io/arnac")],
+      listLocations: async () => [],
+      launchTask: async (input: LaunchTaskInput) => {
+        launched.push(input);
+        return { id: "t-1", title: input.title };
+      },
+    } as unknown as CoreCommands;
+  }
+  const caller = { taskId: "parent-1", cwd: "/tmp" };
+
+  it("refuses a launch_task that names a PR without pullRequest, pointing at review_pull_request", async () => {
+    const launched: LaunchTaskInput[] = [];
+    await expect(
+      dispatchToolCall(
+        fakeCommands(launched),
+        "launch_task",
+        {
+          relation: "child",
+          title: "Test review PR #26873",
+          prompt: "Review https://github.com/arnac-io/arnac/pull/26873",
+          repository: "github.com/arnac-io/arnac",
+        },
+        caller,
+      ),
+    ).rejects.toThrow(
+      /review_pull_request \(pullRequest: "https:\/\/github\.com\/arnac-io\/arnac\/pull\/26873"\)/,
+    );
+    expect(launched).toEqual([]);
+
+    // "none" confirms new work that only mentions the PR.
+    await dispatchToolCall(
+      fakeCommands(launched),
+      "launch_task",
+      {
+        relation: "child",
+        title: "Follow-up to PR #26873",
+        prompt:
+          "Review notes from https://github.com/arnac-io/arnac/pull/26873 call for a new helper",
+        repository: "github.com/arnac-io/arnac",
+        pullRequest: "none",
+      },
+      caller,
+    );
+    expect(launched[0]?.pullRequest).toBeUndefined();
+  });
+
+  it("review_pull_request launches a review child on the PR, titled after it", async () => {
+    const launched: LaunchTaskInput[] = [];
+    await dispatchToolCall(
+      fakeCommands(launched),
+      "review_pull_request",
+      {
+        pullRequest: "https://github.com/arnac-io/arnac/pull/26873",
+        prompt: "Review only this PR's own diff.",
+      },
+      caller,
+    );
+    expect(launched).toHaveLength(1);
+    expect(launched[0]).toMatchObject({
+      relation: "child",
+      fromTaskId: "parent-1",
+      title: "Review PR #26873",
+      repository: { repositoryId: "github.com/arnac-io/arnac" },
+      pullRequest: 26873,
+    });
   });
 });

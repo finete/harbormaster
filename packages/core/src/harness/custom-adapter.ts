@@ -22,7 +22,9 @@ import {
   applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
+  deliverInitialPrompt,
   type PresenceReaderOptions,
+  readPromptFileInstruction,
   templateReviewCommand,
 } from "./adapter-common.js";
 import {
@@ -128,16 +130,22 @@ export class CustomHarnessAdapter implements HarnessAdapter {
   }
 
   buildLaunchSpec(input: BuildLaunchSpecInput): LaunchSpec {
-    const prompt = input.initialPrompt?.trim() ? input.initialPrompt : "";
     const passPrompt = (this.config.promptArg ?? "positional") === "positional";
+    const prompt = passPrompt
+      ? deliverInitialPrompt(
+          input,
+          (text) => [text],
+          (path) => [readPromptFileInstruction(path)],
+        )
+      : { args: [] };
     return {
       command: harnessLaunchCommand(this),
-      args: [
-        ...(this.config.args ?? []),
-        ...(prompt && passPrompt ? [prompt] : []),
-      ],
+      args: [...(this.config.args ?? []), ...prompt.args],
       cwd: input.workspacePath,
       env: applyOpenUrlEnv(baseLaunchEnv(input, this.cliPath), input),
+      ...("promptFile" in prompt && prompt.promptFile
+        ? { promptFile: prompt.promptFile }
+        : {}),
     };
   }
 

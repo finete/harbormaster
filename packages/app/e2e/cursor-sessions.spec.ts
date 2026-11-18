@@ -31,6 +31,7 @@ import {
   writeFakeCursor,
 } from "./fake-cursor";
 import { writeShellPi } from "./fake-pi";
+import { launchedBrief } from "./launched-brief";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const cliBin = path.join(
@@ -280,7 +281,12 @@ test("a launched Cursor child: bypass, a busy child's follow-up through the stop
   const record = await waitForFakeCursor(stateDir, child.id);
   expect(record.bypass).toBe(true);
   expect(record.args[record.args.indexOf("--") + 1]).toBe(record.prompt);
-  expect(record.prompt?.startsWith("-do the child work")).toBe(true);
+  // A launched child's prompt is long (the launch contract is appended):
+  // it travels as a file, never as a killable 943+ char argument.
+  expect(record.prompt?.length ?? 0).toBeLessThan(400);
+  expect(launchedBrief(record.prompt).startsWith("-do the child work")).toBe(
+    true,
+  );
   await expect.poll(() => boundSession(child.id)).toBe(record.sessionId);
   await expect.poll(() => presenceState(child.id)).toBe("working");
 

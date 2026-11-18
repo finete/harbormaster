@@ -27,6 +27,7 @@ import {
   writeFakeClaude,
 } from "./fake-claude";
 import { writeShellPi } from "./fake-pi";
+import { launchedBrief } from "./launched-brief";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const cliBin = path.join(
@@ -189,7 +190,12 @@ test("a launched Claude Code child: bypass, hooks + MCP on argv, a parent's mess
   expect(record.bypass).toBe(true);
   expect(record.sessionId).toMatch(UUID);
   // The prompt follows `--`, so a leading "-" is never parsed as a flag.
-  expect(record.prompt?.startsWith("-do the child work")).toBe(true);
+  // A launched child's prompt is long (the launch contract is appended):
+  // it travels as a file, never as a killable 943+ char argument.
+  expect(record.prompt?.length ?? 0).toBeLessThan(400);
+  expect(launchedBrief(record.prompt).startsWith("-do the child work")).toBe(
+    true,
+  );
   expect(record.args[record.args.indexOf("--") + 1]).toBe(record.prompt);
   // The per-session MCP server: absolute CLI, identity in its env.
   const server = record.mcpConfig?.mcpServers.harbormaster;

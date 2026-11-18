@@ -31,11 +31,13 @@ import {
   type HarnessAdapter,
   type HarnessModelCatalogAccess,
   type LaunchSpec,
+  MAX_LAUNCH_ARG_CHARS,
   PTY_TYPING_CHANNEL,
   type SessionLaunch,
 } from "../src/contracts/harness.js";
 import type { PresenceAccess } from "../src/contracts/services.js";
 import { compareSemver } from "../src/engines/review-support.js";
+import { promptFilePath } from "../src/harness/adapter-common.js";
 import { ClaudeCodeHarnessAdapter } from "../src/harness/claude-code-adapter.js";
 import { CodexHarnessAdapter } from "../src/harness/codex-adapter.js";
 import { CursorHarnessAdapter } from "../src/harness/cursor-adapter.js";
@@ -403,6 +405,37 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
     // No prompt = no positional at all (and no dangling `--`).
     const none = spec(adapter, MODES.resume, { initialPrompt: "  " });
     expect(none.args.at(-1)).not.toBe("--");
+  });
+
+  it("never puts an argument near the exec-kill limit on the command line; a long prompt travels as a file", () => {
+    // A managed Mac SIGKILLs interpreter + script launches with a 943+
+    // char argument (MAX_LAUNCH_ARG_CHARS): every mode, every option, a
+    // 10 KB prompt and a deep workspace path stay under the limit.
+    const prompt = `Review the PR. ${"Context line. ".repeat(800)}`;
+    const deep = {
+      taskId: "task-1",
+      workspacePath: `${WORK}/${"nested-folder/".repeat(20)}`,
+      stateDir: `${STATE}/${"state-folder/".repeat(10)}`,
+      initialPrompt: prompt,
+      permissions: "bypass" as const,
+    };
+    for (const session of Object.values(MODES)) {
+      const built = subject
+        .make({ cliPath: "/opt/hm/bin/harbormaster" })
+        .buildLaunchSpec({ ...deep, session });
+      for (const arg of built.args) {
+        expect(arg.length, arg.slice(0, 80)).toBeLessThan(MAX_LAUNCH_ARG_CHARS);
+      }
+      expect(built.promptFile?.text).toBe(prompt);
+      expect(built.promptFile?.path).toBe(
+        promptFilePath(deep.stateDir, deep.taskId),
+      );
+      expect(built.args.join(" ")).toContain(built.promptFile?.path ?? "?");
+    }
+    // A short prompt stays inline, with no file.
+    const short = spec(adapter, MODES.new, { initialPrompt: "Fix the bug" });
+    expect(short.promptFile).toBeUndefined();
+    expect(short.args.at(-1)).toBe("Fix the bug");
   });
 
   it("bypasses permissions only when the launch says so", () => {

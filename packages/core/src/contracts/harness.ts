@@ -149,6 +149,12 @@ export interface LaunchSpec {
    */
   prepare?: LaunchPrepare;
   /**
+   * A long initial prompt travels as this file, never as an argument (see
+   * `MAX_LAUNCH_ARG_CHARS`): the launcher writes `text` to the absolute
+   * `path` before spawning, and `args` only reference it.
+   */
+  promptFile?: { path: string; text: string };
+  /**
    * The program reports no status on its pty; its hooks do
    * (`capabilities.status.protocol: "hooks"`, Cursor). The launcher
    * registers the attachment at spawn as `working` with
@@ -168,6 +174,18 @@ export interface LaunchPrepare {
   /** Relative path → UTF-8 content. */
   files: Record<string, string>;
 }
+
+/**
+ * The longest single launch argument allowed. A managed Mac's endpoint
+ * security (seen: SentinelOne, Nov 2026) SIGKILLs any interpreter + script
+ * file (node, python: `pi`, the npm `codex`/`cursor-agent` shims) started
+ * with one argument of 943+ characters, at exec, before the program runs.
+ * The launcher refuses a spec with a longer argument.
+ */
+export const MAX_LAUNCH_ARG_CHARS = 900;
+
+/** Initial prompts up to this length stay on the command line; longer ones go through `LaunchSpec.promptFile`. */
+export const INLINE_PROMPT_MAX_CHARS = 400;
 
 /** The status message of a hooks-reporting attachment that is not ready for input yet. */
 export const HOOK_PRESENCE_STARTING = "Starting…";

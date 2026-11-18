@@ -31,7 +31,11 @@ import {
   resolveSocketPath,
   resolveStatePaths,
 } from "../utilities/state-paths.js";
-import { applyOpenUrlEnv, plannotatorSlashReview } from "./adapter-common.js";
+import {
+  applyOpenUrlEnv,
+  deliverInitialPrompt,
+  plannotatorSlashReview,
+} from "./adapter-common.js";
 import {
   harnessCommandEnvName,
   harnessLaunchCommand,
@@ -144,6 +148,15 @@ function defaultIsAlive(pid: number): boolean {
 export function piPromptArgs(prompt: string | undefined): string[] {
   if (!prompt?.trim()) return [];
   return ["--", prompt.startsWith("@") ? ` ${prompt}` : prompt];
+}
+
+/**
+ * A long prompt as a file Pi attaches itself (`@<path>`, read into the
+ * first message: no tool call, no permission), plus the line that says
+ * what it is. Verified: `pi -p -- @<file> "…"` answers from the file.
+ */
+export function piPromptFileArgs(path: string): string[] {
+  return ["--", `@${path}`, "Follow the task brief in the attached file."];
 }
 
 /**
@@ -413,16 +426,15 @@ export class PiHarnessAdapter implements HarnessAdapter {
         }),
       );
     }
+    const prompt = deliverInitialPrompt(input, piPromptArgs, piPromptFileArgs);
     return {
       // HARBORMASTER_PI_COMMAND lets e2e point this at a tiny fake binary
       // instead of a real `pi` install; unset (the normal case) runs `pi`.
       command: harnessLaunchCommand(this),
-      args: [
-        ...piSessionArgs(input.session),
-        ...piPromptArgs(input.initialPrompt),
-      ],
+      args: [...piSessionArgs(input.session), ...prompt.args],
       cwd: input.workspacePath,
       env,
+      ...(prompt.promptFile ? { promptFile: prompt.promptFile } : {}),
     };
   }
 

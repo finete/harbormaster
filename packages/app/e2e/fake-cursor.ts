@@ -143,6 +143,8 @@ notReplayed(
 export function writeFakeCursor(dir: string): string {
   const file = path.join(dir, "fake-cursor.mjs");
   const script = String.raw`#!/usr/bin/env node
+// A managed Mac (SentinelOne) SIGKILLs an interpreter + script started with a 943+ char argument.
+if (process.argv.slice(2).some((arg) => arg.length >= 943)) process.kill(process.pid, "SIGKILL");
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from "node:fs";

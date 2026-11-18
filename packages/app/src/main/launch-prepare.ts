@@ -4,6 +4,8 @@
 // - `prepare`: files the harness needs before it starts (Cursor's
 //   per-session plugin directory: hooks + MCP, docs/harness-additions.md
 //   C2), written right before the spawn.
+// - `promptFile`: a long initial prompt, written where the arguments point
+//   (it never travels as an argument: see `launchRefusal`).
 // - `hookStatus`: the program reports no status on its pty (Cursor, C3,
 //   C9). The attachment is registered at spawn as `working` "Starting…"
 //   (so nothing is typed into a TUI that would drop it), and reported
@@ -13,12 +15,53 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, sep } from "node:path";
-import { HOOK_PRESENCE_QUIET_MS } from "@harbormaster/core";
+import {
+  HOOK_PRESENCE_QUIET_MS,
+  MAX_LAUNCH_ARG_CHARS,
+} from "@harbormaster/core";
 
 /** `LaunchSpec.prepare` (core's contract, structurally). */
 export interface LaunchPrepareLike {
   dir: string;
   files: Record<string, string>;
+}
+
+/** The parts of a `LaunchSpec` the launcher acts on before spawning (structural). */
+export interface LaunchSpecFilesLike {
+  args: readonly string[];
+  prepare?: LaunchPrepareLike;
+  promptFile?: { path: string; text: string };
+}
+
+/**
+ * Why this spec must not be spawned, or `undefined`. An argument of
+ * `MAX_LAUNCH_ARG_CHARS`+ gets an interpreter + script launch SIGKILLed at
+ * exec by a managed Mac's endpoint security (943+ chars, seen with
+ * SentinelOne), so the launcher refuses it up front instead of spawning a
+ * process that dies before it runs. Core's adapters never build one (a long
+ * prompt travels as `promptFile`); this is the last line of defense.
+ */
+export function launchRefusal(spec: LaunchSpecFilesLike): string | undefined {
+  const index = spec.args.findIndex(
+    (arg) => arg.length >= MAX_LAUNCH_ARG_CHARS,
+  );
+  if (index === -1) return undefined;
+  const arg = spec.args[index] ?? "";
+  return `Launch refused: argument ${index + 1} is ${arg.length} characters (limit ${MAX_LAUNCH_ARG_CHARS - 1}); managed Macs kill a program started with an argument this long ("${arg.slice(0, 40)}…").`;
+}
+
+/** Writes everything a spec needs on disk before its spawn: `prepare` files and the prompt file. */
+export function materializeLaunchSpecFiles(spec: LaunchSpecFilesLike): void {
+  if (spec.prepare) materializeLaunchFiles(spec.prepare);
+  if (spec.promptFile) {
+    if (!isAbsolute(spec.promptFile.path)) {
+      throw new Error(
+        `the prompt file needs an absolute path: ${spec.promptFile.path}`,
+      );
+    }
+    mkdirSync(dirname(spec.promptFile.path), { recursive: true });
+    writeFileSync(spec.promptFile.path, spec.promptFile.text);
+  }
 }
 
 /** Writes `prepare.files` under `prepare.dir` (parents created, existing files replaced); never outside it. */

@@ -296,6 +296,22 @@ difference not listed here is a bug.
   ordinary interactive Pi sessions in app-owned ptys with no pane until
   opened (attach, never takeover); quitting the app stops them, no detached
   processes. See "Launching tasks from an agent" above.
+- **Reviewing a PR has its own tool.** Agents pick tools by name and skip
+  field descriptions, so a review launched through `launch_task` without
+  `pullRequest` became a fresh branch off main with no PR link.
+  `review_pull_request(pullRequest, prompt)` is the review entry point, and
+  `launch_task` refuses a launch whose title or prompt names a PR but passes
+  no `pullRequest` (the refusal names `review_pull_request`; `pullRequest:
+  "none"` confirms new work that only mentions a PR). Tool replies are the
+  one text agents always read.
+- **No long argument on an agent's command line.** A managed Mac's
+  endpoint security (SentinelOne, Nov 2026) SIGKILLs any interpreter +
+  script launch with a single 943+ char argument, at exec. Initial prompts
+  over 400 chars travel as `<stateDir>/prompts/<taskId>.md`
+  (`LaunchSpec.promptFile`, written by the launcher); the arguments only
+  reference it (Pi and Claude attach it with `@<path>`, others are told to
+  read it). The launcher refuses any spec with a 900+ char argument, and
+  the contract test holds every adapter to that.
 - **Closing a task's tab hides it, it does not stop it.** The task's pi is
   detached back to an app-owned paneless pty (the same path a window reload
   uses), so reopening re-attaches instantly instead of cold-starting pi

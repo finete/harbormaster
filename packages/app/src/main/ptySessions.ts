@@ -22,7 +22,8 @@ import { debugLog, isDebugLogging } from "./debug-log";
 import {
   createHookReadyWatcher,
   type LaunchPrepareLike,
-  materializeLaunchFiles,
+  launchRefusal,
+  materializeLaunchSpecFiles,
 } from "./launch-prepare";
 import { DoneMessageJoiner, Osc9Splitter } from "./osc9-notifications";
 import {
@@ -322,6 +323,8 @@ export interface LaunchSpecLike {
   env: Record<string, string>;
   /** Files to write before spawning (core's `LaunchSpec.prepare`; see launch-prepare.ts). */
   prepare?: LaunchPrepareLike;
+  /** A long initial prompt, written before spawning (core's `LaunchSpec.promptFile`). */
+  promptFile?: { path: string; text: string };
   /** The program reports through hooks, not its pty (core's `LaunchSpec.hookStatus`). */
   hookStatus?: { ready: "hook" | "quiet" };
 }
@@ -430,7 +433,11 @@ export function createSession(
   const spawnedAtMs = Date.now();
   let ptyProcess: pty.IPty;
   try {
-    if (useSpec && spec.prepare) materializeLaunchFiles(spec.prepare);
+    if (useSpec) {
+      const refusal = launchRefusal(spec);
+      if (refusal) throw new Error(refusal);
+      materializeLaunchSpecFiles(spec);
+    }
     ptyProcess = spawnWithFdHygiene(() =>
       useSpec
         ? pty.spawn(spec.command, spec.args, {
@@ -644,7 +651,9 @@ export function createBackgroundPrimarySession(
   const spawnedAtMs = Date.now();
   let ptyProcess: pty.IPty;
   try {
-    if (spec.prepare) materializeLaunchFiles(spec.prepare);
+    const refusal = launchRefusal(spec);
+    if (refusal) throw new Error(refusal);
+    materializeLaunchSpecFiles(spec);
     ptyProcess = spawnWithFdHygiene(() =>
       pty.spawn(spec.command, spec.args, {
         name: "xterm-256color",

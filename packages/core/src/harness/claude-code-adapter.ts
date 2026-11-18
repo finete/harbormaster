@@ -55,9 +55,11 @@ import {
   applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
+  deliverInitialPrompt,
   mcpIdentityEnv,
   type PresenceReaderOptions,
   plannotatorSlashReview,
+  readPromptFileInstruction,
   shellQuote,
 } from "./adapter-common.js";
 import {
@@ -220,6 +222,21 @@ export function claudeSessionArgs(
 export function claudeProjectSlug(cwd: string): string | undefined {
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-");
   return slug.length <= 200 ? slug : undefined;
+}
+
+/**
+ * A long prompt as a file Claude inlines itself: an `@<path>` mention in
+ * the prompt is read into the message (verified: `claude -p --tools "" --
+ * "@<file> …"` answers from the file). A path with whitespace can't be
+ * mentioned; the agent is told to read it instead.
+ */
+export function claudePromptFileArgs(path: string): string[] {
+  return [
+    "--",
+    /\s/.test(path)
+      ? readPromptFileInstruction(path)
+      : `@${path} Follow the task brief in the attached file.`,
+  ];
 }
 
 /** The prompt as Claude's positional argument, always after `--` (see the header). */
@@ -408,6 +425,11 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
         ),
       );
     }
+    const prompt = deliverInitialPrompt(
+      input,
+      claudePromptArgs,
+      claudePromptFileArgs,
+    );
     return {
       command: harnessLaunchCommand(this),
       args: [
@@ -418,10 +440,11 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
           ? ["--dangerously-skip-permissions"]
           : []),
         ...tooling,
-        ...claudePromptArgs(input.initialPrompt),
+        ...prompt.args,
       ],
       cwd: input.workspacePath,
       env,
+      ...(prompt.promptFile ? { promptFile: prompt.promptFile } : {}),
     };
   }
 

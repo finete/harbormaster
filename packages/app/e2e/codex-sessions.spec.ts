@@ -30,6 +30,7 @@ import {
 } from "./fake-codex";
 import { writeShellPi } from "./fake-pi";
 import { writeFakeOpen, writeFakePlannotator } from "./fake-plannotator";
+import { launchedBrief } from "./launched-brief";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const cliBin = path.join(
@@ -255,7 +256,12 @@ test("a launched Codex child: bypass, prompt after --, and a parent's message re
   expect(record.bypass).toBe(true);
   // The prompt follows `--` (a leading "-" stays text) and ran as a turn.
   expect(record.args[record.args.indexOf("--") + 1]).toBe(record.prompt);
-  expect(record.prompt?.startsWith("-do the child work")).toBe(true);
+  // A launched child's prompt is long (the launch contract is appended):
+  // it travels as a file, never as a killable 943+ char argument.
+  expect(record.prompt?.length ?? 0).toBeLessThan(400);
+  expect(launchedBrief(record.prompt).startsWith("-do the child work")).toBe(
+    true,
+  );
   // The first turn's SessionStart bound the task; wait until that turn is
   // over (its Stop hook ran), so the message below finds the child idle
   // rather than riding the first prompt's catch-up hook.

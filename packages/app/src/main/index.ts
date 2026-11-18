@@ -124,6 +124,7 @@ import {
   describeStartupDecision,
   type StartupDecision,
 } from "./instance-guard";
+import { launchRefusal } from "./launch-prepare";
 import { createLogDedupe } from "./log-dedupe";
 import { applyLoginShellPath, loginShellPathAtStart } from "./login-shell-path";
 import {
@@ -158,7 +159,6 @@ import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
 import { resolvePrimaryLaunch } from "./primary-launch";
-import { EARLY_EXIT_WINDOW_MS } from "./pty-log";
 import {
   acknowledgeSessionData,
   activeSessionCwds,
@@ -940,6 +940,14 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
       .catch(() => {});
     return false;
   }
+  const refused = launchRefusal(resolution.spec);
+  if (refused) {
+    console.error(`[background-launcher] task ${taskId}: ${refused}`);
+    await core.commands
+      .updateTaskState(taskId, { lastError: refused })
+      .catch(() => {});
+    return false;
+  }
   console.log(
     `[background-launcher] primary-launch resolved for ${taskId}: harness=${resolution.harnessId ?? "-"} sessionMode=${resolution.sessionMode ?? "-"}`,
   );
@@ -954,9 +962,9 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
       // prompt out again unless a session file says otherwise.
       if (
         resolution.carriesInitialPrompt &&
-        Date.now() - spawnedAtMs < EARLY_EXIT_WINDOW_MS
+        Date.now() - spawnedAtMs < DIED_AT_LAUNCH_MS
       ) {
-        releasePromptOf(taskId);
+        releasePromptOf(taskId, Date.now() - spawnedAtMs);
       }
       void pollPresenceOnce();
       void backgroundLauncher.runPass();
@@ -972,8 +980,19 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
  * background launch claims the released prompt instead of racing it.
  */
 const promptReleases = new Map<string, Promise<void>>();
+/** An agent gone this soon after spawn never got to its prompt (a kill at exec lands within ~100 ms). */
+const DIED_AT_LAUNCH_MS = 5_000;
+/** Tasks whose prompt was already released once this run: a second early death is reported, never retried. */
+const promptReleasedOnce = new Set<string>();
 
-function releasePromptOf(taskId: string): void {
+function releasePromptOf(taskId: string, livedMs: number): void {
+  if (promptReleasedOnce.has(taskId)) {
+    const lastError = `The agent exited ${livedMs} ms after starting, again (the retry died the same way). Something on this machine is stopping it at launch; check the pane and the app log.`;
+    console.error(`[background-launcher] ${taskId}: ${lastError}`);
+    void core.commands.updateTaskState(taskId, { lastError }).catch(() => {});
+    return;
+  }
+  promptReleasedOnce.add(taskId);
   const release = core.commands
     .releaseInitialPrompt(taskId)
     .then((released) => {
@@ -1954,7 +1973,18 @@ function registerPtyIpc(): void {
               { permissions: "default", ...(await openUrlLaunchOptions()) },
             )
           : undefined;
-      const spec = resolution?.spec;
+      const launchRefused = resolution?.spec
+        ? launchRefusal(resolution.spec)
+        : undefined;
+      if (launchRefused && options.taskId) {
+        console.error(
+          `[primary-launch] task ${options.taskId}: ${launchRefused}`,
+        );
+        void core.commands
+          .updateTaskState(options.taskId, { lastError: launchRefused })
+          .catch(() => {});
+      }
+      const spec = launchRefused ? undefined : resolution?.spec;
       // A primary pane whose worktree directory has vanished must not spawn
       // pi (or a shell) into that dead cwd — that is the bare `[process
       // exited with code 1]`. Drop the cwd so the pane opens a shell in the
@@ -1977,12 +2007,24 @@ function registerPtyIpc(): void {
         }
       }
 
+      const spawnedAtMs = Date.now();
       const { id, fellBackToShell } = createSession(
         options.cols,
         options.rows,
         {
           onData: (data) => safeSend(sender, "pty:data", { id, data }),
           onExit: (exitCode) => {
+            // Same rule as a background launch (startBackgroundLaunch): a
+            // prompt-carrying agent that died right after spawn gets its
+            // prompt back once; a repeat is reported on the task.
+            if (
+              spec &&
+              options.taskId &&
+              resolution?.carriesInitialPrompt &&
+              Date.now() - spawnedAtMs < DIED_AT_LAUNCH_MS
+            ) {
+              releasePromptOf(options.taskId, Date.now() - spawnedAtMs);
+            }
             safeSend(sender, "pty:exit", { id, exitCode });
             untrackSession(sender.id, id);
             // Instant death: the pane-pid registry entry is already gone by
@@ -2020,6 +2062,7 @@ function registerPtyIpc(): void {
         id,
         fellBackToShell,
         worktreeMissing,
+        ...(launchRefused ? { launchRefused } : {}),
         ...(fellBackToShell && resolution?.agentCommand
           ? { missingCommand: resolution.agentCommand }
           : {}),

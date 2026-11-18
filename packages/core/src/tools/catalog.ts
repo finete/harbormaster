@@ -22,6 +22,7 @@ import {
 import {
   buildLaunchResultText,
   launchRepositoryLabel,
+  pullRequestMention,
   resolveLaunchMode,
   resolveLaunchRepository,
 } from "./launch-repository.js";
@@ -210,7 +211,7 @@ const launchTask: ToolDefinition = {
       pullRequest: {
         type: "string",
         description:
-          'For mode "review" (required) or "task" (continue that PR as its author): a PR URL (https://github.com/org/repo/pull/12; it also supplies repository when omitted) or a PR number together with repository.',
+          'For mode "review" (required) or "task" (continue that PR as its author): a PR URL (https://github.com/org/repo/pull/12; it also supplies repository when omitted) or a PR number together with repository. "none" = the prompt only mentions a PR and this is new work (a launch naming a PR without pullRequest is refused). To review a PR, prefer review_pull_request.',
       },
       role: {
         type: "string",
@@ -254,72 +255,170 @@ const launchTask: ToolDefinition = {
     required: ["relation", "title", "prompt"],
     additionalProperties: false,
   },
-  async handler(args, { commands, caller }) {
-    const relation = readEnum(
-      args,
-      "relation",
-      ["child", "standalone"] as const,
-      true,
+  handler: (args, context) => launchFromArgs(args, context, "launch_task"),
+};
+
+async function launchFromArgs(
+  args: Record<string, unknown>,
+  { commands, caller }: ToolContext,
+  tool: "launch_task" | "review_pull_request",
+): Promise<ToolResult> {
+  const relation = readEnum(
+    args,
+    "relation",
+    ["child", "standalone"] as const,
+    true,
+  );
+  if (!relation) throw new Error("relation is required");
+  const title = readString(args, "title", true);
+  const prompt = readString(args, "prompt", true);
+  const mode = readEnum(
+    args,
+    "mode",
+    ["task", "review", "chat"] as const,
+    false,
+  );
+  const pullRequestArg = readString(args, "pullRequest");
+  const mentioned =
+    tool === "launch_task" && !pullRequestArg && mode !== "chat"
+      ? pullRequestMention(title, prompt)
+      : undefined;
+  if (mentioned) {
+    throw new Error(
+      `This launch names pull request ${mentioned} but passes no pullRequest, so the task would get a fresh branch off the default branch, never see the PR's code, and show no PR link. To review it, call review_pull_request (pullRequest: "${mentioned}"). To continue it as its author, pass pullRequest. If the task only mentions the PR and is new work, pass pullRequest: "none".`,
     );
-    if (!relation) throw new Error("relation is required");
-    const title = readString(args, "title", true);
-    const prompt = readString(args, "prompt", true);
-    const resolvedMode = resolveLaunchMode({
-      mode: readEnum(args, "mode", ["task", "review", "chat"] as const, false),
-      repository: readString(args, "repository"),
-      pullRequest: readString(args, "pullRequest"),
-      role: readEnum(args, "role", ["author", "reviewer"] as const, false),
-    });
-    const baseBranch = readEnum(
-      args,
-      "baseBranch",
-      ["default", "parent"] as const,
-      false,
+  }
+  const resolvedMode = resolveLaunchMode({
+    mode,
+    repository: readString(args, "repository"),
+    pullRequest: pullRequestArg,
+    role: readEnum(args, "role", ["author", "reviewer"] as const, false),
+  });
+  const baseBranch = readEnum(
+    args,
+    "baseBranch",
+    ["default", "parent"] as const,
+    false,
+  );
+  const model = readString(args, "model")?.trim() || undefined;
+  const harness = readString(args, "harness")?.trim() || undefined;
+  const bypassPermissions = readBoolean(args, "bypassPermissions");
+  const fromTaskId = caller.taskId;
+  if (relation === "child" && !fromTaskId) {
+    throw new Error(
+      "child requires launching from a Harbormaster task session",
     );
-    const model = readString(args, "model")?.trim() || undefined;
-    const harness = readString(args, "harness")?.trim() || undefined;
-    const bypassPermissions = readBoolean(args, "bypassPermissions");
-    const fromTaskId = caller.taskId;
-    if (relation === "child" && !fromTaskId) {
-      throw new Error(
-        "child requires launching from a Harbormaster task session",
-      );
-    }
-    const [repositories, locations] = await Promise.all([
-      commands.listRepositories(),
-      commands.listLocations(),
-    ]);
-    const repository = resolveLaunchRepository(
-      resolvedMode.repository,
-      repositories,
-      locations,
-    );
-    const input: LaunchTaskInput = {
+  }
+  const [repositories, locations] = await Promise.all([
+    commands.listRepositories(),
+    commands.listLocations(),
+  ]);
+  const repository = resolveLaunchRepository(
+    resolvedMode.repository,
+    repositories,
+    locations,
+  );
+  const input: LaunchTaskInput = {
+    relation,
+    ...(fromTaskId ? { fromTaskId } : {}),
+    title,
+    prompt,
+    repository,
+    ...(resolvedMode.inPlace ? { inPlace: true } : {}),
+    ...(resolvedMode.pullRequest !== undefined
+      ? { pullRequest: resolvedMode.pullRequest }
+      : {}),
+    ...(resolvedMode.role ? { role: resolvedMode.role } : {}),
+    ...(baseBranch ? { baseBranch } : {}),
+    ...(model ? { model } : {}),
+    ...(harness ? { harness } : {}),
+    ...(bypassPermissions !== undefined ? { bypassPermissions } : {}),
+  };
+  const task = await commands.launchTask(input);
+  return {
+    text: buildLaunchResultText({
+      title: task.title,
+      id: task.id,
       relation,
-      ...(fromTaskId ? { fromTaskId } : {}),
-      title,
-      prompt,
-      repository,
-      ...(resolvedMode.inPlace ? { inPlace: true } : {}),
-      ...(resolvedMode.pullRequest !== undefined
-        ? { pullRequest: resolvedMode.pullRequest }
-        : {}),
-      ...(resolvedMode.role ? { role: resolvedMode.role } : {}),
-      ...(baseBranch ? { baseBranch } : {}),
-      ...(model ? { model } : {}),
-      ...(harness ? { harness } : {}),
-      ...(bypassPermissions !== undefined ? { bypassPermissions } : {}),
-    };
-    const task = await commands.launchTask(input);
-    return {
-      text: buildLaunchResultText({
-        title: task.title,
-        id: task.id,
-        relation,
-        repositoryLabel: launchRepositoryLabel(repository),
-      }),
-      details: { task },
-    };
+      repositoryLabel: launchRepositoryLabel(repository),
+    }),
+    details: { task },
+  };
+}
+
+const reviewPullRequest: ToolDefinition = {
+  name: "review_pull_request",
+  title: "Harbormaster review pull request",
+  description:
+    'Launch a Harbormaster task that REVIEWS an existing pull request: the PR\'s head is checked out in its own worktree, the board card links the PR, and the reviewer never commits, pushes or opens a PR. Use this (not launch_task) whenever the work is reviewing a PR. Starts in the background like launch_task; poll a "child" with subtask_status.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      pullRequest: {
+        type: "string",
+        description:
+          "The PR to review: its URL (https://github.com/org/repo/pull/12; it also supplies the repository), or its number together with repository.",
+      },
+      prompt: {
+        type: "string",
+        description:
+          "Self-sufficient review instructions (scope, focus, what to report back): the reviewer starts a fresh session with only this.",
+      },
+      title: {
+        type: "string",
+        description: 'Short board title. Default: "Review PR #<number>".',
+      },
+      relation: {
+        type: "string",
+        enum: ["child", "standalone"],
+        description:
+          'Default "child" from a Harbormaster task session (nested under it, polled with subtask_status), else "standalone".',
+      },
+      repository: {
+        type: "string",
+        description: "Only with a PR number: the repository it belongs to.",
+      },
+      role: {
+        type: "string",
+        enum: ["reviewer", "author"],
+        description:
+          'Default from GitHub: "reviewer" for someone else\'s PR, "author" for your own.',
+      },
+      model: {
+        type: "string",
+        description: "Provider/model override for the reviewer's session.",
+      },
+      harness: {
+        type: "string",
+        description:
+          "Agent id to run the review on (a built-in or configured custom agent). Default: the launching task's agent for a child.",
+      },
+      bypassPermissions: {
+        type: "boolean",
+        description:
+          "Whether the reviewer skips its permission prompts (background tasks do by default).",
+      },
+    },
+    required: ["pullRequest", "prompt"],
+    additionalProperties: false,
+  },
+  handler: (input, context) => {
+    const pullRequest = readString(input, "pullRequest", true);
+    const number = pullRequest.match(/(\d+)\/?$/)?.[1];
+    return launchFromArgs(
+      {
+        ...input,
+        mode: "review",
+        relation:
+          readString(input, "relation") ??
+          (context.caller.taskId ? "child" : "standalone"),
+        title:
+          readString(input, "title")?.trim() ||
+          (number ? `Review PR #${number}` : "Review PR"),
+      },
+      context,
+      "review_pull_request",
+    );
   },
 };
 
@@ -478,6 +577,7 @@ const inboxClaim: ToolDefinition = {
 export const TOOL_CATALOG: readonly ToolDefinition[] = [
   reportStatus,
   launchTask,
+  reviewPullRequest,
   subtaskStatus,
   findTasks,
   sendToTask,

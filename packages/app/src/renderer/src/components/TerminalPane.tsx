@@ -48,6 +48,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
   const [fellBackToShell, setFellBackToShell] = useState(false);
   const [missingCommand, setMissingCommand] = useState("The agent's command");
   const [worktreeMissing, setWorktreeMissing] = useState(false);
+  const [launchRefused, setLaunchRefused] = useState<string>();
   const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Search bar state.
@@ -242,6 +243,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
               fellBackToShell: fellBack,
               worktreeMissing: wtGone,
               missingCommand: missing,
+              launchRefused: refused,
             }) => {
               if (disposed) {
                 void window.harbormaster.terminal.release(id);
@@ -250,6 +252,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
               if (missing) setMissingCommand(missing);
               if (fellBack) setFellBackToShell(true);
               if (wtGone) setWorktreeMissing(true);
+              if (refused) setLaunchRefused(refused);
               wireSession(id);
             },
           );
@@ -341,6 +344,21 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           <button
             type="button"
             data-testid="worktree-missing-warning-dismiss"
+            onClick={() => setWarningDismissed(true)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-foreground transition-colors duration-[120ms] ease-out hover:bg-accent"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {launchRefused && !warningDismissed && (
+        <div
+          data-testid="launch-refused-warning"
+          className="flex items-center justify-between gap-2 border-b border-status-needsYou/35 bg-status-needsYou/10 px-3 py-1.5 text-xs text-status-needsYou"
+        >
+          <span>{launchRefused} Opened a plain shell.</span>
+          <button
+            type="button"
             onClick={() => setWarningDismissed(true)}
             className="shrink-0 rounded px-1.5 py-0.5 text-foreground transition-colors duration-[120ms] ease-out hover:bg-accent"
           >

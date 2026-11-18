@@ -70,8 +70,10 @@ import {
   applyOpenUrlEnv,
   baseLaunchEnv,
   createPresenceReader,
+  deliverInitialPrompt,
   mcpIdentityEnv,
   type PresenceReaderOptions,
+  readPromptFileInstruction,
   SESSION_ID_ENV,
   shellQuote,
 } from "./adapter-common.js";
@@ -438,6 +440,10 @@ export class CursorHarnessAdapter implements HarnessAdapter {
     const pluginDir = cursorPluginDir(input.stateDir, input.taskId);
     const [command, ...prefix] = this.launchArgv();
     const tooling = this.cliPath ? ["--plugin-dir", pluginDir] : [];
+    const prompt = deliverInitialPrompt(input, cursorPromptArgs, (path) => [
+      "--",
+      readPromptFileInstruction(path),
+    ]);
     return {
       command: command as string,
       args: [
@@ -447,7 +453,7 @@ export class CursorHarnessAdapter implements HarnessAdapter {
         ...tooling,
         ...(input.permissions === "bypass" ? ["-f"] : []),
         ...session,
-        ...cursorPromptArgs(input.initialPrompt),
+        ...prompt.args,
       ],
       cwd: input.workspacePath,
       env,
@@ -463,6 +469,7 @@ export class CursorHarnessAdapter implements HarnessAdapter {
           }
         : {}),
       hookStatus: { ready: cursorLaunchResumes(session) ? "quiet" : "hook" },
+      ...(prompt.promptFile ? { promptFile: prompt.promptFile } : {}),
     };
   }
 

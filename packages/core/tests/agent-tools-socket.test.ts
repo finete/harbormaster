@@ -50,6 +50,7 @@ describe("tool catalog", () => {
     expect(names).toEqual([
       "report_status",
       "launch_task",
+      "review_pull_request",
       "subtask_status",
       "find_tasks",
       "send_to_task",

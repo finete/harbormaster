@@ -49,6 +49,8 @@ export interface StatePaths {
   readonly harnessUsageDir: string;
   /** `<stateDir>/cursor-plugins/<taskId>/`: Cursor's per-session plugin directory (hooks + MCP), written by the launcher. */
   readonly cursorPluginsDir: string;
+  /** `<stateDir>/prompts/<taskId>.md`: a long initial prompt, written by the launcher (never on argv). */
+  readonly promptsDir: string;
 }
 
 /** Unix socket paths are capped (104 bytes on macOS); stay safely under it. */
@@ -100,5 +102,6 @@ export function resolveStatePaths(
     inboxLockFile: join(stateDir, "inbox", "items.lock"),
     harnessUsageDir: join(stateDir, "harness-usage"),
     cursorPluginsDir: join(stateDir, "cursor-plugins"),
+    promptsDir: join(stateDir, "prompts"),
   };
 }

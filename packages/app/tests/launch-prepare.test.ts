@@ -9,7 +9,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createHookReadyWatcher,
+  launchRefusal,
   materializeLaunchFiles,
+  materializeLaunchSpecFiles,
 } from "../src/main/launch-prepare";
 
 const dirs: string[] = [];
@@ -50,6 +52,37 @@ describe("materializeLaunchFiles", () => {
     expect(() =>
       materializeLaunchFiles({ dir: root, files: { "/etc/evil": "x" } }),
     ).toThrow(/escapes/);
+  });
+});
+
+describe("launchRefusal / materializeLaunchSpecFiles", () => {
+  it("refuses an argument a managed Mac kills at exec (943+ chars), allows one under the limit", () => {
+    expect(launchRefusal({ args: ["--", "x".repeat(899)] })).toBeUndefined();
+    expect(launchRefusal({ args: ["--", "x".repeat(900)] })).toMatch(
+      /argument 2 is 900 characters/,
+    );
+    expect(
+      launchRefusal({
+        args: Array.from({ length: 50 }, () => "x".repeat(500)),
+      }),
+    ).toBeUndefined();
+  });
+
+  it("writes the prompt file where the arguments point, with its parents", () => {
+    const root = mkdtempSync(join(tmpdir(), "hm-prompt-"));
+    dirs.push(root);
+    const path = join(root, "prompts", "task-1.md");
+    materializeLaunchSpecFiles({
+      args: ["--", `@${path}`],
+      promptFile: { path, text: "the long brief" },
+    });
+    expect(readFileSync(path, "utf8")).toBe("the long brief");
+    expect(() =>
+      materializeLaunchSpecFiles({
+        args: [],
+        promptFile: { path: "relative.md", text: "x" },
+      }),
+    ).toThrow(/absolute/);
   });
 });
 

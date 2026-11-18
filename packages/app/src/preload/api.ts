@@ -297,6 +297,12 @@ export interface TerminalCreateResult {
    * hint.
    */
   worktreeMissing?: boolean;
+  /**
+   * Set when the agent's launch was refused (an argument long enough to be
+   * killed at exec on managed Macs, see main/launch-prepare.ts): the pane
+   * opened a plain shell instead and shows this text.
+   */
+  launchRefused?: string;
 }
 
 export interface TerminalDataEvent {

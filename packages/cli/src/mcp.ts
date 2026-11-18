@@ -34,7 +34,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     {
       capabilities: { tools: {} },
       instructions:
-        "Harbormaster tools for this task: report_status (final outcome), launch_task / subtask_status (background tasks), find_tasks / send_to_task (message other tasks).",
+        "Harbormaster tools for this task: report_status (final outcome), launch_task / review_pull_request / subtask_status (background tasks; review_pull_request for reviewing a PR), find_tasks / send_to_task (message other tasks).",
     },
   );
 
