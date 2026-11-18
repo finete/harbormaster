@@ -1833,6 +1833,10 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
         [
           'model_provider = "hmstub"',
           `model = "${MODEL}"`,
+          // A newer Codex release than the pin shows an "Update available"
+          // dialog before anything else (seen 0.169.0 -> 0.170.0); the pin
+          // is deliberate, so never offer one.
+          "check_for_update_on_startup = false",
           "",
           "[model_providers.hmstub]",
           'name = "stub"',
