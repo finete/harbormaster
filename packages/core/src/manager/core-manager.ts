@@ -125,6 +125,7 @@ import type {
   ConfigSettingsPatch,
   FolderAccess,
   IdGenerator,
+  LaunchFilesAccess,
   MessageAccess,
   PresenceAccess,
   ReviewSupportProbeAccess,
@@ -266,6 +267,8 @@ export interface CoreManagerDependencies {
   sessions: SessionFileAccess;
   /** Scratch-directory workspace for `launchTask`'s `{ none: true }` repository-less tasks. */
   scratch: ScratchWorkspaceAccess;
+  /** Prompt files and plugin dirs launches leave for the agent; removed on Done and delete (`createCore` supplies it). */
+  launchFiles?: LaunchFilesAccess;
   pullRequests: PullRequestAccess;
   versions: VersionAccess;
   /**
@@ -1811,6 +1814,7 @@ export class CoreManager implements CoreCommands {
     }
     await this.deps.bindings.removeBinding(id).catch(() => {});
     await this.deps.tasks.removeTask(id);
+    await this.removeLaunchFiles(id);
     await this.publishBoard();
   }
 
@@ -2972,6 +2976,11 @@ export class CoreManager implements CoreCommands {
     return next;
   }
 
+  /** Best effort: a leftover prompt file or plugin dir is only clutter. */
+  private async removeLaunchFiles(taskId: string): Promise<void> {
+    await this.deps.launchFiles?.removeTaskLaunchFiles(taskId).catch(() => {});
+  }
+
   /**
    * The single "Mark done?" question for a manual Done, its lines computed
    * up front (`doneConfirmationLines`). Read-only: nothing moves or is
@@ -3065,13 +3074,19 @@ export class CoreManager implements CoreCommands {
     return (await this.runForcedCleanup(task.id, protectedPaths)) ?? landed;
   }
 
-  /** The worktree is gone; keep the binding (session identity survives for a reopen — pi-home parks it the same way). */
+  /**
+   * The worktree is gone; keep the binding (session identity survives for a
+   * reopen — pi-home parks it the same way). The launch files go with the
+   * workspace: no agent runs here anymore, and a reopen's launch writes
+   * them again.
+   */
   private async parkBinding(binding: WorkspaceBinding): Promise<void> {
     const { worktreePath: _removed, ...parked } = binding;
     await this.deps.bindings.replaceBinding({
       ...parked,
       updatedAt: this.deps.clock.now().toISOString(),
     });
+    await this.removeLaunchFiles(binding.taskId);
   }
 
   /**

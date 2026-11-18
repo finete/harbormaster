@@ -16,6 +16,7 @@ export * from "./json-source-state-access.js";
 export * from "./json-task-state-access.js";
 export * from "./json-workspace-binding-access.js";
 export * from "./jsonl-audit-log-access.js";
+export * from "./launch-files-access.js";
 export * from "./local-addon-access.js";
 export * from "./local-environment-probe-access.js";
 export * from "./local-folder-access.js";

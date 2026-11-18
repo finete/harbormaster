@@ -149,6 +149,15 @@ export interface ScratchWorkspaceAccess {
 }
 
 /**
+ * Resource Access for the files a launch leaves under the state dir for the
+ * agent (the long-prompt file, Cursor's plugin directory).
+ */
+export interface LaunchFilesAccess {
+  /** Remove the task's prompt file and plugin directory; missing ones are fine. */
+  removeTaskLaunchFiles(taskId: string): Promise<void>;
+}
+
+/**
  * Resource Access for user folders registered outside `codeRoot` (the
  * composer's `Open folder…`; see `/docs/new-task-composer.md` "Where"). The
  * registry is core state (`<stateDir>/locations.json`), so every client and

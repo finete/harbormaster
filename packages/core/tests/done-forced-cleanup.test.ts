@@ -5,13 +5,14 @@
 // repository" folders deleted + pruned, ENOENT = already cleaned), the
 // "needs attention" threshold behind the inbox item, Retry and Dismiss.
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonConfigAccess } from "../src/access/json-config-access.js";
 import { JsonTaskStateAccess } from "../src/access/json-task-state-access.js";
 import { JsonWorkspaceBindingAccess } from "../src/access/json-workspace-binding-access.js";
+import { LocalLaunchFilesAccess } from "../src/access/launch-files-access.js";
 import { isToDoneConfirmation } from "../src/contracts/commands.js";
 import type {
   CommitLogEntry,
@@ -117,6 +118,10 @@ async function harness(
     bindings,
     sessions: {} as never,
     scratch: {} as never,
+    launchFiles: new LocalLaunchFilesAccess({
+      promptsDir: join(dir, "prompts"),
+      cursorPluginsDir: join(dir, "cursor-plugins"),
+    }),
     pullRequests: new NoPullRequests(),
     versions: new NoVersions(),
     rules: {
@@ -158,7 +163,35 @@ async function harness(
     clock.current = new Date(START.getTime() + ms);
   };
   const reload = async () => (await tasks.getTask(task.id)) as Task;
-  return { manager, worktrees, bindings, audit, at, reload, task };
+  // What the launcher left for the agent (LaunchSpec.promptFile, Cursor's
+  // plugin dir).
+  const promptFile = join(dir, "prompts", `${task.id}.md`);
+  const pluginDir = join(dir, "cursor-plugins", task.id);
+  await mkdir(join(dir, "prompts"), { recursive: true });
+  await writeFile(promptFile, "the long brief");
+  await mkdir(join(pluginDir, "hooks"), { recursive: true });
+  await writeFile(join(pluginDir, "hooks", "hooks.json"), "{}");
+  const launchFilesLeft = async () =>
+    (
+      await Promise.all(
+        [promptFile, pluginDir].map((path) =>
+          access(path).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      )
+    ).filter(Boolean).length;
+  return {
+    manager,
+    worktrees,
+    bindings,
+    audit,
+    at,
+    reload,
+    task,
+    launchFilesLeft,
+  };
 }
 
 async function confirmDone(manager: CoreManager, taskId: string) {
@@ -215,6 +248,14 @@ describe("confirmed Done: forced cleanup", () => {
     const binding = await f.bindings.getBindingForTask(f.task.id);
     expect(binding?.worktreePath).toBeUndefined();
     expect(binding?.sessionId).toBe("session-1");
+    // The prompt file and plugin dir go with the worktree.
+    expect(await f.launchFilesLeft()).toBe(0);
+  });
+
+  it("deleting a task removes its launch files too", async () => {
+    const f = await harness(async () => {});
+    await f.manager.deleteTask(f.task.id, { removeDirty: true });
+    expect(await f.launchFilesLeft()).toBe(0);
   });
 
   it("lands Done even when removal fails, then retries silently with backoff (1 min, 5 min, 30 min, hourly)", async () => {
@@ -239,6 +280,8 @@ describe("confirmed Done: forced cleanup", () => {
         message: "worktree left in place: Device or resource busy",
       }),
     ]);
+    // The worktree stays (an agent may still run there): so do its files.
+    expect(await f.launchFilesLeft()).toBe(2);
 
     const calls = () => f.worktrees.removeWorktree.mock.calls.length;
     // Not due yet.

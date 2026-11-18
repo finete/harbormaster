@@ -311,7 +311,10 @@ difference not listed here is a bug.
   (`LaunchSpec.promptFile`, written by the launcher); the arguments only
   reference it (Pi and Claude attach it with `@<path>`, others are told to
   read it). The launcher refuses any spec with a 900+ char argument, and
-  the contract test holds every adapter to that.
+  the contract test holds every adapter to that. The prompt file and
+  Cursor's plugin dir are removed when the task's workspace is (Done
+  cleanup, delete; `LaunchFilesAccess`); a reopen's launch writes them
+  again.
 - **Closing a task's tab hides it, it does not stop it.** The task's pi is
   detached back to an app-owned paneless pty (the same path a window reload
   uses), so reopening re-attaches instantly instead of cold-starting pi
