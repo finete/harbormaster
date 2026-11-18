@@ -382,7 +382,7 @@ const reviewPullRequest: ToolDefinition = {
         type: "string",
         enum: ["reviewer", "author"],
         description:
-          'Default from GitHub: "reviewer" for someone else\'s PR, "author" for your own.',
+          'Default "reviewer", also for your own PR: review only, on a detached checkout of the PR head (never the branch, which another task may hold). "author" continues the PR instead (it can commit and push); use launch_task with pullRequest for that.',
       },
       model: {
         type: "string",
@@ -409,6 +409,7 @@ const reviewPullRequest: ToolDefinition = {
       {
         ...input,
         mode: "review",
+        role: readString(input, "role") ?? "reviewer",
         relation:
           readString(input, "relation") ??
           (context.caller.taskId ? "child" : "standalone"),

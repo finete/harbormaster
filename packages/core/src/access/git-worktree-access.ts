@@ -132,7 +132,17 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       };
     }
     // The branch already exists locally (e.g. the author's own checkout):
-    // check it out as-is, never resetting local commits.
+    // check it out as-is, never resetting local commits. Git checks a
+    // branch out in one worktree only: name the holder instead of git's
+    // bare "already checked out".
+    const holder = (await this.listWorktrees(repo)).find(
+      (worktree) => worktree.branch === branch,
+    );
+    if (holder) {
+      throw new Error(
+        `Branch ${branch} is already checked out at ${holder.path}. Finish or close the task that uses that worktree to continue this PR as its author, or review it instead (role "reviewer": a detached checkout of the PR head that needs no branch).`,
+      );
+    }
     const path = this.taskWorktreePath(repo, branch);
     await mkdir(dirname(path), { recursive: true });
     await run("git", ["worktree", "add", path, branch], repo.root, {

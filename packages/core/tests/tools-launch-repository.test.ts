@@ -304,6 +304,8 @@ describe("launch_task / review_pull_request (tool calls)", () => {
       title: "Review PR #26873",
       repository: { repositoryId: "github.com/arnac-io/arnac" },
       pullRequest: 26873,
+      // Also for your own PR: a review never takes the branch.
+      role: "reviewer",
     });
   });
 });

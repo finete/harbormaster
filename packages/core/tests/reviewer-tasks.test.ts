@@ -245,6 +245,23 @@ describe("reviewer tasks", () => {
     );
   });
 
+  it("continuing a PR as its author while another worktree holds the branch names that worktree", async () => {
+    const f = await fixture();
+    await git(["branch", "-q", "bob/feature", "main"], f.checkout);
+    const authorTree = join(f.checkout, "..", "author-tree");
+    await git(["worktree", "add", "-q", authorTree, "bob/feature"], f.checkout);
+    await expect(
+      f.core.commands.createTask({
+        title: "Continue bob's change",
+        initialPrompt: "",
+        repositoryId: f.repo.id,
+        pullRequest: 7,
+        role: "author",
+        start: true,
+      }),
+    ).rejects.toThrow(/already checked out at .*author-tree.*role "reviewer"/);
+  });
+
   it("an explicit author role on an existing local branch checks it out as-is and keeps the branch on rollback paths", async () => {
     const f = await fixture();
     await git(["branch", "-q", "bob/feature", "main"], f.checkout);
