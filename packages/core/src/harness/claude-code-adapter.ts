@@ -32,19 +32,20 @@ import {
   LocalClaudeTranscriptAccess,
 } from "../access/claude-code-access.js";
 import { readClaudeSessionUsage } from "../access/claude-session-usage-access.js";
-import type {
-  BuildLaunchSpecInput,
-  ExpectedSessionFile,
-  HarnessAdapter,
-  HarnessCapabilities,
-  HarnessDescriptor,
-  HarnessModelCatalog,
-  HarnessModelCatalogAccess,
-  HarnessReviewCapability,
-  LaunchSpec,
-  PresenceStatus,
-  ProgramStatusReading,
-  SessionLaunch,
+import {
+  type BuildLaunchSpecInput,
+  type ExpectedSessionFile,
+  type HarnessAdapter,
+  type HarnessCapabilities,
+  type HarnessDescriptor,
+  type HarnessModelCatalog,
+  type HarnessModelCatalogAccess,
+  type HarnessReviewCapability,
+  type LaunchSpec,
+  type PresenceStatus,
+  type ProgramStatusReading,
+  PTY_TYPING_CHANNEL,
+  type SessionLaunch,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
@@ -126,11 +127,14 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
   delivery: {
     steer: true,
     followUp: true,
+    // An idle Claude fires no hook on its own (every hook above needs a
+    // turn), so the app types pending messages at its prompt instead.
     wakeIdle: false,
     channels: {
       steer: "PostToolUse hook",
       followUp: "Stop hook (block)",
       catchUp: "UserPromptSubmit hook",
+      wakeIdle: PTY_TYPING_CHANNEL,
     },
   },
   trustPrompt: true,

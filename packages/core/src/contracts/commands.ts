@@ -584,6 +584,15 @@ export interface CoreCommands {
    */
   claimInitialPrompt(taskId: string): Promise<string | undefined>;
   /**
+   * The launch that carried the claimed initial prompt died before its
+   * conversation began (the frontend saw the agent process exit right
+   * after spawn): hand the prompt out again on the next launch, which
+   * starts a fresh session instead of resuming the empty one. Refused
+   * (`false`) once the harness recorded or wrote the session file, or
+   * when there is no claimed prompt to release.
+   */
+  releaseInitialPrompt(taskId: string): Promise<boolean>;
+  /**
    * Decide which harness conversation the task's pane opens, for a
    * frontend that is about to launch the harness (call it only once the
    * harness command is known to be launchable). On the first launch this

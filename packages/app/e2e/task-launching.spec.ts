@@ -160,6 +160,16 @@ test.beforeAll(async () => {
     [
       "#!/bin/sh",
       'printf "cwd:%s pid:%s\\n" "$PWD" "$$" >> "$PI_INVOKE_LOG"',
+      // The killed-early child: its first launch (the one carrying the
+      // prompt) dies of SIGKILL before writing any session, as an
+      // endpoint-security kill did on a managed Mac; later launches log
+      // the prompt they were given (the last argument after `--`).
+      'case "$PWD" in *killed-early*)',
+      '  prompt=""; seen=""',
+      '  for arg; do [ -n "$seen" ] && prompt="$arg"; [ "$arg" = "--" ] && seen=1; done',
+      '  if [ -n "$seen" ] && [ ! -e "$PWD/.killed-once" ]; then : > "$PWD/.killed-once"; kill -9 $$; fi',
+      '  printf "cwd:%s prompt:%s\\n" "$PWD" "$prompt" >> "$PI_INVOKE_LOG" ;;',
+      "esac",
       // The child-under-test behaves like fullscreen pi: alt screen + mouse
       // tracking (?1002h) + SGR encoding (?1006h), logging every byte the
       // pane sends back so the test can inspect the mouse reports.
@@ -423,4 +433,29 @@ test("launching a subtask nests it under its parent, queued, starting in the bac
   // extension/MCP wiring in this fixture), so there is nothing to assert
   // here — the derivation itself is covered by
   // tests/task-status-lines.test.ts's `deriveOutcomeLine` cases.
+});
+
+test("a background launch killed before its session began still delivers its prompt", async () => {
+  // Still in the parent's workspace (the previous test ends there).
+  setMaxConcurrent(5);
+  await openLaunchComposer("subtask");
+  await window.getByTestId("new-task-title-input").fill("Killed Early");
+  await window
+    .getByTestId("new-task-prompt-input")
+    .fill("Review the payout evidence");
+  await window.getByTestId("new-task-submit").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
+
+  // The first pi died with the prompt; the next one (the pane opened on
+  // the rail) must start the conversation again with that same prompt,
+  // not resume an empty session.
+  await expect
+    .poll(
+      () =>
+        invocationsFor("killed-early").find((line) =>
+          line.includes("prompt:"),
+        ) ?? "",
+      { timeout: 15_000 },
+    )
+    .toMatch(/prompt:Review the payout evidence/);
 });

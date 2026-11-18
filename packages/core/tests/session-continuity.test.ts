@@ -29,6 +29,7 @@ import type {
   TaskStateAccess,
   WorkspaceBindingAccess,
 } from "../src/contracts/index.js";
+import type { PresenceAccess } from "../src/contracts/services.js";
 import {
   CodexHarnessAdapter,
   CoreEventBus,
@@ -41,6 +42,7 @@ import {
   LocalGitWorktreeAccess,
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
+  PiHarnessAdapter,
   resolveStatePaths,
 } from "../src/index.js";
 
@@ -759,6 +761,92 @@ describe.skipIf(!gitAvailable)(
       const after = await f.manager.getTask(task.id);
       expect(after?.launch?.status).toBe("started");
       expect(after?.launch?.interruptedAt).toBeUndefined();
+    });
+  },
+);
+
+describe.skipIf(!gitAvailable)(
+  "releaseInitialPrompt: a prompted launch that died before its session began",
+  () => {
+    const noPresence = new Proxy({} as PresenceAccess, {
+      get: (_target, key) =>
+        key === "read" ? async () => undefined : async () => {},
+    });
+
+    async function piFixture() {
+      const agentDir = await realpath(
+        await mkdtemp(join(tmpdir(), "harbormaster-pi-agent-")),
+      );
+      roots.push(agentDir);
+      const harness = new PiHarnessAdapter({ presence: noPresence, agentDir });
+      return { f: await fixture({ harness }), harness };
+    }
+
+    async function launchedAndClaimed(f: Fixture) {
+      const task = await f.manager.launchTask({
+        relation: "standalone",
+        title: "Killed early",
+        prompt: "review the PR",
+        repository: { repositoryId: f.repositoryId },
+        model: "anthropic/claude-opus",
+      });
+      const first = await f.manager.claimSessionLaunch(task.id);
+      if (first?.mode !== "new") throw new Error("expected a new session");
+      expect(await f.manager.claimInitialPrompt(task.id)).toMatch(
+        /^review the PR/,
+      );
+      return { task, first };
+    }
+
+    it("hands the prompt out again with a fresh session and the task's model", async () => {
+      const { f } = await piFixture();
+      const { task, first } = await launchedAndClaimed(f);
+
+      expect(await f.manager.releaseInitialPrompt(task.id)).toBe(true);
+      const again = await f.manager.claimSessionLaunch(task.id);
+      expect(again).toMatchObject({
+        mode: "new",
+        model: "anthropic/claude-opus",
+      });
+      expect(again && "sessionId" in again && again.sessionId).not.toBe(
+        first.sessionId,
+      );
+      expect(await f.manager.claimInitialPrompt(task.id)).toMatch(
+        /^review the PR/,
+      );
+      // Released once per death: nothing to release twice.
+      expect(await f.manager.claimSessionLaunch(task.id)).toMatchObject({
+        mode: "resume",
+      });
+    });
+
+    it("refuses once the harness wrote the session file", async () => {
+      const { f, harness } = await piFixture();
+      const { task, first } = await launchedAndClaimed(f);
+      const binding = await f.manager.getTaskWorkspace(task.id);
+      const expected = harness.expectedSessionFile(
+        binding?.worktreePath ?? "",
+        first.sessionId,
+      );
+      await mkdir(expected.dir, { recursive: true });
+      await writeFile(
+        join(expected.dir, `2026-01-01T00-00-00-000Z${expected.fileSuffix}`),
+        "{}\n",
+      );
+
+      expect(await f.manager.releaseInitialPrompt(task.id)).toBe(false);
+      expect(await f.manager.claimSessionLaunch(task.id)).toEqual({
+        mode: "resume",
+        sessionId: first.sessionId,
+      });
+      expect(await f.manager.claimInitialPrompt(task.id)).toBeUndefined();
+    });
+
+    it("refuses with no claimed prompt", async () => {
+      const { f } = await piFixture();
+      const task = await startedTask(f, "");
+      await f.manager.claimSessionLaunch(task.id);
+      expect(await f.manager.releaseInitialPrompt(task.id)).toBe(false);
     });
   },
 );

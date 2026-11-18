@@ -14,7 +14,10 @@
 // Codex run the skill through their model (a few tokens). Codex also runs
 // the presence scenario (docs/harness-additions.md S4): a turn that leaves
 // `sleep 120` running in the background must end at "your move", never
-// spinning; its Review then goes through `codex queue` (X5, X9). Then a
+// spinning; its Review then goes through `codex queue` (X5, X9). A Pi
+// parent and its Claude Code child, both idle at their prompts, message
+// each other both ways and each answers (an idle agent of either kind must
+// get a message with no turn of its own to fire a hook). Then a
 // refresh tick through real gh must raise no warning toast, and main must
 // log no uncaughtException.
 //
@@ -91,15 +94,21 @@ const HARNESSES: readonly ("pi" | "claude-code" | "codex" | "cursor")[] = [
   ...(CURSOR ? (["cursor"] as const) : []),
 ];
 /** Number of `test(...)` cases that run below; the marker needs every one passed. */
-const SMOKE_TESTS = 4 + (CODEX ? 2 : 0) + (CURSOR ? 3 : 0);
+const SMOKE_TESTS = 5 + (CODEX ? 2 : 0) + (CURSOR ? 3 : 0);
 const MARKER = path.join(repoRoot, ".real-smoke-ok");
 /**
  * The PATH a Dock launch would see for agents: a terminal multiplexer's
- * per-session CLI shims (cmux) are not the tools.
+ * per-session CLI shims (cmux) are not the tools, and neither are npm's
+ * `node_modules/.bin` dirs (`npx` puts them first; the workspace's pinned
+ * dev `pi` would stand in for the user's own).
  */
 const AGENT_PATH = (process.env.PATH ?? "")
   .split(path.delimiter)
-  .filter((entry) => !entry.includes("cmux-cli-shims"))
+  .filter(
+    (entry) =>
+      !entry.includes("cmux-cli-shims") &&
+      !entry.split(path.sep).includes("node_modules"),
+  )
   .join(path.delimiter);
 
 test.describe.configure({ mode: "serial", timeout: 240_000 });
@@ -115,6 +124,8 @@ const tasks: Record<"pi" | "claude" | "codex" | "cursor", string> = {
   codex: "",
   cursor: "",
 };
+/** The cross-agent messaging pair: a Pi parent and its Claude Code child. */
+const messaging = { pi: "", claude: "" };
 const mainProcessErrors: string[] = [];
 const mainLog: string[] = [];
 let passedTests = 0;
@@ -257,6 +268,17 @@ test.beforeAll(async () => {
       `real smoke change for ${harness}\n`,
     );
   }
+  for (const harness of ["pi", "claude-code"] as const) {
+    const task = await seed.commands.createTask({
+      title: `Real smoke messaging ${harness}`,
+      initialPrompt: "",
+      repositoryId: REPO_ID,
+      harness,
+      start: true,
+    });
+    messaging[harness === "pi" ? "pi" : "claude"] = task.id;
+  }
+  await seed.commands.setTaskParent(messaging.claude, messaging.pi);
 
   app = await electron.launch({
     args: [mainEntry],
@@ -514,6 +536,95 @@ test("Claude Code: Review opens the real Plannotator page in the review tab", as
     description: String(trustDialog),
   });
   await reviewShowsRealPlannotator(tasks.claude);
+});
+
+/**
+ * The task's pane shows `word` alone on a line: the agent's reply (the
+ * delivered message names the word only inside its sentence).
+ */
+async function expectAssistantSaid(
+  taskId: string,
+  word: string,
+): Promise<void> {
+  const core = createCore({ stateDir });
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${taskId}`).click();
+  await expect
+    .poll(
+      async () =>
+        (await screenText(taskId))
+          .split("\n")
+          .some(
+            (line) =>
+              line.replace(/^[\s\u23fa\u25cf\u2022]+/, "").trim() === word,
+          ),
+      { timeout: 120_000, intervals: [1_000] },
+    )
+    .toBe(true)
+    .catch(async (error) => {
+      const messages = await core.commands.listMessages({ taskId });
+      const delivery = mainLog
+        .join("")
+        .split("\n")
+        .filter((line) => line.includes("[delivery]") || line.includes(taskId))
+        .slice(-20)
+        .join("\n");
+      throw new Error(
+        `no reply "${word}" from ${taskId}; messages ${JSON.stringify(messages.map((m) => [m.targetTaskId === taskId ? "in" : "out", m.status, m.route]))}\n--- main.log ---\n${delivery}\n--- screen ---\n${await screenText(taskId)}`,
+        { cause: error },
+      );
+    });
+}
+
+function sendAs(fromTaskId: string, toTaskId: string, message: string): void {
+  execFileSync(
+    cliBin,
+    ["send_to_task", "--taskId", toTaskId, "--message", message],
+    {
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_TASK_ID: fromTaskId,
+      },
+      encoding: "utf8",
+    },
+  );
+}
+
+test("Pi and Claude Code: an idle agent of the other kind gets its message, both ways", async () => {
+  await openAndSettle(messaging.pi, /claude-|gpt-|gemini|model|\$\d|tokens/i);
+  await openAndSettle(
+    messaging.claude,
+    /\? for shortcuts|bypass permissions|accept edits|auto mode/i,
+  );
+  // Both sit idle at their prompts: nothing but the app can deliver.
+  sendAs(
+    messaging.pi,
+    messaging.claude,
+    "Reply with exactly the word CLAUDEHEARD and nothing else.",
+  );
+  await expectAssistantSaid(messaging.claude, "CLAUDEHEARD");
+  // The child asks; the idle Pi parent answers it through send_to_task,
+  // and that answer reaches the (again idle) Claude child.
+  sendAs(
+    messaging.claude,
+    messaging.pi,
+    "Answer me (your child task) with exactly the word PIHEARD.",
+  );
+  const core = createCore({ stateDir });
+  await expect
+    .poll(
+      async () =>
+        (await core.commands.listMessages({ taskId: messaging.claude }))
+          .filter(
+            (message) =>
+              message.targetTaskId === messaging.claude &&
+              message.text.includes("PIHEARD"),
+          )
+          .map((message) => message.status),
+      { timeout: 180_000, intervals: [1_000] },
+    )
+    .toEqual(["delivered"]);
 });
 
 test("Codex: a turn leaving `sleep 120` in the background ends at your move, never running (S4)", async () => {

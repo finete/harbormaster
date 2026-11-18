@@ -248,4 +248,46 @@ test("a launched Claude Code child: bypass, hooks + MCP on argv, a parent's mess
   const core = createCore({ stateDir });
   const messages = await core.commands.listMessages({ taskId: child.id });
   expect(messages.map((message) => message.status)).toContain("delivered");
+  expect(readFakeClaude(stateDir, child.id)?.typed).toEqual([]);
+
+  // Idle at its prompt, Claude fires no hook on its own: main types the
+  // message into the pane (the pty typing channel), with no help from the
+  // test.
+  const second = spawnSync(
+    cliBin,
+    [
+      "send_to_task",
+      "--taskId",
+      child.id,
+      "--message",
+      "second note from the parent",
+      "--mode",
+      "followUp",
+    ],
+    {
+      env: {
+        ...process.env,
+        HARBORMASTER_STATE_DIR: stateDir,
+        HARBORMASTER_TASK_ID: parent.id,
+      },
+      encoding: "utf8",
+    },
+  );
+  expect(second.status).toBe(0);
+  await expect
+    .poll(
+      () =>
+        readFakeClaude(stateDir, child.id)?.typed.find((line) =>
+          line.includes("second note from the parent"),
+        ) ?? "",
+      { timeout: 20_000 },
+    )
+    .toContain("second note from the parent");
+  await expect
+    .poll(async () =>
+      (await core.commands.listMessages({ taskId: child.id }))
+        .filter((message) => message.targetTaskId === child.id)
+        .map((message) => message.status),
+    )
+    .toEqual(["delivered", "delivered"]);
 });

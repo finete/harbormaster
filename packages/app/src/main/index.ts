@@ -158,6 +158,7 @@ import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
 import { resolvePrimaryLaunch } from "./primary-launch";
+import { EARLY_EXIT_WINDOW_MS } from "./pty-log";
 import {
   acknowledgeSessionData,
   activeSessionCwds,
@@ -694,7 +695,8 @@ async function runHarnessDeliveryPass(
       );
       if (!deliver) {
         // No deliver command, but the harness takes a message typed at
-        // its prompt (Cursor, docs/harness-additions.md C4): claim, type.
+        // its prompt (Cursor, docs/harness-additions.md C4; Claude Code):
+        // claim, type.
         await typeIdleMessages(taskId, messages, text);
         continue;
       }
@@ -714,7 +716,7 @@ async function runHarnessDeliveryPass(
 
 /**
  * The idle wake-up of a harness whose only way into an idle session is its
- * pane (`channels.wakeIdle === PTY_TYPING_CHANNEL`, Cursor): the messages
+ * pane (`channels.wakeIdle === PTY_TYPING_CHANNEL`: Cursor, Claude Code): the messages
  * are claimed first (a hook may have taken them meanwhile), then typed as
  * one prompt. Called only while the agent is at its prompt, which for a
  * hooks-reporting harness is never before it said it is ready (C9).
@@ -890,6 +892,7 @@ function flattenTasks(columns: BoardColumn[]): Task[] {
  * here on attaches to it instead of spawning a second pi).
  */
 async function startBackgroundLaunch(taskId: string): Promise<boolean> {
+  await promptReleases.get(taskId);
   // Decision R7: a launched task skips permission prompts when its launch
   // recorded that (the default); a message wake of any other task does not.
   const task = await core.commands.getTask(taskId);
@@ -940,16 +943,51 @@ async function startBackgroundLaunch(taskId: string): Promise<boolean> {
   console.log(
     `[background-launcher] primary-launch resolved for ${taskId}: harness=${resolution.harnessId ?? "-"} sessionMode=${resolution.sessionMode ?? "-"}`,
   );
+  const spawnedAtMs = Date.now();
   createBackgroundPrimarySession(
     taskId,
     resolution.spec,
     (_exitCode) => {
+      // Died right after spawn (a managed Mac's endpoint security killed
+      // it within ~50 ms): its prompt likely never reached a session, and
+      // the pane about to open would resume an empty one. Core hands the
+      // prompt out again unless a session file says otherwise.
+      if (
+        resolution.carriesInitialPrompt &&
+        Date.now() - spawnedAtMs < EARLY_EXIT_WINDOW_MS
+      ) {
+        releasePromptOf(taskId);
+      }
       void pollPresenceOnce();
       void backgroundLauncher.runPass();
     },
     resolution.harnessId ? { harness: resolution.harnessId } : undefined,
   );
   return true;
+}
+
+/**
+ * In-flight `releaseInitialPrompt` calls by task: every primary launch
+ * waits for its task's release first, so a pane opened right after a dead
+ * background launch claims the released prompt instead of racing it.
+ */
+const promptReleases = new Map<string, Promise<void>>();
+
+function releasePromptOf(taskId: string): void {
+  const release = core.commands
+    .releaseInitialPrompt(taskId)
+    .then((released) => {
+      if (released) {
+        console.log(
+          `[background-launcher] ${taskId}: launch died before its session began; prompt released for the next launch`,
+        );
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (promptReleases.get(taskId) === release) promptReleases.delete(taskId);
+    });
+  promptReleases.set(taskId, release);
 }
 
 /**
@@ -1893,6 +1931,9 @@ function registerPtyIpc(): void {
       options: TerminalCreateOptions,
     ): Promise<TerminalCreateResult> => {
       const sender = event.sender;
+      if (options.primary && options.taskId) {
+        await promptReleases.get(options.taskId);
+      }
 
       // Only a task workspace's first ("primary") panel ever runs pi, and
       // only when the task has a workspace binding (a worktree to run it

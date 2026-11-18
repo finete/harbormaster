@@ -86,6 +86,8 @@ export interface PrimaryLaunchResolution {
   harnessId?: string;
   /** The session mode this launch actually resolved to (new/resume/fork/open/continue), when a session was claimed — diagnostics only. */
   sessionMode?: SessionLaunch["mode"];
+  /** This launch claimed the task's initial prompt (its spec carries it). */
+  carriesInitialPrompt?: boolean;
 }
 
 /**
@@ -170,6 +172,7 @@ export async function resolvePrimaryLaunch(
     worktreeMissing: false,
     ...(harness.id ? { harnessId: harness.id } : {}),
     ...(session ? { sessionMode: session.mode } : {}),
+    ...(initialPrompt ? { carriesInitialPrompt: true } : {}),
     ...agent,
   };
 }

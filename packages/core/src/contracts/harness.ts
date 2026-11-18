@@ -174,8 +174,9 @@ export const HOOK_PRESENCE_STARTING = "Starting…";
 
 /**
  * `capabilities.delivery.channels.wakeIdle` of a harness whose idle
- * session only takes a message typed into its pane (Cursor, C4): the app
- * types pending messages once the agent is at its prompt.
+ * session only takes a message typed into its pane (Cursor, C4; Claude
+ * Code, whose hooks all need a turn): the app types pending messages once
+ * the agent is at its prompt.
  */
 export const PTY_TYPING_CHANNEL = "pty typing";
 

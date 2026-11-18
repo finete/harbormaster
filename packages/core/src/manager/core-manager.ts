@@ -1206,6 +1206,69 @@ export class CoreManager implements CoreCommands {
     return task.initialPrompt;
   }
 
+  async releaseInitialPrompt(taskId: string): Promise<boolean> {
+    const task = await this.deps.tasks.getTask(taskId);
+    if (!task?.initialPromptDeliveredAt || !task.initialPrompt.trim()) {
+      return false;
+    }
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding?.worktreePath || binding.sessionPath) return false;
+    if (
+      binding.sessionId &&
+      (await this.sessionFileWritten(
+        task,
+        binding.worktreePath,
+        binding.sessionId,
+      ))
+    ) {
+      return false;
+    }
+    const now = this.deps.clock.now().toISOString();
+    const released = await this.deps.tasks.patchTask(taskId, (fresh) => {
+      if (!fresh.initialPromptDeliveredAt) return undefined;
+      const { initialPromptDeliveredAt: _lost, ...rest } = fresh;
+      return { ...rest, updatedAt: now };
+    });
+    if (!released) return false;
+    // The unused id goes too: the next launch is a first launch again (a
+    // fresh id, the task's model, the prompt).
+    const { sessionId: _unused, ...rest } = binding;
+    await this.deps.bindings.replaceBinding({ ...rest, updatedAt: now });
+    this.log.warn(
+      "session",
+      `initial prompt never reached task ${taskId}'s session; the next launch delivers it again`,
+      {
+        taskId,
+        ...(binding.sessionId ? { sessionId: binding.sessionId } : {}),
+        outcome: "missing",
+      },
+    );
+    return true;
+  }
+
+  /** Whether the harness already wrote `sessionId`'s file (`false` when it can't tell). */
+  private async sessionFileWritten(
+    task: Task,
+    worktreePath: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    const sessions = this.deps.sessions;
+    if (!sessions.findSessionFile) return false;
+    if (!this.deps.harness && !this.deps.harnesses) return false;
+    try {
+      const expected = (await this.harnessFor(task)).expectedSessionFile?.(
+        worktreePath,
+        sessionId,
+      );
+      if (!expected) return false;
+      return Boolean(
+        await sessions.findSessionFile(expected.dir, expected.fileSuffix),
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async claimSessionLaunch(taskId: string): Promise<SessionLaunch | undefined> {
     const launch = await this.decideSessionLaunch(taskId);
     await this.logSessionLaunch(taskId, launch);
