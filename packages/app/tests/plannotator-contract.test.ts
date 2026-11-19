@@ -12,6 +12,9 @@
 //      comments), `{found: false}` before there is one.
 //   6. `POST /api/exit` with no Origin ends the session like the page's own
 //      Close: stdout says it closed without feedback and the process exits.
+//   7. The page keeps its settings in `document.cookie` with SameSite=Lax
+//      (why the app's URL pane emulates cookies for loopback frames,
+//      preload/frame-cookies-shim.ts, and why the fake's page does too).
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
@@ -54,7 +57,7 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     expect(out).toMatch(/\d+\.\d+\.\d+/);
   });
 
-  it("2-6. a review session announces its URL on stderr, runs PLANNOTATOR_BROWSER with it, is frameable, exposes its draft and closes on /api/exit", async () => {
+  it("2-7. a review session announces its URL on stderr, runs PLANNOTATOR_BROWSER with it, is frameable, keeps settings in Lax cookies, exposes its draft and closes on /api/exit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hm-plannotator-contract-"));
     dirs.push(dir);
     const repo = join(dir, "repo");
@@ -122,6 +125,17 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     expect(response.headers.get("x-frame-options")).toBeNull();
     expect(response.headers.get("content-security-policy") ?? "").not.toMatch(
       /frame-ancestors/i,
+    );
+    // 7. Settings live in SameSite=Lax cookies, written by the page's JS
+    // (inline in the Pi extension's bundle, a /assets module for the CLI).
+    const page = await response.text();
+    const scripts = await Promise.all(
+      [...page.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map(async (match) =>
+        (await fetch(new URL(match[1] as string, url))).text(),
+      ),
+    );
+    expect([page, ...scripts].join("\n")).toMatch(
+      /document\.cookie\s*=\s*`[^`]*SameSite=Lax/,
     );
     // 5. The draft (what closing would lose) is readable.
     const draftUrl = new URL("/api/draft", url);

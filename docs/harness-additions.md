@@ -204,6 +204,36 @@ Settings needed no edits (P2).
 | T3 keyless real-CLI (CI, every push) | `packages/app/tests/real-cli-smoke.test.ts` | flags accepted by the pinned binary, 7501 probe/report, hooks fire with our JSON, MCP config loads, trust prompt text, every contract row that needs no model call (canned stub turns drive hooks, transcripts, session files) | real model turns, background work, review |
 | T4 real smoke (login, local, release gate) | `packages/app/e2e/real-smoke.spec.ts` | Setup/doctor reads ready, Review opens Plannotator, a message reaches an idle and a busy task, S4 presence scenario, refresh through real `gh` | — |
 
+## Fake audit (2026-11-19)
+
+Rule: fakes script Harbormaster's own wiring; how a real CLI behaves comes
+from contract rows asserted against the pinned binary or from recordings.
+The 28 fake-backed e2e specs were audited against it:
+
+- **The agent fakes** (`fake-pi`, `fake-claude`, `fake-codex`,
+  `fake-cursor`) cite their behavior row by row (18-25 rows each, a few
+  declared `notReplayed`); `fake-contract-coverage.test.ts` enforces it.
+- **Inline stand-ins** in specs (argv/cwd/env loggers, idlers, exits, the
+  SentinelOne 943-char kill) only exercise wiring: kept.
+- **Fixed**: new-task-flow's inline `pi --list-models` table now comes
+  from `writeListModelsPi`, backed by row `pi.command.list-models`
+  (T3-asserted on 1.5.2); fake Plannotator's settings cookie is backed by
+  contract fact 7 (the real page writes SameSite=Lax cookies); perf-flood
+  floods with the recorded Pi `long-output` instead of an invented
+  "pi-like" stream (production renderer config, mirror off).
+- **Verified, kept**: terminal-tabs' OSC title stand-in (every recorded Pi
+  session sets `π - <folder>` through OSC 0).
+- **Known gap**: the e2e fake `gh` scripts invent `gh`'s output (`auth
+  status` text, `pr list` JSON); `gh` is not a harness, so no contract
+  covers it. The real smoke (T4) runs real `gh` before a release.
+- **Found by the real-Pi flood**: with xterm's screen-reader mirror on
+  (`screenReaderMode`, enabled when Electron reports accessibility
+  support), a real Pi flood froze the renderer for 26 s; off, hover p95
+  was 17 ms. Export diagnostics records `screenReaderMode` in
+  `renderer.json`; whether to change when the mirror turns on is open.
+- No spec duplicates another's or a unit test's protection: each covers a
+  distinct integration seam, so none was deleted.
+
 ## Adding a harness: the ordered steps (also `docs/adding-a-harness.md`)
 
 1. Pin the CLI; fill the **capability sheet** from `--help` and a hand-run pty probe (the recording script): session flags, 7501 dialect per scenario, delivery channels and whether each works when idle, MCP injection, permission flag, trust prompts, session-file layout, usage format, review integration, binary aliases, detached child processes it leaves behind.

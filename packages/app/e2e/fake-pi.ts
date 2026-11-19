@@ -349,3 +349,52 @@ export function writeVersionPi(dir: string, version: string): string {
   chmodSync(file, 0o755);
   return file;
 }
+
+/** One `pi --list-models` row (the columns of row `pi.command.list-models`). */
+export interface ListedPiModel {
+  provider: string;
+  model: string;
+  context: string;
+  maxOut: string;
+  thinking: "yes" | "no";
+  images: "yes" | "no";
+}
+
+/**
+ * A `pi --list-models` stand-in (for HARBORMASTER_PI_LIST_MODELS_COMMAND):
+ * the header of row `pi.command.list-models`, then the given rows in the
+ * same whitespace-separated table.
+ */
+export function writeListModelsPi(
+  dir: string,
+  models: readonly ListedPiModel[],
+): string {
+  const header = P.row("pi.command.list-models").facts.header;
+  const rows = [
+    header,
+    ...models.map((m) => [
+      m.provider,
+      m.model,
+      m.context,
+      m.maxOut,
+      m.thinking,
+      m.images,
+    ]),
+  ];
+  const widths = header.map((_, i) =>
+    Math.max(...rows.map((row) => row[i]?.length ?? 0)),
+  );
+  const lines = rows.map((row) =>
+    row
+      .map((cell, i) => cell.padEnd(widths[i] ?? 0))
+      .join("  ")
+      .trimEnd(),
+  );
+  const file = path.join(dir, "fake-pi-list-models");
+  writeFileSync(
+    file,
+    `#!/bin/sh\n${lines.map((line) => `echo '${line}'`).join("\n")}\n`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}

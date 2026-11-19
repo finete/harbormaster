@@ -2723,7 +2723,14 @@ async function exportDiagnostics(): Promise<string | null> {
     },
     agentProcesses,
     sessionFiles,
-    ...(renderer ? { renderer } : {}),
+    renderer: {
+      ...(renderer && typeof renderer === "object" ? renderer : {}),
+      // xterm's screen-reader mirror (P1-1) is costly under fullscreen
+      // redraw floods: a freeze report from an AT user starts here.
+      screenReaderMode:
+        process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR === "1" ||
+        app.isAccessibilitySupportEnabled(),
+    },
     configFile: resolveStatePaths(activeStateDir).configFile,
     versions: {
       app: app.getVersion(),

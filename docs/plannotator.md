@@ -45,6 +45,7 @@ Pi `pi update npm:@plannotator/pi-extension` (install:
 4. The review page is frameable (no `X-Frame-Options`, no `frame-ancestors`).
 5. `GET /api/draft` reads back the page's autosaved draft (unsent comments: `annotations`, `codeAnnotations`, `globalAttachments`), `{found: false}` before there is one.
 6. `POST /api/exit` with no `Origin` ends the session like the page's own Close: the CLI prints `Review session closed without feedback.` and exits (decision 9).
+7. The review page keeps its settings in `document.cookie` with `SameSite=Lax` (why the URL pane emulates cookies for loopback frames, decision 7; the e2e fake's page does the same).
 
 Upstream ask (issue to open): a generic host IPC registry like their
 `~/.plannotator/vscode-ipc.json`, so hosts need no env var.

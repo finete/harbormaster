@@ -1298,6 +1298,7 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
     const sockets: Socket[] = [];
     const o = {
       version: "",
+      listModels: "",
       main: undefined as PtyRun | undefined,
       mainTurn: false,
       inboxTurn: false,
@@ -1451,6 +1452,14 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
         env: { ...sandboxEnv(), PI_CODING_AGENT_DIR: agentDir },
         encoding: "utf8",
       }).trim();
+      o.listModels = execFileSync(
+        bin("pi"),
+        P.row("pi.command.list-models").facts.args,
+        {
+          env: { ...sandboxEnv(), PI_CODING_AGENT_DIR: agentDir },
+          encoding: "utf8",
+        },
+      );
 
       // Main session: a new session with an '@' prompt (shielded by the adapter).
       const main = run(
@@ -1573,6 +1582,20 @@ describe.skipIf(!enabled)("real CLI smoke (no API key)", () => {
       const facts = P.row("pi.version").facts;
       expect(o.version).toMatch(new RegExp(facts.pattern));
       expect(o.version).toBe(facts.output);
+    });
+
+    rowIt("pi.command.list-models", () => {
+      const facts = P.row("pi.command.list-models").facts;
+      const [header, ...rows] = o.listModels
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/))
+        .filter((cells) => cells.length >= 2);
+      expect(header).toEqual(facts.header);
+      // The keyless stub provider's model, as core's parsePiModelList reads it.
+      const [provider, model] = MODEL.split("/");
+      expect(
+        rows.some((cells) => cells[0] === provider && cells[1] === model),
+      ).toBe(true);
     });
 
     rowIt("pi.argv.session-id", () => {

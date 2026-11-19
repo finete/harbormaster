@@ -24,6 +24,18 @@ export const PI_CONTRACT = defineContract("pi", PI_CONTRACT_VERSION, [
     },
   },
   {
+    id: "pi.command.list-models",
+    title: "--list-models prints a provider/model table",
+    kind: "command",
+    needsModel: false,
+    detail:
+      "The new-task composer's model picker runs `pi --list-models` (core's PiModelCatalogAccess, `parsePiModelList`): a header row, then one whitespace-separated row per configured model; keyless, the stub provider's model is listed.",
+    facts: {
+      args: ["--list-models"],
+      header: ["provider", "model", "context", "max-out", "thinking", "images"],
+    },
+  },
+  {
     id: "pi.argv.session-id",
     title: "--session-id <id> creates (or reopens) the session with that id",
     kind: "argv",

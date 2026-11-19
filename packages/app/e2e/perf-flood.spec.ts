@@ -1,8 +1,9 @@
-// Performance harness: a fake `pi` that floods its pty with ANSI-colored
-// output (a `yes`/`seq`-style unbounded stream, plus pi-like OSC title
-// updates and periodic same-content state-file rewrites, like the extension
-// re-saving bindings mid-turn) while this spec measures how responsive the
-// renderer stays. Symptom it guards: "while an agent streams output the
+// Performance harness: a fake `pi` that floods its pty with REAL Pi output
+// (the recorded `long-output` fixture of the pinned Pi, looped as fast as
+// `cat` goes: fullscreen cursor-addressed redraws, Pi's own OSC title, no
+// newlines; see scripts/record-harness-status.mjs), plus periodic
+// same-content state-file rewrites like the extension re-saving bindings
+// mid-turn, while this spec measures how responsive the renderer stays. Symptom it guards: "while an agent streams output the
 // whole UI goes molasses — hovering a tab takes 500ms+ to highlight".
 //
 // Everything measured here is test-side instrumentation (main-process
@@ -20,6 +21,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -96,7 +98,34 @@ function seedFixtureRepo(codeRoot: string): void {
  * extension re-saving unchanged bindings mid-turn), which the app's state
  * watcher sees as a change.
  */
-function floodScript(trigger: string): string {
+/** The pinned Pi's recorded `long-output` (newest recorded version). */
+function recordedPiOutput(): string {
+  const root = path.join(
+    __dirname,
+    "..",
+    "..",
+    "core",
+    "tests",
+    "fixtures",
+    "status",
+    "pi",
+  );
+  const newest = readdirSync(root)
+    .sort((a, b) => {
+      const pa = a.split(".").map(Number);
+      const pb = b.split(".").map(Number);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    })
+    .at(-1);
+  if (!newest) throw new Error("no recorded Pi fixtures");
+  return path.join(root, newest, "long-output.txt");
+}
+
+function floodScript(trigger: string, recording: string): string {
   return `#!/bin/sh
 echo "fake-pi ready"
 while [ ! -f "${trigger}" ]; do sleep 0.1; done
@@ -107,12 +136,7 @@ while [ ! -f "${trigger}" ]; do sleep 0.1; done
     sleep 0.5
   done
 ) &
-exec awk 'BEGIN {
-  for (i = 0; ; i++) {
-    printf "\\033[32m%08d\\033[0m \\033[1;34magent\\033[0m streaming tool output \\033[33m%s\\033[0m lorem ipsum dolor sit amet\\n", i, i * 7919
-    if (i % 40 == 0) printf "\\033]0;π - working %d\\007", int(i / 40) % 10
-  }
-}'
+while true; do cat '${recording}'; done
 `;
 }
 
@@ -383,7 +407,7 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
     );
     trigger = path.join(root, "flood-now");
     const fakePiPath = path.join(root, "fake-pi");
-    writeFileSync(fakePiPath, floodScript(trigger));
+    writeFileSync(fakePiPath, floodScript(trigger, recordedPiOutput()));
     chmodSync(fakePiPath, 0o755);
 
     app = await electron.launch({
@@ -393,6 +417,11 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
+        // Production renderer config: xterm's screen-reader mirror stays off
+        // (the suite turns it on for text assertions; it is only on in the
+        // app when Electron reports accessibility support). With it on, this
+        // real-Pi flood froze the renderer for 26 s (2026-11-19).
+        HARBORMASTER_TERMINAL_A11Y_MIRROR: "0",
         HARBORMASTER_PI_COMMAND: fakePiPath,
       },
     });
@@ -450,9 +479,10 @@ test.describe("perf: UI stays responsive while a pi pane floods output", () => {
     ];
 
     writeFileSync(trigger, "go");
-    // Let the flood reach steady state before sampling.
+    // Let the flood reach steady state before sampling: the recording sets
+    // Pi's own title ("π - <folder>").
     await expect(window.getByTestId("terminal-tab").first()).toContainText(
-      "working",
+      "π - ",
       { timeout: 20_000 },
     );
     // Intentional fixed wait: the tab title confirms the flood started, but the

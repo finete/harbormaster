@@ -268,4 +268,5 @@ test("Export Diagnostics in the app menu writes logs, a redacted config, version
   expect(renderer.longFrames).toEqual(
     expect.objectContaining({ supported: true, thresholdMs: 50 }),
   );
+  expect(typeof renderer.screenReaderMode).toBe("boolean");
 });

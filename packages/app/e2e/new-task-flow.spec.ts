@@ -28,6 +28,7 @@ import {
 import { selectCard } from "./board-gestures";
 import { chooseParent, chooseWhere, openOptions, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
+import { writeListModelsPi } from "./fake-pi";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
@@ -304,19 +305,26 @@ test.beforeAll(async () => {
   );
   chmodSync(fakeGh, 0o755);
 
-  // `pi --list-models` stand-in for the Agent · Model picker.
-  const fakeListModels = path.join(root, "fake-pi-list-models");
-  writeFileSync(
-    fakeListModels,
-    [
-      "#!/bin/sh",
-      "echo 'provider   model             context  max-out  thinking  images'",
-      "echo 'anthropic  claude-opus-4-8   1M       128K     yes       yes'",
-      "echo 'anthropic  claude-haiku-4-5  200K     64K      yes       yes'",
-      "",
-    ].join("\n"),
-  );
-  chmodSync(fakeListModels, 0o755);
+  // `pi --list-models` stand-in for the Agent · Model picker (contract row
+  // pi.command.list-models).
+  const fakeListModels = writeListModelsPi(root, [
+    {
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      context: "1M",
+      maxOut: "128K",
+      thinking: "yes",
+      images: "yes",
+    },
+    {
+      provider: "anthropic",
+      model: "claude-haiku-4-5",
+      context: "200K",
+      maxOut: "64K",
+      thinking: "yes",
+      images: "yes",
+    },
+  ]);
   piAgentDir = path.join(root, "pi-agent");
   mkdirSync(piAgentDir);
   writeFileSync(
