@@ -8,7 +8,10 @@
 // burning" should be readable at a glance.
 //
 // Focus: which view, task and dockview tab were showing, so a bug report
-// says what the user was looking at when they exported.
+// says what the user was looking at when they exported, the sidebar's
+// state, and every mounted terminal's size (xterm columns x rows, the
+// pane's pixels, its pty session): a pane whose program draws for another
+// size than the pane shows as pty size (main's ptys.json) != terminal size.
 //
 // Main reads both at export time through `window.__harbormasterDiagnostics`
 // (webContents.executeJavaScript; nothing here leaves the app otherwise).
@@ -114,6 +117,41 @@ let appFocus: { view: string; focusedTaskId: string } = {
 };
 const workspaces = new Map<string, () => WorkspaceFocus>();
 
+export interface TerminalSize {
+  taskId?: string;
+  sessionId?: string;
+  primary: boolean;
+  cols: number;
+  rows: number;
+  /** The pane's container in CSS pixels, "WxH". */
+  pane: string;
+  visible: boolean;
+}
+
+const terminals = new Set<() => TerminalSize>();
+/** At most this many terminals are listed. */
+const MAX_TERMINALS = 40;
+
+/** A mounted TerminalPane describes its size; returns the unregister. */
+export function registerTerminalSize(read: () => TerminalSize): () => void {
+  terminals.add(read);
+  return () => {
+    terminals.delete(read);
+  };
+}
+
+function storedSidebar(): Record<string, string | null> {
+  try {
+    return {
+      hidden: localStorage.getItem("harbormaster.sidebar.hidden"),
+      collapsed: localStorage.getItem("harbormaster.sidebar.collapsed"),
+      width: localStorage.getItem("harbormaster.sidebar.width"),
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** App's current view and focused task (App.tsx keeps this current). */
 export function setAppFocus(view: string, focusedTaskId: string): void {
   appFocus = { view, focusedTaskId };
@@ -145,6 +183,14 @@ function focusSnapshot(): Record<string, unknown> {
     ...(workspace ? { workspace } : {}),
     windowFocused: document.hasFocus(),
     visibility: document.visibilityState,
+    sidebar: storedSidebar(),
+    terminals: [...terminals].slice(0, MAX_TERMINALS).flatMap((read) => {
+      try {
+        return [read()];
+      } catch {
+        return [];
+      }
+    }),
   };
 }
 

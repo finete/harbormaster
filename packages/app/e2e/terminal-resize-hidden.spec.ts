@@ -8,6 +8,11 @@
  * after returning to a task.
  *
  * This spec promotes the prototype in /tmp/hm-e2e/winch.spec.ts.
+ *
+ * Also: a pane that refits while its pty is still being created (a restart
+ * restoring many workspaces at once, each create slow) hands the pty its
+ * new size once the session is known. That resize used to be dropped, and
+ * the agent kept drawing for the old, narrower pane (2026-11-19).
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -32,12 +37,12 @@ function git(args: string[], cwd: string): void {
 
 /**
  * A fake pi that logs its initial size and every SIGWINCH it receives.
- * Format: "start <rows> <cols> <worktree>" and "WINCH <rows> <cols>" (stty
- * size order).
+ * Format: "start <rows> <cols> <worktree>" and "WINCH <rows> <cols>
+ * <worktree>" (stty size order).
  */
 function makeFakePi(log: string): string {
   return `#!/bin/bash
-trap 'echo "WINCH $(stty size)" >> "${log}"' WINCH
+trap 'echo "WINCH $(stty size) $(basename "$PWD")" >> "${log}"' WINCH
 echo "start $(stty size) $(basename "$PWD")" >> "${log}"
 printf 'fake-pi ready\\n'
 while true; do sleep 0.05; done
@@ -83,11 +88,12 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
   writeFileSync(fakePi, makeFakePi(log));
   chmodSync(fakePi, 0o755);
 
-  const launch = () =>
+  const launch = (extraEnv: Record<string, string> = {}) =>
     electron.launch({
       args: [mainEntry],
       env: {
         ...process.env,
+        ...extraEnv,
         HARBORMASTER_STATE_DIR: stateDir,
         HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
         HARBORMASTER_WINDOW_OFFSCREEN: "1",
@@ -222,10 +228,23 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
         /^start \d+ \d+ (\S+)$/m,
       ) as RegExpMatchArray
     )[1] as string;
+    const otherWorktree = (
+      [...readFileSync(log, "utf8").matchAll(/^start \d+ \d+ (\S+)$/gm)].find(
+        (match) => match[1] !== firstWorktree,
+      ) as RegExpMatchArray
+    )[1] as string;
 
+    // Relaunch with slow pty creates (a restart restoring workspaces) and
+    // widen the visible pane while they are in flight: hiding the sidebar.
     await app.close();
-    app = await launch();
-    await (await app.firstWindow()).waitForLoadState("domcontentloaded");
+    app = await launch({ HARBORMASTER_E2E_PTY_CREATE_DELAY_MS: "2500" });
+    const relaunched = await app.firstWindow();
+    await relaunched.waitForLoadState("domcontentloaded");
+    await expect(
+      relaunched.getByTestId("terminal-panel").filter({ visible: true }),
+    ).toHaveCount(1, { timeout: 30_000 });
+    await relaunched.keyboard.press("Meta+B");
+    await expect(relaunched.getByTestId("sidebar")).toBeHidden();
     const startsFor = (worktree: string): string[] =>
       readFileSync(log, "utf8")
         .split("\n")
@@ -244,6 +263,27 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
       rows,
       `hidden-mounted pane started at ${hiddenStart}`,
     ).toBeGreaterThan(6);
+
+    // The visible pane refit (wider) while its create was in flight: its pi
+    // started at the old width and must then be resized to the new one.
+    const sizesFor = (worktree: string): number[] =>
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter(
+          (l) =>
+            (l.startsWith("start ") || l.startsWith("WINCH ")) &&
+            l.endsWith(` ${worktree}`),
+        )
+        .map((l) => Number(l.split(" ")[2]));
+    await expect
+      .poll(() => sizesFor(otherWorktree).length)
+      .toBeGreaterThanOrEqual(2);
+    const otherSizes = sizesFor(otherWorktree);
+    const restartedAt = otherSizes.at(-2) as number;
+    console.log("[resize-hidden] visible pane sizes:", otherSizes);
+    await expect
+      .poll(() => sizesFor(otherWorktree).at(-1) as number, { timeout: 10_000 })
+      .toBeGreaterThan(restartedAt);
   } finally {
     await app.close();
   }

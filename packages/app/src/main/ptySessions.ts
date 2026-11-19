@@ -1009,6 +1009,15 @@ export function sessionCounts(): { live: number; attached: number } {
   return { live: sessions.size, attached };
 }
 
+/** Each live pty's current size, by session id (Export diagnostics: a pane drawn for the wrong size shows here). */
+export function sessionSizes(): Map<string, { cols: number; rows: number }> {
+  const out = new Map<string, { cols: number; rows: number }>();
+  for (const [id, session] of sessions) {
+    out.set(id, { cols: session.process.cols, rows: session.process.rows });
+  }
+  return out;
+}
+
 export function getSession(id: string): PtySessionRecord | undefined {
   return sessions.get(id);
 }

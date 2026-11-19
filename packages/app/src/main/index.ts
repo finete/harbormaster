@@ -190,6 +190,7 @@ import {
   resizeSession,
   resolveCommandPath,
   sessionCounts,
+  sessionSizes,
   setProgramStatusListener,
   setReadyUrlListener,
   tapPrimaryOutput,
@@ -1972,6 +1973,14 @@ function registerPtyIpc(): void {
       options: TerminalCreateOptions,
     ): Promise<TerminalCreateResult> => {
       const sender = event.sender;
+      // e2e only: a slow create, like a restart restoring many panes at once
+      // (each ~600 ms), so a spec can resize a pane while it is in flight.
+      const createDelayMs = Number(
+        process.env.HARBORMASTER_E2E_PTY_CREATE_DELAY_MS,
+      );
+      if (createDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, createDelayMs));
+      }
       if (options.primary && options.taskId) {
         await promptReleases.get(options.taskId);
       }
@@ -2710,6 +2719,7 @@ async function exportDiagnostics(): Promise<string | null> {
       : Promise.resolve(undefined),
   ]);
   const nowMs = Date.now();
+  const sizes = sessionSizes();
   const zip = buildDiagnosticsZip({
     logsDir: join(app.getPath("userData"), "logs"),
     profilesDir: profilesDir(),
@@ -2719,12 +2729,18 @@ async function exportDiagnostics(): Promise<string | null> {
         ...entry,
         startedAt: new Date(entry.startedAt).toISOString(),
         ageMin: Math.round((nowMs - entry.startedAt) / 60_000),
+        // The size the program in the pty draws for; compare with the
+        // pane's terminal in renderer.json (focus.terminals).
+        ...sizes.get(entry.sessionId),
       })),
     },
     agentProcesses,
     sessionFiles,
     renderer: {
       ...(renderer && typeof renderer === "object" ? renderer : {}),
+      ...(rendererWindow && !rendererWindow.isDestroyed()
+        ? { windowContentSize: rendererWindow.getContentSize() }
+        : {}),
       // xterm's screen-reader mirror (P1-1) is costly under fullscreen
       // redraw floods: a freeze report from an AT user starts here.
       screenReaderMode:

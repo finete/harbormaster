@@ -6,6 +6,7 @@ import type { IDockviewPanelProps } from "dockview-react";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
+import { registerTerminalSize } from "../lib/renderer-diagnostics";
 import {
   onTerminalFontSizeChange,
   terminalFontSize,
@@ -171,8 +172,24 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     // background session) "-" same onData/onExit/write subscriptions either
     // way, so the pane behaves identically from here on (closing it kills
     // the pty, same as any normal primary pane).
-    function wireSession(id: string): void {
+    function wireSession(
+      id: string,
+      requested: { cols: number; rows: number },
+    ): void {
       sessionId = id;
+      // A refit while `create` / `attachPrimary` was in flight fired
+      // `onResize` before the id was known, so it was dropped: the pty kept
+      // the requested size and the agent drew for a narrower or shorter
+      // screen than the pane (seen right after a restart restored 8
+      // workspaces at once, each `pty:create` taking ~600 ms). Hand it the
+      // pane's size now; only when it differs, since every resize is a
+      // SIGWINCH and a full repaint.
+      if (
+        terminal.cols !== requested.cols ||
+        terminal.rows !== requested.rows
+      ) {
+        window.harbormaster.terminal.resize(id, terminal.cols, terminal.rows);
+      }
       let receivedOutput = false;
       // Subscribed by id: the preload routes each chunk to this session's
       // listeners only (one IPC listener total, not one per pane).
@@ -206,12 +223,13 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       // guarantee actually attach instead of silently doing nothing. Any
       // other pane (non-primary, no taskId, or a primary with nothing to
       // attach to) falls through to `create` exactly as before.
+      const attachSize = { cols: terminal.cols, rows: terminal.rows };
       const attachAttempt =
         isPrimary && params?.taskId
           ? window.harbormaster.terminal.attachPrimary(
               params.taskId,
-              terminal.cols,
-              terminal.rows,
+              attachSize.cols,
+              attachSize.rows,
             )
           : Promise.resolve(undefined);
 
@@ -226,13 +244,14 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
           // Write the missed screen before switching to live streaming "-"
           // same recommendation as `@xterm/addon-serialize`'s own docs.
           terminal.write(attached.snapshot);
-          wireSession(attached.id);
+          wireSession(attached.id, attachSize);
           return;
         }
+        const createSize = { cols: terminal.cols, rows: terminal.rows };
         void window.harbormaster.terminal
           .create({
-            cols: terminal.cols,
-            rows: terminal.rows,
+            cols: createSize.cols,
+            rows: createSize.rows,
             ...(cwd ? { cwd } : {}),
             ...(params?.taskId ? { taskId: params.taskId } : {}),
             ...(params?.primary ? { primary: true } : {}),
@@ -253,7 +272,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
               if (fellBack) setFellBackToShell(true);
               if (wtGone) setWorktreeMissing(true);
               if (refused) setLaunchRefused(refused);
-              wireSession(id);
+              wireSession(id, createSize);
             },
           );
       });
@@ -298,9 +317,25 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
         ? registerTaskTerminal(params.taskId, () => terminal.buffer.active)
         : undefined;
 
+    // Export diagnostics: this pane's terminal size against its pixels and
+    // its pty session (lib/renderer-diagnostics.ts).
+    const unregisterSize = registerTerminalSize(() => {
+      const rect = container.getBoundingClientRect();
+      return {
+        ...(params?.taskId ? { taskId: params.taskId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+        primary: isPrimary,
+        cols: terminal.cols,
+        rows: terminal.rows,
+        pane: `${Math.round(rect.width)}x${Math.round(rect.height)}`,
+        visible: isContainerVisible(container),
+      };
+    });
+
     return () => {
       disposed = true;
       unregisterTail?.();
+      unregisterSize();
       window.clearTimeout(createTimer);
       titleDisposable.dispose();
       titleThrottle.dispose();

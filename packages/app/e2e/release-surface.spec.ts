@@ -269,4 +269,9 @@ test("Export Diagnostics in the app menu writes logs, a redacted config, version
     expect.objectContaining({ supported: true, thresholdMs: 50 }),
   );
   expect(typeof renderer.screenReaderMode).toBe("boolean");
+  // Geometry for "the terminal is cropped" reports: window, sidebar, and
+  // every mounted terminal's size (none are open in this fixture).
+  expect(renderer.windowContentSize).toHaveLength(2);
+  expect(renderer.focus.sidebar).toEqual(expect.any(Object));
+  expect(Array.isArray(renderer.focus.terminals)).toBe(true);
 });
