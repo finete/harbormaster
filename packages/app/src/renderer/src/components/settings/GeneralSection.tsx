@@ -56,6 +56,11 @@ export function GeneralSection({
       <DescribedSetting
         model={model}
         snapshot={snapshot}
+        settingKey="terminal.screenReader"
+      />
+      <DescribedSetting
+        model={model}
+        snapshot={snapshot}
         settingKey="notifications.enabled"
       />
       <SettingRow

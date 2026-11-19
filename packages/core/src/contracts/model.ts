@@ -510,7 +510,7 @@ export interface GlobalConfig {
    */
   captureAgentBrowser: boolean;
   /** Terminal pane settings (docs/settings.md S11); `fontSize` absent = `DEFAULT_TERMINAL_FONT_SIZE`. */
-  terminal?: { fontSize?: number };
+  terminal?: { fontSize?: number; screenReader?: boolean };
   /** Desktop notifications (S11); `enabled` absent = on. `HARBORMASTER_NOTIFICATIONS=off` still wins. */
   notifications?: { enabled?: boolean };
 }

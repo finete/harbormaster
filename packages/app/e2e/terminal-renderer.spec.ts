@@ -32,7 +32,7 @@ printf 'renderer-test-ready\\n'
 while true; do sleep 0.1; done
 `;
 
-test("terminal panes render with the DOM renderer; power events reach wake.log", async () => {
+test("terminal panes render with the DOM renderer, keep no screen-reader mirror until Settings turns it on; power events reach wake.log", async () => {
   test.setTimeout(90_000);
 
   const root = mkdtempSync(path.join(tmpdir(), "hm-renderer-"));
@@ -76,6 +76,9 @@ test("terminal panes render with the DOM renderer; power events reach wake.log",
       HARBORMASTER_USER_DATA_DIR: path.join(stateDir, "electron-profile"),
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_PI_COMMAND: fakePi,
+      // Production config: no forced screen-reader mirror (the suite forces
+      // it for text assertions; this spec reads the DOM rows directly).
+      HARBORMASTER_TERMINAL_A11Y_MIRROR: "0",
     },
   });
 
@@ -124,6 +127,23 @@ test("terminal panes render with the DOM renderer; power events reach wake.log",
       "renderer-test-ready",
     );
     expect(await panel.locator("canvas").count()).toBe(0);
+
+    // Screen-reader support is off by default, whatever the OS reports
+    // (xterm's mirror froze busy panes); the Settings switch turns it on
+    // live for open panes.
+    await expect(panel.locator(".xterm-accessibility")).toHaveCount(0);
+    await app.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()?.getMenuItemById("settings")?.click();
+    });
+    await expect(window.getByTestId("settings-view")).toBeVisible();
+    const screenReader = window.getByTestId(
+      "setting-input-terminal.screenReader",
+    );
+    await expect(screenReader).toHaveAttribute("aria-checked", "false");
+    await screenReader.click();
+    await expect(screenReader).toHaveAttribute("aria-checked", "true");
+    await window.keyboard.press("Escape");
+    await expect(panel.locator(".xterm-accessibility")).toHaveCount(1);
 
     // Power events land in the wake log (main's powerMonitor wiring).
     await app.evaluate(({ powerMonitor }) => {

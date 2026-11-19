@@ -39,6 +39,7 @@ inherited or locked.
 | General | Code folder | `codeRoot` | change → rediscovery (reaction) |
 | General | Branch prefix | `branchPrefix` | e.g. `alice/`, may be empty |
 | General | Terminal font size | new (e.g. `terminal.fontSize`) | default 13, live |
+| General | Screen-reader support for terminals | `terminal.screenReader` | default **off**, live (2026-11-19): xterm's screen-reader mirror froze busy panes for 26 s, and Electron's accessibility signal also fires for non-screen-reader apps, so it no longer turns itself on |
 | General | Automation | `automation` | read-only state + link to Rules (S13) |
 | Agents | Default agent | `launch.defaultHarness` | built-ins + custom agents; "overridden in N repos" |
 | Agents | Default model | `launch.defaultModel` | applies to the default agent only |

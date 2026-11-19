@@ -475,7 +475,7 @@ function describedBounds(key: string): { min: number; max: number } {
   };
 }
 
-/** `terminal.fontSize`: an integer within the described bounds; absent = the default at read time. */
+/** `terminal.fontSize`: an integer within the described bounds; `terminal.screenReader`: a boolean; absent = the defaults at read time. */
 function normalizeTerminal(
   value: unknown,
 ): GlobalConfig["terminal"] | undefined {
@@ -495,6 +495,12 @@ function normalizeTerminal(
       );
     }
     terminal.fontSize = value.fontSize;
+  }
+  if (value.screenReader !== undefined) {
+    terminal.screenReader = normalizeBoolean(
+      "terminal.screenReader",
+      value.screenReader,
+    );
   }
   return terminal;
 }

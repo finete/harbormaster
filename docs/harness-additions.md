@@ -229,8 +229,10 @@ The 28 fake-backed e2e specs were audited against it:
 - **Found by the real-Pi flood**: with xterm's screen-reader mirror on
   (`screenReaderMode`, enabled when Electron reports accessibility
   support), a real Pi flood froze the renderer for 26 s; off, hover p95
-  was 17 ms. Export diagnostics records `screenReaderMode` in
-  `renderer.json`; whether to change when the mirror turns on is open.
+  was 17 ms. Decided: the mirror is off unless Settings → General →
+  "Screen-reader support for terminals" (`terminal.screenReader`) turns it
+  on; Export diagnostics records `screenReaderMode` and the OS's
+  `accessibilitySupport` in `renderer.json`.
 - No spec duplicates another's or a unit test's protection: each covers a
   distinct integration seam, so none was deleted.
 

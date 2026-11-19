@@ -2521,6 +2521,25 @@ async function allowedLocalPathRoots(): Promise<string[]> {
  * switch (so a notification can be silenced at the process level even if a
  * renderer bug ever called this anyway).
  */
+/** The `terminal.screenReader` setting, last read through core. */
+let screenReaderSetting = false;
+
+async function readScreenReaderSetting(): Promise<void> {
+  try {
+    const settings = await core.commands.getSettings();
+    screenReaderSetting = settings.values["terminal.screenReader"] === true;
+  } catch {
+    // Keep the last value; the next config change re-reads.
+  }
+}
+
+/** Whether terminals keep xterm's screen-reader mirror (see registerAppIpc). */
+function screenReaderMode(): boolean {
+  return (
+    process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR === "1" || screenReaderSetting
+  );
+}
+
 function registerAppIpc(): void {
   ipcMain.handle(
     "app:notify",
@@ -2561,21 +2580,30 @@ function registerAppIpc(): void {
     app.dock?.setBadge(safeCount > 0 ? String(safeCount) : "");
   });
 
-  // P1-1: screen-reader mode IPC.
-  // screenReaderMode is off by default (P1-1
-  // It is enabled when (a) the OS reports an AT via app.isAccessibilitySupportEnabled(),
-  // or (b) the HARBORMASTER_TERMINAL_A11Y_MIRROR=1 env var is set (e2e).
-  const forceA11yMirror = process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR === "1";
-
-  ipcMain.handle(
-    "terminal:screen-reader-mode",
-    (): boolean => forceA11yMirror || app.isAccessibilitySupportEnabled(),
-  );
-
-  app.on("accessibility-support-changed", (_e, enabled: boolean) => {
-    const value = forceA11yMirror || enabled;
+  // P1-1: screen-reader mode, i.e. xterm's screen-reader mirror. Off unless
+  // the `terminal.screenReader` setting turns it on (decided 2026-11-19: it
+  // froze the window for 26 s under a real Pi flood, and Electron's
+  // accessibility signal also fires for apps that are not screen readers),
+  // or HARBORMASTER_TERMINAL_A11Y_MIRROR=1 forces it (e2e text assertions).
+  // Re-read on a config change and pushed to open panes.
+  const pushScreenReaderMode = (): void => {
+    const value = screenReaderMode();
     for (const win of BrowserWindow.getAllWindows()) {
       safeSend(win.webContents, "terminal:screen-reader-mode-changed", value);
+    }
+  };
+  const screenReaderLoaded = readScreenReaderSetting();
+  ipcMain.handle("terminal:screen-reader-mode", async (): Promise<boolean> => {
+    await screenReaderLoaded;
+    return screenReaderMode();
+  });
+  core.events.on("config-changed", (payload) => {
+    if (
+      payload.changedKeys.some(
+        (key) => key === "terminal" || key.startsWith("terminal."),
+      )
+    ) {
+      void readScreenReaderSetting().then(pushScreenReaderMode);
     }
   });
 }
@@ -2742,10 +2770,10 @@ async function exportDiagnostics(): Promise<string | null> {
         ? { windowContentSize: rendererWindow.getContentSize() }
         : {}),
       // xterm's screen-reader mirror (P1-1) is costly under fullscreen
-      // redraw floods: a freeze report from an AT user starts here.
-      screenReaderMode:
-        process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR === "1" ||
-        app.isAccessibilitySupportEnabled(),
+      // redraw floods: a freeze report starts here. The OS signal is
+      // recorded too (it no longer turns the mirror on by itself).
+      screenReaderMode: screenReaderMode(),
+      accessibilitySupport: app.isAccessibilitySupportEnabled(),
     },
     configFile: resolveStatePaths(activeStateDir).configFile,
     versions: {

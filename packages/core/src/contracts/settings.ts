@@ -61,6 +61,14 @@ export interface SettingDescription {
 
 /** `terminal.fontSize` default (S11). */
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+/**
+ * `terminal.screenReader` default: off. xterm's screen-reader mirror froze
+ * the window for 26 s under a real Pi flood (2026-11-19), and Electron's
+ * "accessibility support" signal also fires for apps that are not screen
+ * readers, so it is only on when the user turns it on.
+ */
+export const DEFAULT_TERMINAL_SCREEN_READER = false;
+
 /** `notifications.enabled` default (S11). */
 export const DEFAULT_NOTIFICATIONS_ENABLED = true;
 /**
@@ -100,6 +108,14 @@ export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
     max: 32,
     title: "Terminal font size",
     help: "Font size of task terminals, in points. Applies to open panes immediately.",
+    section: "general",
+  },
+  {
+    key: "terminal.screenReader",
+    type: "boolean",
+    default: DEFAULT_TERMINAL_SCREEN_READER,
+    title: "Screen-reader support for terminals",
+    help: "Keeps a copy of terminal text that screen readers such as VoiceOver can read. Turn it on only if you use one: it can slow down busy agent panes.",
     section: "general",
   },
   {

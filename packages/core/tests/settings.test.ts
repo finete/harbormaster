@@ -57,6 +57,7 @@ describe("settings description", () => {
         "codeRoot",
         "branchPrefix",
         "terminal.fontSize",
+        "terminal.screenReader",
         "notifications.enabled",
         "automation",
         "launch.defaultHarness",
@@ -142,6 +143,13 @@ describe("validateSettingsPatch", () => {
     expect(values.automation).toBe(false);
     expect(values["launch.maxConcurrent"]).toBe(3);
     expect(values["terminal.fontSize"]).toBe(13);
+    // Screen-reader support is off unless turned on (it can freeze busy panes).
+    expect(values["terminal.screenReader"]).toBe(false);
+    expect(
+      settingsValues({ terminal: { screenReader: true } })[
+        "terminal.screenReader"
+      ],
+    ).toBe(true);
     expect(values["launch.defaultModel"]).toBeNull();
     expect(
       explicitSettingKeys({ launch: { maxConcurrent: 3 }, other: 1 }),
