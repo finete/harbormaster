@@ -1,0 +1,95 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.13",
+  "scenario": "long-output",
+  "recordedAt": "2026-11-19T15:44:04.321Z",
+  "prompts": [
+    "Print the lines 'line 1' through 'line 300', one per line, with no other text. Do not use any tools."
+  ],
+  "command": [
+    "cursor-agent",
+    "--trust",
+    "--approve-mcps",
+    "--plugin-dir",
+    "/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-state-PRMyeX/cursor-plugins/status-recording"
+  ],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 70142,
+  "reports": [],
+  "hooks": [
+    {
+      "event": "session-start",
+      "ms": 8435,
+      "payload": {
+        "conversation_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "generation_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "model": "auto-smart",
+        "is_background_agent": false,
+        "session_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "hook_event_name": "sessionStart",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-F4iLmJ"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {}
+    },
+    {
+      "event": "before-submit-prompt",
+      "ms": 10509,
+      "payload": {
+        "conversation_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "generation_id": "0eece00a-3c1a-4f08-b5d5-64c51cf73607",
+        "model": "auto-smart",
+        "prompt": "Print the lines 'line 1' through 'line 300', one per line, with no other text. Do not use any tools.",
+        "attachments": [],
+        "session_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "hook_event_name": "beforeSubmitPrompt",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-F4iLmJ"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": null
+      },
+      "reply": {
+        "continue": true
+      }
+    },
+    {
+      "event": "stop",
+      "ms": 29040,
+      "payload": {
+        "conversation_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "generation_id": "0eece00a-3c1a-4f08-b5d5-64c51cf73607",
+        "model": "auto-smart",
+        "status": "completed",
+        "loop_count": 0,
+        "input_tokens": 20513,
+        "output_tokens": 1267,
+        "cache_read_tokens": 8325,
+        "cache_write_tokens": 12184,
+        "session_id": "7b6f95e1-d4e9-4548-b384-24ca0cd422dc",
+        "hook_event_name": "stop",
+        "cursor_version": "2026.11.13-eacade1",
+        "workspace_roots": [
+          "/private/var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-status-F4iLmJ"
+        ],
+        "user_email": "<redacted>",
+        "transcript_path": "/Users/mova/.cursor/projects/private-var-folders-h5-dxgsblhx5rv544715m7yjlbw0000gn-T-hm-status-F4iLmJ/agent-transcripts/7b6f95e1-d4e9-4548-b384-24ca0cd422dc/7b6f95e1-d4e9-4548-b384-24ca0cd422dc.jsonl"
+      },
+      "reply": {}
+    }
+  ],
+  "notes": ["no mouse tracking: wheel not sent"],
+  "expected": {
+    "states": ["idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

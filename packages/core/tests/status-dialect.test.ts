@@ -203,7 +203,11 @@ describe.each(
 
   it("is a registered harness, recorded under its own path", () => {
     expect(adapter).toBeDefined();
-    expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(200 * 1024);
+    // The recorder's caps: 200 KB for a dialect scenario; `long-output` (the
+    // pty data path fixture, packages/app/tests/pty-path-replay.test.ts)
+    // keeps its whole stream up to 1.5 MB.
+    const cap = meta.scenario === "long-output" ? 1536 * 1024 : 200 * 1024;
+    expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(cap);
   });
 
   it("parses to the reports recorded alongside it", () => {

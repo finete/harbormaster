@@ -80,6 +80,18 @@ The e2e suite is slow (full run ~2.5 min); spend it deliberately.
   tests; merge small same-fixture tests rather than adding launches. Use
   condition waits, not fixed sleeps (a sleep only where "nothing happens"
   is the behavior, with a comment).
+- **The pty data path stays linear.** Anything that runs on every chunk
+  of agent output in main (`ptySessions.ts`'s `onData`: traffic, the
+  output tail, watchers, the status filter, the mode tracker, the batcher)
+  must cost O(chunk), never O(everything drawn so far): Pi's fullscreen UI
+  never prints a newline, and a pane can draw 100 MB. Such code gets a
+  unit test that feeds ~100 MB of newline-free output and stays fast (see
+  `tests/pty-log.test.ts`), and `tests/pty-path-replay.test.ts` replays
+  every supported harness's recorded output through the real pipeline
+  (fixtures from `scripts/record-harness-status.mjs`, `long-output`
+  scenario). Fakes script our own wiring only; how a real CLI behaves
+  comes from recordings of the pinned CLI, never from a hand-written
+  imitation.
 - **Onboarding is skipped in e2e.** `playwright.config.ts` sets
   `HARBORMASTER_SKIP_ONBOARDING=1`; a spec that needs the wizard passes `"0"`.
   The packaged app never sets it.

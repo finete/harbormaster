@@ -34,6 +34,7 @@ exists.
 | `packages/core/src/harness/registry.ts` | One line in `createHarnessRegistry`'s built-in list. |
 | `packages/app/e2e/contracts/<id>.ts`, `packages/app/e2e/fake-<id>.ts`, `packages/app/e2e/<id>-sessions.spec.ts` | Contract table, the fake replaying it, the T2 spec. |
 | `packages/core/tests/fixtures/status/<id>/<version>/*.txt` | Recorded 7501 dialect fixtures (S1): `scripts/record-harness-status.mjs --harness <id> --scenario all [--command <pinned binary>]`. For a `"hooks"` harness the recorder wires the adapter's hooks to a logging stand-in CLI, writes `prepare`, waits for the session-start hook before typing, and records the hook events (`hooks` in the .json, `user_email` redacted) as the sequence; the .txt keeps the raw pty bytes. |
+| `packages/core/tests/fixtures/status/<id>/<version>/long-output.txt` | The pty data path fixture: `--scenario long-output` (a long reply, then PageUp/PageDown and, when the TUI enables mouse tracking, wheel reports; untruncated up to 1.5 MB). `packages/app/tests/pty-path-replay.test.ts` fails when a built-in harness has none, and replays it through the app's real pty pipeline (cost must stay linear as it grows). |
 | `packages/app/tests/real-cli-smoke.test.ts` | T3: `PINNED` entry + one `rowIt` per keyless row (keyless model stubs: Messages API for Claude/Pi, Responses API for Codex; Cursor has none: its keyless rows are `--version`, `--help`, the logged-out messages and `create-chat`; its pin is `cursor-agent@<build>`, a tarball extracted into the prefix). |
 | `packages/app/e2e/real-smoke.spec.ts` | T4 cases for the harness (Setup ready, Review, the S4 presence scenario). |
 
@@ -45,6 +46,8 @@ skill) is added to `engines/review-support.ts` and its probe access.
 
 ## Bumping a pinned version
 
-Run the real-CLI tier on the new version, re-record the dialect fixtures,
-then raise `verifiedVersion` in the descriptor (P7). Raise `minVersion` only
+Run the real-CLI tier on the new version, re-record the dialect fixtures
+and `long-output` (`--scenario all` includes it) with the pinned binary
+(`--command <prefix>/…`), review the diff, then raise `verifiedVersion` in
+the descriptor (P7). Raise `minVersion` only
 when the adapter starts depending on something newer.

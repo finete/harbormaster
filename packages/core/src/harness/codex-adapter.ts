@@ -34,6 +34,10 @@
 //   on every launch (X12).
 // - `codex queue --thread <id> --message <text>` stores a message for a
 //   session; a live idle TUI runs it as its next turn (X5).
+// - `-c check_for_update_on_startup=false` on every launch (X13): an
+//   out-of-date Codex otherwise opens "Update available" at startup with
+//   "Update now" preselected, and the first Enter typed into the pane
+//   (the Review button's command) runs `npm install -g @openai/codex`.
 
 import {
   CodexModelCatalogAccess,
@@ -178,6 +182,16 @@ export const CODEX_HOOK_EVENTS = {
 
 /** Seconds Codex waits for one hook (ours reply in milliseconds, X2). */
 const HOOK_TIMEOUT_SECONDS = 10;
+
+/**
+ * No startup update dialog (X13): it takes the pane's first Enter, and its
+ * default is a global `npm install -g @openai/codex` (seen when an older
+ * pinned Codex met a newer release). Upgrades are the user's, through
+ * doctor's version check and the harness's own upgrade command.
+ */
+export const CODEX_STARTUP_OVERRIDES: readonly string[] = [
+  tomlOverride("check_for_update_on_startup", false),
+];
 
 /** `tui.notifications` over OSC 9 (X4): the reply text arrives right before `done`. */
 export const CODEX_NOTIFICATION_OVERRIDES: readonly string[] = [
@@ -415,6 +429,7 @@ export class CodexHarnessAdapter implements HarnessAdapter {
         ...[
           ...CODEX_SANDBOX_OVERRIDES,
           ...CODEX_NOTIFICATION_OVERRIDES,
+          ...CODEX_STARTUP_OVERRIDES,
         ].flatMap((override) => ["-c", override]),
         ...(input.permissions === "bypass"
           ? ["--dangerously-bypass-approvals-and-sandbox"]

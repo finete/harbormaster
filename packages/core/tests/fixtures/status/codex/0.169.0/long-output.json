@@ -1,0 +1,72 @@
+{
+  "harness": "codex",
+  "version": "0.169.0",
+  "scenario": "long-output",
+  "recordedAt": "2026-11-19T15:45:54.215Z",
+  "prompts": [
+    "Print the lines 'line 1' through 'line 300', one per line, with no other text. Do not use any tools."
+  ],
+  "command": [
+    "codex",
+    "-c",
+    "model_reasoning_effort=\"low\"",
+    "-c",
+    "notify=[]",
+    "-c",
+    "check_for_update_on_startup=false",
+    "-c",
+    "sandbox_workspace_write.network_access=true",
+    "-c",
+    "tui.notifications=[\"agent-turn-complete\",\"approval-requested\",\"plan-mode-prompt\",\"async-question\"]",
+    "-c",
+    "tui.notification_method=\"osc9\"",
+    "-c",
+    "tui.notification_condition=\"always\""
+  ],
+  "probesAnswered": 0,
+  "trustDialog": true,
+  "truncated": false,
+  "rawBytes": 159727,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 3360
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 3505
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 5827
+    },
+    {
+      "state": "working",
+      "app": "codex",
+      "ms": 6817
+    },
+    {
+      "state": "done",
+      "app": "codex",
+      "ms": 39016
+    },
+    {
+      "state": "idle",
+      "app": "codex",
+      "ms": 41155
+    }
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ],
+  "expected": {
+    "states": ["idle", "working", "idle", "working", "done", "idle"],
+    "final": {
+      "state": "idle"
+    }
+  }
+}

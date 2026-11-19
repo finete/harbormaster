@@ -145,6 +145,7 @@ describe("Codex launch spec", () => {
       'tui.notifications=["agent-turn-complete","approval-requested","plan-mode-prompt","async-question"]',
       'tui.notification_method="osc9"',
       'tui.notification_condition="always"',
+      "check_for_update_on_startup=false",
     ]);
     // Bypass, model, then the prompt after `--` (a leading "-" stays text).
     expect(args.slice(-5)).toEqual([

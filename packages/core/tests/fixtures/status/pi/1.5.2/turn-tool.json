@@ -1,0 +1,38 @@
+{
+  "harness": "pi",
+  "version": "1.5.2",
+  "scenario": "turn-tool",
+  "recordedAt": "2026-11-19T15:37:48.834Z",
+  "prompts": [
+    "Run `ls` with your shell tool, then reply with exactly the word DONE."
+  ],
+  "command": ["pi"],
+  "probesAnswered": 0,
+  "trustDialog": false,
+  "truncated": false,
+  "rawBytes": 47744,
+  "reports": [
+    {
+      "state": "idle",
+      "app": "pi",
+      "ms": 1400
+    },
+    {
+      "state": "working",
+      "app": "pi",
+      "ms": 4829
+    },
+    {
+      "state": "done",
+      "app": "pi",
+      "ms": 7563
+    }
+  ],
+  "notes": [],
+  "expected": {
+    "states": ["idle", "working", "done"],
+    "final": {
+      "state": "done"
+    }
+  }
+}

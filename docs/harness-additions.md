@@ -65,8 +65,16 @@ Status-dialect notes (wave 2, claude-dialect lane):
   `<scenario>.txt` (raw bytes, ≤ 200 KB) + `<scenario>.json` (`prompts`,
   parsed `reports` with timings, `notes`, and the reviewed `expected`
   state sequence). Recorded: `claude-code/2.1.326/` all eight scripted
-  scenarios; `pi/1.3.0/` startup, turn, turn-tool, cancel,
-  background-work, exit (Pi has no permission prompts; subagent n/a).
+  scenarios; `pi/1.5.2/` startup, turn, turn-tool, cancel,
+  background-work, exit (Pi has no permission prompts; subagent n/a;
+  re-recorded on the 1.5.2 pin 2026-11-19, the same state sequences as
+  1.3.0's). Every built-in harness also has `long-output` (2026-11-19):
+  a 300-line reply, then scrolling, untruncated up to 1.5 MB, for the pty
+  data path rather than the dialect. Pi's is ~950 KB with no newline at
+  all (fullscreen, cursor-addressed redraws); Codex's and Cursor's TUIs
+  redraw in place too, Claude's prints lines. `packages/app/tests/
+  pty-path-replay.test.ts` replays it through the app's real pty pipeline
+  and requires linear cost (the 2026-11-19 output-tail bug fails it).
   Claude's `permission` scenario adds `--settings {"permissions":{"ask":["Write","Edit","Bash"]}}`
   because a user allow-list otherwise suppresses the prompt (recorded in
   the .json's `command`).
@@ -110,6 +118,7 @@ Status-dialect notes (wave 2, claude-dialect lane):
 | X10 | **Versions**: `minVersion 0.166.0` (`queue --resume`, 7501 `done`, stable hooks), `verifiedVersion 0.169.0`. Doctor must flag a PATH entry that is only a terminal-multiplexer shim (cmux writes one for `codex` and `claude`). |
 | X11 | **Usage**: per-model tokens from the rollout JSONL (new access `codex-session-usage-access.ts`). **Done**: `token_usage_record` lines (per response, deduped by `response_id`; `input_tokens` includes the cached part → cache read; `output_tokens` includes reasoning), the model from the turn's `turn_context`; records of another `thread_id` skipped; `event_msg`/`token_count` running totals as the fallback for older rollouts. A fork's rollout references the parent's history (`forked_from_id`, `history_mode: "paginated"`) instead of copying it, so it has no prefix to subtract. |
 | X12 | **Network in the sandbox** (an R7 deviation, decided 2026-11-17): every Harbormaster Codex launch adds `-c sandbox_workspace_write.network_access=true`; the approvals policy is unchanged. Codex's default `workspace-write` seatbelt sandbox denies even binding a loopback port (`listen(0)` → EPERM), so in an interactive pane `plannotator review` died with "port … already in use" and Review never opened; `gh` and dev servers fail the same way. Pi and Claude Code panes have no such restriction, so this makes Codex consistent with them. A per-repository opt-out (the stricter sandbox) could be added later; no setting yet. | Contract row `codex.sandbox.network` (T3 runs `codex sandbox` with and without it); real smoke: Review opens Plannotator from an interactive Codex pane. |
+| X13 | **No startup update dialog** (2026-11-19): every Harbormaster Codex launch adds `-c check_for_update_on_startup=false`. Found while recording fixtures: the pinned 0.169.0 met the 0.170.0 release and opened "Update available" with "1. Update now (runs `npm install -g @openai/codex`)" preselected; the recorder's Enter ran the global install. In an app pane the first typed Enter (the Review button's `$plannotator-review`) would do the same. Upgrades stay the user's: doctor's version floors and the descriptor's `upgradeHint`. The recorder passes the same override. |
 
 Codex lane notes (wave 3, codex-adapter): adapter `harness/codex-adapter.ts`
 (registered after Claude Code), access `access/codex-code-access.ts`
@@ -200,7 +209,7 @@ Settings needed no edits (P2).
 1. Pin the CLI; fill the **capability sheet** from `--help` and a hand-run pty probe (the recording script): session flags, 7501 dialect per scenario, delivery channels and whether each works when idle, MCP injection, permission flag, trust prompts, session-file layout, usage format, review integration, binary aliases, detached child processes it leaves behind.
 2. Record every deviation from the standard path here as a decision row.
 3. Adapter + descriptor + capabilities + usage reader; `interpretProgramStatus` with the recorded quirks.
-4. `contracts/<harness>.ts` rows; `fake-<harness>.ts` replaying them; `<harness>-sessions.spec.ts`; T3 assertions per row; dialect fixtures.
+4. `contracts/<harness>.ts` rows; `fake-<harness>.ts` replaying them; `<harness>-sessions.spec.ts`; T3 assertions per row; dialect fixtures and the `long-output` pty-path fixture.
 5. T4 scenarios for the harness; run it; commit the marker.
 6. Doctor/onboarding/Settings need **no** edits (P2); if they do, the descriptor is missing a field.
 

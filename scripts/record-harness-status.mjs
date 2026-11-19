@@ -26,7 +26,12 @@
 //     --command <prefix>/node_modules/.bin/codex
 //
 // Scenarios: startup, turn, turn-tool, permission, cancel, background-work,
-// subagent, exit. `--version` defaults to the CLI's own `--version`. The
+// subagent, exit, long-output. `long-output` is for the pty data path, not
+// the status dialect: a long reply, then scrolling (PageUp/PageDown, and
+// mouse-wheel reports when the TUI enabled mouse tracking), recorded
+// untruncated up to `MAX_LONG_FIXTURE_BYTES` (beyond that the start and
+// the end are kept). packages/app/tests/pty-path-replay.test.ts replays
+// every fixture through the app's real pty pipeline. `--version` defaults to the CLI's own `--version`. The
 // binary is `--command <path>` (a pinned install outside PATH, e.g. the
 // real-CLI tier's npm prefix), else the descriptor's override env var, else
 // its first alias found on PATH that is not a terminal-multiplexer shim
@@ -75,6 +80,7 @@ export const SCENARIOS = [
   "background-work",
   "subagent",
   "exit",
+  "long-output",
 ];
 
 /** The prompt each scenario types (absent = it types none). */
@@ -90,6 +96,8 @@ export const SCENARIO_PROMPTS = {
     "Run `sleep 120` in the background, then reply with exactly the word DONE",
   subagent:
     "Use a subagent (the Task/Agent tool) to run `echo hi` and report its output, then reply with exactly the word DONE.",
+  "long-output":
+    "Print the lines 'line 1' through 'line 300', one per line, with no other text. Do not use any tools.",
 };
 
 /** How each harness leaves its TUI (the exit scenario). */
@@ -130,15 +138,26 @@ const SCENARIO_ARGS = {
 
 /**
  * Extra launch args per harness for every scenario. Codex: low reasoning
- * effort (fast, cheap turns; the dialect does not depend on it) and no
- * user `notify` program (a user's turn-ended hook stays out of the
- * recording).
+ * effort (fast, cheap turns; the dialect does not depend on it), no user
+ * `notify` program (a user's turn-ended hook stays out of the recording)
+ * and no startup update check (see below).
  */
 const HARNESS_ARGS = {
-  codex: ["-c", 'model_reasoning_effort="low"', "-c", "notify=[]"],
+  codex: [
+    "-c",
+    'model_reasoning_effort="low"',
+    "-c",
+    "notify=[]",
+    // An older pinned Codex otherwise opens "Update available" at startup,
+    // and the recorder's Enter picks "Update now": a global npm install.
+    "-c",
+    "check_for_update_on_startup=false",
+  ],
 };
 
 const MAX_FIXTURE_BYTES = 200 * 1024;
+/** `long-output` keeps its whole stream up to this; past it, half from each end. */
+const MAX_LONG_FIXTURE_BYTES = 1536 * 1024;
 
 function parseArgs(argv) {
   const flags = new Map();
@@ -353,13 +372,31 @@ function startSession({
     get probes() {
       return probes;
     },
+    /** The TUI turned on mouse reporting (wheel events are its to handle). */
+    get mouseTracking() {
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the literal ESC of a DEC private mode set is the point.
+      return /\x1b\[\?100[0236]h/.test(chunks.join(""));
+    },
     get exited() {
       return exited;
     },
     /** The raw stream, cut after the last 7501 report when over the cap. */
-    raw() {
+    raw(scenario) {
       let text = chunks.join("");
       let truncated = false;
+      if (scenario === "long-output") {
+        // The pty path's fixture: everything, scrolling included.
+        const buf = Buffer.from(text);
+        if (buf.length > MAX_LONG_FIXTURE_BYTES) {
+          const half = MAX_LONG_FIXTURE_BYTES / 2;
+          text = Buffer.concat([
+            buf.subarray(0, half),
+            buf.subarray(buf.length - half),
+          ]).toString();
+          truncated = true;
+        }
+        return { text, truncated, bytes };
+      }
       if (Buffer.byteLength(text) > MAX_FIXTURE_BYTES && reports.length === 0) {
         // No 7501 at all (hooks-reporting harness): keep the tail.
         const buf = Buffer.from(text);
@@ -657,6 +694,29 @@ const SCENARIO_STEPS = {
     });
     await sleep(5000);
   },
+  async "long-output"(session, ctx) {
+    await runTurn(session, SCENARIO_PROMPTS["long-output"], ctx);
+    await sleep(2000);
+    const keys = ["\x1b[5~", "\x1b[6~"]; // PageUp, PageDown
+    if (session.mouseTracking) {
+      // SGR wheel up / down over the middle of the screen.
+      keys.push("\x1b[<64;60;20M", "\x1b[<65;60;20M");
+    } else {
+      ctx.notes.push("no mouse tracking: wheel not sent");
+    }
+    for (const [up, down] of [keys.slice(0, 2), keys.slice(2, 4)]) {
+      if (!up || !down) continue;
+      for (let i = 0; i < 8; i++) {
+        session.proc.write(up);
+        await sleep(250);
+      }
+      for (let i = 0; i < 8; i++) {
+        session.proc.write(down);
+        await sleep(250);
+      }
+    }
+    await sleep(2000);
+  },
   async exit(session, ctx) {
     const key = EXIT_KEYS[ctx.harness] ?? "\x03\x03";
     session.proc.write(key);
@@ -777,7 +837,7 @@ async function recordScenario({
       rmSync(stateDir, { recursive: true, force: true });
     }
   }
-  const { text, truncated, bytes } = session.raw();
+  const { text, truncated, bytes } = session.raw(scenario);
   const dir = join(outDir, harness, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${scenario}.txt`), text);
