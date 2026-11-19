@@ -34,6 +34,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { readTestClipboardText } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -149,20 +150,12 @@ test("a newer GitHub release, fetched through Chromium's TLS stack, shows a clos
     "brew update && brew upgrade --cask harbormaster",
   );
 
-  // Copy goes through main's clipboard; keep the developer's clipboard.
-  const previous = await app.evaluate(({ clipboard }) => clipboard.readText());
-  try {
-    await window.getByTestId("update-banner-copy").click();
-    await expect(window.getByTestId("update-banner-copy")).toHaveText("Copied");
-    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(
-      "brew update && brew upgrade --cask harbormaster",
-    );
-  } finally {
-    await app.evaluate(
-      ({ clipboard }, text) => clipboard.writeText(text),
-      previous,
-    );
-  }
+  // Copy goes through main's clipboard (the private test one).
+  await window.getByTestId("update-banner-copy").click();
+  await expect(window.getByTestId("update-banner-copy")).toHaveText("Copied");
+  expect(await readTestClipboardText(app)).toBe(
+    "brew update && brew upgrade --cask harbormaster",
+  );
 
   await window.getByTestId("update-banner-dismiss").click();
   await expect(banner).toHaveCount(0);

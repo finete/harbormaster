@@ -301,6 +301,19 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
     });
     resizeObserver.observe(container);
 
+    // Copy (Cmd+C / Edit > Copy, i.e. webContents.copy()) goes through main's
+    // clipboard like every other copy (main/app-clipboard.ts), instead of
+    // Chromium writing xterm's selection itself: one path, and under e2e the
+    // private test clipboard, never the developer's. A cancelled copy event
+    // with no data leaves the system clipboard untouched.
+    const onCopy = (event: ClipboardEvent): void => {
+      if (!terminal.hasSelection()) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void window.harbormaster.app.copyText(terminal.getSelection());
+    };
+    container.addEventListener("copy", onCopy, true);
+
     // The `terminal.fontSize` setting applies live (docs/settings.md S11):
     // new cell metrics, then a refit (the pty follows via onResize). A
     // hidden pane refits through the ResizeObserver when it shows.
@@ -341,6 +354,7 @@ export function TerminalPane(props: IDockviewPanelProps): JSX.Element {
       titleThrottle.dispose();
       resizeDisposable.dispose();
       resizeObserver.disconnect();
+      container.removeEventListener("copy", onCopy, true);
       integrations.dispose();
       unsubscribeData?.();
       unsubscribeExit?.();

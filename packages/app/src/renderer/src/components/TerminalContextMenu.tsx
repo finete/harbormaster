@@ -34,7 +34,8 @@ export function TerminalContextMenu({
       disabled: !hasSelection,
       onSelect: () => {
         const sel = terminal.getSelection();
-        if (sel) void navigator.clipboard.writeText(sel);
+        // Through main's clipboard (main/app-clipboard.ts), like every copy.
+        if (sel) void window.harbormaster.app.copyText(sel);
       },
     },
     {

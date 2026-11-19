@@ -24,6 +24,7 @@ import {
 } from "@playwright/test";
 import { chooseWhere } from "./composer";
 import { writeShellPi } from "./fake-pi";
+import { readTestClipboardText } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -187,23 +188,13 @@ test("opens the task's worktree folder in the chosen app, remembers it, copies t
   expect(isWorktree(ghosttyArgv?.[3])).toBe(true);
   await expect(main).toHaveText("Open in Ghostty");
 
-  // Copy path copies the worktree folder (through main's clipboard; keep
-  // the developer's clipboard).
-  const previous = await app.evaluate(({ clipboard }) => clipboard.readText());
-  try {
-    await workspace.getByTestId("open-in-menu-trigger").click();
-    await window.getByTestId("open-in-copy-path").click();
-    await expect
-      .poll(async () =>
-        isWorktree(await app.evaluate(({ clipboard }) => clipboard.readText())),
-      )
-      .toBe(true);
-  } finally {
-    await app.evaluate(
-      ({ clipboard }, text) => clipboard.writeText(text),
-      previous,
-    );
-  }
+  // Copy path copies the worktree folder (through main's clipboard: the
+  // private test one).
+  await workspace.getByTestId("open-in-menu-trigger").click();
+  await window.getByTestId("open-in-copy-path").click();
+  await expect
+    .poll(async () => isWorktree(await readTestClipboardText(app)))
+    .toBe(true);
 
   // Main refuses a path outside the allowlist, and an unknown app id, and
   // runs nothing for either.

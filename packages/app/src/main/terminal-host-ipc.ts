@@ -7,7 +7,8 @@
 
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import { clipboard, ipcMain, shell } from "electron";
+import { ipcMain, shell } from "electron";
+import { appClipboard } from "./app-clipboard";
 import { resolveClipboardPaste } from "./clipboard-paste";
 
 function isHttpUrl(url: unknown): url is string {
@@ -31,10 +32,10 @@ export function registerTerminalHostIpc(): void {
     async (): Promise<string | null> => {
       return resolveClipboardPaste({
         clipboard: {
-          availableFormats: () => clipboard.availableFormats(),
-          read: (format) => clipboard.read(format),
-          readText: () => clipboard.readText(),
-          readImage: () => clipboard.readImage(),
+          availableFormats: () => appClipboard.availableFormats(),
+          read: (format) => appClipboard.read(format),
+          readText: () => appClipboard.readText(),
+          readImage: () => appClipboard.readImage(),
         },
         fs: { writeFileSync, existsSync },
         tmpdir: os.tmpdir(),

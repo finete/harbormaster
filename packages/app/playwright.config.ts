@@ -14,12 +14,20 @@ process.env.HARBORMASTER_TERMINAL_A11Y_MIRROR ??= "1";
 // exercise it. The packaged app never sets this.
 process.env.HARBORMASTER_SKIP_ONBOARDING ??= "1";
 
+// Every launch uses a private in-memory clipboard (main/app-clipboard.ts):
+// a spec seeds and reads it through `globalThis.__harbormasterTestClipboard`
+// in main, and never overwrites what the developer copied. The packaged
+// app never sets it.
+process.env.HARBORMASTER_E2E_FAKE_CLIPBOARD ??= "1";
+
 // Smoke-lane e2e config for the Electron app shell. Playwright drives the
 // already-built electron-vite output (`out/main/index.js`) via its Electron
 // support (`_electron.launch`) — see e2e/smoke.spec.ts. `npm run build` must
 // run before this; `npm test` in package.json wires that order.
 export default defineConfig({
   testDir: "./e2e",
+  // Warns when the real clipboard changed during the run (see the file).
+  globalSetup: "./e2e/clipboard-guard.ts",
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

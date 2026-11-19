@@ -29,6 +29,7 @@ import { selectCard } from "./board-gestures";
 import { chooseParent, chooseWhere, openOptions, submitAs } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 import { writeListModelsPi } from "./fake-pi";
+import { writeTestClipboardImage } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 const REPO_ID = "github.com/test/fixture";
@@ -769,15 +770,22 @@ test("Open folder runs a task in place, and the picked model, thinking level and
   const prompt = window.getByTestId("new-task-prompt-input");
   await prompt.fill("Compare");
   await prompt.focus();
-  await app.evaluate(({ clipboard, nativeImage }, base64) => {
-    clipboard.clear();
-    clipboard.writeImage(
-      nativeImage.createFromDataURL(`data:image/png;base64,${base64}`),
+  // The image goes on the app's private test clipboard (main resolves the
+  // paste from it), and the paste event carries an image like Chromium's
+  // would; the system clipboard is never touched.
+  await writeTestClipboardImage(app, TINY_PNG_BASE64);
+  await prompt.evaluate((element, base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(new File([bytes], "image.png", { type: "image/png" }));
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: data,
+        bubbles: true,
+        cancelable: true,
+      }),
     );
   }, TINY_PNG_BASE64);
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.paste();
-  });
   await expect(prompt).toHaveValue(
     /^Compare \S*clipboard-\d{4}-\d{2}-\d{2}-\d{6}-[0-9A-F]{8}\.png$/,
   );

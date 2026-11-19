@@ -722,7 +722,7 @@ export function Sidebar({
         label: "Copy branch",
         disabled: !task.branch,
         onSelect: () => {
-          if (task.branch) void navigator.clipboard.writeText(task.branch);
+          if (task.branch) void window.harbormaster.app.copyText(task.branch);
         },
       },
     ];
@@ -756,7 +756,7 @@ export function Sidebar({
       items.push({
         key: "copy-worktree-path",
         label: "Copy worktree path",
-        onSelect: () => void navigator.clipboard.writeText(worktreePath),
+        onSelect: () => void window.harbormaster.app.copyText(worktreePath),
       });
       items.push({
         key: "reveal-in-finder",

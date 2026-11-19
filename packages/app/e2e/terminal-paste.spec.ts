@@ -26,6 +26,13 @@ import {
   test,
 } from "@playwright/test";
 import { chooseWhere, submitAs } from "./composer";
+import {
+  clearTestClipboard,
+  readTestClipboardText,
+  writeTestClipboardBuffer,
+  writeTestClipboardImage,
+  writeTestClipboardText,
+} from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -63,9 +70,7 @@ function cardLocator(title: string): Locator {
 }
 
 async function clearClipboard(): Promise<void> {
-  await app.evaluate(({ clipboard }) => {
-    clipboard.clear();
-  });
+  await clearTestClipboard(app);
 }
 
 test.beforeAll(async () => {
@@ -133,12 +138,7 @@ test("image paste: clipboard image → clipboard-*.png path appears in terminal"
   await startRawReader(panel);
 
   // Seed the clipboard with a PNG image.
-  await app.evaluate(({ clipboard, nativeImage }, base64) => {
-    clipboard.clear();
-    clipboard.writeImage(
-      nativeImage.createFromDataURL(`data:image/png;base64,${base64}`),
-    );
-  }, TINY_PNG_BASE64);
+  await writeTestClipboardImage(app, TINY_PNG_BASE64);
 
   // Trigger paste via webContents (same as Cmd+V via the native menu).
   await app.evaluate(({ BrowserWindow }) => {
@@ -211,21 +211,10 @@ test("Finder file paste: NSFilenamesPboardType plist  escaped path inserted", as
   const panel = window.getByTestId("terminal-panel").first();
   await startRawReader(panel);
 
-  // Seed the clipboard using the injected electron module arg.
-  // require() is unavailable inside app.evaluate; use the { electron } arg.
-  // IMPORTANT: clipboard.writeText() clears all other formats, so we write
-  // ONLY NSFilenamesPboardType here.  If the NSFilenamesPboardType branch
-  // fails the resolver returns null → nothing is pasted → toContainText fails.
-  await app.evaluate(({ clipboard }, plistData) => {
-    clipboard.clear();
-    // Write the raw plist bytes to NSFilenamesPboardType exactly as Finder.
-    // Verified: clipboard.read("NSFilenamesPboardType") returns the plist
-    // after this call.  Calling writeText() after would clear it.
-    clipboard.writeBuffer(
-      "NSFilenamesPboardType",
-      Buffer.from(plistData, "utf8"),
-    );
-  }, plist);
+  await clearTestClipboard(app);
+  // The raw plist bytes under NSFilenamesPboardType, exactly as Finder
+  // writes them (the app reads `read("NSFilenamesPboardType")`).
+  await writeTestClipboardBuffer(app, "NSFilenamesPboardType", plist);
 
   // Trigger paste via webContents (same path as Cmd+V via the native menu).
   await app.evaluate(({ BrowserWindow }) => {
@@ -267,9 +256,7 @@ test("plain text paste: brackets appear when bracketed paste mode is active", as
   await expect(panel).toContainText("z", { timeout: 5_000 });
 
   // Seed plain text.
-  await app.evaluate(({ clipboard }) => {
-    clipboard.writeText("hello");
-  });
+  await writeTestClipboardText(app, "hello");
 
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.webContents.paste();
@@ -286,7 +273,7 @@ test("plain text paste: brackets appear when bracketed paste mode is active", as
   await clearClipboard();
 });
 
-test("copy: select-all + webContents.copy() puts terminal text in clipboard", async () => {
+test("copy: select-all + webContents.copy() puts terminal text in the app's clipboard", async () => {
   const panel = window.getByTestId("terminal-panel").first();
   await panel.click();
 
@@ -296,7 +283,7 @@ test("copy: select-all + webContents.copy() puts terminal text in clipboard", as
   await expect(panel).toContainText("copy-marker-42", { timeout: 10_000 });
 
   // Clear clipboard first.
-  await app.evaluate(({ clipboard }) => clipboard.clear());
+  await clearTestClipboard(app);
 
   // Select all (xterm's Meta+A select-all) then copy via webContents.
   await window.keyboard.press("Meta+a");
@@ -307,6 +294,8 @@ test("copy: select-all + webContents.copy() puts terminal text in clipboard", as
   await window.waitForTimeout(200);
 
   // The clipboard should contain our marker.
-  const clipText = await app.evaluate(({ clipboard }) => clipboard.readText());
-  expect(clipText).toContain("copy-marker-42");
+  // Through the pane's copy handler and main's clipboard (the test one).
+  await expect
+    .poll(() => readTestClipboardText(app))
+    .toContain("copy-marker-42");
 });

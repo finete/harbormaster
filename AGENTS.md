@@ -97,6 +97,15 @@ The e2e suite is slow (full run ~2.5 min); spend it deliberately.
   The packaged app never sets it.
 - **Leave no app instances behind.** Close every Electron app a test or
   scratch script launches; leaked instances slow every later run.
+- **Never touch the user's clipboard.** Every e2e launch uses the app's
+  private in-memory clipboard (`HARBORMASTER_E2E_FAKE_CLIPBOARD=1`, set in
+  `playwright.config.ts`; `src/main/app-clipboard.ts`). Specs seed and read
+  it through `e2e/test-clipboard.ts`, never Electron's `clipboard` or
+  `navigator.clipboard` (`tests/clipboard-isolation.test.ts` fails on
+  either), and a native paste is a dispatched `paste` event, not the system
+  clipboard. App code reaches the clipboard only through `appClipboard`
+  (main) and `app.copyText` (renderer). After a run, a moved system
+  clipboard counter prints a `[clipboard]` warning.
 - **Run headless: the user must never see a test app.** Every e2e or
   scratch launch sets `HARBORMASTER_WINDOW_OFFSCREEN=1`, which makes the
   window invisible (opacity 0, click-through, never focused, no dock icon)

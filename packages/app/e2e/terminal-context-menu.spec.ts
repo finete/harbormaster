@@ -21,6 +21,7 @@ import {
   test,
 } from "@playwright/test";
 import { chooseWhere, submitAs } from "./composer";
+import { clearTestClipboard, writeTestClipboardText } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -141,9 +142,7 @@ test("Paste menu item inserts clipboard text into the pty", async () => {
 
   // Seed the clipboard with an echo command that evaluates to pasted-4.
   const pasteText = "echo pasted-$((2+2))";
-  await app.evaluate(({ clipboard }, text) => {
-    clipboard.writeText(text);
-  }, pasteText);
+  await writeTestClipboardText(app, pasteText);
 
   // Right-click to open context menu.
   const box = await panel.boundingBox();
@@ -169,5 +168,5 @@ test("Paste menu item inserts clipboard text into the pty", async () => {
   await window.keyboard.press("Enter");
   await expect(panel).toContainText("pasted-4", { timeout: 10_000 });
 
-  await app.evaluate(({ clipboard }) => clipboard.clear());
+  await clearTestClipboard(app);
 });

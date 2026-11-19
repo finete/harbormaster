@@ -64,7 +64,6 @@ import type { WebContents } from "electron";
 import {
   app,
   BrowserWindow,
-  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -90,6 +89,7 @@ import {
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
+import { appClipboard } from "./app-clipboard";
 import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import { createBackgroundLauncher } from "./background-launcher";
@@ -2975,7 +2975,7 @@ function registerReleaseIpc(): void {
     return updateChecker.latest() ?? null;
   });
   ipcMain.handle("app:copyText", (_event, text: unknown): void => {
-    if (typeof text === "string") clipboard.writeText(text);
+    if (typeof text === "string") appClipboard.writeText(text);
   });
   ipcMain.handle("app:exportDiagnostics", () => exportDiagnostics());
   ipcMain.handle(
@@ -2988,7 +2988,7 @@ function registerReleaseIpc(): void {
     },
   );
   ipcMain.handle("app:copyDiagnosticsSummary", (): string => {
-    clipboard.writeText(lastDiagnosticsSummary);
+    appClipboard.writeText(lastDiagnosticsSummary);
     return lastDiagnosticsSummary;
   });
 

@@ -20,6 +20,7 @@ import {
 } from "@playwright/test";
 import { chooseWhere } from "./composer";
 import { fakePiPid, writeShellPi } from "./fake-pi";
+import { readTestClipboardText } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -432,10 +433,8 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
     await expect(menu).toBeVisible();
     await menu.getByTestId("sidebar-row-context-menu-item-copy-branch").click();
 
-    const clipboard = await window.evaluate(() =>
-      navigator.clipboard.readText(),
-    );
-    expect(clipboard).toBe(branch);
+    // Through main's clipboard (the private test one).
+    await expect.poll(() => readTestClipboardText(app)).toBe(branch);
   });
 
   test("copy worktree path writes a path under the worktrees root to the clipboard", async () => {
@@ -451,12 +450,9 @@ test.describe("repo-backed context menu actions (copy branch/worktree path, reve
     await expect(copyPath).toBeVisible({ timeout: 5_000 });
     await copyPath.click();
 
-    const clipboard = await window.evaluate(() =>
-      navigator.clipboard.readText(),
-    );
-    expect(clipboard).toContain(
-      path.join(stateDir, "worktrees", "fixture-repo"),
-    );
+    await expect
+      .poll(() => readTestClipboardText(app))
+      .toContain(path.join(stateDir, "worktrees", "fixture-repo"));
   });
 
   test("reveal in Finder calls the main-process IPC with an allowlisted path, never with an arbitrary one", async () => {
