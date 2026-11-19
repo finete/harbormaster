@@ -158,9 +158,24 @@ there are more than a handful of users.
 - **Logs** live in `~/Library/Application Support/Harbormaster/logs/`:
 `main.log` (rotated at 5 MB) records app events, agent launches and
 exits, and a `[health]` line every minute (event-loop lag, memory, process
-and terminal activity). `[health] spike`, `[pass]` and `[ipc] slow` lines
-mark moments the app was busy. An identical line repeated within a minute is
-written once, followed by a `… repeated N times` note.
+and terminal activity, including each busy terminal's total output since it
+started and the window's dropped-frame count). `[health] spike`, `[pass]` and
+`[ipc] slow` lines mark moments the app was busy. An identical line repeated
+within a minute is written once, followed by a `… repeated N times` note.
+- **CPU profiles**: when the app's main process lags or stays above 80% CPU
+for a minute, it records a 5-second CPU profile on its own (at most one
+every 10 minutes, the newest 3 kept in `logs/profiles/`, one `[profile]` line
+in `main.log`). **Help → Profile Main Process (10 s)** records one on demand
+while you reproduce something slow. Profiles open in Chrome DevTools, VS Code
+or speedscope. Recording uses V8's own profiler inside the app: no debug
+port, no external tools.
+- **Help → Export Diagnostics…** saves a zip for a bug report: recent logs,
+a redacted config, versions, `doctor` and task state, the saved CPU profiles,
+each terminal's output totals, CPU/memory/uptime of the running agents (one
+`ps` limited to their process ids), the size and entry count of each open
+task's agent session file, and the window's recent slow frames and what was
+focused. Secrets are redacted, your home folder shows as `~`, prompts and
+messages are never included, and nothing is uploaded.
 - **`harbormaster doctor`** (or **Check setup** on the Setup screen,
 Settings → Run setup again) checks tools, agents, state files,
 repositories, disk, the tool socket and PATH; it works with the app down and

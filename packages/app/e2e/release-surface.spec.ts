@@ -1,6 +1,9 @@
 // Release surface (release plan, "Build and distribution"): the "new version
 // available" card fed by a stubbed GitHub "latest release" endpoint, and
-// "Export diagnostics" from the app menu. One launch covers both seams;
+// "Export diagnostics" from the app menu, after "Profile Main Process" saved
+// a CPU profile (the bundle must carry it, plus the runtime files: ptys,
+// agent `ps`, session files, the renderer's long frames and focus). One
+// launch covers both seams;
 // semver comparison, redaction and the zip format are unit-tested
 // (tests/update-check.test.ts, tests/diagnostics.test.ts).
 //
@@ -15,6 +18,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -104,6 +108,7 @@ test.beforeAll(async () => {
       HARBORMASTER_WINDOW_OFFSCREEN: "1",
       HARBORMASTER_UPDATE_URL: `https://127.0.0.1:${port}/repos/finete/harbormaster/releases/latest`,
       HARBORMASTER_E2E_SAVE_PATH: savePath,
+      HARBORMASTER_MANUAL_PROFILE_MS: "300",
     },
   });
   const child = app.process();
@@ -168,7 +173,29 @@ test("a newer GitHub release, fetched through Chromium's TLS stack, shows a clos
   await expect(window.getByTestId("update-banner")).toHaveCount(0);
 });
 
-test("Export Diagnostics in the app menu writes logs, a redacted config and versions", async () => {
+test("Export Diagnostics in the app menu writes logs, a redacted config, versions, and the profile and runtime evidence", async () => {
+  // A manual profile of main first: it lands in <userData>/logs/profiles.
+  await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById("profile-main");
+    if (!item) throw new Error("no Profile Main Process menu item");
+    item.click();
+  });
+  const profilesDir = path.join(
+    stateDir,
+    "electron-profile",
+    "logs",
+    "profiles",
+  );
+  await expect
+    .poll(() =>
+      existsSync(profilesDir)
+        ? readdirSync(profilesDir).filter((n) =>
+            n.endsWith("-manual.cpuprofile"),
+          ).length
+        : 0,
+    )
+    .toBe(1);
+
   await app.evaluate(({ Menu }) => {
     const item =
       Menu.getApplicationMenu()?.getMenuItemById("export-diagnostics");
@@ -219,4 +246,26 @@ test("Export Diagnostics in the app menu writes logs, a redacted config and vers
   expect(versions.electron).toMatch(/^\d+\.\d+\.\d+/);
   expect(versions.node).toMatch(/^\d+\.\d+\.\d+/);
   expect(typeof versions.app).toBe("string");
+
+  // The real V8 profile of the real main process.
+  const read = (name: string): string =>
+    execFileSync("unzip", ["-p", savePath, name], { encoding: "utf8" });
+  const profileName = names.find((n) =>
+    /^profiles\/.*-manual\.cpuprofile$/.test(n),
+  );
+  expect(profileName).toBeDefined();
+  const profile = JSON.parse(read(profileName ?? ""));
+  expect(profile.nodes.length).toBeGreaterThan(0);
+  expect(profile.samples.length).toBeGreaterThan(0);
+  // Runtime evidence, from main and from the renderer (executeJavaScript).
+  expect(JSON.parse(read("ptys.json")).counts).toEqual(
+    expect.objectContaining({ live: expect.any(Number) }),
+  );
+  expect(JSON.parse(read("agents-ps.json"))).toEqual({ agents: [] });
+  expect(JSON.parse(read("session-files.json"))).toEqual([]);
+  const renderer = JSON.parse(read("renderer.json"));
+  expect(renderer.focus.view).toBe("workspace");
+  expect(renderer.longFrames).toEqual(
+    expect.objectContaining({ supported: true, thresholdMs: 50 }),
+  );
 });

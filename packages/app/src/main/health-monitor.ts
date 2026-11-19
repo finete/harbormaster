@@ -9,11 +9,21 @@
 // handlers in flight (ipc-timing.ts), passes running (pass-timer.ts) and
 // pty bytes in the last second (pty-traffic.ts) — at most once per 10 s.
 //
+// Each busy pty also carries its lifetime total, the line lists the top 3
+// ptys by lifetime bytes (pty-traffic.ts), and the renderer's long-frame
+// count for the minute rides along (`frames`, renderer lib/long-frames.ts).
+// Every lag sample is also handed to `onLagSample`, which the automatic
+// CPU profiler's trigger watches (cpu-profile.ts).
+//
 // Everything is pure (stats, metric summaries, formatting, rate limiting)
 // except `startHealthMonitor`, which wires those to timers and injectable
 // sources.
 import type { PassStats } from "./pass-timer";
-import type { PtyTrafficEntry, PtyTrafficWindow } from "./pty-traffic";
+import type {
+  PtyLifetimeEntry,
+  PtyTrafficEntry,
+  PtyTrafficWindow,
+} from "./pty-traffic";
 
 export const HEALTH_INTERVAL_MS = 60_000;
 export const LAG_SAMPLE_MS = 100;
@@ -95,6 +105,12 @@ export function summarizeAppMetrics(
   return out;
 }
 
+/** The renderer's long animation frames (≥ 50 ms) over the window. */
+export interface FrameStats {
+  long: number;
+  maxMs: number;
+}
+
 export interface HealthSnapshot {
   lag: LagStats;
   rssMb: number;
@@ -103,8 +119,14 @@ export interface HealthSnapshot {
   ptys: { live: number; attached: number };
   ptyBytes: number;
   topPtys: readonly PtyTrafficEntry[];
+  /** Live ptys' totals since spawn (most bytes first); absent = not tracked. */
+  ptyLifetimes?: readonly PtyLifetimeEntry[];
+  /** The renderer's long frames this window; absent = none reported. */
+  frames?: FrameStats;
   windows: number;
   passes: Readonly<Record<string, PassStats>>;
+  /** Epoch ms the line is written at (for pty ages); defaults to now. */
+  nowMs?: number;
 }
 
 function compactPasses(
@@ -123,8 +145,8 @@ function compactPasses(
 
 /**
  * `[health] {...}` — compact JSON, never longer than `maxChars`: if it
- * would be, the pass stats go first, then the top-pty list, and as a last
- * resort the line is hard-truncated.
+ * would be, the pass stats go first, then the window's top-pty list, then
+ * the lifetime list, and as a last resort the line is hard-truncated.
  */
 export function formatHealthLine(
   snapshot: HealthSnapshot,
@@ -143,14 +165,42 @@ export function formatHealthLine(
     ptyBytes: snapshot.ptyBytes,
     windows: snapshot.windows,
   };
-  const topPtys = snapshot.topPtys.slice(0, 3).map((entry) => ({
-    id: entry.sessionId.slice(0, 40),
-    task: (entry.taskId ?? "-").slice(0, 40),
-    bytes: entry.bytes,
-  }));
+  const lifetimes = snapshot.ptyLifetimes;
+  const lifetimeOf = new Map(
+    (lifetimes ?? []).map((entry) => [entry.sessionId, entry]),
+  );
+  const topPtys = snapshot.topPtys.slice(0, 3).map((entry) => {
+    const total = lifetimeOf.get(entry.sessionId)?.bytes;
+    return {
+      id: entry.sessionId.slice(0, 40),
+      task: (entry.taskId ?? "-").slice(0, 40),
+      bytes: entry.bytes,
+      ...(total !== undefined ? { total } : {}),
+    };
+  });
+  const nowMs = snapshot.nowMs ?? Date.now();
+  const topPtysLifetime = lifetimes
+    ? lifetimes.slice(0, 3).map((entry) => ({
+        id: entry.sessionId.slice(0, 40),
+        task: (entry.taskId ?? "-").slice(0, 40),
+        bytes: entry.bytes,
+        ageMin: Math.max(0, Math.round((nowMs - entry.startedAt) / 60_000)),
+      }))
+    : undefined;
+  const withFrames = snapshot.frames
+    ? { ...base, frames: snapshot.frames }
+    : base;
+  const lifetime = topPtysLifetime ? { topPtysLifetime } : {};
   const candidates = [
-    { ...base, topPtys, passes: compactPasses(snapshot.passes) },
-    { ...base, topPtys },
+    {
+      ...withFrames,
+      topPtys,
+      ...lifetime,
+      passes: compactPasses(snapshot.passes),
+    },
+    { ...withFrames, topPtys, ...lifetime },
+    { ...withFrames, ...lifetime },
+    withFrames,
     base,
   ];
   for (const candidate of candidates) {
@@ -219,6 +269,12 @@ export interface HealthMonitorDeps {
   drainPassStats: () => Record<string, PassStats>;
   runningPasses: () => string[];
   ipcInFlight: () => string[];
+  /** Live ptys' lifetime totals, most bytes first. */
+  ptyLifetimes?: () => PtyLifetimeEntry[];
+  /** The renderer's long frames since the last call (then reset). */
+  drainFrameStats?: () => FrameStats | undefined;
+  /** Every lag sample (ms, epoch-ms time), for the profiler trigger. */
+  onLagSample?: (lagMs: number, nowMs: number) => void;
   log: (line: string) => void;
   now?: () => number;
   intervalMs?: number;
@@ -244,7 +300,11 @@ export function startHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
     const lag = t - expected;
     expected = t + sampleMs;
     try {
-      if (recordLagSample(samples, lag, Date.now(), allowSpike)) {
+      const wallNow = Date.now();
+      if (lag <= MAX_PLAUSIBLE_LAG_MS) {
+        deps.onLagSample?.(Math.max(0, lag), wallNow);
+      }
+      if (recordLagSample(samples, lag, wallNow, allowSpike)) {
         deps.log(
           formatSpikeLine({
             lagMs: lag,
@@ -264,6 +324,8 @@ export function startHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
     try {
       const memory = deps.memory();
       const traffic = deps.drainPtyTraffic();
+      const ptyLifetimes = deps.ptyLifetimes?.();
+      const frames = deps.drainFrameStats?.();
       const line = formatHealthLine({
         lag: lagStats(samples),
         rssMb: Math.round(memory.rss / 1024 / 1024),
@@ -272,8 +334,11 @@ export function startHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
         ptys: deps.ptyCounts(),
         ptyBytes: traffic.totalBytes,
         topPtys: traffic.top,
+        ...(ptyLifetimes ? { ptyLifetimes } : {}),
+        ...(frames ? { frames } : {}),
         windows: deps.windowCount(),
         passes: deps.drainPassStats(),
+        nowMs: Date.now(),
       });
       samples.length = 0;
       deps.log(line);

@@ -105,6 +105,12 @@ import {
   diagnosticsFileName,
 } from "./diagnostics";
 import {
+  agentProcessStats,
+  rendererDiagnostics,
+  runtimeTargets,
+  sessionFileStats,
+} from "./diagnostics-runtime";
+import {
   type DoctorHostFacts,
   diagnosticsSummary,
   doctorForDiagnostics,
@@ -131,6 +137,9 @@ import { applyLoginShellPath, loginShellPathAtStart } from "./login-shell-path";
 import {
   installIpcTiming,
   installRunSentinel,
+  profileMainNow,
+  profilesDir,
+  recordFrameStats,
   startMainHealthMonitor,
 } from "./main-health";
 import {
@@ -162,6 +171,7 @@ import { wirePowerGating } from "./power-gating";
 import { corroboratePresence } from "./presence-corroboration";
 import { createPushDedupe, createSingleFlight } from "./presence-push";
 import { resolvePrimaryLaunch } from "./primary-launch";
+import { ptyTraffic } from "./pty-traffic";
 import {
   acknowledgeSessionData,
   activeSessionCwds,
@@ -179,6 +189,7 @@ import {
   primarySessionTail,
   resizeSession,
   resolveCommandPath,
+  sessionCounts,
   setProgramStatusListener,
   setReadyUrlListener,
   tapPrimaryOutput,
@@ -2683,8 +2694,36 @@ async function exportDiagnostics(): Promise<string | null> {
     appVersion: app.getVersion(),
     os: `${process.platform === "darwin" ? "macOS" : process.platform} ${process.getSystemVersion()} (${process.arch})`,
   });
+  // Runtime evidence (diagnostics-runtime.ts): one narrow `ps` of the live
+  // agents, the open tasks' session files, the renderer's long frames and
+  // focus, and every live pty's totals since spawn.
+  const targets = runtimeTargets(state);
+  const rendererWindow =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const [agentProcesses, sessionFiles, renderer] = await Promise.all([
+    agentProcessStats(targets.agents),
+    sessionFileStats(targets.sessionFiles),
+    rendererWindow && !rendererWindow.webContents.isDestroyed()
+      ? rendererDiagnostics((code) =>
+          rendererWindow.webContents.executeJavaScript(code),
+        )
+      : Promise.resolve(undefined),
+  ]);
+  const nowMs = Date.now();
   const zip = buildDiagnosticsZip({
     logsDir: join(app.getPath("userData"), "logs"),
+    profilesDir: profilesDir(),
+    ptys: {
+      counts: sessionCounts(),
+      ptys: ptyTraffic.lifetime().map((entry) => ({
+        ...entry,
+        startedAt: new Date(entry.startedAt).toISOString(),
+        ageMin: Math.round((nowMs - entry.startedAt) / 60_000),
+      })),
+    },
+    agentProcesses,
+    sessionFiles,
+    ...(renderer ? { renderer } : {}),
     configFile: resolveStatePaths(activeStateDir).configFile,
     versions: {
       app: app.getVersion(),
@@ -2778,15 +2817,54 @@ function exportDiagnosticsFromMenu(): void {
 }
 
 /**
+ * "Profile Main Process (10 s)": a CPU profile of main on demand
+ * (cpu-profile.ts), for "it is slow right now, while I do X". Saved with
+ * the automatic ones and included in the next Export Diagnostics. The
+ * confirmation dialog is skipped under e2e (HARBORMASTER_E2E_SAVE_PATH),
+ * like the export's own save dialog.
+ */
+function profileMainFromMenu(): void {
+  void profileMainNow().then(async (path) => {
+    if (process.env.HARBORMASTER_E2E_SAVE_PATH) return;
+    const options = path
+      ? {
+          type: "info" as const,
+          message: "Profile saved",
+          detail:
+            "The next Export Diagnostics includes it (as profiles/…cpuprofile).",
+          buttons: ["OK", "Export Diagnostics…"],
+          defaultId: 0,
+        }
+      : {
+          type: "warning" as const,
+          message: "No profile was saved",
+          detail:
+            "A profile is already being recorded, or recording failed (see main.log).",
+          buttons: ["OK"],
+        };
+    const win = BrowserWindow.getFocusedWindow();
+    const result = win
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options);
+    if (path && result.response === 1) exportDiagnosticsFromMenu();
+  });
+}
+
+/**
  * Electron's default menu (app, File, Edit, View, Window), plus "Export
- * Diagnostics…" in the app menu and a Help menu that replaces Electron's
- * own links.
+ * Diagnostics…" and "Profile Main Process (10 s)" in the app menu and a
+ * Help menu that replaces Electron's own links.
  */
 function installApplicationMenu(): void {
   const exportItem: MenuItemConstructorOptions = {
     id: "export-diagnostics",
     label: "Export Diagnostics…",
     click: exportDiagnosticsFromMenu,
+  };
+  const profileItem: MenuItemConstructorOptions = {
+    id: "profile-main",
+    label: "Profile Main Process (10 s)",
+    click: profileMainFromMenu,
   };
   // The Settings page (docs/settings.md S2/S3); its footer reopens the
   // first-run wizard ("Run setup again").
@@ -2807,6 +2885,7 @@ function installApplicationMenu(): void {
               settingsItem,
               { type: "separator" },
               exportItem,
+              profileItem,
               { type: "separator" },
               { role: "services" },
               { type: "separator" },
@@ -2848,6 +2927,7 @@ function installApplicationMenu(): void {
           label: "Export Diagnostics…",
           click: exportDiagnosticsFromMenu,
         },
+        { ...profileItem, id: "profile-main-help" },
         {
           label: "Harbormaster on GitHub",
           click: () =>
@@ -2888,6 +2968,11 @@ function registerReleaseIpc(): void {
     clipboard.writeText(lastDiagnosticsSummary);
     return lastDiagnosticsSummary;
   });
+
+  // The renderer's long frames per minute, for the `[health]` line.
+  ipcMain.on("app:frameStats", (_event, stats: unknown) =>
+    recordFrameStats(stats),
+  );
 
   // See preload's `reportError`: an uncaught renderer error/rejection,
   // logged as `[renderer] ...` (never includes anything but the error's own

@@ -121,6 +121,58 @@ describe("formatHealthLine", () => {
     expect(parsed.topPtys).toHaveLength(3);
   });
 
+  it("carries each busy pty's lifetime total, the top 3 by lifetime and the renderer's long frames", () => {
+    const line = formatHealthLine(
+      snapshot({
+        nowMs: 10 * 60_000,
+        ptyLifetimes: [
+          {
+            sessionId: "s9",
+            taskId: "t9",
+            bytes: 83_000_000,
+            chunks: 9,
+            startedAt: 0,
+          },
+          {
+            sessionId: "s1",
+            taskId: "t1",
+            bytes: 5_000_000,
+            chunks: 4,
+            startedAt: 4 * 60_000,
+          },
+          {
+            sessionId: "s3",
+            taskId: "t3",
+            bytes: 9_000,
+            chunks: 2,
+            startedAt: 9 * 60_000,
+          },
+          {
+            sessionId: "s2",
+            taskId: undefined,
+            bytes: 1_000,
+            chunks: 1,
+            startedAt: 0,
+          },
+        ],
+        frames: { long: 37, maxMs: 412 },
+      }),
+    );
+    const parsed = JSON.parse(line.slice("[health] ".length));
+    expect(parsed.topPtys[0]).toEqual({
+      id: "s1",
+      task: "t1",
+      bytes: 100_000,
+      total: 5_000_000,
+    });
+    expect(parsed.topPtysLifetime).toEqual([
+      { id: "s9", task: "t9", bytes: 83_000_000, ageMin: 10 },
+      { id: "s1", task: "t1", bytes: 5_000_000, ageMin: 6 },
+      { id: "s3", task: "t3", bytes: 9_000, ageMin: 1 },
+    ]);
+    expect(parsed.frames).toEqual({ long: 37, maxMs: 412 });
+  });
+
   it("hard-truncates as a last resort", () => {
     expect(formatHealthLine(snapshot(), 50).length).toBe(50);
   });

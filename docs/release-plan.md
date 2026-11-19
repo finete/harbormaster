@@ -288,8 +288,12 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   against GitHub Releases (`http-version-access` over Electron's
   `net.fetch`, so it trusts the macOS keychain), shows
   `brew update && brew upgrade --cask harbormaster` with a copy button.
-- "Export diagnostics" (settings): zips `<userData>/logs` + a redacted
-  `config.json` + `harbormaster rules list` output.
+- "Export diagnostics" (Help menu): zips `<userData>/logs` + a redacted
+  `config.json` + `harbormaster rules list` output; since 2026-11-19 also
+  the main-process CPU profiles (automatic on lag/CPU, or Help → Profile
+  Main Process), each pty's lifetime output, one narrow `ps` of the live
+  agents, open tasks' session file sizes and entry counts, and the
+  renderer's long frames + focus. What and why: README "Troubleshooting".
 - LICENSE: MIT, `finete`.
 - Removed: `migrate-from-pihome`, Beads reading, `/totask` / `/totemptask`,
   the TUI board, multiplexer leftovers. README rewritten around the Homebrew

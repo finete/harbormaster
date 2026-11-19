@@ -20,6 +20,8 @@ export const DIAGNOSTICS_LIMITS = {
   wakeLogBytes: 256 * KiB,
   /** Byte budget for any other log kind found in the logs folder. */
   otherLogBytes: 256 * KiB,
+  /** Byte budget for the saved main-process CPU profiles (`profiles/`), newest first. */
+  profilesBytes: 2 * MiB,
   /** Hard cap on the whole bundle's uncompressed size. */
   bundleBytes: 8 * MiB,
   /** Room kept free for `manifest.json` and `logs/README.txt`. */

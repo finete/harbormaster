@@ -58,6 +58,10 @@ import {
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
 import { boardShortcutLabel, modKeyLabel } from "./lib/platform";
+import {
+  setAppFocus,
+  startRendererDiagnostics,
+} from "./lib/renderer-diagnostics";
 import { startReviewRejectedListener } from "./lib/review";
 import { closeReview, reviewUrlFor } from "./lib/review-close";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
@@ -204,11 +208,14 @@ export function App({
   // workspace; never changes focus or view here.
   useEffect(() => startTaskUrlListener(), []);
   useEffect(() => startReviewRejectedListener(), []);
+  // Long frames + focus for Export diagnostics (lib/renderer-diagnostics.ts).
+  useEffect(() => startRendererDiagnostics(), []);
   // Sticky composer choices (last Where / agent / model, recent Wheres).
   const [newTaskPrefs, setNewTaskPrefs] = useState<NewTaskPrefs>(() =>
     readPrefs(window.localStorage),
   );
   const visibleTaskId = draftFocused ? "" : focusedTaskId;
+  useEffect(() => setAppFocus(view, visibleTaskId), [view, visibleTaskId]);
   const boardTasks = useMemo(() => flatRows.map((row) => row.task), [flatRows]);
   // The "Ready to review" hint (lib/review.ts): idle Dev tasks with a dirty worktree.
   const draftOrigin = draft?.originTaskId

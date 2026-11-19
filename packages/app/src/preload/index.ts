@@ -466,6 +466,9 @@ const api: HarbormasterApi = {
     }): void => {
       ipcRenderer.send("app:rendererError", error);
     },
+    reportFrameStats: (stats: { long: number; maxMs: number }): void => {
+      ipcRenderer.send("app:frameStats", stats);
+    },
   },
   onboarding: {
     shouldShow: () => ipcRenderer.invoke("onboarding:shouldShow"),

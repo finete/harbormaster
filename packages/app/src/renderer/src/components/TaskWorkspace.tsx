@@ -10,6 +10,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import { registerWorkspaceFocus } from "../lib/renderer-diagnostics";
 import { registerReviewSource } from "../lib/review-close";
 import {
   reviewPanelId,
@@ -218,6 +219,28 @@ export const TaskWorkspace = memo(function TaskWorkspace({
             | undefined
         )?.url,
     );
+  }, [api, taskId]);
+
+  // What this workspace shows, for Export diagnostics' "what was focused".
+  useEffect(() => {
+    if (!api) return;
+    return registerWorkspaceFocus(taskId, () => {
+      const active = api.activePanel;
+      return {
+        panels: api.panels.length,
+        ...(active
+          ? {
+              activePanel: {
+                id: active.id,
+                ...(active.title ? { title: active.title.slice(0, 80) } : {}),
+                ...(active.view.contentComponent
+                  ? { component: active.view.contentComponent }
+                  : {}),
+              },
+            }
+          : {}),
+      };
+    });
   }, [api, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {

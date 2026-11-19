@@ -1086,6 +1086,7 @@ function retireSession(id: string): void {
   // another onExit delivery, and we don't want a re-entrant disposeSession
   // call to find (and double-dispose) the same record.
   sessions.delete(id);
+  ptyTraffic.end(id);
   if (session.taskId && primaryTaskSessions.get(session.taskId) === id) {
     primaryTaskSessions.delete(session.taskId);
   }

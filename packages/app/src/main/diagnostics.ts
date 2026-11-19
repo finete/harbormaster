@@ -29,6 +29,7 @@ import {
   type DiagnosticsLimits,
   rotatedLogFiles,
 } from "./diagnostics-limits";
+import { profilesForBundle } from "./diagnostics-runtime";
 import { createZip, type ZipEntry } from "./zip-writer";
 
 export const REDACTED = "[redacted]";
@@ -142,6 +143,16 @@ export interface DiagnosticsInput {
   lastUncleanExit?: unknown;
   /** OS crash report names (never contents), written as `crash-reports.json`. */
   crashReports?: Array<{ name: string; mtime: string }>;
+  /** Live ptys' lifetime totals (pty-traffic.ts), written as `ptys.json`. */
+  ptys?: unknown;
+  /** One narrow `ps` of the live agents (diagnostics-runtime.ts), written as `agents-ps.json`. */
+  agentProcesses?: unknown;
+  /** Open tasks' session files: size, mtime, entry count, written as `session-files.json`. */
+  sessionFiles?: unknown;
+  /** The renderer's long frames and focus (renderer-diagnostics.ts), written as `renderer.json`. */
+  renderer?: unknown;
+  /** Folder of saved main-process CPU profiles (cpu-profile.ts); the newest go in `profiles/` within `limits.profilesBytes`. */
+  profilesDir?: string;
   /** Replace the home folder with `~` in every file (default `true`). */
   replaceHome?: boolean;
   /** Home folder to replace; defaults to `os.homedir()`. */
@@ -159,6 +170,10 @@ const FILE_CAPS = {
   doctor: 512 * 1024,
   reviewSupport: 64 * 1024,
   crashReports: 64 * 1024,
+  ptys: 128 * 1024,
+  agentProcesses: 64 * 1024,
+  sessionFiles: 128 * 1024,
+  renderer: 256 * 1024,
   stateTasks: 1024 * 1024,
   stateLocations: 128 * 1024,
   stateRepositories: 256 * 1024,
@@ -265,6 +280,27 @@ export function buildDiagnosticsZip(input: DiagnosticsInput): Buffer {
   }
   if (input.crashReports !== undefined) {
     addJson("crash-reports.json", input.crashReports, FILE_CAPS.crashReports);
+  }
+  if (input.ptys !== undefined) {
+    addJson("ptys.json", input.ptys, FILE_CAPS.ptys);
+  }
+  if (input.agentProcesses !== undefined) {
+    addJson("agents-ps.json", input.agentProcesses, FILE_CAPS.agentProcesses);
+  }
+  if (input.sessionFiles !== undefined) {
+    addJson("session-files.json", input.sessionFiles, FILE_CAPS.sessionFiles);
+  }
+  if (input.renderer !== undefined) {
+    addJson("renderer.json", input.renderer, FILE_CAPS.renderer);
+  }
+  // Profiles before the logs: the logs get whatever budget is left.
+  if (input.profilesDir) {
+    for (const profile of profilesForBundle(
+      input.profilesDir,
+      limits.profilesBytes,
+    )) {
+      add(`profiles/${profile.name}`, { text: profile.text, truncated: false });
+    }
   }
   const state = input.state;
   if (state?.tasks) {

@@ -746,6 +746,8 @@ export interface HarbormasterApi {
       stack?: string | undefined;
       source?: string | undefined;
     }): void;
+    /** The renderer's long animation frames over the last minute, for main's `[health]` line. Fire-and-forget. */
+    reportFrameStats(stats: { long: number; maxMs: number }): void;
   };
   /** The first-run wizard (docs/release-plan.md "Onboarding"); every call is a core command. */
   onboarding: OnboardingApi;

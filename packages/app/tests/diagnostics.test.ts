@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os, { tmpdir } from "node:os";
 import path from "node:path";
 import type { BoardColumn, WorkspaceBinding } from "@harbormaster/core";
@@ -817,6 +823,76 @@ describe("buildDiagnosticsZip manifest, limits and home replacement", () => {
       manifest.files.find((f: { name: string }) => f.name === "doctor.json")
         .truncated,
     ).toBe(true);
+  });
+});
+
+describe("buildDiagnosticsZip runtime evidence", () => {
+  it("adds ptys, agents, session files, renderer and the newest profiles within their cap", () => {
+    const dir = tempDir();
+    const logsDir = path.join(dir, "logs");
+    const profilesDir = path.join(logsDir, "profiles");
+    mkdirSync(profilesDir, { recursive: true });
+    const home = os.homedir();
+    const profile = (name: string, mtime: number, bytes: number) => {
+      const file = path.join(profilesDir, name);
+      writeFileSync(
+        file,
+        JSON.stringify({
+          url: `file://${home}/app.js`,
+          pad: "x".repeat(bytes),
+        }),
+      );
+      utimesSync(file, mtime, mtime);
+    };
+    profile("a-cpu.cpuprofile", 1_000, 10);
+    profile("b-lag.cpuprofile", 2_000, 10);
+    profile("c-manual.cpuprofile", 3_000, 900);
+    const configFile = path.join(dir, "config.json");
+    writeFileSync(configFile, "{}");
+    const files = unzipAll(
+      writeBundle({
+        logsDir,
+        configFile,
+        versions: { app: "9.9.9" },
+        profilesDir,
+        limits: { profilesBytes: 600 },
+        ptys: {
+          counts: { live: 1, attached: 1 },
+          ptys: [{ sessionId: "s", bytes: 83_000_000 }],
+        },
+        agentProcesses: { agents: [{ taskId: "t", pid: 1, cpuPercent: 3 }] },
+        sessionFiles: [
+          { taskId: "t", path: `${home}/.pi/s.jsonl`, entries: 797 },
+        ],
+        renderer: { focus: { view: "workspace" }, longFrames: { frames: [] } },
+        now: NOW,
+      }),
+    );
+    expect(JSON.parse(files.get("ptys.json") ?? "").ptys[0].bytes).toBe(
+      83_000_000,
+    );
+    expect(JSON.parse(files.get("agents-ps.json") ?? "").agents[0].pid).toBe(1);
+    expect(JSON.parse(files.get("session-files.json") ?? "")[0]).toEqual({
+      taskId: "t",
+      path: "~/.pi/s.jsonl",
+      entries: 797,
+    });
+    expect(JSON.parse(files.get("renderer.json") ?? "").focus.view).toBe(
+      "workspace",
+    );
+    // The 900-byte newest one is over the 600-byte cap; the next two fit.
+    const profiles = [...files.keys()].filter((name) =>
+      name.startsWith("profiles/"),
+    );
+    expect(profiles.sort()).toEqual([
+      "profiles/a-cpu.cpuprofile",
+      "profiles/b-lag.cpuprofile",
+    ]);
+    expect(files.get("profiles/b-lag.cpuprofile")).toContain(
+      '"file://~/app.js"',
+    );
+    const manifest = JSON.parse(files.get("manifest.json") ?? "");
+    expect(manifest.limits.profilesBytes).toBe(600);
   });
 });
 
