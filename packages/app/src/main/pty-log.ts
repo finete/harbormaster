@@ -29,14 +29,36 @@ export const RING_BUFFER_LINES = 40;
 export const RING_BUFFER_MAX_LINE_LENGTH = 200;
 
 /**
+ * Longest unfinished escape sequence carried into the next chunk (an OSC
+ * title or hyperlink split by the pty read); a longer one is stripped as
+ * text would be, leaving a little junk in the tail rather than growing.
+ */
+const MAX_ESCAPE_CARRY = 4096;
+/** An escape sequence cut off at the end of a chunk: lone ESC, OSC without its BEL/ST, CSI without its final byte. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching literal ESC/BEL bytes is the point.
+const UNFINISHED_ESCAPE = /^\x1b(?:\][^\x07\x1b]*|\[[0-?]*[ -/]*)?$/;
+
+/**
  * A small bounded, in-memory tail of a pty's recent output: ANSI-stripped,
  * split into non-empty lines, each capped in length, only the newest
  * `maxLines` kept. Never persisted — only read when a session exits within
  * its early-exit window (see `formatPtyExitLine`).
+ *
+ * Every chunk costs O(chunk): only new data is stripped (an escape sequence
+ * split across chunks is carried, bounded), and the unterminated last line
+ * is capped at `maxLineLength` as it grows. Pi's fullscreen UI never prints
+ * a newline, so an uncapped partial line held everything a pane ever drew
+ * and each chunk re-stripped all of it: tens of ms of main-thread work per
+ * frame on a long-lived pane, which lagged every pane's IPC.
  */
 export class OutputRingBuffer {
   private readonly lines: string[] = [];
+  /** The unterminated last line, leading whitespace dropped, at most `maxLineLength` chars. */
   private partial = "";
+  /** Non-blank text was dropped from `partial` (its line ends in "…"). */
+  private partialOverflow = false;
+  /** An escape sequence cut off at the end of the previous chunk. */
+  private carry = "";
 
   constructor(
     private readonly maxLines: number = RING_BUFFER_LINES,
@@ -44,20 +66,57 @@ export class OutputRingBuffer {
   ) {}
 
   push(chunk: string): void {
-    const clean = stripAnsi(this.partial + chunk);
-    const parts = clean.split(/\r?\n/);
-    this.partial = parts.pop() ?? "";
-    for (const line of parts) this.addLine(line);
+    let raw = this.carry + chunk;
+    this.carry = "";
+    const esc = raw.lastIndexOf("\x1b");
+    if (
+      esc !== -1 &&
+      raw.length - esc <= MAX_ESCAPE_CARRY &&
+      UNFINISHED_ESCAPE.test(raw.slice(esc))
+    ) {
+      this.carry = raw.slice(esc);
+      raw = raw.slice(0, esc);
+    }
+    const parts = stripAnsi(raw).split(/\r?\n/);
+    const last = parts.pop() ?? "";
+    if (parts.length > 0) {
+      this.appendPartial(parts[0] ?? "");
+      this.flushPartial();
+      for (let i = 1; i < parts.length; i++) this.addLine(parts[i] ?? "");
+    }
+    this.appendPartial(last);
+  }
+
+  private appendPartial(text: string): void {
+    if (this.partialOverflow || !text) return;
+    const next = this.partial ? this.partial + text : text.trimStart();
+    if (next.length <= this.maxLineLength) {
+      this.partial = next;
+      return;
+    }
+    this.partial = next.slice(0, this.maxLineLength);
+    if (next.slice(this.maxLineLength).trim()) this.partialOverflow = true;
+  }
+
+  private flushPartial(): void {
+    if (this.partialOverflow) this.keep(`${this.partial}…`);
+    else this.addLine(this.partial);
+    this.partial = "";
+    this.partialOverflow = false;
   }
 
   private addLine(line: string): void {
     const trimmed = line.trim();
     if (!trimmed) return;
-    const capped =
+    this.keep(
       trimmed.length > this.maxLineLength
         ? `${trimmed.slice(0, this.maxLineLength)}…`
-        : trimmed;
-    this.lines.push(capped);
+        : trimmed,
+    );
+  }
+
+  private keep(line: string): void {
+    this.lines.push(line);
     if (this.lines.length > this.maxLines) this.lines.shift();
   }
 

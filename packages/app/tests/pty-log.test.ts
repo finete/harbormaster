@@ -39,6 +39,39 @@ describe("OutputRingBuffer", () => {
     buf.push("abcdefgh\n");
     expect(buf.tail()).toEqual(["abcde…"]);
   });
+  it("strips an escape sequence split across chunks", () => {
+    const buf = new OutputRingBuffer(10, 100);
+    buf.push("hello \x1b[3");
+    buf.push("1mred\x1b[0m\na\x1b]0;ti");
+    buf.push("tle\x07b\x1b");
+    buf.push("[0m\n");
+    expect(buf.tail()).toEqual(["hello red", "ab"]);
+  });
+  it("caps a long line built up over many chunks, and \\r\\n split across them", () => {
+    const buf = new OutputRingBuffer(10, 5);
+    buf.push("   ab");
+    buf.push("cdefgh\r");
+    buf.push("\nnext   ");
+    buf.push("      \n");
+    expect(buf.tail()).toEqual(["abcde…", "next"]);
+  });
+  it("costs O(chunk) on endless newline-free output (Pi's fullscreen UI)", () => {
+    // Before: the partial line grew without bound and every chunk
+    // re-stripped all of it, so this took minutes. Now it is linear.
+    const buf = new OutputRingBuffer();
+    const frame =
+      `\x1b[12;1H${"x".repeat(80)}\x1b[13;1H${"y".repeat(80)}`.repeat(60);
+    const started = performance.now();
+    for (let drawn = 0; drawn < 30_000_000; drawn += frame.length) {
+      buf.push(frame);
+    }
+    expect(performance.now() - started).toBeLessThan(5000);
+    buf.push("\ndone\n");
+    expect(buf.tail()).toEqual([
+      `${"x".repeat(80)}${"y".repeat(80)}${"x".repeat(40)}…`,
+      "done",
+    ]);
+  });
   it("holds a trailing partial line until it is terminated", () => {
     const buf = new OutputRingBuffer(10, 100);
     buf.push("partial-no-newline");
