@@ -1,4 +1,5 @@
 import type { JSX, ReactNode } from "react";
+import { SidebarRevealButton } from "./SidebarReveal";
 import { TaskWorkspace } from "./TaskWorkspace";
 
 /**
@@ -28,16 +29,23 @@ export function WorkspaceView({
    */
   composer?: ReactNode;
 }): JSX.Element {
+  // No task header on screen (composer, empty state): the hidden sidebar's
+  // "Show sidebar" button floats in the corner instead.
+  const floatingReveal = (composer || !openedTaskIds.has(focusedTaskId)) && (
+    <SidebarRevealButton className="absolute left-2 top-2.5 z-20" />
+  );
   if (openedTaskIds.size === 0) {
     if (composer) {
       return (
         <div data-testid="workspace-main" className="relative h-full flex-1">
+          {floatingReveal}
           {composer}
         </div>
       );
     }
     return (
       <div data-testid="workspace-main" className="relative h-full flex-1">
+        {floatingReveal}
         <div
           data-testid="workspace-empty-hint"
           className="flex h-full items-center justify-center text-sm text-muted-foreground"
@@ -61,6 +69,7 @@ export function WorkspaceView({
         </div>
       ))}
       {composer && <div className="absolute inset-0 z-10 flex">{composer}</div>}
+      {floatingReveal}
     </div>
   );
 }

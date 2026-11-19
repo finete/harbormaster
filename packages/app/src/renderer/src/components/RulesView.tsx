@@ -42,6 +42,7 @@ import { RULE_SHEET_MENU_OWNER, RuleSheet } from "./RuleSheet";
 import { RulesActivity } from "./RulesActivity";
 import { RulesEditButton } from "./RulesEditButton";
 import { RulesList } from "./RulesList";
+import { SidebarRevealButton } from "./SidebarReveal";
 import { Kbd } from "./ui/kbd";
 import { Segmented } from "./ui/segmented";
 
@@ -294,6 +295,7 @@ export function RulesView({
       className="flex h-full min-w-0 flex-1 flex-col outline-none"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
+        <SidebarRevealButton />
         <ListChecks className="h-4 w-4 text-foreground" aria-hidden />
         <span className="text-sm font-medium" data-testid="rules-title">
           Rules

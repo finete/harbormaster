@@ -493,7 +493,7 @@ test("the workspace header keeps the verbs (Await… · Done, no kind names) and
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test("Cmd+B toggles between board and workspace views", async () => {
+test("Cmd+Shift+B toggles board and workspace; Cmd+B and the hide button hide the sidebar", async () => {
   // The previous test left the app in the board view.
   // Confirm the board-button / workspace-button pair (formerly separate tests):
   // board visible and workspace hidden while in board view.
@@ -505,12 +505,31 @@ test("Cmd+B toggles between board and workspace views", async () => {
   await expect(window.getByTestId("workspace-view")).toBeVisible();
   await expect(window.getByTestId("board-view")).toBeHidden();
 
-  // Cmd+B keyboard shortcut toggles between the two views.
-  await window.keyboard.press("Meta+B");
+  // Cmd+Shift+B toggles between the two views.
+  await window.keyboard.press("Meta+Shift+B");
   await expect(window.getByTestId("board-view")).toBeVisible();
 
-  await window.keyboard.press("Meta+B");
+  await window.keyboard.press("Meta+Shift+B");
   await expect(window.getByTestId("workspace-view")).toBeVisible();
+
+  // Cmd+B hides the sidebar entirely (as in most macOS apps); the main
+  // area's header offers "Show sidebar" while it is hidden.
+  const sidebar = window.getByTestId("sidebar");
+  const reveal = window.getByTestId("sidebar-reveal").filter({ visible: true });
+  await window.keyboard.press("Meta+B");
+  await expect(sidebar).toBeHidden();
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await reveal.click();
+  await expect(sidebar).toBeVisible();
+  await expect(window.getByTestId("sidebar-reveal")).toHaveCount(0);
+
+  // The sidebar's own hide button does the same; Cmd+B brings it back
+  // (persisted, so later tests sharing the profile need it shown).
+  await sidebar.getByTestId("sidebar-hide").click();
+  await expect(sidebar).toBeHidden();
+  await expect(reveal).toBeVisible();
+  await window.keyboard.press("Meta+B");
+  await expect(sidebar).toBeVisible();
 });
 
 test("sidebar rows group under a repository header with a state chip per task", async () => {

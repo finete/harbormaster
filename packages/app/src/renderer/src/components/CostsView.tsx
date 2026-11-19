@@ -65,6 +65,7 @@ import {
 } from "../lib/usage";
 import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
+import { SidebarRevealButton } from "./SidebarReveal";
 import { Button } from "./ui/button";
 import { Chip } from "./ui/chip";
 import {
@@ -208,6 +209,7 @@ export function CostsView({
       className="flex h-full min-w-0 flex-1 flex-col outline-none"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
+        <SidebarRevealButton />
         <Gauge className="h-4 w-4 text-foreground" aria-hidden />
         <span className="text-sm font-medium" data-testid="costs-title">
           Costs

@@ -28,6 +28,7 @@ import {
   Inbox,
   LayoutGrid,
   ListChecks,
+  PanelLeftClose,
   Pencil,
   Pin,
   Plus,
@@ -51,7 +52,12 @@ import {
   useUnreadTaskIds,
 } from "../core-client";
 import { defaultOpenInApp } from "../lib/open-in";
-import { modKeyLabel, rulesShortcutLabel } from "../lib/platform";
+import {
+  boardShortcutLabel,
+  modKeyLabel,
+  rulesShortcutLabel,
+  sidebarShortcutLabel,
+} from "../lib/platform";
 import { repoColorClass } from "../lib/repo-color";
 import { cycleTaskId } from "../lib/sidebar-cycle";
 import {
@@ -325,12 +331,14 @@ function SortableGroupSection({
  * activates on Enter/Space, which would steal row activation (no
  * KeyboardSensor is registered; announcements below serve pointer drags). A
  * type-to-filter search box, drag-to-resize right edge (persisted), and a
- * collapse toggle down to a thin strip of status dots. Clicking a row
+ * collapse toggle down to a thin strip of status dots, and a hide button
+ * (Cmd/Ctrl+B too) that takes it out of the layout entirely (App owns that
+ * state, see SidebarReveal.tsx). Clicking a row
  * focuses that task through App's takeover-guarded `selectTask`; each row's
  * hover close button (or a middle-click) closes just that task's workspace
  * through `onCloseTask` (App's `requestCloseTask`) without touching its
- * board state. The footer keeps "+ New task" and the "Board" button (Cmd+B
- * also works, see App.tsx). Archived tasks are always excluded (the Done
+ * board state. The footer keeps "+ New task" and the "Board" button
+ * (Cmd/Ctrl+Shift+B also works, see App.tsx). Archived tasks are always excluded (the Done
  * column's "show archived" toggle is board-only; see BoardColumn.tsx).
  */
 /** The Costs row's tooltip (docs/costs.md). */
@@ -358,6 +366,8 @@ export function Sidebar({
   draftFocused,
   onSelectDraft,
   onCloseDraft,
+  hidden = false,
+  onHide,
 }: {
   focusedTaskId: string | null;
   openedTaskIds: ReadonlySet<string>;
@@ -391,6 +401,13 @@ export function Sidebar({
   draftFocused: boolean;
   onSelectDraft: () => void;
   onCloseDraft: () => void;
+  /**
+   * Hidden entirely (App's Cmd/Ctrl+B). Stays mounted, so the filter, drag
+   * state and keyboard task cycling survive.
+   */
+  hidden?: boolean;
+  /** Hide the sidebar (App owns the state, see SidebarReveal.tsx). */
+  onHide: () => void;
 }): JSX.Element {
   const columns = useBoard();
   const inboxTitle =
@@ -398,6 +415,8 @@ export function Sidebar({
       ? `Inbox: ${inboxCount} need${inboxCount === 1 ? "s" : ""} you (${modKeyLabel()}I)`
       : `Inbox: nothing needs you (${modKeyLabel()}I)`;
   const rulesShortcut = rulesShortcutLabel();
+  const boardShortcut = boardShortcutLabel();
+  const hideTitle = `Hide sidebar (${sidebarShortcutLabel()})`;
   const rulesTitle = `Rules: what each rule says and did (${rulesShortcut})`;
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
@@ -1149,8 +1168,21 @@ export function Sidebar({
       <div
         data-testid="sidebar"
         data-collapsed="true"
-        className="flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-chrome"
+        className={cn(
+          "flex h-full w-12 shrink-0 flex-col items-center border-r border-border bg-chrome",
+          hidden && "hidden",
+        )}
       >
+        <button
+          type="button"
+          data-testid="sidebar-hide"
+          aria-label="Hide sidebar"
+          title={hideTitle}
+          onClick={onHide}
+          className="mt-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeftClose className="h-4 w-4" aria-hidden />
+        </button>
         <button
           type="button"
           data-testid="sidebar-collapse"
@@ -1158,7 +1190,7 @@ export function Sidebar({
           aria-label="Expand sidebar"
           title="Expand sidebar"
           onClick={toggleCollapsed}
-          className="mt-2 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         >
           <ChevronsRight className="h-4 w-4" aria-hidden />
         </button>
@@ -1178,7 +1210,7 @@ export function Sidebar({
             compact
             icon={<LayoutGrid aria-hidden />}
             label="Board"
-            shortcut={`${modKeyLabel()}B`}
+            shortcut={boardShortcut}
             onClick={onShowBoard}
             testId="board-button"
           />
@@ -1265,6 +1297,7 @@ export function Sidebar({
       className={cn(
         "relative flex h-full shrink-0 flex-col border-r border-border bg-chrome",
         resizing && "select-none",
+        hidden && "hidden",
       )}
     >
       <nav
@@ -1281,7 +1314,7 @@ export function Sidebar({
         <SidebarNavItem
           icon={<LayoutGrid aria-hidden />}
           label="Board"
-          shortcut={`${modKeyLabel()}B`}
+          shortcut={boardShortcut}
           onClick={onShowBoard}
           testId="board-button"
         />
@@ -1330,9 +1363,19 @@ export function Sidebar({
           aria-label="Collapse sidebar"
           title="Collapse sidebar"
           onClick={toggleCollapsed}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+          className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
         >
           <ChevronsLeft className="h-4 w-4" aria-hidden />
+        </button>
+        <button
+          type="button"
+          data-testid="sidebar-hide"
+          aria-label="Hide sidebar"
+          title={hideTitle}
+          onClick={onHide}
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeftClose className="h-4 w-4" aria-hidden />
         </button>
       </div>
       <div className="px-3 pb-2">

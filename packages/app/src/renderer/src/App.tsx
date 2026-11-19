@@ -18,6 +18,11 @@ import {
   RulesView,
 } from "./components/RulesView";
 import { Sidebar } from "./components/Sidebar";
+import {
+  readSidebarHidden,
+  SidebarRevealContext,
+  storeSidebarHidden,
+} from "./components/SidebarReveal";
 import { SettingsView } from "./components/settings/SettingsView";
 import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
@@ -52,7 +57,7 @@ import {
   dismissOrphanWarning,
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
-import { modKeyLabel } from "./lib/platform";
+import { boardShortcutLabel, modKeyLabel } from "./lib/platform";
 import { startReviewRejectedListener } from "./lib/review";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
@@ -87,7 +92,8 @@ function isPage(view: View): view is Page {
  * - "workspace" (default): sidebar listing every task + the focused task's
  *   per-task dockview terminal workspace (persists across switches).
  * - "board": the kanban board, full-width, reached via the sidebar's Board
- *   button, Cmd+B, or landing here from app start. Clicking a card jumps
+ *   button, Cmd/Ctrl+Shift+B, or landing here from app start. (Cmd/Ctrl+B
+ *   hides the sidebar, as in most macOS apps: SidebarReveal.tsx.) Clicking a card jumps
  *   back into the workspace view focused on that task.
  * - "inbox": everything that needs a human (docs/release-plan.md "Inbox"),
  *   in place of the task workspace; the sidebar stays. Sidebar Inbox row or
@@ -122,6 +128,18 @@ export function App({
   onRunSetup?: (() => void) | undefined;
 } = {}): JSX.Element {
   const [view, setView] = useState<View>("workspace");
+  // Cmd/Ctrl+B or the sidebar's hide button (SidebarReveal.tsx), persisted.
+  const [sidebarHidden, setSidebarHidden] = useState(() =>
+    readSidebarHidden(window.localStorage),
+  );
+  const setSidebarHiddenStored = useCallback((hidden: boolean) => {
+    setSidebarHidden(hidden);
+    storeSidebarHidden(window.localStorage, hidden);
+  }, []);
+  const showSidebar = useCallback(
+    () => setSidebarHiddenStored(false),
+    [setSidebarHiddenStored],
+  );
   // The view the inbox / Rules page returns to (Esc, or its shortcut again).
   const viewBeforePage = useRef<Exclude<View, Page>>("workspace");
   const togglePage = useCallback((page: Page) => {
@@ -507,9 +525,16 @@ export function App({
         openSettings();
         return;
       }
-      if (key === "b") {
+      if (key === "b" && !event.altKey) {
         event.preventDefault();
-        setView((current) => (current === "board" ? "workspace" : "board"));
+        if (event.shiftKey) {
+          setView((current) => (current === "board" ? "workspace" : "board"));
+        } else {
+          setSidebarHidden((hidden) => {
+            storeSidebarHidden(window.localStorage, !hidden);
+            return !hidden;
+          });
+        }
         return;
       }
       if (key === "i" && !event.shiftKey && !event.altKey) {
@@ -655,7 +680,7 @@ export function App({
                 size="sm"
                 data-testid="workspace-button"
                 onClick={() => setView("workspace")}
-                title={`Back to workspace (${modKeyLabel()}B)`}
+                title={`Back to workspace (${boardShortcutLabel()})`}
               >
                 <PanelLeft className="h-3.5 w-3.5" />
                 Workspace
@@ -704,7 +729,11 @@ export function App({
             </div>
           </div>
         }
-        {
+        {/* While the sidebar is hidden, each main-area header shows a
+            "Show sidebar" button (SidebarReveal.tsx). */}
+        <SidebarRevealContext.Provider
+          value={sidebarHidden ? showSidebar : null}
+        >
           <div
             data-testid="workspace-view"
             className={
@@ -737,6 +766,8 @@ export function App({
               // (Inbox / Rules / Costs) for the workspace that shows it.
               onSelectDraft={openDraft}
               onCloseDraft={closeDraft}
+              hidden={sidebarHidden}
+              onHide={() => setSidebarHiddenStored(true)}
             />
             {view === "inbox" && (
               <InboxView
@@ -809,7 +840,7 @@ export function App({
               />
             </div>
           </div>
-        }
+        </SidebarRevealContext.Provider>
         <TakeoverDialog
           open={takeover !== null}
           taskTitle={

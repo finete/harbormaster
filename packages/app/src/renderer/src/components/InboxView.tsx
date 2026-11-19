@@ -58,6 +58,7 @@ import {
   approvalDraftOf,
   decideApproval,
 } from "./ApprovalDetail";
+import { SidebarRevealButton } from "./SidebarReveal";
 import { pullRequestUrl, stateChipLabel } from "./sidebar-model";
 import { Button } from "./ui/button";
 import {
@@ -387,6 +388,7 @@ export function InboxView({
       className="flex h-full min-w-0 flex-1 flex-col outline-none"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
+        <SidebarRevealButton />
         <LogoGlyph className="h-4 w-4 text-foreground" />
         <span className="text-sm font-medium">Inbox</span>
         <Segmented

@@ -25,6 +25,7 @@ import {
 } from "../lib/workspace-persistence";
 import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { OpenInButton } from "./OpenInButton";
+import { SidebarRevealButton } from "./SidebarReveal";
 import { TaskActions } from "./TaskActions";
 import { TaskAudit } from "./TaskAudit";
 import { TaskUsageChip } from "./TaskUsageChip";
@@ -309,6 +310,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
         data-testid="workspace-header"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
+          <SidebarRevealButton />
           {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
           {task && <TaskUsageChip task={task} />}
         </div>

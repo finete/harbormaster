@@ -11,6 +11,20 @@ export function modKeyLabel(platform: string = navigator.platform): string {
   return isMacPlatform(platform) ? "⌘" : "Ctrl+";
 }
 
+/** The board/workspace toggle: "⌘⇧B" on macOS, "Ctrl+Shift+B" elsewhere. */
+export function boardShortcutLabel(
+  platform: string = navigator.platform,
+): string {
+  return isMacPlatform(platform) ? "⌘⇧B" : "Ctrl+Shift+B";
+}
+
+/** Hide/show the sidebar: "⌘B" on macOS, "Ctrl+B" elsewhere. */
+export function sidebarShortcutLabel(
+  platform: string = navigator.platform,
+): string {
+  return `${modKeyLabel(platform)}B`;
+}
+
 /** The Rules page shortcut: "⌘⇧R" on macOS, "Ctrl+Shift+R" elsewhere. */
 export function rulesShortcutLabel(
   platform: string = navigator.platform,

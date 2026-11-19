@@ -25,6 +25,7 @@ import { configErrorText, SETTINGS_SECTIONS } from "../../lib/settings-form";
 import { useLastOpenInAppId, useOpenInApps } from "../../lib/use-open-in";
 import { useSettings } from "../../lib/use-settings";
 import { describeThrown, pushToast } from "../../toast";
+import { SidebarRevealButton } from "../SidebarReveal";
 import { Button } from "../ui/button";
 import { SidebarNavItem } from "../ui/sidebar-nav";
 import { AgentsSection } from "./AgentsSection";
@@ -114,6 +115,7 @@ export function SettingsView({
       className="flex h-full min-w-0 flex-1 flex-col"
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
+        <SidebarRevealButton />
         <Settings2 className="h-4 w-4 text-foreground" aria-hidden />
         <span className="text-sm font-medium" data-testid="settings-title">
           Settings
