@@ -6,7 +6,8 @@
 // PLANNOTATOR_BROWSER (the app's `harbormaster-open-url` → `harbormaster
 // open-url` → core `openTaskUrl` → `task-url-opened`) and the task's review
 // tab shows the page in an iframe. Sending the feedback ends the session:
-// the tab shows "Review sent" with Review again, which starts a new one.
+// the tab shows "Review sent" with Review again, which starts a new one,
+// and the page finds the settings cookie the first session set.
 // The wizard's code review step lists Plannotator as ready for Pi.
 // A Claude Code task (fake-claude.ts) covers the other harness's seam: with
 // no `/plannotator-review` skill the Review button is disabled; installing
@@ -271,6 +272,9 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
     await expect(page.getByTestId("fake-plannotator-title")).toHaveText(
       "Fake Plannotator review",
     );
+    await expect(page.getByTestId("fake-plannotator-seen")).toHaveText(
+      "first run",
+    );
     // Sending the feedback ends the session: the server goes away.
     await page.getByRole("button", { name: "Send feedback" }).click();
     const ended = workspace.getByTestId("url-pane-ended");
@@ -282,6 +286,11 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
     await expect(frame).toBeVisible({ timeout: 30_000 });
     await expect(frame).not.toHaveAttribute("data-url", firstUrl ?? "");
     await expect(workspace.getByTestId("url-tab")).toHaveCount(1);
+    // The page's settings cookie survived into the new session on another
+    // port (the frame is cross-site, so Chromium alone drops it).
+    await expect(page.getByTestId("fake-plannotator-seen")).toHaveText(
+      "remembered",
+    );
   } else {
     await expect(page.locator("body")).not.toBeEmpty();
   }

@@ -65,6 +65,7 @@ import type {
   UpdateTaskInput,
   WorktreeStatus,
 } from "./api";
+import { installFrameCookies } from "./frame-cookies";
 import { createIdRouter } from "./pty-bus";
 
 /**
@@ -487,4 +488,11 @@ const api: HarbormasterApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("harbormaster", api);
+// This preload also runs in subframes (`nodeIntegrationInSubFrames`, for the
+// URL pane's cookies: frame-cookies-shim.ts). Only the app's own top frame
+// ever gets the API; an embedded page gets nothing but its cookie jar.
+if (window.top === window) {
+  contextBridge.exposeInMainWorld("harbormaster", api);
+} else {
+  installFrameCookies();
+}

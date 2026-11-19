@@ -11,7 +11,9 @@ export const FAKE_PLANNOTATOR_VERSION = "0.28.64";
  * random 127.0.0.1 port, prints `Plannotator session ready: <url>` on
  * stderr first, then runs `$PLANNOTATOR_BROWSER <url>` when set; it exits
  * once the page POSTs `/send` (the user sent their feedback), so the
- * server is gone exactly like a real session's. Written as `<binDir>/plannotator`.
+ * server is gone exactly like a real session's. The page shows "first run"
+ * until it finds the settings cookie it sets (Plannotator keeps its settings
+ * in SameSite=Lax cookies). Written as `<binDir>/plannotator`.
  */
 export function writeFakePlannotator(binDir: string): string {
   mkdirSync(binDir, { recursive: true });
@@ -31,7 +33,13 @@ if (command !== "review") {
 const PAGE = '<!doctype html><html><body style="background:#fff;color:#111">' +
   '<h1 data-testid="fake-plannotator-title">Fake Plannotator review</h1>' +
   '<button id="send" onclick="fetch(\'/send\',{method:\'POST\'}).then(function(){document.getElementById(\'sent\').textContent=\'sent\'})">Send feedback</button>' +
-  '<p id="sent"></p></body></html>';
+  '<p id="sent"></p>' +
+  // Like Plannotator's settings: a SameSite=Lax cookie it must find again
+  // in the next session, on a new port.
+  '<p data-testid="fake-plannotator-seen"></p><script>' +
+  'document.querySelector("[data-testid=fake-plannotator-seen]").textContent = /(?:^|; )plannotator-seen=1/.test(document.cookie) ? "remembered" : "first run";' +
+  'document.cookie = "plannotator-seen=1; path=/; max-age=31536000; SameSite=Lax";' +
+  '</script></body></html>';
 const server = http.createServer((req, res) => {
   if (req.method === "POST" && req.url === "/send") {
     res.end("ok");

@@ -114,6 +114,7 @@ import {
   githubHostsFromRepositoryIds,
   isAllowedExternalUrl,
 } from "./external-url";
+import { FRAME_COOKIES_FILE, registerFrameCookieIpc } from "./frame-cookies";
 import {
   deliverableMessages,
   HarnessDeliveries,
@@ -2190,6 +2191,9 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // The preload also runs in the URL pane's iframes, where it installs
+      // only a cookie jar and never the API (preload/frame-cookies-shim.ts).
+      nodeIntegrationInSubFrames: true,
     },
   });
 
@@ -2903,6 +2907,12 @@ registerPtyIpc();
 registerShellIpc();
 registerAppIpc();
 registerTerminalHostIpc();
+// The URL pane's cookie jar (frame-cookies.ts): Plannotator's settings.
+const frameCookies = registerFrameCookieIpc(
+  ipcMain,
+  join(app.getPath("userData"), FRAME_COOKIES_FILE),
+);
+app.on("will-quit", () => frameCookies.flush());
 
 /**
  * Single-instance guard, part 2 (see instance-guard.ts): never run beside
