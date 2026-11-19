@@ -1,6 +1,8 @@
 import type { IDockviewPanelHeaderProps } from "dockview-react";
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { closeReview } from "../lib/review-close";
+import { isReviewPanelId } from "../lib/task-urls";
 import { truncateTitle } from "../lib/terminal-title";
 
 /**
@@ -15,12 +17,34 @@ import { truncateTitle } from "../lib/terminal-title";
  * not app-level React state: TerminalPane pushes title updates through
  * `props.api.setTitle`, so a title change here never touches the panel
  * component tree and can't remount a terminal/pty.
+ *
+ * Closing the review tab first closes its Plannotator session, asking when
+ * unsent comments would be lost (lib/review-close.ts); "Keep open" leaves
+ * the tab where it is.
  */
 export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
   const { api } = props;
   // The same tab look serves the `url` panels (review/preview, UrlPane).
   const testId = api.tabComponent === "url" ? "url-tab" : "terminal-tab";
   const [title, setTitle] = useState(api.title ?? "");
+  const closingRef = useRef(false);
+
+  function close(): void {
+    if (!isReviewPanelId(api.id)) {
+      api.close();
+      return;
+    }
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const url = api.getParameters<{ url?: string }>().url;
+    void closeReview(url)
+      .then((closed) => {
+        if (closed) api.close();
+      })
+      .finally(() => {
+        closingRef.current = false;
+      });
+  }
 
   useEffect(() => {
     setTitle(api.title ?? "");
@@ -45,7 +69,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
         if (event.button !== 1) return;
         event.preventDefault();
         event.stopPropagation();
-        api.close();
+        close();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -65,7 +89,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps): JSX.Element {
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
-          api.close();
+          close();
         }}
       >
         <svg

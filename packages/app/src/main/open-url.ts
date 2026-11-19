@@ -1,7 +1,8 @@
 // Agent-opened local URLs (docs/plannotator.md): where the open-url handler
 // script lives (exported to sessions as PLANNOTATOR_BROWSER through the
-// harness adapter), the loopback check every in-app URL must pass, and the
-// HEAD probe the review tab polls to notice a Plannotator server is gone.
+// harness adapter), the loopback check every in-app URL must pass, the
+// HEAD probe the review tab polls to notice a Plannotator server is gone,
+// and closing a live review when its tab closes (decision 9).
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -69,6 +70,59 @@ export async function probeLoopbackUrl(
       signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
     });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Unsent comments in a live Plannotator review (docs/plannotator.md
+ * decision 9): the page autosaves its draft to `GET /api/draft`
+ * (`{found: false}` when there is none). `null` when the server is gone or
+ * answers something else; never fetches a non-loopback URL.
+ */
+export async function countUnsentReviewComments(
+  url: string,
+  options: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<number | null> {
+  if (!isLoopbackUrl(url)) return null;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const response = await fetchImpl(new URL("/api/draft", url), {
+      signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
+    });
+    if (!response.ok) return null;
+    const draft = (await response.json()) as Record<string, unknown>;
+    let count = 0;
+    for (const key of ["annotations", "codeAnnotations", "globalAttachments"]) {
+      const list = draft[key];
+      if (Array.isArray(list)) count += list.length;
+    }
+    return count;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ends a live Plannotator review the way its own Close button does
+ * (`POST /api/exit`, decision 9): the agent hears "closed without feedback"
+ * and the draft is discarded. Sent from main, so there is no `Origin`
+ * header for Plannotator's cross-origin write guard to refuse. Whether the
+ * server accepted it; never posts to a non-loopback URL.
+ */
+export async function closeReviewSession(
+  url: string,
+  options: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<boolean> {
+  if (!isLoopbackUrl(url)) return false;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  try {
+    const response = await fetchImpl(new URL("/api/exit", url), {
+      method: "POST",
+      signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
+    });
+    return response.ok;
   } catch {
     return false;
   }

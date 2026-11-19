@@ -59,6 +59,7 @@ import {
 } from "./lib/orphan-warning";
 import { boardShortcutLabel, modKeyLabel } from "./lib/platform";
 import { startReviewRejectedListener } from "./lib/review";
+import { closeReview, reviewUrlFor } from "./lib/review-close";
 import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
@@ -268,6 +269,20 @@ export function App({
   // them; the cleanup is the app's): close its workspace so no pane is left
   // on a dead pty.
   useEffect(() => subscribeTaskPanesClosing(closeTask), [closeTask]);
+
+  // A user closing the workspace (Cmd/Ctrl+W, its header ✕, the sidebar
+  // row's ✕) also closes a live review session in it, asking first when
+  // unsent comments would be lost; "Keep open" keeps the workspace too
+  // (docs/plannotator.md decision 9). Done closes the review itself, inside
+  // its own question (lib/task-mutations.ts).
+  const requestCloseTask = useCallback(
+    (taskId: string) => {
+      void closeReview(reviewUrlFor(taskId)).then((closed) => {
+        if (closed) closeTask(taskId);
+      });
+    },
+    [closeTask],
+  );
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
   // session, and doing that for whatever happens to sort first on the board
@@ -573,9 +588,9 @@ export function App({
       window.harbormaster.core.onCloseTabShortcut(() => {
         if (view !== "workspace") return;
         if (draftFocused) closeDraft();
-        else if (focusedTaskId) closeTask(focusedTaskId);
+        else if (focusedTaskId) requestCloseTask(focusedTaskId);
       }),
-    [view, draftFocused, focusedTaskId, closeTask, closeDraft],
+    [view, draftFocused, focusedTaskId, requestCloseTask, closeDraft],
   );
 
   // Clicking an OS notification: main pushes the clicked task's id (see
@@ -750,7 +765,7 @@ export function App({
               detachedIds={sidebarOrder.detachedIds}
               onDetachedChange={sidebarOrder.setDetachedIds}
               onSelectTask={selectTask}
-              onCloseTask={closeTask}
+              onCloseTask={requestCloseTask}
               onShowBoard={() => setView("board")}
               onOpenInbox={openInbox}
               inboxCount={inbox.priorityCount}
@@ -819,7 +834,7 @@ export function App({
               <WorkspaceView
                 focusedTaskId={visibleTaskId}
                 openedTaskIds={openedTaskIds}
-                onCloseTask={closeTask}
+                onCloseTask={requestCloseTask}
                 composer={
                   draft && draftFocused ? (
                     <NewTaskComposer

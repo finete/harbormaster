@@ -7,7 +7,8 @@
 // open-url` → core `openTaskUrl` → `task-url-opened`) and the task's review
 // tab shows the page in an iframe. Sending the feedback ends the session:
 // the tab shows "Review sent" with Review again, which starts a new one,
-// and the page finds the settings cookie the first session set.
+// and the page finds the settings cookie the first session set. Closing
+// that live tab closes its session, asking first about unsent comments.
 // The wizard's code review step lists Plannotator as ready for Pi.
 // A Claude Code task (fake-claude.ts) covers the other harness's seam: with
 // no `/plannotator-review` skill the Review button is disabled; installing
@@ -291,6 +292,41 @@ test("Review runs Plannotator in the task's review tab; sending ends it; Setting
     await expect(page.getByTestId("fake-plannotator-seen")).toHaveText(
       "remembered",
     );
+
+    // Closing the live tab closes its session (decision 9). With an unsent
+    // comment in the draft it asks first; Keep open keeps tab and session.
+    const liveUrl = (await frame.getAttribute("data-url")) ?? "";
+    await fetch(new URL("/api/draft", liveUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        annotations: [],
+        codeAnnotations: [{ id: "c1" }],
+        globalAttachments: [],
+      }),
+    });
+    const tabClose = workspace.getByTestId("url-tab-close");
+    await tabClose.click();
+    await expect(window.getByTestId("confirm-dialog-message")).toHaveText(
+      "1 review comment not sent. They'll be lost if you close.",
+    );
+    await window.getByTestId("confirm-dialog-cancel").click();
+    await expect(window.getByTestId("confirm-dialog-message")).toHaveCount(0);
+    await expect(workspace.getByTestId("url-tab")).toHaveCount(1);
+    expect((await fetch(liveUrl)).ok).toBe(true);
+    // Close review: the tab goes and so does the server (the agent hears
+    // "closed without feedback" from Plannotator).
+    await tabClose.click();
+    await window.getByTestId("confirm-dialog-confirm").click();
+    await expect(workspace.getByTestId("url-tab")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        fetch(liveUrl).then(
+          () => "up",
+          () => "gone",
+        ),
+      )
+      .toBe("gone");
   } else {
     await expect(page.locator("body")).not.toBeEmpty();
   }

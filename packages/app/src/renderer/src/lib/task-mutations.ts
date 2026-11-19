@@ -15,6 +15,12 @@ import type {
 } from "../../../preload/api";
 import { requestConfirm } from "../confirm";
 import { describeThrown, pushToast } from "../toast";
+import {
+  doneLosesCommentsLine,
+  endReviewSession,
+  reviewUrlFor,
+  unsentReviewComments,
+} from "./review-close";
 
 export function canStart(task: Pick<Task, "state">): boolean {
   return task.state === "backlog";
@@ -104,6 +110,10 @@ export const DONE_QUESTION = {
 export async function toDoneMutation(taskId: string): Promise<void> {
   try {
     const force: ToDoneForce = {};
+    // A live review in the task's workspace closes with it; its unsent
+    // comments are named in the Done question (docs/plannotator.md 9).
+    const reviewUrl = reviewUrlFor(taskId);
+    const unsent = await unsentReviewComments(reviewUrl);
     for (;;) {
       const result = await window.harbormaster.core.toDone(taskId, { force });
       // Landed. Cleanup outcomes live on `task.cleanup` (inbox item after
@@ -131,11 +141,17 @@ export async function toDoneMutation(taskId: string): Promise<void> {
       const confirmed = await requestConfirm({
         title: DONE_QUESTION.title,
         message: "",
-        lines: result.lines ?? [],
+        lines: [
+          ...(result.lines ?? []),
+          ...(unsent > 0 ? [doneLosesCommentsLine(unsent)] : []),
+        ],
         enterConfirms: true,
         confirmLabel: DONE_QUESTION.confirmLabel,
       });
       if (!confirmed) return;
+      // Before Done ends the worktree's processes: the agent hears
+      // "closed without feedback" rather than losing its review mid-wait.
+      await endReviewSession(reviewUrl);
       if (result.closesPane) {
         for (const listener of panesClosingListeners) listener(taskId);
       }

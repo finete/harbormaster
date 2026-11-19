@@ -51,7 +51,7 @@ export function ConfirmHost(): JSX.Element | null {
           onClick={() => request.resolve(false)}
           data-testid="confirm-dialog-cancel"
         >
-          Cancel
+          {request.cancelLabel ?? "Cancel"}
         </Button>
         <Button
           size="sm"

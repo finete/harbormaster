@@ -10,6 +10,7 @@ import "dockview-react/dist/styles/dockview.css";
 import { RefreshCw, X } from "lucide-react";
 import { flattenBoard, useBoard, useManualRefresh } from "../core-client";
 import { modKeyLabel } from "../lib/platform";
+import { registerReviewSource } from "../lib/review-close";
 import {
   reviewPanelId,
   type TaskUrlOpen,
@@ -203,6 +204,21 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     taskUrls.take(taskId);
     for (const open of pendingOpens) applyUrlOpen(api, taskId, open);
   }, [api, bootstrapped, pendingOpens, taskId]);
+
+  // Closing the workspace closes a live review session first (App.tsx,
+  // lib/review-close.ts), which reads the review tab's URL from here.
+  useEffect(() => {
+    if (!api) return;
+    return registerReviewSource(
+      taskId,
+      () =>
+        (
+          api.getPanel(reviewPanelId(taskId))?.params as
+            | UrlPanelParams
+            | undefined
+        )?.url,
+    );
+  }, [api, taskId]);
 
   function onReady(event: DockviewReadyEvent): void {
     apiRef.current = event.api;

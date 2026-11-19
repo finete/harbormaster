@@ -33,6 +33,11 @@ export function reviewPanelId(taskId: string): string {
   return `review:${taskId}`;
 }
 
+/** Whether a dockview panel id is a task's review tab. */
+export function isReviewPanelId(panelId: string): boolean {
+  return panelId.startsWith("review:");
+}
+
 function enqueue(
   state: TaskUrlState,
   taskId: string,

@@ -8,6 +8,10 @@
 //   3. The session prints `Plannotator session ready: <url>` on stderr
 //      before opening anything.
 //   4. The review page is frameable (no X-Frame-Options, no frame-ancestors).
+//   5. `GET /api/draft` reads back the page's autosaved draft (unsent
+//      comments), `{found: false}` before there is one.
+//   6. `POST /api/exit` with no Origin ends the session like the page's own
+//      Close: stdout says it closed without feedback and the process exits.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
@@ -50,7 +54,7 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     expect(out).toMatch(/\d+\.\d+\.\d+/);
   });
 
-  it("2-4. a review session announces its URL on stderr, runs PLANNOTATOR_BROWSER with it, and is frameable", async () => {
+  it("2-6. a review session announces its URL on stderr, runs PLANNOTATOR_BROWSER with it, is frameable, exposes its draft and closes on /api/exit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hm-plannotator-contract-"));
     dirs.push(dir);
     const repo = join(dir, "repo");
@@ -83,15 +87,22 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     chmodSync(browser, 0o755);
 
     let stderr = "";
+    let stdout = "";
     const child = spawn(binary as string, ["review"], {
       cwd: repo,
       env: { ...process.env, PLANNOTATOR_BROWSER: browser, BROWSER: browser },
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     children.push(child);
     child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    const exited = new Promise<void>((resolve) =>
+      child.once("exit", () => resolve()),
+    );
 
     await expect
       .poll(() => existsSync(argsFile), { timeout: 30_000 })
@@ -112,6 +123,28 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     expect(response.headers.get("content-security-policy") ?? "").not.toMatch(
       /frame-ancestors/i,
     );
-    child.kill("SIGTERM");
+    // 5. The draft (what closing would lose) is readable.
+    const draftUrl = new URL("/api/draft", url);
+    expect(await (await fetch(draftUrl)).json()).toEqual({ found: false });
+    const saved = await fetch(draftUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        annotations: [],
+        codeAnnotations: [{ id: "c1", text: "contract" }],
+        globalAttachments: [],
+      }),
+    });
+    expect(saved.ok).toBe(true);
+    const draft = (await (await fetch(draftUrl)).json()) as {
+      codeAnnotations?: unknown[];
+    };
+    expect(draft.codeAnnotations).toHaveLength(1);
+    // 6. /api/exit (Node's fetch sends no Origin) ends it, like Close.
+    expect(
+      (await fetch(new URL("/api/exit", url), { method: "POST" })).ok,
+    ).toBe(true);
+    await exited;
+    expect(stdout).toContain("Review session closed without feedback.");
   });
 });

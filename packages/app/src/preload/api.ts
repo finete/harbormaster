@@ -646,6 +646,10 @@ export interface HarbormasterApi {
     ): () => void;
     /** Whether a loopback URL's server still answers (a HEAD from main; never a non-loopback URL). */
     probeUrl(url: string): Promise<boolean>;
+    /** Unsent comments in a live Plannotator review (its autosaved draft); `null` when the server is gone. Loopback only. */
+    countUnsentReviewComments(url: string): Promise<number | null>;
+    /** Ends a live Plannotator review like its own Close (the agent hears "closed without feedback"; the draft is discarded). Loopback only. */
+    closeReviewSession(url: string): Promise<boolean>;
     /** Subscribes to core's `task-url-opened` push channel; returns an unsubscribe fn. */
     onTaskUrlOpened(
       listener: (payload: TaskUrlOpenedPayload) => void,

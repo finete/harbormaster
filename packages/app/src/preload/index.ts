@@ -368,6 +368,10 @@ const api: HarbormasterApi = {
     },
     probeUrl: (url: string): Promise<boolean> =>
       ipcRenderer.invoke("app:probeUrl", url),
+    countUnsentReviewComments: (url: string): Promise<number | null> =>
+      ipcRenderer.invoke("app:countUnsentReviewComments", url),
+    closeReviewSession: (url: string): Promise<boolean> =>
+      ipcRenderer.invoke("app:closeReviewSession", url),
     onTaskUrlOpened: (
       listener: (payload: TaskUrlOpenedPayload) => void,
     ): (() => void) => {

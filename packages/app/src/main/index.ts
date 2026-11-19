@@ -151,6 +151,8 @@ import {
   runOpenInArgv,
 } from "./open-in";
 import {
+  closeReviewSession,
+  countUnsentReviewComments,
   isLoopbackUrl,
   probeLoopbackUrl,
   resolveOpenUrlHandler,
@@ -1451,6 +1453,14 @@ function registerCoreIpc(): void {
   // its feedback is sent. Loopback only (see open-url.ts).
   ipcMain.handle("app:probeUrl", (_event, url: unknown) =>
     typeof url === "string" ? probeLoopbackUrl(url) : false,
+  );
+  // Closing a live review tab closes its Plannotator session
+  // (docs/plannotator.md decision 9): count what would be lost, then close.
+  ipcMain.handle("app:countUnsentReviewComments", (_event, url: unknown) =>
+    typeof url === "string" ? countUnsentReviewComments(url) : null,
+  );
+  ipcMain.handle("app:closeReviewSession", (_event, url: unknown) =>
+    typeof url === "string" ? closeReviewSession(url) : false,
   );
   core.events.on("task-url-opened", (payload) => {
     if (!isLoopbackUrl(payload.url)) return;

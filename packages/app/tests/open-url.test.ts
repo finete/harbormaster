@@ -1,6 +1,6 @@
-// The open-url handler path (packaged vs dev), the loopback-only rule and
-// the HEAD probe behind the review tab's "server gone" placeholder
-// (main/open-url.ts, docs/plannotator.md).
+// The open-url handler path (packaged vs dev), the loopback-only rule, the
+// HEAD probe behind the review tab's "server gone" placeholder, and closing
+// a live review with its tab (main/open-url.ts, docs/plannotator.md).
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  closeReviewSession,
+  countUnsentReviewComments,
   isLoopbackUrl,
   probeLoopbackUrl,
   resolveOpenUrlHandler,
@@ -91,6 +93,60 @@ describe("probeLoopbackUrl", () => {
     expect(await probeLoopbackUrl("https://example.com/", { fetchImpl })).toBe(
       false,
     );
+    expect(called).toBe(false);
+  });
+});
+
+describe("closing a live review (decision 9)", () => {
+  it("counts the draft's unsent comments and posts /api/exit with no Origin", async () => {
+    let draft: unknown = { found: false };
+    const exits: (string | undefined)[] = [];
+    const server = createServer((req, res) => {
+      if (req.url === "/api/draft") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(draft));
+        return;
+      }
+      if (req.url === "/api/exit" && req.method === "POST") {
+        // Plannotator refuses a cross-site write: main must send no Origin.
+        exits.push(req.headers.origin);
+        res.end('{"ok":true}');
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    try {
+      expect(await countUnsentReviewComments(url)).toBe(0);
+      draft = {
+        annotations: [{ id: "a" }],
+        codeAnnotations: [{ id: "b" }, { id: "c" }],
+        globalAttachments: [],
+      };
+      expect(await countUnsentReviewComments(url)).toBe(3);
+      expect(await closeReviewSession(url)).toBe(true);
+      expect(exits).toEqual([undefined]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    // Gone: nothing to count, nothing to close.
+    expect(await countUnsentReviewComments(url, { timeoutMs: 500 })).toBeNull();
+    expect(await closeReviewSession(url, { timeoutMs: 500 })).toBe(false);
+  });
+
+  it("never touches a non-loopback URL", async () => {
+    let called = false;
+    const fetchImpl = (async () => {
+      called = true;
+      return new Response("{}");
+    }) as typeof fetch;
+    const remote = "https://example.com/";
+    expect(await countUnsentReviewComments(remote, { fetchImpl })).toBeNull();
+    expect(await closeReviewSession(remote, { fetchImpl })).toBe(false);
     expect(called).toBe(false);
   });
 });

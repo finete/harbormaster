@@ -13,7 +13,9 @@ export const FAKE_PLANNOTATOR_VERSION = "0.28.64";
  * once the page POSTs `/send` (the user sent their feedback), so the
  * server is gone exactly like a real session's. The page shows "first run"
  * until it finds the settings cookie it sets (Plannotator keeps its settings
- * in SameSite=Lax cookies). Written as `<binDir>/plannotator`.
+ * in SameSite=Lax cookies). `GET`/`POST /api/draft` hold the unsent-comment
+ * draft and `POST /api/exit` (no Origin) closes the session like the page's
+ * Close (contract facts 5 and 6). Written as `<binDir>/plannotator`.
  */
 export function writeFakePlannotator(binDir: string): string {
   mkdirSync(binDir, { recursive: true });
@@ -40,7 +42,36 @@ const PAGE = '<!doctype html><html><body style="background:#fff;color:#111">' +
   'document.querySelector("[data-testid=fake-plannotator-seen]").textContent = /(?:^|; )plannotator-seen=1/.test(document.cookie) ? "remembered" : "first run";' +
   'document.cookie = "plannotator-seen=1; path=/; max-age=31536000; SameSite=Lax";' +
   '</script></body></html>';
+let draft = null;
 const server = http.createServer((req, res) => {
+  // The autosaved draft (contract fact 5): what closing the tab would lose.
+  if (req.url === "/api/draft") {
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        draft = JSON.parse(body);
+        res.end('{"ok":true}');
+      });
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(draft ?? { found: false }));
+    return;
+  }
+  // The page's own Close (contract fact 6): refused from a browser page on
+  // another site, like Plannotator's cross-origin write guard.
+  if (req.method === "POST" && req.url === "/api/exit") {
+    if (req.headers.origin) {
+      res.statusCode = 403;
+      res.end();
+      return;
+    }
+    res.end('{"ok":true}');
+    process.stdout.write("Review session closed without feedback.\n");
+    setTimeout(() => process.exit(0), 50);
+    return;
+  }
   if (req.method === "POST" && req.url === "/send") {
     res.end("ok");
     // Like a real session: the feedback goes to the agent, the server ends.

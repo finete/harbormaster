@@ -12,6 +12,8 @@ export interface ConfirmRequest {
   /** Enter confirms: the confirm button takes focus on open (Done's "Mark done"). */
   enterConfirms?: boolean;
   confirmLabel: string;
+  /** The cancel button's label ("Cancel" when omitted). */
+  cancelLabel?: string;
   resolve: (confirmed: boolean) => void;
 }
 
@@ -31,6 +33,7 @@ export function requestConfirm(question: {
   lines?: string[];
   enterConfirms?: boolean;
   confirmLabel?: string;
+  cancelLabel?: string;
 }): Promise<boolean> {
   return new Promise((resolve) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -43,6 +46,7 @@ export function requestConfirm(question: {
         ...(question.lines?.length ? { lines: question.lines } : {}),
         ...(question.enterConfirms ? { enterConfirms: true } : {}),
         confirmLabel: question.confirmLabel ?? "Confirm",
+        ...(question.cancelLabel ? { cancelLabel: question.cancelLabel } : {}),
         resolve: (confirmed) => {
           queue = queue.filter((request) => request.id !== id);
           emit();
