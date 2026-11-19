@@ -273,9 +273,10 @@ function piAgentDir(env: NodeJS.ProcessEnv, home: string): string {
 const PI_INSTALL = "npm install -g @earendil-works/pi-coding-agent";
 
 /**
- * Pi's install/version facts (P2). The floor is the 1.0 line the adapter's
- * flags were verified against (`--session-id`, `--fork`, `PI_PROGRAM_STATUS`);
- * `verifiedVersion` is the release used day to day when this was written.
+ * Pi's install/version facts (P2). Floor 1.1.0: the first release that
+ * speaks OSC 7501 (presence); below it a session never reads live, so idle
+ * delivery, wake-up and the Review button's typing all break. Verified 1.5.2:
+ * the real-CLI pin (`PINNED` in packages/app/tests/real-cli-smoke.test.ts).
  */
 export const PI_DESCRIPTOR: HarnessDescriptor = {
   id: PI_HARNESS_ID,
