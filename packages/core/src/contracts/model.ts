@@ -236,9 +236,10 @@ export interface Task {
   stateChangedAt: string;
   /**
    * When the task first entered `working` (created started, started from
-   * the backlog, or launched); kept through later moves and reopens.
-   * Absent while parked in the backlog, and on tasks from before this field
-   * existed.
+   * the backlog, launched, or a parked idea's reopen from Done); kept
+   * through later moves and reopens. Absent on a task that never started
+   * (parked, or Done straight from the backlog), and on tasks from before
+   * this field existed.
    */
   startedAt?: string;
   completedAt?: string;

@@ -96,23 +96,6 @@ export function subscribeTaskPanesClosing(
   };
 }
 
-type TaskArchivedListener = (taskId: string) => void;
-const archivedListeners = new Set<TaskArchivedListener>();
-
-/**
- * A task just went off the board: the app shell (App.tsx) closes its
- * workspace the way the user's own close does (a live review with unsent
- * comments still asks first). Returns the unsubscribe.
- */
-export function subscribeTaskArchived(
-  listener: TaskArchivedListener,
-): () => void {
-  archivedListeners.add(listener);
-  return () => {
-    archivedListeners.delete(listener);
-  };
-}
-
 /** What the single Done question looks like (title, button), body lines from core. */
 export const DONE_QUESTION = {
   title: "Mark done?",
@@ -126,7 +109,7 @@ export const DONE_QUESTION = {
 export const ARCHIVE_QUESTION = {
   title: "Archive?",
   confirmLabel: "Archive",
-  line: "It leaves the board; Done's “show archived” still lists it.",
+  line: "It leaves the board; the sidebar's Archived section and Done's “show archived” still list it.",
 } as const;
 
 /**
@@ -145,8 +128,8 @@ export function toDoneMutation(taskId: string): Promise<void> {
 
 /**
  * Archive a task (header button, a card's ×, `e` on the board, the
- * rail's menu): off the
- * board, kept behind Done's "show archived", and its workspace closes.
+ * rail's menu): off the board, kept in the sidebar's Archived section and
+ * behind Done's "show archived"; its workspace closes (App.tsx).
  * Always one question (Enter confirms); a task not yet Done gets the Done
  * question's lines too and is completed exactly like `toDoneMutation`,
  * landing archived.
@@ -170,12 +153,7 @@ async function completeTaskMutation(
       const result = await window.harbormaster.core[verb](taskId, { force });
       // Landed. Cleanup outcomes live on `task.cleanup` (inbox item after
       // repeated failures), never in a toast.
-      if (!("requiresConfirmation" in result)) {
-        if (verb === "archiveTask") {
-          for (const listener of archivedListeners) listener(taskId);
-        }
-        return;
-      }
+      if (!("requiresConfirmation" in result)) return;
       if (result.requiresConfirmation === "activeChildren") {
         // Core asks this at most once (the answer accumulates); never loop.
         if (force.leaveChildren) {

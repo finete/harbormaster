@@ -95,19 +95,20 @@ describe("taskStartMoment", () => {
     ).toEqual({ label: "started", iso: "2026-11-19T10:00:00.000Z" });
   });
 
-  it("a task past the backlog with no recorded start started when it was created", () => {
-    expect(taskStartMoment({ state: "done", createdAt })).toEqual({
-      label: "started",
-      iso: createdAt,
-    });
-  });
-
-  it("a parked task that never started shows when it was created", () => {
-    expect(taskStartMoment({ state: "backlog", createdAt })).toEqual({
-      label: "created",
-      iso: createdAt,
-    });
-  });
+  it.each([
+    ["working", "started"],
+    ["awaiting", "started"],
+    ["backlog", "created"],
+    ["done", "created"],
+  ] as const)(
+    "with no recorded start, a %s task shows %s at its creation",
+    (state, label) => {
+      expect(taskStartMoment({ state, createdAt })).toEqual({
+        label,
+        iso: createdAt,
+      });
+    },
+  );
 });
 
 describe("absoluteDateTime", () => {

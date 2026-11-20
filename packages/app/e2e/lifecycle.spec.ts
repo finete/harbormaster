@@ -987,7 +987,7 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
     ).toHaveText("1");
   });
 
-  test("cards name their agent and start; archiving always asks, then takes the task off the board: a parked one with e, a Done one with its card's hover ×", async () => {
+  test("cards name their agent and start; archiving always asks, then takes the task off the board: a parked one with e, a Done one's hover × asks too, and one archived outside this window closes its workspace", async () => {
     await window.getByTestId("board-button").click();
     await expect(window.getByTestId("board-view")).toBeVisible();
     const toggle = window
@@ -1026,7 +1026,6 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
     expect(parked?.archivedAt).toBeTruthy();
 
     // A Done task's card ×: still one question; cancel keeps it.
-    // Its workspace is open (previous test), and closes with the archive.
     await expect(
       window.getByTestId("sidebar-task-row-visible-done-task-1"),
     ).toHaveCount(1);
@@ -1041,9 +1040,15 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
     await expect(doneCard).toBeVisible();
     await expect(window.getByTestId("board-view")).toBeVisible();
 
-    await doneCard.hover();
-    await archiveButton.click();
-    await window.keyboard.press("Enter");
+    // Archived without this window's mutation (another window, the 7-day
+    // sweep): its open workspace (previous test) still closes.
+    await window.evaluate(
+      (id) =>
+        window.harbormaster.core.archiveTask(id, {
+          force: { confirmed: true },
+        }),
+      "visible-done-task-1",
+    );
     await expect(doneCard).toHaveCount(0);
     await expect(toggle).toContainText("show archived (3)");
     await expect(
@@ -1051,7 +1056,10 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
     ).toHaveCount(0);
     await toggle.click();
     await expect(doneCard).toBeVisible();
-    await expect(parkedCard).toBeVisible();
+    // Done straight from the backlog: it never started.
+    await expect(parkedCard.getByTestId("card-agent-line")).toContainText(
+      "pi · created ",
+    );
 
     // The rail lists them under the tasks, newest first, collapsed until
     // opened; a click opens one like its card does.

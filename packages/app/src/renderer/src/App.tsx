@@ -64,10 +64,7 @@ import {
 } from "./lib/renderer-diagnostics";
 import { startReviewRejectedListener } from "./lib/review";
 import { closeReview, reviewUrlFor } from "./lib/review-close";
-import {
-  subscribeTaskArchived,
-  subscribeTaskPanesClosing,
-} from "./lib/task-mutations";
+import { subscribeTaskPanesClosing } from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
@@ -293,9 +290,21 @@ export function App({
     },
     [closeTask],
   );
-  // An archived task leaves the rail too: close its workspace like the
-  // user would.
-  useEffect(() => subscribeTaskArchived(requestCloseTask), [requestCloseTask]);
+  // A task archived anywhere (this window, another, the 7-day sweep) closes
+  // its workspace; only the transition counts, so one opened from the
+  // sidebar's Archived section stays open.
+  const archivedById = useRef<Map<string, boolean> | null>(null);
+  useEffect(() => {
+    const previous = archivedById.current;
+    const current = new Map(
+      flatRows.map(({ task }) => [task.id, Boolean(task.archivedAt)]),
+    );
+    archivedById.current = current;
+    if (!previous) return;
+    for (const [taskId, archived] of current) {
+      if (archived && previous.get(taskId) === false) requestCloseTask(taskId);
+    }
+  }, [flatRows, requestCloseTask]);
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
   // session, and doing that for whatever happens to sort first on the board

@@ -271,10 +271,13 @@ difference not listed here is a bug.
   question's lines and lands in Done already archived, in one write, so
   nothing keeps running unseen. Archived tasks are listed behind the Done
   column's "show archived" (`a`) and in the rail's collapsible "Archived"
-  section under the tasks (newest first; never as a task row), and the
-  task's open workspace closes (the user's own close, so a live review
-  still asks about unsent comments). Reopen (or any move out of Done)
-  clears the flag. The 7-day sweep archives old Done tasks the same way.
+  section under the tasks (newest first, ten at a time behind "Show more";
+  never as a task row). Whenever a task becomes archived (here, in another
+  window, or by the 7-day sweep, which archives old Done tasks the same
+  way) its open workspace closes (the user's own close, so a live review
+  still asks about unsent comments). Archiving a task already Done ends
+  nothing in its worktree; its Done cleanup already ran or keeps retrying.
+  Reopen (or any move out of Done) clears the flag.
 - **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at

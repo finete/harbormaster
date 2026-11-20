@@ -1196,15 +1196,23 @@ function registerCoreIpc(): void {
           force,
         });
       }
+      const [task, binding] = await Promise.all([
+        core.commands.getTask(taskId).catch(() => undefined),
+        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
+      ]);
+      // Archiving a task already Done only flags it: its Done cleanup ran
+      // (or keeps retrying) on its own, so nothing in its worktree ends here.
+      if (verb === "archiveTask" && task?.state === "done") {
+        return core.commands.archiveTask(taskId, {
+          protectedPaths: activeSessionCwds(),
+          force,
+        });
+      }
       // Confirmed: Done is final and the housekeeping is the app's. End the
       // task's warm pi and every pty still running in its worktree (the
       // renderer closes the task's panes too) so nothing keeps the worktree
       // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
-      const [task, binding] = await Promise.all([
-        core.commands.getTask(taskId).catch(() => undefined),
-        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
-      ]);
       // Only a repository worktree is removed: a scratch dir or a folder
       // task's own folder stays, and so do the panes running in it.
       if (task?.repositoryId && binding?.worktreePath) {

@@ -1588,6 +1588,7 @@ export class CoreManager implements CoreCommands {
       state: "working",
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: task.startedAt ?? now,
     };
     delete reopened.completedAt;
     delete reopened.archivedAt;
@@ -1747,7 +1748,8 @@ export class CoreManager implements CoreCommands {
         updatedAt: now,
         stateChangedAt: stateChanged ? now : task.stateChangedAt,
         ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
-        ...(task.state === "backlog" && state === "working"
+        ...((task.state === "backlog" || task.state === "done") &&
+        state === "working"
           ? { startedAt: task.startedAt ?? now }
           : {}),
       };

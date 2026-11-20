@@ -128,6 +128,8 @@ import { SidebarNavItem } from "./ui/sidebar-nav";
 const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
 const ARCHIVED_OPEN_KEY = "harbormaster.sidebar.archivedOpen";
+/** Archived rows shown per "Show more" step (the sweep archives every Done task after 7 days). */
+const ARCHIVED_PAGE_SIZE = 10;
 
 function readStoredWidth(): number {
   try {
@@ -354,7 +356,8 @@ function SortableGroupSection({
  * board state. The footer keeps "+ New task" and the "Board" button
  * (Cmd/Ctrl+Shift+B also works, see App.tsx). Archived tasks never get a
  * task row: they are listed in the collapsible "Archived" section under the
- * tasks (most recently archived first; a click opens one, like a card).
+ * tasks (most recently archived first, a page at a time; a click opens
+ * one, like a card).
  */
 /** The Costs row's tooltip (docs/costs.md). */
 const COSTS_TITLE = "Costs: token usage per task (est. at list price)";
@@ -505,6 +508,7 @@ export function Sidebar({
   );
   const [collapsed, setCollapsed] = useState(readStoredCollapsed);
   const [archivedOpen, setArchivedOpen] = useState(readStoredArchivedOpen);
+  const [archivedLimit, setArchivedLimit] = useState(ARCHIVED_PAGE_SIZE);
   const [width, setWidth] = useState(readStoredWidth);
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -572,7 +576,9 @@ export function Sidebar({
   );
   // A live filter shows archived matches even while the section is closed.
   const archivedShown = archivedOpen || searching;
+  const archivedHidden = archived.length - archivedLimit;
   const toggleArchived = (): void => {
+    setArchivedLimit(ARCHIVED_PAGE_SIZE);
     setArchivedOpen((open) => {
       store(ARCHIVED_OPEN_KEY, String(!open));
       return !open;
@@ -1637,7 +1643,7 @@ export function Sidebar({
               </button>
               {archivedShown && (
                 <div className="border-y border-border/40">
-                  {archived.map((task) => (
+                  {archived.slice(0, archivedLimit).map((task) => (
                     <button
                       key={task.id}
                       type="button"
@@ -1669,6 +1675,18 @@ export function Sidebar({
                       </span>
                     </button>
                   ))}
+                  {archivedHidden > 0 && (
+                    <button
+                      type="button"
+                      data-testid="sidebar-archived-more"
+                      onClick={() =>
+                        setArchivedLimit((limit) => limit + ARCHIVED_PAGE_SIZE)
+                      }
+                      className="w-full px-3 py-1.5 text-left text-[11px] text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent/60 hover:text-foreground"
+                    >
+                      Show {Math.min(archivedHidden, ARCHIVED_PAGE_SIZE)} more
+                    </button>
+                  )}
                 </div>
               )}
             </section>

@@ -63,16 +63,17 @@ export function waitingDurationText(sinceIso: string, now: number): string {
 }
 
 /**
- * When a card says its task began: `startedAt` (first entered Working);
- * a task from before that was recorded but already past the backlog falls
- * back to `createdAt` (it was created started); a parked task that never
- * started shows when it was created.
+ * When a card says its task began: `startedAt` (first entered Working).
+ * Without one, a task in Working or Awaiting predates that field and falls
+ * back to `createdAt` (it was created started); any other task (parked, or
+ * Done straight from the backlog) never started and shows when it was
+ * created.
  */
 export function taskStartMoment(
   task: Pick<Task, "state" | "createdAt" | "startedAt">,
 ): { label: "started" | "created"; iso: string } {
   if (task.startedAt) return { label: "started", iso: task.startedAt };
-  if (task.state !== "backlog") {
+  if (task.state === "working" || task.state === "awaiting") {
     return { label: "started", iso: task.createdAt };
   }
   return { label: "created", iso: task.createdAt };

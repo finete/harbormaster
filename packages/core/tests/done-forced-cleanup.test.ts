@@ -505,4 +505,28 @@ describe("startedAt", () => {
     const restarted = await f.manager.moveTask(f.task.id, "working");
     expect(restarted.startedAt).toBe(stamp);
   });
+
+  it.each(["moveTask", "reopenTask"] as const)(
+    "is never stamped on a parked idea discarded to Done, and is when %s brings it back to Working",
+    async (verb) => {
+      const f = await harness(async () => {});
+      await f.manager.moveTask(f.task.id, "backlog");
+      await f.manager.moveTask(f.task.id, "done");
+      expect((await f.reload()).startedAt).toBeUndefined();
+
+      f.at(minutes(10));
+      if (verb === "moveTask") {
+        await f.manager.moveTask(f.task.id, "working");
+      } else {
+        // Reopen into the still-present worktree (no new cycle to provision).
+        Object.assign(f.worktrees, {
+          listWorktrees: async () => [{ path: WORKTREE }],
+        });
+        await f.manager.reopenTask(f.task.id);
+      }
+      expect((await f.reload()).startedAt).toBe(
+        new Date(START.getTime() + minutes(10)).toISOString(),
+      );
+    },
+  );
 });

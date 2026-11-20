@@ -110,7 +110,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
       data-testid={`archive-task-button-${task.id}`}
       title={
         task.state === "done"
-          ? 'Archive: take it off the board (Done\'s "show archived" lists it) (e)'
+          ? "Archive: take it off the board (the sidebar's Archived section lists it) (e)"
           : "Archive: mark it done and take it off the board (e)"
       }
     >
