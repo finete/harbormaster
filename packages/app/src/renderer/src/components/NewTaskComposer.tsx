@@ -275,51 +275,51 @@ export function NewTaskComposer({
   // effective agent's skills and commands for where the task would run,
   // fetched ahead of the first `/` (Claude's plugin listing takes a moment)
   // and again whenever the agent or the place changes.
-  const slashKey = JSON.stringify(
-    prBound
-      ? {
-          harness: effectiveHarness,
-          ...(pullRequest ? { repositoryId: pullRequest.repositoryId } : {}),
-        }
-      : {
-          harness: effectiveHarness,
-          ...(where.kind === "repository"
-            ? { repositoryId: where.repositoryId }
-            : {}),
-          ...(where.kind === "folder" ? { folderPath: where.path } : {}),
-        },
+  const slashRepositoryId = prBound
+    ? pullRequest?.repositoryId
+    : where.kind === "repository"
+      ? where.repositoryId
+      : undefined;
+  const slashFolderPath =
+    !prBound && where.kind === "folder" ? where.path : undefined;
+  const slashInput = useMemo<ListSlashCommandsInput>(
+    () => ({
+      harness: effectiveHarness,
+      ...(slashRepositoryId ? { repositoryId: slashRepositoryId } : {}),
+      ...(slashFolderPath ? { folderPath: slashFolderPath } : {}),
+    }),
+    [effectiveHarness, slashRepositoryId, slashFolderPath],
   );
   const [slashCatalog, setSlashCatalog] = useState<{
-    key: string;
+    input: ListSlashCommandsInput;
     catalog?: SlashCommandCatalog;
     error?: string;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const input = JSON.parse(slashKey) as ListSlashCommandsInput;
     void window.harbormaster.core
-      .listSlashCommands(input)
+      .listSlashCommands(slashInput)
       .then((catalog) => {
-        if (!cancelled) setSlashCatalog({ key: slashKey, catalog });
+        if (!cancelled) setSlashCatalog({ input: slashInput, catalog });
       })
       .catch((thrown: unknown) => {
         if (cancelled) return;
         setSlashCatalog({
-          key: slashKey,
+          input: slashInput,
           error: thrown instanceof Error ? thrown.message : String(thrown),
         });
       });
     return () => {
       cancelled = true;
     };
-  }, [slashKey]);
+  }, [slashInput]);
   const [slash, setSlash] = useState<SlashTrigger | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   /** Escape closed the menu; typing reopens it. */
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [promptFocused, setPromptFocused] = useState(false);
   const slashMenuId = useId();
-  const slashLoaded = slashCatalog?.key === slashKey ? slashCatalog : null;
+  const slashLoaded = slashCatalog?.input === slashInput ? slashCatalog : null;
   const slashEntries = useMemo(
     () =>
       slash && slashLoaded?.catalog

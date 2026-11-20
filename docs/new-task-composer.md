@@ -187,7 +187,7 @@ offers, read-only from its own files
 
 | Agent | Sources | Inserted as |
 |---|---|---|
-| Claude Code | `skills/*/SKILL.md` and `commands/**/*.md` in `<cwd>/.claude/` and `$CLAUDE_CONFIG_DIR` (`~/.claude`); enabled plugins (`claude plugin list --json`, in `cwd`) with their `skills/`, `commands/` and any manifest paths. `user-invocable: false` is hidden. | `/name`; a plugin's `/plugin:name` (plugin name from `.claude-plugin/plugin.json`) |
+| Claude Code | `skills/*/SKILL.md` and `commands/**/*.md` in `<cwd>/.claude/` and `$CLAUDE_CONFIG_DIR` (`~/.claude`); enabled plugins (`claude plugin list --json` with the binary the adapter launches, in `cwd`) with their `skills/`, `commands/` and any manifest paths. `user-invocable: false` is hidden. | `/name`; a plugin's `/plugin:name` (plugin name from `.claude-plugin/plugin.json`) |
 | Pi | Prompt templates: direct `.md` children of `<agentDir>/prompts` and `<cwd>/.pi/prompts`. Skills (with a description): `<agentDir>/skills`, `<cwd>/.pi/skills`, `~/.agents/skills`, `.agents/skills` from `cwd` up to the git root. Pi packages' and settings paths' are not listed. | `/name`; skills `/skill:name` |
 | Codex | Skills: `.agents/skills` from `cwd` up to the git root, `$CODEX_HOME/skills` (and its bundled `.system`), `~/.agents/skills`. | `$name` (Codex has no `/` form) |
 | Cursor, custom agents | Nothing listed yet; the menu says so. | |
@@ -198,11 +198,14 @@ thinking.
 
 A long prompt (over `INLINE_PROMPT_MAX_CHARS`) normally travels as a file
 the agent is pointed at, which would bury a leading command inside the
-file. `deliverInitialPrompt` keeps a leading command (`leadingCommand`:
-`/name`, `/@scope/plugin:name`, `$name`; not a path or `$HOME`) inline,
-with "Read the file … and follow it as your task brief." as its arguments,
-and puts only the rest in the file (every adapter; the harness contract
-test covers it).
+file. For Claude Code, `deliverInitialPrompt` keeps a leading command
+(`leadingCommand`: `/name`, `/@scope/plugin:name`, `$name`; not a path or
+`$HOME`) inline, with "Read the file … and follow it as your task brief."
+as its arguments, and puts only the rest in the file. Other agents get the
+whole prompt in the file until they are verified to run a command from
+their launch prompt (Pi 1.6.0 passed `pi "/hm-probe 42"` to the model
+unexpanded; Codex is untested). An adapter opts in with
+`keepLeadingCommand`; the harness contract test covers both.
 
 ## Model list
 

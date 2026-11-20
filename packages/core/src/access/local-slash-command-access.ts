@@ -260,6 +260,8 @@ function fileStem(file: string): string {
 export interface ClaudeSlashCommandAccessOptions {
   /** Claude's config directory; defaults to `$CLAUDE_CONFIG_DIR` / `~/.claude`. */
   configDir?: string;
+  /** The `claude` binary that lists plugins, read per listing (the adapter's launch command); defaults to `claude`. */
+  command?: () => string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
 }
@@ -313,8 +315,7 @@ export class ClaudeSlashCommandAccess implements HarnessSlashCommandAccess {
   /** Enabled plugins' skills and commands; none when the listing fails. */
   private async pluginCommands(cwd?: string): Promise<SlashCommand[]> {
     const outcome = await runOutcome(
-      // The same override the Claude Code adapter launches with (e2e fakes).
-      this.env.HARBORMASTER_CLAUDE_COMMAND || "claude",
+      this.options.command?.() ?? "claude",
       ["plugin", "list", "--json"],
       {
         timeoutMs: this.options.timeoutMs ?? PLUGIN_LIST_TIMEOUT_MS,

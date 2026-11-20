@@ -1,9 +1,8 @@
 // The composer's `/` menu, core side (docs/new-task-composer.md "Slash
 // commands"): frontmatter parsing, each harness's skill / command readers
 // over real temp directories (Claude's plugin listing through a fake
-// `claude` on HARBORMASTER_CLAUDE_COMMAND, shaped like contract row
-// claude.plugin.list-json), and which leading token a long
-// launch prompt keeps inline.
+// `claude`, shaped like contract row claude.plugin.list-json), and which
+// leading token a long launch prompt keeps inline.
 
 import { chmodSync } from "node:fs";
 import {
@@ -16,7 +15,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ancestorAgentsSkillDirs,
   ClaudeSlashCommandAccess,
@@ -24,6 +23,7 @@ import {
   PiSlashCommandAccess,
 } from "../src/access/local-slash-command-access.js";
 import { leadingCommand } from "../src/harness/adapter-common.js";
+import { ClaudeCodeHarnessAdapter } from "../src/harness/claude-code-adapter.js";
 import {
   firstLine,
   frontmatterString,
@@ -33,6 +33,7 @@ import {
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
@@ -182,7 +183,7 @@ describe("Claude Code", () => {
 
     const access = new ClaudeSlashCommandAccess({
       configDir: config,
-      env: { HARBORMASTER_CLAUDE_COMMAND: claude },
+      command: () => claude,
     });
     const list = await access.listSlashCommands(project);
     expect(list).toEqual([
@@ -259,12 +260,32 @@ describe("Claude Code", () => {
     for (const command of [join(root, "missing-claude"), "/usr/bin/false"]) {
       const access = new ClaudeSlashCommandAccess({
         configDir: config,
-        env: { HARBORMASTER_CLAUDE_COMMAND: command },
+        command: () => command,
       });
       expect(
         (await access.listSlashCommands()).map((entry) => entry.command),
       ).toEqual(["/mine"]);
     }
+  });
+
+  it("the adapter lists plugins with the claude it launches", async () => {
+    const root = await tempRoot();
+    const plugin = join(root, "plugins", "tools");
+    await put(
+      join(plugin, "skills", "lint", "SKILL.md"),
+      skill("lint", "Lint it"),
+    );
+    const claude = await fakeClaude(root, [
+      { id: "tools@market", enabled: true, installPath: plugin },
+    ]);
+    vi.stubEnv("HARBORMASTER_CLAUDE_COMMAND", "");
+    vi.stubEnv("HARBORMASTER_CLAUDE_CODE_COMMAND", claude);
+    const adapter = new ClaudeCodeHarnessAdapter({
+      configDir: join(root, "claude"),
+    });
+    expect(
+      (await adapter.listSlashCommands()).map((entry) => entry.command),
+    ).toEqual(["/tools:lint"]);
   });
 });
 

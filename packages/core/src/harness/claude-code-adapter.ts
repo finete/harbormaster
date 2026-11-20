@@ -369,9 +369,10 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     this.configDir = options.configDir;
     this.slashCommands =
       options.slashCommands ??
-      new ClaudeSlashCommandAccess(
-        options.configDir ? { configDir: options.configDir } : {},
-      );
+      new ClaudeSlashCommandAccess({
+        ...(options.configDir ? { configDir: options.configDir } : {}),
+        command: () => harnessLaunchCommand(this),
+      });
   }
 
   /** Claude's skills, commands and enabled plugins' (`/name`, `/plugin:name`). */
@@ -445,6 +446,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       input,
       claudePromptArgs,
       claudePromptFileArgs,
+      { keepLeadingCommand: true },
     );
     return {
       command: harnessLaunchCommand(this),

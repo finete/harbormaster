@@ -154,20 +154,24 @@ export function leadingCommand(prompt: string): string | undefined {
  * reaches the command line, so no argument nears `MAX_LAUNCH_ARG_CHARS`.
  *
  * An agent runs a skill / command only when the message itself starts
- * with it, so a long prompt that starts with one (`leadingCommand`) keeps
- * it inline, with "read the file" as its arguments and only the rest of
- * the prompt in the file.
+ * with it, so with `keepLeadingCommand` (a harness verified to run one
+ * from its launch prompt) a long prompt that starts with one
+ * (`leadingCommand`) keeps it inline, with "read the file" as its
+ * arguments and only the rest of the prompt in the file.
  */
 export function deliverInitialPrompt(
   input: Pick<BuildLaunchSpecInput, "initialPrompt" | "stateDir" | "taskId">,
   inline: (prompt: string) => string[],
   fromFile: (path: string) => string[],
+  options: { keepLeadingCommand?: boolean } = {},
 ): { args: string[]; promptFile?: NonNullable<LaunchSpec["promptFile"]> } {
   const prompt = input.initialPrompt;
   if (!prompt?.trim()) return { args: [] };
   if (prompt.length <= INLINE_PROMPT_MAX_CHARS) return { args: inline(prompt) };
   const path = promptFilePath(input.stateDir, input.taskId);
-  const command = leadingCommand(prompt);
+  const command = options.keepLeadingCommand
+    ? leadingCommand(prompt)
+    : undefined;
   if (command) {
     return {
       args: inline(`${command} ${readPromptFileInstruction(path)}`),

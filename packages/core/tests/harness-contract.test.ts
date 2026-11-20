@@ -95,6 +95,8 @@ interface Subject {
   commandEnv?: string;
   /** How the adapter keeps a prompt from parsing as options: `--` before it, or nothing (generic CLIs). */
   defuse: "double-dash" | "none";
+  /** A long prompt's leading `/name` / `$name` stays inline (the agent is verified to run it from the launch prompt). */
+  keepsLeadingCommand?: boolean;
   make(options: {
     cliPath?: string;
     models?: HarnessModelCatalogAccess;
@@ -118,6 +120,7 @@ const SUBJECTS: Subject[] = [
     name: "claude-code",
     commandEnv: "HARBORMASTER_CLAUDE_COMMAND",
     defuse: "double-dash",
+    keepsLeadingCommand: true,
     make: ({ cliPath, models }) =>
       new ClaudeCodeHarnessAdapter({
         presence: noPresence,
@@ -433,8 +436,8 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
       expect(built.args.join(" ")).toContain(built.promptFile?.path ?? "?");
     }
     // A long prompt that starts with a skill / command (the composer's `/`
-    // menu) keeps it first in the message, since the agent only runs one it
-    // starts with; the rest of the prompt travels as the file.
+    // menu) keeps it first in the message where the agent is known to run
+    // one it starts with; elsewhere the whole prompt travels as the file.
     for (const command of ["/review", "/caveman:caveman", "$plannotator"]) {
       const commanded = subject
         .make({ cliPath: "/opt/hm/bin/harbormaster" })
@@ -443,10 +446,15 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
           initialPrompt: `${command} ${prompt}`,
           session: MODES.new,
         });
-      expect(commanded.args.at(-1)).toBe(
-        `${command} Read the file ${promptFilePath(deep.stateDir, deep.taskId)} and follow it as your task brief.`,
-      );
-      expect(commanded.promptFile?.text).toBe(prompt.trim());
+      if (subject.keepsLeadingCommand) {
+        expect(commanded.args.at(-1)).toBe(
+          `${command} Read the file ${promptFilePath(deep.stateDir, deep.taskId)} and follow it as your task brief.`,
+        );
+        expect(commanded.promptFile?.text).toBe(prompt.trim());
+      } else {
+        expect(commanded.promptFile?.text).toBe(`${command} ${prompt}`);
+        expect(commanded.args.join(" ")).not.toContain(command);
+      }
     }
     // A short prompt stays inline, with no file.
     const short = spec(adapter, MODES.new, { initialPrompt: "Fix the bug" });
