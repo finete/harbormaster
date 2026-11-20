@@ -3,8 +3,9 @@
 // at startup, so a window this process opens or reloads afterwards reads the
 // new archive at the old offsets and renders a slice of minified JS as text.
 //
-// The executable's stat is captured at launch; any later difference (new
-// inode from the swapped bundle, or the file gone) means "replaced".
+// The executable's stat is captured at launch; a different file at that path
+// later means "replaced". A missing one (mid-swap, or uninstalled) does not:
+// the next check looks again.
 import { readFileSync, statSync } from "node:fs";
 
 export interface BundleStamp {
@@ -74,7 +75,7 @@ export function createAppBundleGuard(input: {
   return {
     replacement: () => {
       const current = stampNow();
-      if (current && sameStamp(initial, current)) return undefined;
+      if (!current || sameStamp(initial, current)) return undefined;
       return { installedVersion: installedVersion() };
     },
   };

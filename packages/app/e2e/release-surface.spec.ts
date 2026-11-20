@@ -3,7 +3,8 @@
 // "Export diagnostics" from the app menu, after "Profile Main Process" saved
 // a CPU profile (the bundle must carry it, plus the runtime files: ptys,
 // agent `ps`, session files, the renderer's long frames and focus), then the
-// card's Restart once a fake app bundle is swapped under the running app.
+// card's Restart once a fake app bundle is swapped under the running app,
+// which asks first while a (fake) Claude Code agent is mid-turn.
 // One launch covers all three seams;
 // semver comparison, redaction and the zip format are unit-tested
 // (tests/update-check.test.ts, tests/diagnostics.test.ts).
@@ -29,6 +30,7 @@ import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createCore, type Task } from "@harbormaster/core";
 import {
   type ElectronApplication,
   _electron as electron,
@@ -36,6 +38,12 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { chooseWhere, submitAs } from "./composer";
+import {
+  controlFakeClaude,
+  waitForFakeClaude,
+  writeFakeClaude,
+} from "./fake-claude";
 import { readTestClipboardText } from "./test-clipboard";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -71,9 +79,16 @@ test.beforeAll(async () => {
       githubToken: "ghp_should_never_leave_the_machine",
       repositories: {
         "github.com/acme/app": {
-          deployment: [
-            { name: "prod", versionUrl: "https://bob:pw@prod.example/v" },
-          ],
+          deployment: {
+            stages: [
+              {
+                id: "prod",
+                label: "prod",
+                hook: "version-endpoint",
+                options: { url: "https://bob:pw@prod.example/v" },
+              },
+            ],
+          },
         },
       },
     }),
@@ -81,6 +96,8 @@ test.beforeAll(async () => {
   savePath = path.join(stateDir, "diagnostics.zip");
   bundleDir = path.join(stateDir, "Harbormaster.app");
   writeFakeBundle(bundleDir, "0.0.1");
+  const claudeConfig = path.join(stateDir, "claude-config");
+  mkdirSync(claudeConfig, { recursive: true });
 
   // Stub GitHub "latest release" endpoint (same JSON shape as the real API).
   const keyPath = path.join(stateDir, "tls-key.pem");
@@ -125,6 +142,9 @@ test.beforeAll(async () => {
       HARBORMASTER_UPDATE_URL: `https://127.0.0.1:${port}/repos/finete/harbormaster/releases/latest`,
       HARBORMASTER_E2E_SAVE_PATH: savePath,
       HARBORMASTER_MANUAL_PROFILE_MS: "300",
+      HARBORMASTER_PRESENCE_POLL_MS: "250",
+      HARBORMASTER_CLAUDE_COMMAND: writeFakeClaude(stateDir),
+      CLAUDE_CONFIG_DIR: claudeConfig,
       HARBORMASTER_BUNDLE_EXECUTABLE: path.join(
         bundleDir,
         "Contents",
@@ -291,11 +311,46 @@ test("Export Diagnostics in the app menu writes logs, a redacted config, version
   expect(Array.isArray(renderer.focus.terminals)).toBe(true);
 });
 
+async function startMidTurnClaudeChat(title: string): Promise<Task> {
+  await window.getByTestId("sidebar-new-task-button").click();
+  await window.getByTestId("new-task-title-input").fill(title);
+  await chooseWhere(window, "none");
+  await window.getByTestId("new-task-agent").click();
+  await window
+    .getByTestId("new-task-agent-menu")
+    .locator(
+      '[data-testid="new-task-agent-option"][data-harness="claude-code"]',
+    )
+    .click();
+  await submitAs(window, "start");
+  const core = createCore({ stateDir });
+  let task: Task | undefined;
+  await expect
+    .poll(async () => {
+      const columns = await core.commands.listBoard();
+      task = columns
+        .flatMap((column) => column.groups.flatMap((group) => group.tasks))
+        .find((candidate) => candidate.title === title);
+      return task?.id ?? null;
+    })
+    .not.toBeNull();
+  const started = task as Task;
+  await waitForFakeClaude(stateDir, started.id);
+  controlFakeClaude(stateDir, started.id, "working");
+  await expect(
+    window
+      .getByTestId(`sidebar-task-row-${started.id}`)
+      .getByTestId("sidebar-row-spinner"),
+  ).toBeVisible({ timeout: 10_000 });
+  return started;
+}
+
 // Last: Restart quits the app.
-test("an app replaced on disk while running turns the card into Restart, which quits", async () => {
+test("an app replaced on disk while running turns the card into Restart, which asks first while an agent is mid-turn, then quits", async () => {
   expect(
     await window.evaluate(() => window.harbormaster.app.getInstalledUpdate()),
   ).toBeNull();
+  await startMidTurnClaudeChat("Mid-turn chat");
 
   // What `brew upgrade` does: the old bundle moves out, a new one moves in.
   // The window never gains focus here: main's periodic check finds it.
@@ -310,8 +365,14 @@ test("an app replaced on disk while running turns the card into Restart, which q
   await expect(card).toContainText("Harbormaster v999.0.0 is installed");
   await expect(window.getByTestId("update-banner")).toHaveCount(0);
 
-  const exited = new Promise((resolve) => app.process().once("exit", resolve));
   await window.getByTestId("restart-banner-restart").click();
+  await expect(card).toContainText(
+    "An agent is mid-turn; restarting interrupts it.",
+  );
+  expect(mainOutput).not.toContain("[main] restart requested");
+
+  const exited = new Promise((resolve) => app.process().once("exit", resolve));
+  await window.getByTestId("restart-banner-confirm").click();
   await exited;
   expect(mainOutput).toContain("[main] app replaced on disk (running ");
   expect(mainOutput).toContain(

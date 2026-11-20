@@ -1,6 +1,7 @@
 import { ArrowUpCircle, Check, Copy, RotateCw, X } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
 import type { InstalledUpdate, UpdateInfo } from "../../../preload/api";
+import { usePresenceMap } from "../core-client";
 
 /** Dismissing hides the banner for that version only; a newer release shows again. */
 const DISMISSED_KEY = "harbormaster.update.dismissedVersion";
@@ -24,7 +25,8 @@ function readDismissed(): string | null {
  *
  * Once the app on disk has been replaced (the upgrade ran), the same card
  * offers a restart instead: this window keeps working, but this process
- * can no longer load a new one.
+ * can no longer load a new one. Restart asks first while an agent is
+ * mid-turn, since quitting interrupts it.
  */
 export function UpdateBanner(): JSX.Element | null {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -138,6 +140,24 @@ export function UpdateBanner(): JSX.Element | null {
   );
 }
 
+function restartCardText(installed: InstalledUpdate): {
+  title: string;
+  detail: string;
+} {
+  if (installed.version === installed.runningVersion) {
+    return {
+      title: "Restart to finish reinstalling",
+      detail: "Harbormaster was reinstalled; restart to keep things working.",
+    };
+  }
+  return {
+    title: "Restart to finish updating",
+    detail: installed.version
+      ? `Harbormaster v${installed.version} is installed; this window is still v${installed.runningVersion}.`
+      : `A new Harbormaster is installed; this window is still v${installed.runningVersion}.`,
+  };
+}
+
 function RestartCard({
   installed,
   onDismiss,
@@ -145,6 +165,14 @@ function RestartCard({
   installed: InstalledUpdate;
   onDismiss: () => void;
 }): JSX.Element {
+  const presence = usePresenceMap();
+  const midTurn = Object.values(presence).filter(
+    (badge) => badge.runningTurn,
+  ).length;
+  const [confirming, setConfirming] = useState(false);
+  const { title, detail } = restartCardText(installed);
+  const restart = (): void => void window.harbormaster.app.restartToUpdate();
+  const asking = confirming && midTurn > 0;
   return (
     <div
       data-testid="restart-banner"
@@ -155,12 +183,11 @@ function RestartCard({
       <div className="flex items-start gap-2">
         <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <p className="font-medium">Restart to finish updating</p>
+          <p className="font-medium">{title}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {installed.version
-              ? `Harbormaster v${installed.version} is installed; this window is still v${installed.runningVersion}.`
-              : `A new Harbormaster is installed; this window is still v${installed.runningVersion}.`}{" "}
-            Restarting stops running agents.
+            {asking
+              ? `${midTurn === 1 ? "An agent is" : `${midTurn} agents are`} mid-turn; restarting interrupts ${midTurn === 1 ? "it" : "them"}.`
+              : `${detail} Restarting stops running agents.`}
           </p>
         </div>
         <button
@@ -174,16 +201,38 @@ function RestartCard({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="mt-2 flex justify-end">
-        <button
-          type="button"
-          data-testid="restart-banner-restart"
-          onClick={() => void window.harbormaster.app.restartToUpdate()}
-          className="inline-flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors duration-[120ms] ease-out hover:bg-primary/90"
-        >
-          <RotateCw className="h-3.5 w-3.5" />
-          Restart
-        </button>
+      <div className="mt-2 flex justify-end gap-1.5">
+        {asking ? (
+          <>
+            <button
+              type="button"
+              data-testid="restart-banner-cancel"
+              onClick={() => setConfirming(false)}
+              className="inline-flex shrink-0 items-center rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="restart-banner-confirm"
+              onClick={restart}
+              className="inline-flex shrink-0 items-center gap-1 rounded bg-status-error px-2 py-1 text-xs text-background transition-colors duration-[120ms] ease-out hover:bg-status-error/90"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+              Restart anyway
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            data-testid="restart-banner-restart"
+            onClick={() => (midTurn > 0 ? setConfirming(true) : restart())}
+            className="inline-flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors duration-[120ms] ease-out hover:bg-primary/90"
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            Restart
+          </button>
+        )}
       </div>
     </div>
   );

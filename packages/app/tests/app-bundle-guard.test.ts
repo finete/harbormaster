@@ -53,7 +53,7 @@ describe("createAppBundleGuard", () => {
     expect(guard.replacement()).toEqual({ installedVersion: "0.7.1" });
   });
 
-  it("treats a removed bundle as replaced, version unknown", () => {
+  it("waits out a missing bundle (mid-upgrade or uninstalled) until a new one is in place", () => {
     const { fs, disk } = memoryFs(STAMP, "0.6.0");
     const guard = createAppBundleGuard({
       executablePath: EXE,
@@ -62,7 +62,10 @@ describe("createAppBundleGuard", () => {
     });
     disk.stamp = undefined;
     disk.plist = "";
-    expect(guard.replacement()).toEqual({ installedVersion: undefined });
+    expect(guard.replacement()).toBeUndefined();
+    disk.stamp = { ...STAMP, ino: 101 };
+    disk.plist = plist("0.7.1");
+    expect(guard.replacement()).toEqual({ installedVersion: "0.7.1" });
   });
 
   it("stays silent when the executable could not be read at launch", () => {

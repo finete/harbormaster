@@ -2729,12 +2729,17 @@ function restartIntoInstalledApp(): void {
 function restartIfBundleReplaced(): boolean {
   const update = checkInstalledUpdate();
   if (!update) return false;
+  const reinstalled = update.version === update.runningVersion;
   const choice = dialog.showMessageBoxSync({
     type: "info",
-    message: update.version
-      ? `Harbormaster ${update.version} was installed while ${update.runningVersion} was running.`
-      : "Harbormaster was updated while it was running.",
-    detail: "Restart to open the new version.",
+    message: reinstalled
+      ? "Harbormaster was reinstalled while it was running."
+      : update.version
+        ? `Harbormaster ${update.version} was installed while ${update.runningVersion} was running.`
+        : "Harbormaster was updated while it was running.",
+    detail: reinstalled
+      ? "Restart to keep things working."
+      : "Restart to open the new version.",
     buttons: ["Restart", "Quit"],
     defaultId: 0,
     cancelId: 1,
