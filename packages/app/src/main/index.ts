@@ -1170,11 +1170,13 @@ function registerCoreIpc(): void {
     core.commands.startTask(taskId),
   );
   // Main owns the ptys, so it (not the renderer) supplies the live pane
-  // cwds core must never remove a worktree out from under.
-  ipcMain.handle(
-    "core:toDone",
+  // cwds core must never remove a worktree out from under. Archive is the
+  // same verb for a task not yet Done (it completes on the way), so both
+  // share this path.
+  const completeTask =
+    (verb: "toDone" | "archiveTask") =>
     async (
-      _event,
+      _event: unknown,
       taskId: string,
       options: { force?: ToDoneForce } | undefined,
     ) => {
@@ -1189,7 +1191,7 @@ function registerCoreIpc(): void {
         const warm = new Set(
           warmSessions.ids().filter((id) => getSession(id)?.taskId === taskId),
         );
-        return core.commands.toDone(taskId, {
+        return core.commands[verb](taskId, {
           protectedPaths: activeSessionCwds({ excludeIds: warm }),
           force,
         });
@@ -1208,12 +1210,13 @@ function registerCoreIpc(): void {
       if (task?.repositoryId && binding?.worktreePath) {
         disposeSessionsUnder(binding.worktreePath);
       }
-      return core.commands.toDone(taskId, {
+      return core.commands[verb](taskId, {
         protectedPaths: activeSessionCwds(),
         force,
       });
-    },
-  );
+    };
+  ipcMain.handle("core:toDone", completeTask("toDone"));
+  ipcMain.handle("core:archiveTask", completeTask("archiveTask"));
   ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>
     core.commands.retryDoneCleanup(taskId, {
       protectedPaths: activeSessionCwds(),

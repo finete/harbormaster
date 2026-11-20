@@ -4,6 +4,8 @@
 // (1 min, 5 min, 30 min, then hourly), orphan handling ("not a git
 // repository" folders deleted + pruned, ENOENT = already cleaned), the
 // "needs attention" threshold behind the inbox item, Retry and Dismiss.
+// Archiving rides the same path (archive = Done + off the board), and the
+// clock also pins when a task counts as started (`startedAt`).
 
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -95,6 +97,10 @@ async function harness(
     join(dir, "workspace-bindings.json"),
   );
   const audit: AuditEntry[] = [];
+  const events = new CoreEventBus();
+  // Every task snapshot core published, in order.
+  const published: Task[] = [];
+  events.on("task-changed", ({ task }) => published.push(task));
   const worktrees = {
     removeWorktree: vi.fn(removeWorktree),
     uncommittedChangeCount: vi.fn(async () => 3),
@@ -109,7 +115,7 @@ async function harness(
     tasks,
     clock,
     ids: new UuidGenerator(),
-    events: new CoreEventBus(),
+    events,
     config: new JsonConfigAccess(join(dir, "config.json")),
     repositories: {
       discoverRepositories: async () => [REPO],
@@ -191,6 +197,7 @@ async function harness(
     reload,
     task,
     launchFilesLeft,
+    published,
   };
 }
 
@@ -417,5 +424,85 @@ describe("confirmed Done: forced cleanup", () => {
     f.at(minutes(600));
     await f.manager.refresh();
     expect(f.worktrees.removeWorktree).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("archiveTask", () => {
+  it("asks a task not yet Done the same question, then lands it Done and archived in one move", async () => {
+    const f = await harness(async () => {});
+    const question = await f.manager.archiveTask(f.task.id);
+    expect(question).toMatchObject({ requiresConfirmation: "done" });
+    expect(f.worktrees.removeWorktree).not.toHaveBeenCalled();
+    expect((await f.reload()).archivedAt).toBeUndefined();
+
+    f.at(minutes(5));
+    const result = await f.manager.archiveTask(f.task.id, {
+      force: { confirmed: true },
+    });
+    if (isToDoneConfirmation(result)) throw new Error("unexpected question");
+    const stamp = new Date(START.getTime() + minutes(5)).toISOString();
+    expect(result.task).toMatchObject({
+      state: "done",
+      completedAt: stamp,
+      archivedAt: stamp,
+    });
+    // Done's cleanup ran as for a plain Done.
+    expect(f.worktrees.removeWorktree).toHaveBeenCalledWith(
+      REPO,
+      WORKTREE,
+      true,
+    );
+    // Never published as a visible (unarchived) Done card on its way off.
+    expect(
+      f.published.filter((task) => task.state === "done" && !task.archivedAt),
+    ).toEqual([]);
+    expect((await f.reload()).archivedAt).toBe(stamp);
+  });
+
+  it("asks a Done task once (no lines), then archives it; keeps the first stamp, and a reopen clears it", async () => {
+    const f = await harness(async () => {});
+    await confirmDone(f.manager, f.task.id);
+    expect((await f.reload()).archivedAt).toBeUndefined();
+
+    f.at(minutes(1));
+    expect(await f.manager.archiveTask(f.task.id)).toEqual({
+      requiresConfirmation: "done",
+      detail: "Feature",
+      lines: [],
+    });
+    expect((await f.reload()).archivedAt).toBeUndefined();
+    const first = await f.manager.archiveTask(f.task.id, {
+      force: { confirmed: true },
+    });
+    if (isToDoneConfirmation(first)) throw new Error("unexpected question");
+    const stamp = new Date(START.getTime() + minutes(1)).toISOString();
+    expect(first.task.archivedAt).toBe(stamp);
+
+    f.at(minutes(2));
+    const again = await f.manager.archiveTask(f.task.id);
+    if (isToDoneConfirmation(again)) throw new Error("unexpected question");
+    expect(again.task.archivedAt).toBe(stamp);
+
+    const reopened = await f.manager.moveTask(f.task.id, "working");
+    expect(reopened.archivedAt).toBeUndefined();
+  });
+});
+
+describe("startedAt", () => {
+  it("is stamped the first time a task leaves the backlog for Working, and kept after that", async () => {
+    const f = await harness(async () => {});
+    // The fixture task predates `startedAt` (none recorded).
+    await f.manager.moveTask(f.task.id, "backlog");
+    expect((await f.reload()).startedAt).toBeUndefined();
+
+    f.at(minutes(10));
+    const started = await f.manager.moveTask(f.task.id, "working");
+    const stamp = new Date(START.getTime() + minutes(10)).toISOString();
+    expect(started.startedAt).toBe(stamp);
+
+    f.at(minutes(20));
+    await f.manager.moveTask(f.task.id, "backlog");
+    const restarted = await f.manager.moveTask(f.task.id, "working");
+    expect(restarted.startedAt).toBe(stamp);
   });
 });

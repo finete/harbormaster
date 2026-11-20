@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardColumn, Task } from "../src/preload/api";
 import {
   activityTimestamp,
+  archivedTasks,
   clampSidebarWidth,
   groupRows,
   matchesQuery,
@@ -138,6 +139,42 @@ describe("sidebarRows", () => {
     ];
     const rows = sidebarRows(columns, {}, new Set(["a"]));
     expect(rows.map((r) => r.task.id)).toEqual(["a"]);
+  });
+});
+
+describe("archivedTasks", () => {
+  it("lists only archived tasks, most recently archived first, filtered like rows", () => {
+    const done = (id: string, archivedAt?: string, title = id): Task =>
+      task({ id, title, state: "done", ...(archivedAt ? { archivedAt } : {}) });
+    const columns: BoardColumn[] = [
+      {
+        state: "working",
+        title: "Working",
+        groups: [{ id: "w", tasks: [task({ id: "live" })] }],
+      },
+      {
+        state: "done",
+        title: "Done",
+        groups: [
+          {
+            id: "d1",
+            tasks: [
+              done("older", "2025-01-02T00:00:00.000Z", "Fix login"),
+              done("visible"),
+            ],
+          },
+          {
+            id: "d2",
+            tasks: [done("newer", "2025-01-05T00:00:00.000Z", "Ship docs")],
+          },
+        ],
+      },
+    ];
+    expect(archivedTasks(columns, "").map((t) => t.id)).toEqual([
+      "newer",
+      "older",
+    ]);
+    expect(archivedTasks(columns, "login").map((t) => t.id)).toEqual(["older"]);
   });
 });
 

@@ -5,8 +5,10 @@
 // the card-only waitingDurationText fragment.
 import { describe, expect, it } from "vitest";
 import {
+  absoluteDateTime,
   lastInteractionTimestamp,
   relativeTime,
+  taskStartMoment,
   waitingDurationText,
 } from "../src/renderer/src/lib/time-format";
 
@@ -77,5 +79,56 @@ describe("waitingDurationText", () => {
     ["2025-01-06T12:00:00.000Z", "waiting 4d"],
   ])("%s -> %j", (sinceIso, expected) => {
     expect(waitingDurationText(sinceIso, now)).toBe(expected);
+  });
+});
+
+describe("taskStartMoment", () => {
+  const createdAt = "2026-11-18T09:00:00.000Z";
+
+  it("prefers the recorded start", () => {
+    expect(
+      taskStartMoment({
+        state: "working",
+        createdAt,
+        startedAt: "2026-11-19T10:00:00.000Z",
+      }),
+    ).toEqual({ label: "started", iso: "2026-11-19T10:00:00.000Z" });
+  });
+
+  it("a task past the backlog with no recorded start started when it was created", () => {
+    expect(taskStartMoment({ state: "done", createdAt })).toEqual({
+      label: "started",
+      iso: createdAt,
+    });
+  });
+
+  it("a parked task that never started shows when it was created", () => {
+    expect(taskStartMoment({ state: "backlog", createdAt })).toEqual({
+      label: "created",
+      iso: createdAt,
+    });
+  });
+});
+
+describe("absoluteDateTime", () => {
+  // Local-time constructors: the expectation holds in any test timezone.
+  const at = new Date(2026, 10, 20, 14, 32).toISOString();
+  const now = new Date(2026, 10, 21, 8, 0).getTime();
+  // Newer ICU puts a narrow no-break space before "PM".
+  const format = (nowMs: number) =>
+    absoluteDateTime(at, nowMs, "en-US").replace(/\s/g, " ");
+
+  it("shows month, day and time, without the current year", () => {
+    expect(format(now)).toBe("Nov 20, 2:32 PM");
+  });
+
+  it("adds the year for another year", () => {
+    expect(format(new Date(2027, 0, 2).getTime())).toBe(
+      "Nov 20, 2026, 2:32 PM",
+    );
+  });
+
+  it("is empty for an unparseable value", () => {
+    expect(absoluteDateTime("not a date", now, "en-US")).toBe("");
   });
 });

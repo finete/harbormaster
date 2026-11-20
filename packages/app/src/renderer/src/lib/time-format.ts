@@ -61,3 +61,41 @@ export function lastInteractionTimestamp(
 export function waitingDurationText(sinceIso: string, now: number): string {
   return `waiting ${relativeTime(sinceIso, now)}`;
 }
+
+/**
+ * When a card says its task began: `startedAt` (first entered Working);
+ * a task from before that was recorded but already past the backlog falls
+ * back to `createdAt` (it was created started); a parked task that never
+ * started shows when it was created.
+ */
+export function taskStartMoment(
+  task: Pick<Task, "state" | "createdAt" | "startedAt">,
+): { label: "started" | "created"; iso: string } {
+  if (task.startedAt) return { label: "started", iso: task.startedAt };
+  if (task.state !== "backlog") {
+    return { label: "started", iso: task.createdAt };
+  }
+  return { label: "created", iso: task.createdAt };
+}
+
+/**
+ * A date and time in the user's locale, the year only when it is not the
+ * current one: "Nov 20, 2:32 PM", "Mar 3, 2025, 9:05 AM" (en-US); "" for an
+ * unparseable value. `locale` is for tests.
+ */
+export function absoluteDateTime(
+  iso: string,
+  now: number,
+  locale?: string,
+): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}

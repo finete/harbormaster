@@ -120,8 +120,9 @@ without new commands; rules already consume kinds purely as data.
 - Frontends render the registry (`listAwaitingKinds`: labels, inputs,
   per-task availability and side-effect notices) and never branch on kind
   names for controls. Kind-specific *display* (group headings, state chips)
-  is fine. Board cards carry no action buttons: the verbs live in the
-  workspace header, the board keys, and drag-and-drop.
+  is fine. Board cards carry no workflow buttons: the verbs live in the
+  workspace header, the board keys, and drag-and-drop. The one button on a
+  card is its hover × (Archive, which asks first).
 
 ## Column names: Working, and running agents
 
@@ -263,6 +264,17 @@ difference not listed here is a bug.
   thing the user ever sees about it. pi-home asked "Discard uncommitted
   changes?" / "Delete unmerged task workspace?" one after the other and
   kept a live pane's worktree with a warning.
+- **Archive is Done, then off the board.** `archiveTask` (workspace header
+  Archive, a card's hover ×, `e` on the board, the rail row's menu) is not
+  a fourth verb. It always asks once ("Archive?"): a Done task's question
+  has no other lines and it gets `archivedAt`; any other task gets the Done
+  question's lines and lands in Done already archived, in one write, so
+  nothing keeps running unseen. Archived tasks are listed behind the Done
+  column's "show archived" (`a`) and in the rail's collapsible "Archived"
+  section under the tasks (newest first; never as a task row), and the
+  task's open workspace closes (the user's own close, so a live review
+  still asks about unsent comments). Reopen (or any move out of Done)
+  clears the flag. The 7-day sweep archives old Done tasks the same way.
 - **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at

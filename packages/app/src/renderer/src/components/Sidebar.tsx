@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  Archive,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -89,7 +90,9 @@ import {
   parentCandidates,
 } from "../lib/task-lineage";
 import { deriveMessagingChips } from "../lib/task-messaging-chips";
+import { archiveTaskMutation, canArchive } from "../lib/task-mutations";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
+import { relativeTime } from "../lib/time-format";
 import { useDragGuards } from "../lib/use-drag-guards";
 import { CLOCK_TICK_MS, useNow } from "../lib/use-now";
 import {
@@ -105,6 +108,7 @@ import {
 } from "./SidebarRowContextMenu";
 import { type RowDragProps, SidebarTaskRow, StatusDot } from "./SidebarTaskRow";
 import {
+  archivedTasks,
   clampSidebarWidth,
   groupRows,
   matchesQuery,
@@ -123,6 +127,7 @@ import { SidebarNavItem } from "./ui/sidebar-nav";
 
 const WIDTH_KEY = "harbormaster.sidebar.width";
 const COLLAPSED_KEY = "harbormaster.sidebar.collapsed";
+const ARCHIVED_OPEN_KEY = "harbormaster.sidebar.archivedOpen";
 
 function readStoredWidth(): number {
   try {
@@ -138,6 +143,15 @@ function readStoredWidth(): number {
 function readStoredCollapsed(): boolean {
   try {
     return window.localStorage.getItem(COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+/** The "Archived" section starts collapsed until the user opens it. */
+function readStoredArchivedOpen(): boolean {
+  try {
+    return window.localStorage.getItem(ARCHIVED_OPEN_KEY) === "true";
   } catch {
     return false;
   }
@@ -338,8 +352,9 @@ function SortableGroupSection({
  * hover close button (or a middle-click) closes just that task's workspace
  * through `onCloseTask` (App's `requestCloseTask`) without touching its
  * board state. The footer keeps "+ New task" and the "Board" button
- * (Cmd/Ctrl+Shift+B also works, see App.tsx). Archived tasks are always excluded (the Done
- * column's "show archived" toggle is board-only; see BoardColumn.tsx).
+ * (Cmd/Ctrl+Shift+B also works, see App.tsx). Archived tasks never get a
+ * task row: they are listed in the collapsible "Archived" section under the
+ * tasks (most recently archived first; a click opens one, like a card).
  */
 /** The Costs row's tooltip (docs/costs.md). */
 const COSTS_TITLE = "Costs: token usage per task (est. at list price)";
@@ -489,6 +504,7 @@ export function Sidebar({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
   const [collapsed, setCollapsed] = useState(readStoredCollapsed);
+  const [archivedOpen, setArchivedOpen] = useState(readStoredArchivedOpen);
   const [width, setWidth] = useState(readStoredWidth);
   const [resizing, setResizing] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -550,6 +566,18 @@ export function Sidebar({
     [lineageIndex, layoutOptions],
   );
   const searching = query.trim().length > 0;
+  const archived = useMemo(
+    () => archivedTasks(columns, query),
+    [columns, query],
+  );
+  // A live filter shows archived matches even while the section is closed.
+  const archivedShown = archivedOpen || searching;
+  const toggleArchived = (): void => {
+    setArchivedOpen((open) => {
+      store(ARCHIVED_OPEN_KEY, String(!open));
+      return !open;
+    });
+  };
   const visiblePinned = useMemo(
     () => pinned.filter((row) => matchesQuery(row, query)),
     [pinned, query],
@@ -790,6 +818,16 @@ export function Sidebar({
         label: "Open PR",
         separatorBefore: true,
         onSelect: () => void window.harbormaster.shell.openExternal(prUrl),
+      });
+    }
+    if (canArchive(task)) {
+      // Off the board and the rail; a task not yet Done asks the Done
+      // question first (see archiveTaskMutation).
+      items.push({
+        key: "archive",
+        label: task.state === "done" ? "Archive" : "Archive…",
+        separatorBefore: true,
+        onSelect: () => void archiveTaskMutation(task.id),
       });
     }
     return items;
@@ -1477,7 +1515,8 @@ export function Sidebar({
           )}
           {rows.length > 0 &&
             visiblePinned.length === 0 &&
-            visibleGroups.length === 0 && (
+            visibleGroups.length === 0 &&
+            archived.length === 0 && (
               <p
                 data-testid="sidebar-search-empty"
                 className="px-4 py-4 text-xs text-muted-foreground"
@@ -1573,6 +1612,67 @@ export function Sidebar({
               );
             })}
           </SortableContext>
+          {archived.length > 0 && (
+            <section data-testid="sidebar-archived-section" className="pt-1">
+              <button
+                type="button"
+                data-testid="sidebar-archived-toggle"
+                aria-expanded={archivedShown}
+                onClick={toggleArchived}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors duration-[120ms] ease-out hover:text-foreground"
+              >
+                {archivedShown ? (
+                  <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+                ) : (
+                  <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />
+                )}
+                <Archive className="h-3 w-3 shrink-0" aria-hidden />
+                <span>Archived</span>
+                <span
+                  className="ml-auto font-normal tabular-nums text-muted-foreground/70"
+                  data-testid="sidebar-archived-count"
+                >
+                  {archived.length}
+                </span>
+              </button>
+              {archivedShown && (
+                <div className="border-y border-border/40">
+                  {archived.map((task) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      data-testid={`sidebar-archived-row-${task.id}`}
+                      data-focused={focusedTaskId === task.id}
+                      onClick={() => onSelectTask(task.id)}
+                      title={`${task.title} (archived ${new Date(task.archivedAt ?? "").toLocaleString()})`}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent/60 hover:text-foreground",
+                        focusedTaskId === task.id &&
+                          "bg-accent text-foreground",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {task.title}
+                      </span>
+                      <span
+                        className={cn(
+                          "max-w-[40%] shrink-0 truncate font-mono text-[10px]",
+                          task.repositoryId
+                            ? repoColorClass(repoLabel(task))
+                            : "text-muted-foreground/70",
+                        )}
+                      >
+                        {repoLabel(task)}
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                        {relativeTime(task.archivedAt ?? "", now)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </div>
         {/* Portaled out of the overflow-y-auto scroller (R22): never clipped,
           never stretches the list; the in-flow source row just dims. */}

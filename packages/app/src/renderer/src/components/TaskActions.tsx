@@ -1,8 +1,10 @@
-import { Loader2, Play, RotateCcw } from "lucide-react";
+import { Archive, Loader2, Play, RotateCcw } from "lucide-react";
 import type { JSX, MouseEvent } from "react";
 import { useState } from "react";
 import type { Task } from "../../../preload/api";
 import {
+  archiveTaskMutation,
+  canArchive,
   canAwait,
   canDone,
   canReopen,
@@ -19,11 +21,12 @@ import { Kbd } from "./ui/kbd";
 
 /**
  * The focused task's workflow verbs in `TaskWorkspace`'s header — the only
- * place action buttons live (board cards carry none; the board drives the
- * same verbs by key and drag): Start (backlog) · Review ▾ (Working/Awaiting,
- * see ReviewButton) · Await… · Done, or Reopen
- * once Done. Await… opens the shared kind picker (`AwaitDialog`); which
- * awaiting kinds exist and what each does is core's registry, never a
+ * place workflow buttons live (a board card's only button is its hover ×
+ * Archive; the board drives the same verbs by key and drag): Start
+ * (backlog) · Review ▾ (Working/Awaiting, see ReviewButton) · Await… ·
+ * Done, or Reopen once Done; Archive (takes it off the board, completing it first if
+ * needed) on every task not archived yet. Await… opens the shared kind
+ * picker (`AwaitDialog`); which awaiting kinds exist and what each does is core's registry, never a
  * button here. Everything calls straight through the IPC bridge — the
  * board re-renders from the next `board-changed` push, never from a
  * locally-applied result. Thrown errors and returned warnings surface as a
@@ -31,7 +34,7 @@ import { Kbd } from "./ui/kbd";
  */
 export function TaskActions({ task }: { task: Task }): JSX.Element {
   const [busy, setBusy] = useState<
-    "start" | "await" | "done" | "reopen" | null
+    "start" | "await" | "done" | "reopen" | "archive" | null
   >(null);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [awaitOpen, setAwaitOpen] = useState(false);
@@ -85,6 +88,42 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
     }
   }
 
+  async function handleArchive(
+    event: MouseEvent<HTMLButtonElement>,
+  ): Promise<void> {
+    stopClick(event);
+    if (busy) return;
+    setBusy("archive");
+    try {
+      await archiveTaskMutation(task.id);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const archiveButton = canArchive(task) && (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={busy !== null}
+      onClick={handleArchive}
+      data-testid={`archive-task-button-${task.id}`}
+      title={
+        task.state === "done"
+          ? 'Archive: take it off the board (Done\'s "show archived" lists it) (e)'
+          : "Archive: mark it done and take it off the board (e)"
+      }
+    >
+      {busy === "archive" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Archive className="h-3.5 w-3.5" />
+      )}
+      Archive
+      <Kbd>e</Kbd>
+    </Button>
+  );
+
   function handleReopenClick(event: MouseEvent<HTMLButtonElement>): void {
     stopClick(event);
     if (busy) return;
@@ -123,6 +162,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           )}
           Reopen
         </Button>
+        {archiveButton}
         {/* Clicks inside the dialog must not bubble to the header's hosts. */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: event-propagation boundary only, not an interactive element. */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: same — keyboard events are handled by the dialog itself. */}
@@ -187,6 +227,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
         Done
         <Kbd>x</Kbd>
       </Button>
+      {archiveButton}
       <AwaitDialog
         taskId={awaitOpen ? task.id : null}
         reviewer={task.pr?.role === "reviewer"}

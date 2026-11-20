@@ -1,4 +1,4 @@
-// Shared board gestures for e2e lanes. Board cards carry no action buttons
+// Shared board gestures for e2e lanes. Board cards carry no workflow buttons
 // (the workflow verbs live in the workspace header, the board's s/r/x keys,
 // and drag-and-drop), so lanes that used to click a card's Start/Done
 // button drive the same verbs through these instead. Not a spec file

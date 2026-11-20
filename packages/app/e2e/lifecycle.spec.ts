@@ -260,9 +260,11 @@ test.describe("toAwait and toDone drive the board through the real core command 
     const card = cardLocator(window, "Ship Feature");
     await expect(card).toBeVisible();
     const taskId = await cardTaskId(card);
-    // Cards carry no action buttons: the verbs are keys, drags, and the
-    // workspace header.
-    await expect(card.locator("button")).toHaveCount(0);
+    // Cards carry no workflow buttons (the verbs are keys, drags, and the
+    // workspace header): the only one is the hover × (Archive).
+    await expect(
+      card.locator('button:not([data-testid="card-archive-button"])'),
+    ).toHaveCount(0);
     // Every card shows a last-interaction time indicator (ported from
     // pi-home's withLastInteraction; see TaskCard.tsx).
     await expect(card.getByTestId("card-time")).not.toBeEmpty();
@@ -897,10 +899,23 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
             state: "done",
             title: "Fresh Done Task",
             initialPrompt: "",
+            harness: "claude-code",
+            model: "anthropic/claude-opus-4-8",
             createdAt: now,
             updatedAt: now,
             stateChangedAt: now,
+            startedAt: now,
             completedAt: now,
+          },
+          {
+            id: "parked-task-1",
+            kind: "temp_task",
+            state: "backlog",
+            title: "Parked Idea",
+            initialPrompt: "",
+            createdAt: now,
+            updatedAt: now,
+            stateChangedAt: now,
           },
         ],
       }),
@@ -970,5 +985,91 @@ test.describe("archived done tasks stay hidden until the Done column's toggle is
         .getByTestId("sidebar-group-scratch")
         .getByTestId("sidebar-group-count"),
     ).toHaveText("1");
+  });
+
+  test("cards name their agent and start; archiving always asks, then takes the task off the board: a parked one with e, a Done one with its card's hover ×", async () => {
+    await window.getByTestId("board-button").click();
+    await expect(window.getByTestId("board-view")).toBeVisible();
+    const toggle = window
+      .getByTestId("column-done")
+      .getByTestId("toggle-archived-button");
+    // The previous test left archived cards shown.
+    await toggle.click();
+    await expect(toggle).toContainText("show archived (1)");
+
+    const doneCard = cardLocator(window, "Fresh Done Task");
+    await expect(doneCard.getByTestId("card-agent-line")).toContainText(
+      "claude-code · claude-opus-4-8 · started ",
+    );
+    const parkedCard = cardLocator(window, "Parked Idea");
+    await expect(parkedCard.getByTestId("card-agent-line")).toContainText(
+      "pi · created ",
+    );
+
+    // e on the selected backlog card: not Done yet, so it asks first.
+    for (let i = 0; i < 4; i++) await window.keyboard.press("ArrowLeft");
+    for (let i = 0; i < 3; i++) await window.keyboard.press("ArrowUp");
+    await expect(parkedCard).toHaveAttribute("data-selected", "true");
+    await window.keyboard.press("e");
+    await expect(window.getByTestId("confirm-dialog")).toContainText(
+      "Archive?",
+    );
+    await window.keyboard.press("Enter");
+    await expect(window.getByTestId("confirm-dialog")).toHaveCount(0);
+    await expect(parkedCard).toHaveCount(0);
+    await expect(toggle).toContainText("show archived (2)");
+    const parked = await window.evaluate(
+      (id) => window.harbormaster.core.getTask(id),
+      "parked-task-1",
+    );
+    expect(parked?.state).toBe("done");
+    expect(parked?.archivedAt).toBeTruthy();
+
+    // A Done task's card ×: still one question; cancel keeps it.
+    // Its workspace is open (previous test), and closes with the archive.
+    await expect(
+      window.getByTestId("sidebar-task-row-visible-done-task-1"),
+    ).toHaveCount(1);
+    const archiveButton = doneCard.getByTestId("card-archive-button");
+    await doneCard.hover();
+    await archiveButton.click();
+    const dialog = window.getByTestId("confirm-dialog");
+    await expect(dialog).toContainText("Archive?");
+    await expect(dialog).toContainText("leaves the board");
+    await window.getByTestId("confirm-dialog-cancel").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(doneCard).toBeVisible();
+    await expect(window.getByTestId("board-view")).toBeVisible();
+
+    await doneCard.hover();
+    await archiveButton.click();
+    await window.keyboard.press("Enter");
+    await expect(doneCard).toHaveCount(0);
+    await expect(toggle).toContainText("show archived (3)");
+    await expect(
+      window.getByTestId("sidebar-task-row-visible-done-task-1"),
+    ).toHaveCount(0);
+    await toggle.click();
+    await expect(doneCard).toBeVisible();
+    await expect(parkedCard).toBeVisible();
+
+    // The rail lists them under the tasks, newest first, collapsed until
+    // opened; a click opens one like its card does.
+    await window.getByTestId("workspace-button").click();
+    const archivedRows = window
+      .getByTestId("sidebar-archived-section")
+      .locator('[data-testid^="sidebar-archived-row-"]');
+    await expect(window.getByTestId("sidebar-archived-count")).toHaveText("3");
+    await expect(archivedRows).toHaveCount(0);
+    await window.getByTestId("sidebar-archived-toggle").click();
+    await expect(archivedRows).toHaveText([
+      /Fresh Done Task/,
+      /Parked Idea/,
+      /Old Archived Task/,
+    ]);
+    await window.getByTestId("sidebar-archived-row-parked-task-1").click();
+    await expect(
+      window.getByTestId("task-workspace-parked-task-1"),
+    ).toBeVisible();
   });
 });

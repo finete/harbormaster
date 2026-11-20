@@ -64,7 +64,10 @@ import {
 } from "./lib/renderer-diagnostics";
 import { startReviewRejectedListener } from "./lib/review";
 import { closeReview, reviewUrlFor } from "./lib/review-close";
-import { subscribeTaskPanesClosing } from "./lib/task-mutations";
+import {
+  subscribeTaskArchived,
+  subscribeTaskPanesClosing,
+} from "./lib/task-mutations";
 import { startTaskUrlListener } from "./lib/task-urls";
 import { useInbox } from "./lib/use-inbox";
 import { useSidebarOrder } from "./lib/use-sidebar-order";
@@ -290,6 +293,9 @@ export function App({
     },
     [closeTask],
   );
+  // An archived task leaves the rail too: close its workspace like the
+  // user would.
+  useEffect(() => subscribeTaskArchived(requestCloseTask), [requestCloseTask]);
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
   // session, and doing that for whatever happens to sort first on the board
