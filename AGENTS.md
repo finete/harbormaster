@@ -41,6 +41,20 @@ Utility) that `packages/core` follows. Pi-home's `src/` layout
   through the takeover-offer guard (stop-and-attach for headless runs, focus
   the existing app pane, or explicit attach-anyway).
 
+## Identity
+
+Which GitHub account works on this repository is each developer's local
+setup, never named here: commits use the repo-local `user.name` /
+`user.email`, and the account for `gh` is the repo-local
+`harbormaster.ghUser` (`git config harbormaster.ghUser <account>`). Agents
+never change either.
+
+Every `gh` command here runs as that account:
+`GH_TOKEN="$(gh auth token --user "$(git config harbormaster.ghUser)")" gh …`.
+If `harbormaster.ghUser` is unset, stop and ask the developer which account
+to use; never fall back to gh's active account. Never add other accounts as
+collaborators.
+
 ## Workflow
 
 Solo development, directly on `main`, with no pull requests and no
