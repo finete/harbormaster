@@ -2,8 +2,9 @@
 // available" card fed by a stubbed GitHub "latest release" endpoint, and
 // "Export diagnostics" from the app menu, after "Profile Main Process" saved
 // a CPU profile (the bundle must carry it, plus the runtime files: ptys,
-// agent `ps`, session files, the renderer's long frames and focus). One
-// launch covers both seams;
+// agent `ps`, session files, the renderer's long frames and focus), then the
+// card's Restart once a fake app bundle is swapped under the running app.
+// One launch covers all three seams;
 // semver comparison, redaction and the zip format are unit-tested
 // (tests/update-check.test.ts, tests/diagnostics.test.ts).
 //
@@ -20,6 +21,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -44,7 +46,18 @@ let stateDir: string;
 let server: Server;
 let releaseRequests = 0;
 let savePath: string;
+let bundleDir: string;
 const mainProcessErrors: string[] = [];
+let mainOutput = "";
+
+function writeFakeBundle(dir: string, version: string): void {
+  mkdirSync(path.join(dir, "Contents", "MacOS"), { recursive: true });
+  writeFileSync(path.join(dir, "Contents", "MacOS", "Harbormaster"), version);
+  writeFileSync(
+    path.join(dir, "Contents", "Info.plist"),
+    `<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`,
+  );
+}
 
 test.beforeAll(async () => {
   stateDir = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-release-"));
@@ -66,6 +79,8 @@ test.beforeAll(async () => {
     }),
   );
   savePath = path.join(stateDir, "diagnostics.zip");
+  bundleDir = path.join(stateDir, "Harbormaster.app");
+  writeFakeBundle(bundleDir, "0.0.1");
 
   // Stub GitHub "latest release" endpoint (same JSON shape as the real API).
   const keyPath = path.join(stateDir, "tls-key.pem");
@@ -110,11 +125,18 @@ test.beforeAll(async () => {
       HARBORMASTER_UPDATE_URL: `https://127.0.0.1:${port}/repos/finete/harbormaster/releases/latest`,
       HARBORMASTER_E2E_SAVE_PATH: savePath,
       HARBORMASTER_MANUAL_PROFILE_MS: "300",
+      HARBORMASTER_BUNDLE_EXECUTABLE: path.join(
+        bundleDir,
+        "Contents",
+        "MacOS",
+        "Harbormaster",
+      ),
     },
   });
   const child = app.process();
   const onChunk = (chunk: Buffer): void => {
     const text = chunk.toString();
+    mainOutput += text;
     if (/\[main] uncaughtException/i.test(text)) {
       mainProcessErrors.push(text.trim());
     }
@@ -267,4 +289,37 @@ test("Export Diagnostics in the app menu writes logs, a redacted config, version
   expect(renderer.windowContentSize).toHaveLength(2);
   expect(renderer.focus.sidebar).toEqual(expect.any(Object));
   expect(Array.isArray(renderer.focus.terminals)).toBe(true);
+});
+
+// Last: Restart quits the app.
+test("an app replaced on disk while running turns the card into Restart, which quits", async () => {
+  const focusWindow = (): Promise<void> =>
+    app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.emit("focus");
+    });
+  await focusWindow();
+  expect(
+    await window.evaluate(() => window.harbormaster.app.getInstalledUpdate()),
+  ).toBeNull();
+
+  // What `brew upgrade` does: the old bundle moves out, a new one moves in.
+  const staged = `${bundleDir}.new`;
+  writeFakeBundle(staged, "999.0.0");
+  renameSync(bundleDir, `${bundleDir}.old`);
+  renameSync(staged, bundleDir);
+  await focusWindow();
+
+  const card = window.getByTestId("restart-banner");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-version", "999.0.0");
+  await expect(card).toContainText("Harbormaster v999.0.0 is installed");
+  await expect(window.getByTestId("update-banner")).toHaveCount(0);
+
+  const exited = new Promise((resolve) => app.process().once("exit", resolve));
+  await window.getByTestId("restart-banner-restart").click();
+  await exited;
+  expect(mainOutput).toContain("[main] app replaced on disk (running ");
+  expect(mainOutput).toContain(
+    "[main] restart requested (test instance: quit only)",
+  );
 });

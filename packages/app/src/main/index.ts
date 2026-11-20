@@ -75,6 +75,7 @@ import {
   utilityProcess,
 } from "electron";
 import type {
+  InstalledUpdate,
   MessagingChangedPayload,
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -2243,6 +2244,9 @@ function createWindow(): void {
   win.once("ready-to-show", () =>
     offscreen ? win.showInactive() : win.show(),
   );
+  win.on("focus", () => {
+    checkInstalledUpdate();
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   // Cmd+W (mac) or Ctrl+W (other) closes the focused task workspace, not the
@@ -2660,6 +2664,76 @@ function startUpdateChecks(): void {
   updateChecker.start();
 }
 
+// e2e stamps a scratch "bundle" instead (HARBORMASTER_BUNDLE_EXECUTABLE);
+// the app never sets it.
+const bundleExecutable =
+  process.env.HARBORMASTER_BUNDLE_EXECUTABLE ??
+  (app.isPackaged ? process.execPath : undefined);
+const appBundleGuard = bundleExecutable
+  ? createAppBundleGuard({
+      executablePath: bundleExecutable,
+      infoPlistPath: join(dirname(bundleExecutable), "..", "Info.plist"),
+    })
+  : undefined;
+let installedUpdate: InstalledUpdate | undefined;
+
+/**
+ * Whether the installed app was replaced since launch (see
+ * app-bundle-guard.ts). The first time it was, every window is told so its
+ * update card offers a restart while the window still works.
+ */
+function checkInstalledUpdate(): InstalledUpdate | undefined {
+  if (installedUpdate) return installedUpdate;
+  const replaced = appBundleGuard?.replacement();
+  if (!replaced) return undefined;
+  installedUpdate = {
+    version: replaced.installedVersion ?? null,
+    runningVersion: app.getVersion(),
+  };
+  console.log(
+    `[main] app replaced on disk (running ${installedUpdate.runningVersion}, installed ${installedUpdate.version ?? "unknown"})`,
+  );
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "app:installed-update", installedUpdate);
+  }
+  return installedUpdate;
+}
+
+function restartIntoInstalledApp(): void {
+  if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
+    console.log("[main] restart requested (test instance: quit only)");
+  } else {
+    console.log("[main] restarting into the installed app");
+    app.relaunch();
+  }
+  app.quit();
+}
+
+/**
+ * A window about to load (dock click with none open, Reload) would render
+ * garbage from a replaced app, and there is no working window to show the
+ * update card in: asks Restart or Quit natively instead. Returns `true`
+ * when the app is quitting.
+ */
+function restartIfBundleReplaced(): boolean {
+  const update = checkInstalledUpdate();
+  if (!update) return false;
+  const choice = dialog.showMessageBoxSync({
+    type: "info",
+    message: update.version
+      ? `Harbormaster ${update.version} was installed while ${update.runningVersion} was running.`
+      : "Harbormaster was updated while it was running.",
+    detail: "Restart to open the new version.",
+    buttons: ["Restart", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice === 0) restartIntoInstalledApp();
+  else app.quit();
+  return true;
+}
+
 /** Best-effort `harbormaster rules list` for the diagnostics bundle. */
 function rulesListOutput(): Promise<string> {
   const cli = cliPathForTools();
@@ -3010,6 +3084,11 @@ function registerReleaseIpc(): void {
   ipcMain.handle("app:getUpdate", (): UpdateInfo | null => {
     return updateChecker.latest() ?? null;
   });
+  ipcMain.handle(
+    "app:getInstalledUpdate",
+    (): InstalledUpdate | null => checkInstalledUpdate() ?? null,
+  );
+  ipcMain.handle("app:restartToUpdate", () => restartIntoInstalledApp());
   ipcMain.handle("app:copyText", (_event, text: unknown): void => {
     if (typeof text === "string") appClipboard.writeText(text);
   });
@@ -3118,45 +3197,6 @@ async function guardSingleInstance(): Promise<boolean> {
     // Retry: a lock we got is released so the next pass asks afresh.
     if (gotLock) app.releaseSingleInstanceLock();
   }
-}
-
-const appBundleGuard = app.isPackaged
-  ? createAppBundleGuard({
-      executablePath: process.execPath,
-      infoPlistPath:
-        process.platform === "darwin"
-          ? join(dirname(process.execPath), "..", "Info.plist")
-          : undefined,
-    })
-  : undefined;
-
-/**
- * When the installed app was replaced since launch, this process can no
- * longer load a renderer (see app-bundle-guard.ts): offers Restart or Quit
- * instead, and returns `true` (the app is quitting).
- */
-function restartIfBundleReplaced(): boolean {
-  const replaced = appBundleGuard?.replacement();
-  if (!replaced) return false;
-  const running = app.getVersion();
-  const installed = replaced.installedVersion;
-  console.log(
-    `[main] app replaced on disk (running ${running}, installed ${installed ?? "unknown"})`,
-  );
-  const choice = dialog.showMessageBoxSync({
-    type: "info",
-    message: installed
-      ? `Harbormaster ${installed} was installed while ${running} was running.`
-      : "Harbormaster was updated while it was running.",
-    detail: "Restart to open the new version.",
-    buttons: ["Restart", "Quit"],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  });
-  if (choice === 0) app.relaunch();
-  app.quit();
-  return true;
 }
 
 // A duplicate of this app started (it quits itself): bring ours forward.

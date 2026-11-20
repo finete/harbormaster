@@ -1,6 +1,6 @@
-import { ArrowUpCircle, Check, Copy, X } from "lucide-react";
+import { ArrowUpCircle, Check, Copy, RotateCw, X } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
-import type { UpdateInfo } from "../../../preload/api";
+import type { InstalledUpdate, UpdateInfo } from "../../../preload/api";
 
 /** Dismissing hides the banner for that version only; a newer release shows again. */
 const DISMISSED_KEY = "harbormaster.update.dismissedVersion";
@@ -21,10 +21,16 @@ function readDismissed(): string | null {
  * Homebrew cask, so the card shows the upgrade command with a copy button
  * instead of downloading anything. Closing it hides it for that version
  * only; a newer release shows again. Renders nothing otherwise.
+ *
+ * Once the app on disk has been replaced (the upgrade ran), the same card
+ * offers a restart instead: this window keeps working, but this process
+ * can no longer load a new one.
  */
 export function UpdateBanner(): JSX.Element | null {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [installed, setInstalled] = useState<InstalledUpdate | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
+  const [installedDismissed, setInstalledDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -35,16 +41,35 @@ export function UpdateBanner(): JSX.Element | null {
         if (alive && latest) setUpdate(latest);
       })
       .catch(() => {});
+    void window.harbormaster.app
+      .getInstalledUpdate()
+      .then((next) => {
+        if (alive && next) setInstalled(next);
+      })
+      .catch(() => {});
     const unsubscribe = window.harbormaster.app.onUpdateAvailable((next) => {
       setUpdate(next);
       setCopied(false);
     });
+    const unsubscribeInstalled = window.harbormaster.app.onInstalledUpdate(
+      (next) => setInstalled(next),
+    );
     return () => {
       alive = false;
       unsubscribe();
+      unsubscribeInstalled();
     };
   }, []);
 
+  if (installed) {
+    if (installedDismissed) return null;
+    return (
+      <RestartCard
+        installed={installed}
+        onDismiss={() => setInstalledDismissed(true)}
+      />
+    );
+  }
   if (!update || dismissed === update.version) return null;
 
   const copy = (): void => {
@@ -107,6 +132,57 @@ export function UpdateBanner(): JSX.Element | null {
             <Copy className="h-3.5 w-3.5" />
           )}
           {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RestartCard({
+  installed,
+  onDismiss,
+}: {
+  installed: InstalledUpdate;
+  onDismiss: () => void;
+}): JSX.Element {
+  return (
+    <div
+      data-testid="restart-banner"
+      data-version={installed.version ?? ""}
+      role="status"
+      className="pointer-events-auto w-80 self-end rounded-lg border border-border bg-card p-3 text-sm text-foreground shadow-lg"
+    >
+      <div className="flex items-start gap-2">
+        <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">Restart to finish updating</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {installed.version
+              ? `Harbormaster v${installed.version} is installed; this window is still v${installed.runningVersion}.`
+              : `A new Harbormaster is installed; this window is still v${installed.runningVersion}.`}{" "}
+            Restarting stops running agents.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="restart-banner-dismiss"
+          onClick={onDismiss}
+          title="Close"
+          aria-label="Close"
+          className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          data-testid="restart-banner-restart"
+          onClick={() => void window.harbormaster.app.restartToUpdate()}
+          className="inline-flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors duration-[120ms] ease-out hover:bg-primary/90"
+        >
+          <RotateCw className="h-3.5 w-3.5" />
+          Restart
         </button>
       </div>
     </div>
