@@ -141,6 +141,17 @@ export function parseCursorModelList(output: string): {
   return { models, ...(current ? { current } : {}) };
 }
 
+/**
+ * What Cursor's IDE terminal exports so a `cursor-agent` started there
+ * hands options it does not know to the IDE. Inherited (Harbormaster or a
+ * test run started from that terminal), an older `cursor-agent` without
+ * `--list-models` opens a Cursor window and takes focus instead of failing.
+ */
+export const CURSOR_IDE_ROUTING_ENV = [
+  "CURSOR_CLI",
+  "CURSOR_CLI_MODE",
+] as const;
+
 /** Cursor's message when logged out (`--list-models`, `-p`, the TUI). */
 export const CURSOR_AUTH_REQUIRED = "Authentication required";
 
@@ -183,6 +194,7 @@ export class CursorModelCatalogAccess implements HarnessModelCatalogAccess {
     }
     const outcome = await runOutcome(command, [...prefix, "--list-models"], {
       timeoutMs: LIST_TIMEOUT_MS,
+      unsetEnv: CURSOR_IDE_ROUTING_ENV,
     });
     const said = `${outcome.stdout}\n${outcome.stderr}`;
     if (said.includes(CURSOR_AUTH_REQUIRED)) {

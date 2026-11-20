@@ -33,6 +33,9 @@ const EMULATOR_MARKERS = [
   "STY",
   "VSCODE_INJECTION",
   "VSCODE_GIT_IPC_HANDLE",
+  // Cursor's IDE terminal: makes a pane's `cursor-agent` open the IDE.
+  "CURSOR_CLI",
+  "CURSOR_CLI_MODE",
   "TERMINAL_EMULATOR",
   "ZED_TERM",
 ] as const;

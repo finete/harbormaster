@@ -5,6 +5,7 @@
 
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -452,6 +453,38 @@ describe("Cursor models", () => {
     const ok = await access().listModels();
     expect(ok.models.map((model) => model.id)).toEqual(["auto", "gpt-5.2"]);
     expect(ok.error).toBeUndefined();
+  });
+
+  it("never lets an inherited IDE terminal route --list-models to the Cursor IDE", async () => {
+    const root = tempDir();
+    const script = join(root, "fake-agent");
+    writeFileSync(
+      script,
+      `#!/bin/sh\nif [ -n "$CURSOR_CLI$CURSOR_CLI_MODE" ]; then touch "${root}/ide-opened"; fi\necho "error: unknown option '--list-models'"; exit 1\n`,
+    );
+    chmodSync(script, 0o755);
+    const saved = {
+      cli: process.env.CURSOR_CLI,
+      mode: process.env.CURSOR_CLI_MODE,
+    };
+    process.env.CURSOR_CLI = "/Applications/Cursor.app/Contents/MacOS/Cursor";
+    process.env.CURSOR_CLI_MODE = "local";
+    try {
+      const out = await new CursorModelCatalogAccess({
+        command: () => [script],
+        configDir: root,
+      }).listModels();
+      expect(out.error).toMatch(/unknown option/);
+    } finally {
+      for (const [name, value] of [
+        ["CURSOR_CLI", saved.cli],
+        ["CURSOR_CLI_MODE", saved.mode],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(existsSync(join(root, "ide-opened"))).toBe(false);
   });
 });
 
