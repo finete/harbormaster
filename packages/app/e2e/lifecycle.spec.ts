@@ -389,9 +389,7 @@ test.describe("toAwait and toDone drive the board through the real core command 
   });
 
   test('Done on a clean scratch task asks just "Mark done?" (Enter confirms) and lands in the Done column with no warning', async () => {
-    // The previous test ended on the board view; back to the workspace view
-    // for its sidebar "+ New task" button.
-    await window.getByTestId("workspace-button").click();
+    // The previous test ended on the board view, the sidebar beside it.
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Quick Scratch Fix");
     await chooseWhere(window, "none");
@@ -434,7 +432,6 @@ test.describe("toAwait and toDone drive the board through the real core command 
   });
 
   test("dragging a branch-backed Working card to Awaiting opens the Await picker; confirming the preselected review kind pushes the branch and the PR badge appears", async () => {
-    await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Review");
     await chooseWhere(window, { index: 1 });
@@ -479,7 +476,6 @@ test.describe("toAwait and toDone drive the board through the real core command 
   });
 
   test("dragging a repo-backed card to Done runs the Done cleanup: its clean worktree is removed and the binding parked", async () => {
-    await window.getByTestId("workspace-button").click();
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill("Drag Done");
     await chooseWhere(window, { index: 1 });
@@ -622,9 +618,6 @@ test.describe("Done is final: one small question, then the app owns the worktree
   async function startedRepoTask(
     title: string,
   ): Promise<{ taskId: string; worktreePath: string; devCard: Locator }> {
-    if (await window.getByTestId("board-view").isVisible()) {
-      await window.getByTestId("workspace-button").click();
-    }
     await window.getByTestId("sidebar-new-task-button").click();
     await window.getByTestId("new-task-title-input").fill(title);
     await chooseWhere(window, { index: 1 });
@@ -661,7 +654,7 @@ test.describe("Done is final: one small question, then the app owns the worktree
     writeFileSync(dirtyFile, "work in progress\n");
     // A fresh app may auto-open the new task's workspace; this case is about
     // the dirty line alone (the live-pane case is the next test). Close it.
-    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("board-button").click();
     const closeButton = window.getByTestId("close-workspace-button");
     if ((await closeButton.count()) > 0) {
       await closeButton.click();

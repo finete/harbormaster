@@ -160,7 +160,7 @@ test("fresh state dir renders an empty board and an empty sidebar hint", async (
   }
   await expect(window.locator('[data-testid^="card-"]')).toHaveCount(0);
 
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
   await expect(window.getByTestId("workspace-view")).toBeVisible();
 });
 
@@ -232,7 +232,7 @@ test("terminals survive a board round-trip without respawning", async () => {
 
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
   await expect(window.getByTestId("workspace-view")).toBeVisible();
 
   await expect(window.getByTestId("terminal-panel").first()).toContainText(
@@ -297,7 +297,7 @@ test("hovering a row reveals a close \u2715; clicking it closes that task's work
   await expect(window.getByTestId("column-backlog-cards")).toContainText(
     "Task Beta",
   );
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
 
   // Beta was focused when closed: focus moves to the only other open task
   // (App.closeTask), same as Cmd+W already covers for the keyboard path.
@@ -337,7 +337,7 @@ test("middle-clicking a row closes it too, without touching board state", async 
   await expect(window.getByTestId("column-backlog-cards")).toContainText(
     "Task Gamma",
   );
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
 });
 
 test("closing a non-focused row doesn't steal focus from the focused workspace", async () => {
@@ -384,7 +384,7 @@ test("the rail lists only opened tasks: a parked backlog task stays off the rail
     "Parked Idea",
   );
 
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
   await expect(
     window
       .locator('[data-testid^="sidebar-task-row-"]')
@@ -495,8 +495,8 @@ test("the workspace header keeps the verbs (Await… · Done, no kind names) and
 
 test("Cmd+Shift+B toggles board and workspace; Cmd+B and the hide button hide the sidebar", async () => {
   // The previous test left the app in the board view.
-  // Confirm the board-button / workspace-button pair (formerly separate tests):
-  // board visible and workspace hidden while in board view.
+  // Confirm the Board row's toggle (formerly separate tests): board visible
+  // and workspace hidden while in board view.
   await expect(window.getByTestId("board-view")).toBeVisible();
   await expect(window.getByTestId("workspace-view")).toBeHidden();
   // The sidebar stays beside the board (like the Inbox / Rules pages), its
@@ -512,8 +512,9 @@ test("Cmd+Shift+B toggles board and workspace; Cmd+B and the hide button hide th
   await window.getByTestId("board-view").getByTestId("sidebar-reveal").click();
   await expect(sidebar).toBeVisible();
 
-  // Workspace button returns to the workspace view; board becomes hidden.
-  await window.getByTestId("workspace-button").click();
+  // Clicking the active Board row returns to the workspace view, like the
+  // Inbox / Rules rows; board becomes hidden.
+  await sidebar.getByTestId("board-button").click();
   await expect(window.getByTestId("workspace-view")).toBeVisible();
   await expect(window.getByTestId("board-view")).toBeHidden();
 

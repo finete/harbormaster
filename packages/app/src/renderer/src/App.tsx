@@ -1,4 +1,4 @@
-import { PanelLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceSnapshot, SettingSectionId } from "../../preload/api";
@@ -58,7 +58,7 @@ import {
   dismissOrphanWarning,
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
-import { boardShortcutLabel, modKeyLabel } from "./lib/platform";
+import { modKeyLabel } from "./lib/platform";
 import {
   setAppFocus,
   startRendererDiagnostics,
@@ -164,6 +164,19 @@ export function App({
   const openInbox = useCallback(() => togglePage("inbox"), [togglePage]);
   const openRules = useCallback(() => togglePage("rules"), [togglePage]);
   const openCosts = useCallback(() => togglePage("costs"), [togglePage]);
+  const toggleBoard = useCallback(() => {
+    setView((current) => (current === "board" ? "workspace" : "board"));
+  }, []);
+  const boardViewRef = useRef<HTMLDivElement>(null);
+  // The board's keymap ignores keys aimed elsewhere (Board.tsx), so showing
+  // it moves focus off the sidebar row or terminal that was focused.
+  useEffect(() => {
+    if (view !== "board") return;
+    const boardView = boardViewRef.current;
+    if (boardView && !boardView.contains(document.activeElement)) {
+      boardView.focus({ preventScroll: true });
+    }
+  }, [view]);
   // Cmd/Ctrl+, and the menu item both land here (either may fire for one
   // keystroke): opening is idempotent, never a toggle.
   const openSettings = useCallback(() => {
@@ -555,7 +568,7 @@ export function App({
       if (key === "b" && !event.altKey) {
         event.preventDefault();
         if (event.shiftKey) {
-          setView((current) => (current === "board" ? "workspace" : "board"));
+          toggleBoard();
         } else {
           setSidebarHidden((hidden) => {
             storeSidebarHidden(window.localStorage, !hidden);
@@ -585,7 +598,7 @@ export function App({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [takeover, openDraft, openInbox, openRules, openSettings]);
+  }, [takeover, openDraft, openInbox, openRules, openSettings, toggleBoard]);
 
   // The app menu's "Settings…" (main sends it to every window).
   useEffect(
@@ -703,7 +716,7 @@ export function App({
             onDetachedChange={sidebarOrder.setDetachedIds}
             onSelectTask={selectTask}
             onCloseTask={requestCloseTask}
-            onShowBoard={() => setView("board")}
+            onShowBoard={toggleBoard}
             boardActive={view === "board"}
             onOpenInbox={openInbox}
             inboxCount={inbox.priorityCount}
@@ -726,10 +739,12 @@ export function App({
               (and its pty-backed terminals) alive across board/workspace
               switches. */}
           <div
+            ref={boardViewRef}
+            tabIndex={-1}
             data-testid="board-view"
             className={
               view === "board"
-                ? "flex h-full min-w-0 flex-1 flex-col bg-chrome"
+                ? "flex h-full min-w-0 flex-1 flex-col bg-chrome outline-none"
                 : "hidden"
             }
           >
@@ -738,16 +753,6 @@ export function App({
               <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Board
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                data-testid="workspace-button"
-                onClick={() => setView("workspace")}
-                title={`Back to workspace (${boardShortcutLabel()})`}
-              >
-                <PanelLeft className="h-3.5 w-3.5" />
-                Workspace
-              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -786,6 +791,7 @@ export function App({
                 onSelectTask={selectTask}
                 onNewTask={openDraft}
                 active={view === "board"}
+                keyScopeRef={boardViewRef}
                 onBackToWorkspace={() => setView("workspace")}
                 focusedTaskId={visibleTaskId || null}
               />

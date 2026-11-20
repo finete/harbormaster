@@ -336,7 +336,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   ]);
 
   // The fork is handed out once: the next open resumes the new session.
-  await window.getByTestId("workspace-button").click();
+  await window.getByTestId("board-button").click();
   await closeWorkspace();
   await killPi();
   await openTask("Continuity");

@@ -380,6 +380,7 @@ export function Sidebar({
   onDetachedChange: (ids: ReadonlySet<string>) => void;
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
+  /** Toggle the board (App owns it; same as Cmd+Shift+B). */
   onShowBoard: () => void;
   /** The board is showing. */
   boardActive: boolean;
