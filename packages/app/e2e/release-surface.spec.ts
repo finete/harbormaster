@@ -293,21 +293,16 @@ test("Export Diagnostics in the app menu writes logs, a redacted config, version
 
 // Last: Restart quits the app.
 test("an app replaced on disk while running turns the card into Restart, which quits", async () => {
-  const focusWindow = (): Promise<void> =>
-    app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.emit("focus");
-    });
-  await focusWindow();
   expect(
     await window.evaluate(() => window.harbormaster.app.getInstalledUpdate()),
   ).toBeNull();
 
   // What `brew upgrade` does: the old bundle moves out, a new one moves in.
+  // The window never gains focus here: main's periodic check finds it.
   const staged = `${bundleDir}.new`;
   writeFakeBundle(staged, "999.0.0");
   renameSync(bundleDir, `${bundleDir}.old`);
   renameSync(staged, bundleDir);
-  await focusWindow();
 
   const card = window.getByTestId("restart-banner");
   await expect(card).toBeVisible();

@@ -2699,6 +2699,17 @@ function checkInstalledUpdate(): InstalledUpdate | undefined {
   return installedUpdate;
 }
 
+/** One stat every 5 s: the upgrade usually runs while the window already has focus (a pane's shell). */
+const INSTALLED_UPDATE_POLL_MS = 5_000;
+
+function startInstalledUpdateWatch(): void {
+  if (!appBundleGuard) return;
+  const timer = setInterval(() => {
+    if (checkInstalledUpdate()) clearInterval(timer);
+  }, INSTALLED_UPDATE_POLL_MS);
+  timer.unref();
+}
+
 function restartIntoInstalledApp(): void {
   if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
     console.log("[main] restart requested (test instance: quit only)");
@@ -3222,6 +3233,7 @@ app.whenReady().then(async () => {
   startPresencePolling();
   startRefreshLoop();
   startUpdateChecks();
+  startInstalledUpdateWatch();
   wireSleepWakeGating();
   wireWakeLog();
   // Queued launches (from a previous run, or a launch_task call
