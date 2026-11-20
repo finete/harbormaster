@@ -499,6 +499,18 @@ test("Cmd+Shift+B toggles board and workspace; Cmd+B and the hide button hide th
   // board visible and workspace hidden while in board view.
   await expect(window.getByTestId("board-view")).toBeVisible();
   await expect(window.getByTestId("workspace-view")).toBeHidden();
+  // The sidebar stays beside the board (like the Inbox / Rules pages), its
+  // Board row marked active; hidden, the board header offers to show it.
+  const sidebar = window.getByTestId("sidebar");
+  await expect(sidebar).toBeVisible();
+  await expect(sidebar.getByTestId("board-button")).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+  await window.keyboard.press("Meta+B");
+  await expect(sidebar).toBeHidden();
+  await window.getByTestId("board-view").getByTestId("sidebar-reveal").click();
+  await expect(sidebar).toBeVisible();
 
   // Workspace button returns to the workspace view; board becomes hidden.
   await window.getByTestId("workspace-button").click();
@@ -514,7 +526,6 @@ test("Cmd+Shift+B toggles board and workspace; Cmd+B and the hide button hide th
 
   // Cmd+B hides the sidebar entirely (as in most macOS apps); the main
   // area's header offers "Show sidebar" while it is hidden.
-  const sidebar = window.getByTestId("sidebar");
   const reveal = window.getByTestId("sidebar-reveal").filter({ visible: true });
   await window.keyboard.press("Meta+B");
   await expect(sidebar).toBeHidden();

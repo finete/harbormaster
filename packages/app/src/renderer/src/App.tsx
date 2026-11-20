@@ -20,6 +20,7 @@ import {
 import { Sidebar } from "./components/Sidebar";
 import {
   readSidebarHidden,
+  SidebarRevealButton,
   SidebarRevealContext,
   storeSidebarHidden,
 } from "./components/SidebarReveal";
@@ -79,7 +80,10 @@ import {
 import { pushToast } from "./toast";
 
 type View = "board" | "workspace" | "inbox" | "rules" | "costs" | "settings";
-/** The pages shown in place of the task workspace (the sidebar stays). */
+/**
+ * The pages shown in place of the task workspace (the sidebar stays, as it
+ * does for the board; a page's Esc returns to the view it was opened from).
+ */
 type Page = "inbox" | "rules" | "costs" | "settings";
 
 function isPage(view: View): view is Page {
@@ -96,7 +100,8 @@ function isPage(view: View): view is Page {
  *
  * - "workspace" (default): sidebar listing every task + the focused task's
  *   per-task dockview terminal workspace (persists across switches).
- * - "board": the kanban board, full-width, reached via the sidebar's Board
+ * - "board": the kanban board, in place of the task workspace like the
+ *   pages below (the sidebar stays), reached via the sidebar's Board
  *   button, Cmd/Ctrl+Shift+B, or landing here from app start. (Cmd/Ctrl+B
  *   hides the sidebar, as in most macOS apps: SidebarReveal.tsx.) Clicking a card jumps
  *   back into the workspace view focused on that task.
@@ -682,18 +687,54 @@ export function App({
           warning toast. */}
       <ConnectivityBanner />
       <div className="flex min-h-0 flex-1">
-        {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
-          (and its pty-backed terminals) alive across board/workspace switches. */}
-        {
+        {/* While the sidebar is hidden, each main-area header shows a
+            "Show sidebar" button (SidebarReveal.tsx). */}
+        <SidebarRevealContext.Provider
+          value={sidebarHidden ? showSidebar : null}
+        >
+          {/* The sidebar stays beside every view: the board, the workspace
+              and the pages (Inbox / Rules / Costs / Settings). */}
+          <Sidebar
+            focusedTaskId={visibleTaskId}
+            openedTaskIds={openedTaskIds}
+            taskOrder={sidebarOrder.taskOrder}
+            onTaskOrderChange={sidebarOrder.setTaskOrder}
+            detachedIds={sidebarOrder.detachedIds}
+            onDetachedChange={sidebarOrder.setDetachedIds}
+            onSelectTask={selectTask}
+            onCloseTask={requestCloseTask}
+            onShowBoard={() => setView("board")}
+            boardActive={view === "board"}
+            onOpenInbox={openInbox}
+            inboxCount={inbox.priorityCount}
+            inboxActive={view === "inbox"}
+            onOpenRules={openRules}
+            rulesActive={view === "rules"}
+            onOpenCosts={openCosts}
+            costsActive={view === "costs"}
+            onNewTask={openDraft}
+            draftLabel={draft ? draftLabel(draft) : null}
+            draftFocused={draftFocused}
+            // Same as New task: focus the existing draft AND leave any page
+            // (Inbox / Rules / Costs) for the workspace that shows it.
+            onSelectDraft={openDraft}
+            onCloseDraft={closeDraft}
+            hidden={sidebarHidden}
+            onHide={() => setSidebarHiddenStored(true)}
+          />
+          {/* Both views stay mounted; hiding via CSS keeps every TaskWorkspace
+              (and its pty-backed terminals) alive across board/workspace
+              switches. */}
           <div
             data-testid="board-view"
             className={
               view === "board"
-                ? "flex h-full w-full flex-col bg-chrome"
+                ? "flex h-full min-w-0 flex-1 flex-col bg-chrome"
                 : "hidden"
             }
           >
             <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-chrome px-3">
+              <SidebarRevealButton />
               <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Board
               </span>
@@ -750,47 +791,14 @@ export function App({
               />
             </div>
           </div>
-        }
-        {/* While the sidebar is hidden, each main-area header shows a
-            "Show sidebar" button (SidebarReveal.tsx). */}
-        <SidebarRevealContext.Provider
-          value={sidebarHidden ? showSidebar : null}
-        >
           <div
             data-testid="workspace-view"
             className={
               view === "workspace" || isPage(view)
-                ? "flex h-full w-full"
+                ? "flex h-full min-w-0 flex-1"
                 : "hidden"
             }
           >
-            <Sidebar
-              focusedTaskId={visibleTaskId}
-              openedTaskIds={openedTaskIds}
-              taskOrder={sidebarOrder.taskOrder}
-              onTaskOrderChange={sidebarOrder.setTaskOrder}
-              detachedIds={sidebarOrder.detachedIds}
-              onDetachedChange={sidebarOrder.setDetachedIds}
-              onSelectTask={selectTask}
-              onCloseTask={requestCloseTask}
-              onShowBoard={() => setView("board")}
-              onOpenInbox={openInbox}
-              inboxCount={inbox.priorityCount}
-              inboxActive={view === "inbox"}
-              onOpenRules={openRules}
-              rulesActive={view === "rules"}
-              onOpenCosts={openCosts}
-              costsActive={view === "costs"}
-              onNewTask={openDraft}
-              draftLabel={draft ? draftLabel(draft) : null}
-              draftFocused={draftFocused}
-              // Same as New task: focus the existing draft AND leave any page
-              // (Inbox / Rules / Costs) for the workspace that shows it.
-              onSelectDraft={openDraft}
-              onCloseDraft={closeDraft}
-              hidden={sidebarHidden}
-              onHide={() => setSidebarHiddenStored(true)}
-            />
             {view === "inbox" && (
               <InboxView
                 model={inbox}
