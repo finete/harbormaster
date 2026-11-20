@@ -23,6 +23,7 @@ export * from "./local-folder-access.js";
 export * from "./local-onboarding-probe-access.js";
 export * from "./local-review-support-probe-access.js";
 export * from "./local-rules-file-access.js";
+export * from "./local-slash-command-access.js";
 export * from "./pi-model-catalog-access.js";
 export * from "./pi-session-usage-access.js";
 export * from "./scratch-workspace-access.js";

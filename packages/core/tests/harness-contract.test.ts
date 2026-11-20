@@ -432,6 +432,22 @@ describe.each(SUBJECTS)("agent contract: $name", (subject) => {
       );
       expect(built.args.join(" ")).toContain(built.promptFile?.path ?? "?");
     }
+    // A long prompt that starts with a skill / command (the composer's `/`
+    // menu) keeps it first in the message, since the agent only runs one it
+    // starts with; the rest of the prompt travels as the file.
+    for (const command of ["/review", "/caveman:caveman", "$plannotator"]) {
+      const commanded = subject
+        .make({ cliPath: "/opt/hm/bin/harbormaster" })
+        .buildLaunchSpec({
+          ...deep,
+          initialPrompt: `${command} ${prompt}`,
+          session: MODES.new,
+        });
+      expect(commanded.args.at(-1)).toBe(
+        `${command} Read the file ${promptFilePath(deep.stateDir, deep.taskId)} and follow it as your task brief.`,
+      );
+      expect(commanded.promptFile?.text).toBe(prompt.trim());
+    }
     // A short prompt stays inline, with no file.
     const short = spec(adapter, MODES.new, { initialPrompt: "Fix the bug" });
     expect(short.promptFile).toBeUndefined();

@@ -1,11 +1,21 @@
 import { ChevronDown, GitBranch, GitPullRequest } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   HarnessModelCatalog,
   KnownLocation,
   LaunchSettings,
+  ListSlashCommandsInput,
   RepositoryInfo,
+  SlashCommand,
+  SlashCommandCatalog,
   Task,
 } from "../../../preload/api";
 import { shellEscapePaths } from "../../../shared/shell-escape";
@@ -29,6 +39,13 @@ import {
   type WhereToken,
 } from "../lib/new-task-draft";
 import {
+  applySlashCommand,
+  matchSlashCommands,
+  moveSlashSelection,
+  type SlashTrigger,
+  slashTrigger,
+} from "../lib/slash-commands";
+import {
   ACTION_LABELS,
   AgentModelPicker,
   AgentPicker,
@@ -46,6 +63,7 @@ import {
   whereOptions,
 } from "./NewTaskPickers";
 import { PullRequestField, usePullRequestLookup } from "./PullRequestField";
+import { SlashCommandMenu } from "./SlashCommandMenu";
 import { Button } from "./ui/button";
 import { Chip } from "./ui/chip";
 import { Input } from "./ui/input";
@@ -252,6 +270,135 @@ export function NewTaskComposer({
     [draft.mode, draft.parentTaskId, hasWorktree],
   );
   const primaryBlocker = blockerFor(primary);
+
+  // The `/` menu (docs/new-task-composer.md "Slash commands"): the
+  // effective agent's skills and commands for where the task would run,
+  // fetched ahead of the first `/` (Claude's plugin listing takes a moment)
+  // and again whenever the agent or the place changes.
+  const slashKey = JSON.stringify(
+    prBound
+      ? {
+          harness: effectiveHarness,
+          ...(pullRequest ? { repositoryId: pullRequest.repositoryId } : {}),
+        }
+      : {
+          harness: effectiveHarness,
+          ...(where.kind === "repository"
+            ? { repositoryId: where.repositoryId }
+            : {}),
+          ...(where.kind === "folder" ? { folderPath: where.path } : {}),
+        },
+  );
+  const [slashCatalog, setSlashCatalog] = useState<{
+    key: string;
+    catalog?: SlashCommandCatalog;
+    error?: string;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const input = JSON.parse(slashKey) as ListSlashCommandsInput;
+    void window.harbormaster.core
+      .listSlashCommands(input)
+      .then((catalog) => {
+        if (!cancelled) setSlashCatalog({ key: slashKey, catalog });
+      })
+      .catch((thrown: unknown) => {
+        if (cancelled) return;
+        setSlashCatalog({
+          key: slashKey,
+          error: thrown instanceof Error ? thrown.message : String(thrown),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slashKey]);
+  const [slash, setSlash] = useState<SlashTrigger | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  /** Escape closed the menu; typing reopens it. */
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const [promptFocused, setPromptFocused] = useState(false);
+  const slashMenuId = useId();
+  const slashLoaded = slashCatalog?.key === slashKey ? slashCatalog : null;
+  const slashEntries = useMemo(
+    () =>
+      slash && slashLoaded?.catalog
+        ? matchSlashCommands(slashLoaded.catalog.commands, slash.query)
+        : [],
+    [slash, slashLoaded],
+  );
+  // Nothing matching a typed name (a path like `/tmp/x`) closes it.
+  const slashOpen =
+    promptFocused &&
+    !!slash &&
+    !slashDismissed &&
+    (slashEntries.length > 0 || slash.query === "");
+  const activeSlash = Math.min(
+    slashIndex,
+    Math.max(0, slashEntries.length - 1),
+  );
+  const agentLabel =
+    catalogs.find((entry) => entry.harness === effectiveHarness)?.label ??
+    slashLoaded?.catalog?.label ??
+    effectiveHarness;
+  const slashStatus = !slashLoaded
+    ? `Loading ${agentLabel}'s skills and commands\u2026`
+    : slashLoaded.error
+      ? `Couldn't list ${agentLabel}'s skills and commands: ${slashLoaded.error}`
+      : slashLoaded.catalog?.commands.length === 0
+        ? `${agentLabel} has no skills or commands to offer here${slashLoaded.catalog.error ? ` (${slashLoaded.catalog.error})` : ""}`
+        : slashLoaded.catalog?.error
+          ? `Some may be missing: ${slashLoaded.catalog.error}`
+          : undefined;
+
+  /** Open, move or close the menu from the prompt's text and caret. */
+  function trackSlash(element: HTMLTextAreaElement): void {
+    const next = slashTrigger(element.value, element.selectionStart ?? 0);
+    if (next?.query !== slash?.query) setSlashIndex(0);
+    setSlash(next);
+    setPromptFocused(true);
+  }
+
+  function pickSlash(entry: SlashCommand): void {
+    if (!slash) return;
+    const { text, caret } = applySlashCommand(draft.prompt, slash, entry);
+    onChange({ prompt: text });
+    setSlash(null);
+    requestAnimationFrame(() => {
+      promptRef.current?.focus();
+      promptRef.current?.setSelectionRange(caret, caret);
+    });
+  }
+
+  /** The menu's keys, ahead of the composer-wide shortcuts (⌘↵ still submits). */
+  function onPromptKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ): void {
+    if (!slashOpen || event.metaKey || event.ctrlKey || event.altKey) return;
+    const entry = slashEntries[activeSlash];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!slashEntries.length) return;
+      event.preventDefault();
+      setSlashIndex(
+        moveSlashSelection(
+          activeSlash,
+          slashEntries.length,
+          event.key === "ArrowDown" ? 1 : -1,
+        ),
+      );
+    } else if (
+      (event.key === "Enter" || event.key === "Tab") &&
+      !event.shiftKey &&
+      entry
+    ) {
+      event.preventDefault();
+      pickSlash(entry);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSlashDismissed(true);
+    }
+  }
 
   async function submit(action: SubmitAction): Promise<void> {
     if (submitting || submitBlocker(draft, action, prLookup)) return;
@@ -479,7 +626,24 @@ export function NewTaskComposer({
             aria-label="Prompt"
             rows={5}
             value={draft.prompt}
-            onChange={(event) => onChange({ prompt: event.target.value })}
+            onChange={(event) => {
+              onChange({ prompt: event.target.value });
+              setSlashDismissed(false);
+              trackSlash(event.target);
+            }}
+            onSelect={(event) => trackSlash(event.currentTarget)}
+            onKeyDown={onPromptKeyDown}
+            onFocus={() => setPromptFocused(true)}
+            onBlur={() => setPromptFocused(false)}
+            aria-autocomplete="list"
+            aria-controls={
+              slashOpen && slashEntries.length ? slashMenuId : undefined
+            }
+            aria-activedescendant={
+              slashOpen && slashEntries.length
+                ? `${slashMenuId}-${activeSlash}`
+                : undefined
+            }
             onPaste={(event) => void onPaste(event)}
             onDrop={onDrop}
             placeholder={
@@ -489,7 +653,7 @@ export function NewTaskComposer({
                   ? selectedRepo || where.kind === "folder"
                     ? `Ask anything about ${whereLabel(draft.where, options)}\u2026`
                     : "Ask anything\u2026"
-                  : "What should the agent do? Paste screenshots or drop files."
+                  : "What should the agent do? / for skills and commands; paste screenshots or drop files."
             }
             className="min-h-[132px] text-[13px] leading-relaxed"
           />
@@ -524,6 +688,16 @@ export function NewTaskComposer({
               />
             </div>
           </InputGroupAddon>
+          {slashOpen && (
+            <SlashCommandMenu
+              id={slashMenuId}
+              entries={slashEntries}
+              activeIndex={activeSlash}
+              status={slashStatus}
+              onPick={pickSlash}
+              onHover={setSlashIndex}
+            />
+          )}
         </InputGroup>
         <div
           data-testid="new-task-details"

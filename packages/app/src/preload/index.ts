@@ -24,6 +24,7 @@ import type {
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListSlashCommandsInput,
   MessageMode,
   MessagingChangedPayload,
   MoveTaskOptions,
@@ -45,6 +46,7 @@ import type {
   RulesListing,
   SettingsPatch,
   SettingsSnapshot,
+  SlashCommandCatalog,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -161,6 +163,10 @@ const api: HarbormasterApi = {
       ipcRenderer.invoke("core:listBranches", repositoryId),
     listModels: (): Promise<HarnessModelCatalog[]> =>
       ipcRenderer.invoke("core:listModels"),
+    listSlashCommands: (
+      input: ListSlashCommandsInput,
+    ): Promise<SlashCommandCatalog> =>
+      ipcRenderer.invoke("core:listSlashCommands", input),
     listHarnessDescriptors: (): Promise<HarnessDescriptorInfo[]> =>
       ipcRenderer.invoke("core:listHarnessDescriptors"),
     getTaskWorkspace: (taskId: string): Promise<TaskWorkspace | undefined> =>

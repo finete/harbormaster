@@ -127,11 +127,36 @@ export function readPromptFileInstruction(path: string): string {
   return `Read the file ${path} and follow it as your task brief.`;
 }
 
+/** Longest leading command `leadingCommand` recognizes. */
+const MAX_LEADING_COMMAND_CHARS = 120;
+
+/**
+ * The skill / command a prompt starts with (the composer's `/` menu
+ * inserts one): `/review`, `/caveman:caveman`, `/@fordefi/build:check`,
+ * `/skill:pdf-tools`, `$plannotator-review`; `undefined` when it starts
+ * with anything else. A path (`/Users/me/shot.png`) is not a command, nor
+ * is a shell variable (`$HOME`).
+ */
+export function leadingCommand(prompt: string): string | undefined {
+  const match =
+    /^\/(?:@[\w.-]+\/)?[A-Za-z0-9][\w.:-]*(?=\s|$)/.exec(prompt) ??
+    /^\$[a-z0-9][a-z0-9_.:-]*(?=\s|$)/.exec(prompt);
+  const command = match?.[0];
+  return command && command.length <= MAX_LEADING_COMMAND_CHARS
+    ? command
+    : undefined;
+}
+
 /**
  * The one place a launch's initial prompt becomes arguments, for every
  * adapter: a short prompt stays inline (`inline(prompt)`); a longer one
  * goes into `promptFile` and only a reference to it (`fromFile(path)`)
  * reaches the command line, so no argument nears `MAX_LAUNCH_ARG_CHARS`.
+ *
+ * An agent runs a skill / command only when the message itself starts
+ * with it, so a long prompt that starts with one (`leadingCommand`) keeps
+ * it inline, with "read the file" as its arguments and only the rest of
+ * the prompt in the file.
  */
 export function deliverInitialPrompt(
   input: Pick<BuildLaunchSpecInput, "initialPrompt" | "stateDir" | "taskId">,
@@ -142,6 +167,13 @@ export function deliverInitialPrompt(
   if (!prompt?.trim()) return { args: [] };
   if (prompt.length <= INLINE_PROMPT_MAX_CHARS) return { args: inline(prompt) };
   const path = promptFilePath(input.stateDir, input.taskId);
+  const command = leadingCommand(prompt);
+  if (command) {
+    return {
+      args: inline(`${command} ${readPromptFileInstruction(path)}`),
+      promptFile: { path, text: prompt.slice(command.length).trim() },
+    };
+  }
   return { args: fromFile(path), promptFile: { path, text: prompt } };
 }
 
