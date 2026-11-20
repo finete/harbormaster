@@ -89,6 +89,7 @@ import {
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
+import { createAppBundleGuard } from "./app-bundle-guard";
 import { appClipboard } from "./app-clipboard";
 import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
@@ -2956,7 +2957,14 @@ function installApplicationMenu(): void {
     {
       label: "View",
       submenu: [
-        { role: "reload" },
+        {
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: () => {
+            if (restartIfBundleReplaced()) return;
+            BrowserWindow.getFocusedWindow()?.webContents.reload();
+          },
+        },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
@@ -3112,6 +3120,45 @@ async function guardSingleInstance(): Promise<boolean> {
   }
 }
 
+const appBundleGuard = app.isPackaged
+  ? createAppBundleGuard({
+      executablePath: process.execPath,
+      infoPlistPath:
+        process.platform === "darwin"
+          ? join(dirname(process.execPath), "..", "Info.plist")
+          : undefined,
+    })
+  : undefined;
+
+/**
+ * When the installed app was replaced since launch, this process can no
+ * longer load a renderer (see app-bundle-guard.ts): offers Restart or Quit
+ * instead, and returns `true` (the app is quitting).
+ */
+function restartIfBundleReplaced(): boolean {
+  const replaced = appBundleGuard?.replacement();
+  if (!replaced) return false;
+  const running = app.getVersion();
+  const installed = replaced.installedVersion;
+  console.log(
+    `[main] app replaced on disk (running ${running}, installed ${installed ?? "unknown"})`,
+  );
+  const choice = dialog.showMessageBoxSync({
+    type: "info",
+    message: installed
+      ? `Harbormaster ${installed} was installed while ${running} was running.`
+      : "Harbormaster was updated while it was running.",
+    detail: "Restart to open the new version.",
+    buttons: ["Restart", "Quit"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice === 0) app.relaunch();
+  app.quit();
+  return true;
+}
+
 // A duplicate of this app started (it quits itself): bring ours forward.
 app.on("second-instance", () => {
   console.log("[instance] another copy started; focusing this one");
@@ -3143,7 +3190,10 @@ app.whenReady().then(async () => {
   void backgroundLauncher.runPass();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (restartIfBundleReplaced()) return;
+      createWindow();
+    }
     startPresencePolling();
     startRefreshLoop();
   });
