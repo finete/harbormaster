@@ -69,6 +69,8 @@ export interface PlannedRuleAction {
   /** `run` = execute; the rest are already decided no-ops. */
   status: "run" | "superseded" | "skipped" | "failed";
   detail?: string;
+  /** Short plain-words cause of a non-`run` status (see AuditActionEntry.reason). */
+  reason?: string;
 }
 
 export interface RuleWarning {
@@ -217,6 +219,7 @@ export async function planActions(
           with: spec.with ?? {},
           status: "failed",
           detail: `template failed: ${describe(error)}`,
+          reason: "template error",
         });
         continue;
       }
@@ -233,6 +236,7 @@ export async function planActions(
           with: rendered,
           status: "skipped",
           detail: "move needs a task-bound event",
+          reason: "no task",
         });
         continue;
       }
@@ -249,6 +253,7 @@ export async function planActions(
           with: rendered,
           status: "failed",
           detail: describe(error),
+          reason: "invalid move",
         });
         continue;
       }
@@ -260,6 +265,7 @@ export async function planActions(
           move,
           status: "superseded",
           detail: `rule ${winner} moves this task this tick`,
+          reason: "an earlier rule won",
         });
         continue;
       }
@@ -271,6 +277,7 @@ export async function planActions(
           move,
           status: "skipped",
           detail: refusal,
+          reason: moveRefusalReason(refusal),
         });
         continue;
       }
@@ -315,6 +322,7 @@ async function expandActions(
         with: spec.with ?? {},
         status: "failed",
         detail: describe(error),
+        reason: "script error",
       });
     }
   }
@@ -389,6 +397,11 @@ export function resolveMove(
         `move.to must be working, awaiting or done (got ${JSON.stringify((input as { to?: unknown }).to)})`,
       );
   }
+}
+
+/** The short reason label for a {@link moveRefusal} message. */
+export function moveRefusalReason(refusal: string): string {
+  return refusal.startsWith("already ") ? "already there" : "move not allowed";
 }
 
 /** Why a resolved move cannot (or need not) apply to the task as it is now. */

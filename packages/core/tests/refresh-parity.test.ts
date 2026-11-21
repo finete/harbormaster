@@ -400,6 +400,13 @@ describe("auto-done stays put when cleanup would be refused (#4, #5)", () => {
     return { f, task, worktree: binding!.worktreePath! };
   }
 
+  async function lastStay(f: Fixture, taskId: string) {
+    const entries = await f.core.commands.listEvents({ taskId });
+    return entries.findLast(
+      (entry) => entry.kind === "action" && entry.outcome === "stayed",
+    );
+  }
+
   it("keeps a deployed task with a dirty worktree in Awaiting with a ready-to-land warning", async () => {
     const { f, task, worktree } = await landingFixture();
     await writeFile(join(worktree, "scratch.txt"), "dirty\n");
@@ -415,6 +422,11 @@ describe("auto-done stays put when cleanup would be refused (#4, #5)", () => {
     expect(
       (await f.core.commands.getTaskWorkspace(task.id))?.worktreePath,
     ).toBe(worktree);
+    // The audit keeps the long detail and adds the short reason.
+    expect(await lastStay(f, task.id)).toMatchObject({
+      detail: expect.stringContaining("Refusing to remove dirty worktree"),
+      reason: "uncommitted changes",
+    });
   });
 
   it("honors refresh protectedPaths: a live pane's worktree keeps the task in place", async () => {
@@ -429,6 +441,10 @@ describe("auto-done stays put when cleanup would be refused (#4, #5)", () => {
       expect.stringContaining("open in a live session"),
     ]);
     expect(await exists(worktree)).toBe(true);
+    expect(await lastStay(f, task.id)).toMatchObject({
+      detail: expect.stringContaining("open in a live session"),
+      reason: "worktree in use",
+    });
   });
 
   it("lands a clean, unprotected deployed task and force-deletes its merged branch", async () => {

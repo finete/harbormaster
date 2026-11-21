@@ -25,6 +25,7 @@ import {
   LocalGitWorktreeAccess,
   TASK_WORKTREES_DIRNAME,
 } from "../src/access/git-worktree-access.js";
+import { DirtyWorktreeError } from "../src/contracts/workspace.js";
 import {
   execFileRunner,
   type ProcessRunRequest,
@@ -376,6 +377,9 @@ describe.skipIf(!gitAvailable)("LocalGitWorktreeAccess", () => {
     await expect(worktrees.removeWorktree(repo, info.path)).rejects.toThrow(
       "Refusing to remove dirty worktree",
     );
+    await expect(
+      worktrees.removeWorktree(repo, info.path),
+    ).rejects.toBeInstanceOf(DirtyWorktreeError);
 
     await worktrees.removeWorktree(repo, info.path, true);
     const listed = await worktrees.listWorktrees(repo);
