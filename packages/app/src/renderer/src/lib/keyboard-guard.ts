@@ -14,3 +14,15 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   if (target.closest(".xterm")) return true;
   return false;
 }
+
+/** Whether a keydown aims at a focused element outside `scope`; nothing focused (the body) counts as inside. */
+export function isOutsideKeyScope(
+  target: EventTarget | null,
+  scope: Element | null,
+): boolean {
+  if (!scope || !(target instanceof Node)) return false;
+  if (target === document.body || target === document.documentElement) {
+    return false;
+  }
+  return !scope.contains(target);
+}

@@ -194,7 +194,7 @@ test.describe("scratch-task sidebar polish (pin, rename, cycling, unread)", () =
 
     await window.getByTestId("board-button").click();
     await expect(cardLocator(window, "Orca Beta Renamed")).toBeVisible();
-    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("board-button").click();
   });
 
   test("the main process's app:cycle-task push (Cmd/Ctrl+Shift+Up/Down, intercepted via before-input-event exactly like the existing Cmd+W handler) cycles sidebar focus and opens the next task", async () => {
