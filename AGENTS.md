@@ -71,6 +71,17 @@ pushes. Keep `main` green (typecheck + tests pass at every commit).
 
 The e2e suite is slow (full run ~2.5 min); spend it deliberately.
 
+- **Task sessions are stripped.** `playwright.config.ts` clears the six
+  `HARBORMASTER*` session variables, so an e2e run started from a
+  Harbormaster task never reaches the real app. Specs must not re-add them
+  from `process.env`.
+- **Fresh worktree: install Electron's binary.** `npm ci` skips Electron's
+  install script, and on recent Node its `install.js` downloads the zip but
+  stops after extracting one file (exit 0, no `path.txt`). Run
+  `node node_modules/electron/install.js`, then extract the cached zip:
+  `ditto -x -k ~/Library/Caches/electron/*/electron-v<version>-darwin-arm64.zip node_modules/electron/dist`
+  and `printf 'Electron.app/Contents/MacOS/Electron' > node_modules/electron/path.txt`
+  (`node -e 'require("electron")'` prints the binary path when it worked).
 - **Iterate on targeted tests.** While working, run only the specs and unit
   files you touch: `npx playwright test e2e/<spec>.spec.ts` (after
   `npx electron-vite build` if main/preload/renderer changed) and
