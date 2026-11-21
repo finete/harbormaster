@@ -5,7 +5,8 @@
 // review-request rule item (Priority, unbound) and a `priority: false` rule
 // item (Other). Covers the Priority / Other split and the sidebar badge,
 // J/K/arrows, A / R / D / H / C, Tab, Cmd+I and Esc back to the previous
-// view; "Create review task" creates a reviewer task bound to the PR
+// view, and opening a task clears its done item (not another task's
+// question); "Create review task" creates a reviewer task bound to the PR
 // (a fake `gh` answers the PR lookup). Results are read back through core.
 import { execFileSync } from "node:child_process";
 import {
@@ -278,10 +279,15 @@ test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc) and Create re
   expect(statuses[first.message.id]).toBe("pending");
   expect(statuses[second.message.id]).toBe("rejected");
 
-  // D on a live question does nothing: it leaves when the agent's state does.
+  // D on a live question hides it locally; a NEW question (new time, new id)
+  // shows again.
   await row("asked").click();
   await window.keyboard.press("d");
-  await expect(row("asked")).toBeVisible();
+  await expect(row("asked")).toHaveCount(0);
+  asker.report(
+    `state=blocked:kind=question:msg=${Buffer.from("Which cache?").toString("base64")}`,
+  );
+  await expect(row("asked", "Which cache?")).toBeVisible({ timeout: 15_000 });
 
   // C on the review request: a reviewer task bound to the PR's head branch.
   // Click the row's leading edge, not its center: the hover-revealed
@@ -349,4 +355,28 @@ test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc) and Create re
   await window.keyboard.press("Escape");
   await expect(window.getByTestId("board-view")).toBeVisible();
   await expect(window.getByTestId("inbox-view")).toHaveCount(0);
+});
+
+test("opening a task clears its done item and keeps another task's question", async () => {
+  // The first test ended on the board; the workspace brings the sidebar back.
+  await window.getByTestId("workspace-button").click();
+  const finisher = await startAgentChat("Finisher");
+  finisher.report("state=done");
+  // The question from the first test (Asker) is still waiting on the user.
+  await window.keyboard.press(`${MOD}+i`);
+  await expect(window.getByTestId("inbox-view")).toBeVisible();
+  await expect(row("asked", "Which cache?")).toBeVisible();
+  await window.getByTestId("inbox-tab-other").click();
+  await expect(row("done")).toBeVisible({ timeout: 15_000 });
+
+  // O opens the task (the same open path as the sidebar and board): its done
+  // item is gone from the inbox, the question stays.
+  await row("done").click();
+  await window.keyboard.press("o");
+  await expect(window.getByTestId("workspace-view")).toBeVisible();
+  await window.keyboard.press(`${MOD}+i`);
+  await expect(window.getByTestId("inbox-view")).toBeVisible();
+  await expect(window.getByTestId("inbox-tab-other-count")).toHaveText("0");
+  await expect(row("done")).toHaveCount(0);
+  await expect(row("asked", "Which cache?")).toBeVisible();
 });

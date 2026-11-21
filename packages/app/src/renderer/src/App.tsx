@@ -394,8 +394,11 @@ export function App({
     storeFocusedTaskId(window.localStorage, focusedTaskId);
   }, [restoreComplete, focusedTaskId]);
 
+  const { markTaskSeen } = inbox;
   const openTask = useCallback(
     (taskId: string) => {
+      // Looking at the task answers its "look at this" inbox items.
+      markTaskSeen(taskId);
       setFocusedTaskId(taskId);
       setOpenedTaskIds((prev) =>
         prev.has(taskId) ? prev : new Set(prev).add(taskId),
@@ -405,7 +408,7 @@ export function App({
       setDraftFocused(false);
       setView("workspace");
     },
-    [appendOpened],
+    [appendOpened, markTaskSeen],
   );
 
   // Entry point for every "open/focus this task" action (sidebar row, board

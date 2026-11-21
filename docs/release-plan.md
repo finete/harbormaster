@@ -238,7 +238,7 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   badge, no OS notifications, nothing pops up on its own.
 - **Two tabs: Priority / Other.** Every item has `priority: boolean`,
   **default true**. Built-in producers: agent asked (OSC 7501 `blocked`
-  with its message; live, leaves when the state changes, not dismissable)
+  with its message; leaves when the state changes; D only hides it locally)
   = priority; agent reported (`report_status` outcome + note) = priority;
   message approval (not dismissable) = priority; ready to land = priority;
   launch failed = priority; plain idle "your move" (turn ended, nothing
@@ -263,8 +263,9 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   (markdown) + source facts (PR title/author/description, Slack text) and
   the rule's buttons. Launch failed: error, launch prompt, Retry. No live
   terminal mirror in v1.
-- **Leaving.** Own action; dismiss where allowed (not approvals, not live
-  questions); snooze with presets 1 hour / this evening / tomorrow morning /
+- **Leaving.** Own action; dismiss where allowed (not approvals; D on a live
+  question only hides it, the sidebar keeps its "your move"); opening a task
+  hides its reported / done / idle items (not questions, approvals or failures); snooze with presets 1 hour / this evening / tomorrow morning /
   next week plus a date picker; "Clear Other" bulk action. Derived items
   (asked, plain idle) are recomputed, not stored; the rest persist in
   `~/.harbormaster/inbox/`.
@@ -272,7 +273,7 @@ Linear's Priority/Other inbox, Orca's agent dashboard, Superhuman's keys).
   `Enter`/`O` open task, `A`/`R` approve/reject, `E` edit then approve,
   `C` create task / review task, `D` mark done or dismiss, `H` snooze,
   `Tab` switch tab, `Esc` back to the previous view. Key hints on hover.
-- **Buttons per kind.** Asked: Open. Reported: Open · To Done · Dismiss.
+- **Buttons per kind.** Asked: Open · Dismiss. Reported: Open · To Done · Dismiss.
   Approval: Approve · Edit · Reject. Rule item: its buttons (e.g. Create
   review task) · Dismiss · Snooze. Ready to land: Mark Done · Dismiss.
   Launch failed: Open · Retry · Dismiss.

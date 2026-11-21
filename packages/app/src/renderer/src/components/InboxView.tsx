@@ -349,9 +349,7 @@ export function InboxView({
       }
       if (key === "D" && !selected.dismissable && !actionByKey(selected, "D")) {
         pushToast(
-          selected.kind === "approval"
-            ? "An approval can't be dismissed: approve or reject it"
-            : "A live question leaves when the agent's state changes",
+          "An approval can't be dismissed: approve or reject it",
           "warning",
         );
         return;
