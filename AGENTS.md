@@ -62,10 +62,15 @@ account. Never add other accounts as collaborators.
 
 ## Workflow
 
-Solo development, directly on `main`, with no pull requests and no
-review ceremony. Subagents/implementers work on short-lived local branches or
-worktrees purely as transport; the supervisor reviews, merges to `main`, and
-pushes. Keep `main` green (typecheck + tests pass at every commit).
+Every change lands on `main` through a pull request from its own branch or
+worktree (Harbormaster tasks open a draft PR). CI must pass before a PR merges,
+and merges are squash merges. `main` has branch protection; who needs an
+approving review is decided by those branch rules and by each developer's own
+local setup. A child task or subagent that builds part of its parent's feature
+branches off the parent task's branch; the parent reviews its work and merges it
+into its own branch, so that feature ends as one PR. An independent fix gets its
+own branch off `main` and its own PR. Keep `main` green (typecheck + tests pass
+at every commit).
 
 ## Testing workflow
 
