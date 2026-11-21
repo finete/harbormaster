@@ -68,6 +68,7 @@ describe("settings description", () => {
         "sources.github.enabled",
         "messaging.parentReplyTimeoutMinutes",
         "messaging.loopCap",
+        "messaging.directRoutes",
         "inbox.priorityFilter",
       ]),
     );
@@ -110,6 +111,33 @@ describe("validateSettingsPatch", () => {
       branchPrefix: "",
       "messaging.loopCap": null,
     });
+  });
+
+  it("messaging.directRoutes: defaults to same-task-tree, accepts the three values, rejects others", () => {
+    const setting = SETTINGS_DESCRIPTION.find(
+      (entry) => entry.key === "messaging.directRoutes",
+    );
+    expect(setting).toMatchObject({
+      type: "enum",
+      default: "same-task-tree",
+      title: "Messages between tasks",
+      values: ["parent-and-child", "same-task-tree", "any-task"],
+      valueLabels: {
+        "parent-and-child": "Parent and child",
+        "same-task-tree": "Same task tree",
+        "any-task": "Any task",
+      },
+    });
+    for (const value of ["parent-and-child", "same-task-tree", "any-task"]) {
+      expect(
+        validateSettingsPatch({ "messaging.directRoutes": value }, context)
+          .problems,
+      ).toEqual([]);
+    }
+    expect(
+      validateSettingsPatch({ "messaging.directRoutes": "everyone" }, context)
+        .problems.join("\n"),
+    ).toMatch(/must be one of: parent-and-child, same-task-tree, any-task/);
   });
 
   it("rejects unknown keys, wrong types, out-of-range numbers, empty text and unknown agents", () => {

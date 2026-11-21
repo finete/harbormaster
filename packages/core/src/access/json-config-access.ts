@@ -14,10 +14,14 @@ import type {
   DeploymentPipeline,
   DeploymentStageConfig,
   GlobalConfig,
+  MessageDirectRoutes,
   RepositoryConfig,
   SourceConfig,
 } from "../contracts/model.js";
-import { defaultGlobalConfig } from "../contracts/model.js";
+import {
+  defaultGlobalConfig,
+  MESSAGE_DIRECT_ROUTES,
+} from "../contracts/model.js";
 import type {
   ConfigAccess,
   ConfigAccessSnapshot,
@@ -805,6 +809,17 @@ function normalizeMessaging(
       throw new Error("messaging.loopCap must be a positive integer");
     }
     messaging.loopCap = value.loopCap;
+  }
+  if (value.directRoutes !== undefined) {
+    if (
+      typeof value.directRoutes !== "string" ||
+      !MESSAGE_DIRECT_ROUTES.includes(value.directRoutes as MessageDirectRoutes)
+    ) {
+      throw new Error(
+        `messaging.directRoutes must be one of: ${MESSAGE_DIRECT_ROUTES.join(", ")}`,
+      );
+    }
+    messaging.directRoutes = value.directRoutes as MessageDirectRoutes;
   }
   return messaging;
 }

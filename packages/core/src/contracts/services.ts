@@ -263,6 +263,12 @@ export interface MessageAccess {
   listPendingTargets(): Promise<string[]>;
   /** The user typed into the task's session at `at`. */
   recordUserInput(taskId: string, at: string): Promise<void>;
+  /** Record a pair grant between two tasks (idempotent; the first grant's time is kept). */
+  grantPair(taskA: string, taskB: string, grantedAt: string): Promise<void>;
+  /** Remove the pair's grant; resolves whether there was one. */
+  revokePair(taskA: string, taskB: string): Promise<boolean>;
+  /** Remove every grant that involves the task; returns the other task ids. */
+  revokeGrantsForTask(taskId: string): Promise<string[]>;
   /** Stamp `prunedAt` on every attachment of a message (the files are removed by `removeAttachments`). */
   markAttachmentsPruned(id: string, prunedAt: string): Promise<void>;
   /**

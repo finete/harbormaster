@@ -65,7 +65,11 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
 
 describe("message log", () => {
   it("starts empty and round-trips records and user inputs", async () => {
-    expect(await access.readStore()).toEqual({ messages: [], userInputs: {} });
+    expect(await access.readStore()).toEqual({
+      messages: [],
+      userInputs: {},
+      grants: [],
+    });
     const m = msg("t1");
     await access.recordMessage(m);
     await access.recordUserInput("t1", "2026-01-02T00:00:00.000Z");
@@ -178,6 +182,31 @@ describe("message log", () => {
     await access.recordMessage(msg("b", { status: "awaiting_approval" }));
     await access.recordMessage(msg("c"));
     expect((await access.listPendingTargets()).sort()).toEqual(["a", "c"]);
+  });
+
+  it("pair grants: unordered, idempotent, revocable, and a store without grants still reads", async () => {
+    await access.grantPair("b", "a", "2026-01-01T00:00:00.000Z");
+    await access.grantPair("a", "b", "2026-01-02T00:00:00.000Z"); // same pair: keeps the first
+    await access.grantPair("a", "c", "2026-01-03T00:00:00.000Z");
+    expect((await access.readStore()).grants).toEqual([
+      { taskIds: ["a", "b"], grantedAt: "2026-01-01T00:00:00.000Z" },
+      { taskIds: ["a", "c"], grantedAt: "2026-01-03T00:00:00.000Z" },
+    ]);
+    expect(await access.revokePair("c", "a")).toBe(true);
+    expect(await access.revokePair("c", "a")).toBe(false);
+    await access.grantPair("b", "d", "2026-01-04T00:00:00.000Z");
+    expect(await access.revokeGrantsForTask("b")).toEqual(["a", "d"]);
+    expect((await access.readStore()).grants).toEqual([]);
+
+    // A messages.json written before grants existed.
+    await writeFile(
+      paths.messagesFile,
+      JSON.stringify({ version: 1, messages: [], userInputs: {} }),
+    );
+    const fresh = new JsonMessageAccess(paths);
+    expect((await fresh.readStore()).grants).toEqual([]);
+    await fresh.grantPair("x", "y", "2026-01-05T00:00:00.000Z");
+    expect((await fresh.readStore()).grants).toHaveLength(1);
   });
 
   it("rejects a corrupt store", async () => {

@@ -7,11 +7,13 @@ import type {
   MessageRoute,
   MessageSender,
   MessageStatus,
+  PairGrant,
   TaskMessage,
 } from "../src/contracts/messaging.js";
-import type { Task } from "../src/contracts/model.js";
+import type { MessageDirectRoutes, Task } from "../src/contracts/model.js";
 import {
   buildReceiptText,
+  canMessageDirectly,
   classifyRoute,
   countLoopMessages,
   defaultMode,
@@ -69,32 +71,125 @@ function task(id: string, extra: Partial<Task> = {}): Task {
 
 const ALL = { receive: true, steer: true, followUp: true, images: true };
 
-describe("route classification and modes", () => {
-  const parent = task("p");
-  const child = task("c", { parentTaskId: "p" });
-  const other = task("o");
-  const sibling = task("s", { parentTaskId: "p" });
+function policyFor(
+  directRoutes: MessageDirectRoutes,
+  tasks: readonly Task[],
+  grants: PairGrant[] = [],
+) {
+  return {
+    directRoutes,
+    tasks: new Map(tasks.map((t) => [t.id, t])),
+    grants,
+  };
+}
 
-  it("classifies from lineage", () => {
-    const from = (t: Task): MessageSender => ({ kind: "task", taskId: t.id });
-    expect(classifyRoute(from(parent), parent, child)).toBe("parent-to-child");
-    expect(classifyRoute(from(child), child, parent)).toBe("child-to-parent");
-    expect(classifyRoute(from(child), child, sibling)).toBe("approval");
-    expect(classifyRoute(from(other), other, child)).toBe("approval");
-    expect(classifyRoute(from(parent), parent, other)).toBe("approval");
+describe("route classification and modes", () => {
+  // root ─┬─ a ── a1
+  //       └─ b ── b1        x (a separate top-level task)
+  const root = task("root");
+  const a = task("a", { parentTaskId: "root" });
+  const b = task("b", { parentTaskId: "root" });
+  const a1 = task("a1", { parentTaskId: "a" });
+  const b1 = task("b1", { parentTaskId: "b" });
+  const x = task("x");
+  const all = [root, a, b, a1, b1, x];
+  const from = (t: Task): MessageSender => ({ kind: "task", taskId: t.id });
+  const route = (
+    setting: MessageDirectRoutes,
+    sender: Task,
+    target: Task,
+    grants: PairGrant[] = [],
+    tasks: readonly Task[] = all,
+  ) =>
+    classifyRoute(
+      from(sender),
+      sender,
+      target,
+      policyFor(setting, tasks, grants),
+    );
+
+  it("a direct parent link is direct under every setting, in its own route kinds", () => {
+    for (const setting of [
+      "parent-and-child",
+      "same-task-tree",
+      "any-task",
+    ] as const) {
+      expect(route(setting, root, a)).toBe("parent-to-child");
+      expect(route(setting, a, root)).toBe("child-to-parent");
+      expect(route(setting, a, a1)).toBe("parent-to-child");
+      expect(route(setting, a1, a)).toBe("child-to-parent");
+    }
   });
 
-  it("non-task senders always need approval, even toward a task with a parent", () => {
-    expect(
-      classifyRoute({ kind: "session", cwd: "/x" }, undefined, child),
-    ).toBe("approval");
-    expect(classifyRoute({ kind: "harbormaster" }, undefined, parent)).toBe(
+  it("parent-and-child: everything beyond the direct link needs approval", () => {
+    const setting = "parent-and-child";
+    expect(route(setting, a, b)).toBe("approval"); // sibling
+    expect(route(setting, root, a1)).toBe("approval"); // grandparent
+    expect(route(setting, a1, root)).toBe("approval"); // grandchild
+    expect(route(setting, a1, b1)).toBe("approval"); // cousin
+    expect(route(setting, a, x)).toBe("approval"); // unrelated
+  });
+
+  it("same-task-tree: anything inside the tree is direct, other trees need approval", () => {
+    const setting = "same-task-tree";
+    expect(route(setting, a, b)).toBe("task-to-task");
+    expect(route(setting, root, a1)).toBe("task-to-task");
+    expect(route(setting, a1, root)).toBe("task-to-task");
+    expect(route(setting, a1, b1)).toBe("task-to-task");
+    expect(route(setting, a, x)).toBe("approval");
+    expect(route(setting, x, root)).toBe("approval");
+  });
+
+  it("any-task: every task pair is direct", () => {
+    const setting = "any-task";
+    expect(route(setting, a, b)).toBe("task-to-task");
+    expect(route(setting, a1, b1)).toBe("task-to-task");
+    expect(route(setting, a, x)).toBe("task-to-task");
+    expect(route(setting, x, b1)).toBe("task-to-task");
+  });
+
+  it("a pair grant makes that pair direct both ways, and nobody else", () => {
+    const grants: PairGrant[] = [
+      { taskIds: ["a", "x"], grantedAt: at(0) },
+    ];
+    expect(route("parent-and-child", a, x, grants)).toBe("task-to-task");
+    expect(route("parent-and-child", x, a, grants)).toBe("task-to-task");
+    expect(route("parent-and-child", a, b, grants)).toBe("approval");
+    expect(route("parent-and-child", a1, x, grants)).toBe("approval");
+  });
+
+  it("a grant is void once either task is Done or gone", () => {
+    const grants: PairGrant[] = [{ taskIds: ["a", "x"], grantedAt: at(0) }];
+    const doneX = task("x", { state: "done" });
+    const withDone = all.map((t) => (t.id === "x" ? doneX : t));
+    expect(route("parent-and-child", a, x, grants, withDone)).toBe("approval");
+    const without = all.filter((t) => t.id !== "x");
+    expect(route("parent-and-child", a, x, grants, without)).toBe("approval");
+  });
+
+  it("canMessageDirectly agrees with the route (used to mark find_tasks results)", () => {
+    const policy = policyFor("same-task-tree", all);
+    expect(canMessageDirectly(a, b, policy)).toBe(true);
+    expect(canMessageDirectly(a, x, policy)).toBe(false);
+  });
+
+  it("non-task senders (sessions, rules, Harbormaster) always need approval, even under any-task", () => {
+    const policy = policyFor("any-task", all);
+    expect(classifyRoute({ kind: "session", cwd: "/x" }, undefined, a1, policy)).toBe(
       "approval",
     );
+    expect(classifyRoute({ kind: "rule", ruleId: "r1" }, undefined, a, policy)).toBe(
+      "approval",
+    );
+    expect(classifyRoute({ kind: "harbormaster" }, undefined, root, policy)).toBe(
+      "approval",
+    );
+    expect(classifyRoute({ kind: "user" }, undefined, a, policy)).toBe("user");
   });
 
   it("defaults the mode by route", () => {
     expect(defaultMode("parent-to-child")).toBe("steer");
+    expect(defaultMode("task-to-task")).toBe("steer");
     expect(defaultMode("child-to-parent")).toBe("followUp");
     expect(defaultMode("approval")).toBe("steer");
     expect(defaultMode("receipt")).toBe("followUp");
@@ -109,6 +204,10 @@ describe("route classification and modes", () => {
   });
 
   it("reports relations relative to the searching task", () => {
+    const parent = task("p");
+    const child = task("c", { parentTaskId: "p" });
+    const other = task("o");
+    const sibling = task("s", { parentTaskId: "p" });
     expect(relationTo(parent, parent)).toBe("self");
     expect(relationTo(child, parent)).toBe("parent");
     expect(relationTo(parent, child)).toBe("child");
@@ -130,6 +229,23 @@ describe("loop cap", () => {
       message("x", "y", "parent-to-child", 3),
     ];
     expect(countLoopMessages(messages, {}, "p", "c")).toBe(3);
+  });
+
+  it("counts every direct route per unordered pair, including non-lineage and granted pairs", () => {
+    const messages = [
+      message("a", "b", "task-to-task", 1),
+      message("b", "a", "task-to-task", 2),
+      message("a", "b", "task-to-task", 3),
+      message("a", "c", "task-to-task", 3),
+      message("c", "b", "task-to-task", 3),
+    ];
+    expect(countLoopMessages(messages, {}, "a", "b")).toBe(3);
+    expect(countLoopMessages(messages, {}, "b", "a")).toBe(3);
+    expect(isLoopCapReached(messages, {}, "a", "b", 3)).toBe(true);
+    expect(isLoopCapReached(messages, {}, "a", "c", 3)).toBe(false);
+    // The user typing into either side resets that pair only.
+    expect(countLoopMessages(messages, { b: at(2) }, "a", "b")).toBe(1);
+    expect(countLoopMessages(messages, { b: at(2) }, "a", "c")).toBe(1);
   });
 
   it("excludes approval, receipt, rejected and failed messages", () => {
@@ -198,6 +314,43 @@ describe("deriveMessagingStates", () => {
     id: string,
   ) =>
     deriveMessagingStates({ ...base, ...input }).find((s) => s.taskId === id);
+
+  it("a loop-capped pair chips both tasks, whatever the route, and only that pair", () => {
+    const pairTasks = [task("a"), task("b"), task("c")];
+    const messages = Array.from({ length: 3 }, (_, i) =>
+      message(i % 2 ? "b" : "a", i % 2 ? "a" : "b", "task-to-task", i + 1),
+    );
+    const states = deriveMessagingStates({
+      ...base,
+      tasks: pairTasks,
+      messages,
+      loopCap: 3,
+    });
+    expect(states.find((s) => s.taskId === "a")?.loopCapReached).toEqual({
+      otherTaskId: "b",
+      count: 3,
+      cap: 3,
+    });
+    expect(states.find((s) => s.taskId === "b")?.loopCapReached).toEqual({
+      otherTaskId: "a",
+      count: 3,
+      cap: 3,
+    });
+    expect(states.find((s) => s.taskId === "c")).toBeUndefined();
+  });
+
+  it("reports grants in force on both tasks and drops those whose task is Done", () => {
+    const grants: PairGrant[] = [
+      { taskIds: ["c", "p"], grantedAt: at(0) },
+      { taskIds: ["gone", "p"], grantedAt: at(0) },
+    ];
+    expect(state({ messages: [], grants }, "c")?.grantedWith).toEqual(["p"]);
+    expect(state({ messages: [], grants }, "p")?.grantedWith).toEqual(["c"]);
+    const doneTasks = [task("p"), task("c", { parentTaskId: "p", state: "done" })];
+    expect(
+      state({ messages: [], grants, tasks: doneTasks }, "p"),
+    ).toBeUndefined();
+  });
 
   it("a delivered question puts the child on waiting-on-parent with a deadline, and flags the parent", () => {
     const q = question();

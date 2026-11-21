@@ -26,6 +26,20 @@ describe("formatTaskSearchLine", () => {
     );
   });
 
+  it("says whether a send would be direct or needs approval (nothing for the task itself)", () => {
+    expect(formatTaskSearchLine(result({ send: "direct" }))).toBe(
+      '"Fix login" (t-1) · Working · running · child · direct',
+    );
+    expect(
+      formatTaskSearchLine(result({ relation: "none", send: "needs-approval" })),
+    ).toBe(
+      '"Fix login" (t-1) · Working · running · unrelated · needs approval',
+    );
+    expect(formatTaskSearchLine(result({ relation: "self" }))).toBe(
+      '"Fix login" (t-1) · Working · running · self',
+    );
+  });
+
   it("appends repository, branch and PR when present", () => {
     expect(
       formatTaskSearchLine(

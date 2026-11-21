@@ -18,7 +18,7 @@ const RUN_LABELS: Record<TaskSearchResult["run"], string> = {
   "not-running": "not running",
 };
 
-/** One match: `"<title>" (<id>) · <column> · <run state> · <relation>[ · <repo>[@<branch>]][ · PR #n]`. */
+/** One match: `"<title>" (<id>) · <column> · <run state> · <relation> · <direct | needs approval>[ · <repo>[@<branch>]][ · PR #n]`. */
 export function formatTaskSearchLine(result: TaskSearchResult): string {
   const parts: string[] = [
     `"${result.title}" (${result.id})`,
@@ -26,6 +26,9 @@ export function formatTaskSearchLine(result: TaskSearchResult): string {
     RUN_LABELS[result.run],
     result.relation === "none" ? "unrelated" : result.relation,
   ];
+  if (result.send) {
+    parts.push(result.send === "direct" ? "direct" : "needs approval");
+  }
   if (result.repositoryId) {
     parts.push(
       result.branch
