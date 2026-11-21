@@ -64,6 +64,7 @@ import type { CoreLogger, CoreOperation } from "../contracts/logger.js";
 import { noopCoreLogger } from "../contracts/logger.js";
 import type {
   ApproveMessageEdits,
+  ApproveMessageResult,
   FindTasksOptions,
   MessageSender,
   MessageStoreSnapshot,
@@ -3991,39 +3992,73 @@ export class CoreManager implements CoreCommands {
   async approveMessage(
     messageId: string,
     edits?: ApproveMessageEdits,
-  ): Promise<TaskMessage> {
+  ): Promise<ApproveMessageResult> {
     const { messages } = this.requireMessaging();
     const message = await this.requireAwaitingApproval(messageId);
     if (edits?.text !== undefined && !edits.text.trim()) {
       throw new Error("Message text is empty.");
     }
-    const now = this.deps.clock.now().toISOString();
-    const target = await this.deps.tasks.getTask(message.targetTaskId);
-    const reason = target
-      ? (undeliverableReason(target) ?? (await this.noSessionReason(target)))
-      : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
     if (edits?.allowBothWays && message.sender.kind !== "task") {
       throw new Error(
         "Only a message from a task can be approved with both ways allowed.",
       );
     }
-    let result: TaskMessage;
-    if (reason) {
-      result = (await messages.failMessage(messageId, now, reason)) ?? message;
-    } else {
-      result = await messages.approveMessage(messageId, {
-        approvedAt: now,
-        ...(edits?.text !== undefined ? { text: edits.text } : {}),
-        ...(edits?.mode ? { mode: edits.mode } : {}),
-      });
-      if (edits?.allowBothWays && message.sender.kind === "task") {
-        await messages.grantPair(
-          message.sender.taskId,
-          message.targetTaskId,
-          now,
-        );
-      }
+    const result = await this.decideAwaiting(message, edits);
+    if (!edits?.allowBothWays || message.sender.kind !== "task") return result;
+    if (result.status === "failed") return { ...result, releasedCount: 0 };
+
+    // "Approve and allow both ways" (docs/task-trees.md decision 15): the
+    // grant, then every OTHER message still awaiting approval between the
+    // two tasks (either direction, task senders only) is approved as if
+    // individually, keeping its own text and mode.
+    const sender = message.sender.taskId;
+    const other = message.targetTaskId;
+    await messages.grantPair(
+      sender,
+      other,
+      this.deps.clock.now().toISOString(),
+    );
+    let releasedCount = 0;
+    for (const waiting of await messages.listMessages()) {
+      if (
+        waiting.id === messageId ||
+        waiting.status !== "awaiting_approval" ||
+        waiting.sender.kind !== "task"
+      )
+        continue;
+      const from = waiting.sender.taskId;
+      const between =
+        (from === sender && waiting.targetTaskId === other) ||
+        (from === other && waiting.targetTaskId === sender);
+      if (!between) continue;
+      const released = await this.decideAwaiting(waiting);
+      if (released.status !== "failed") releasedCount += 1;
     }
+    return { ...result, releasedCount };
+  }
+
+  /**
+   * Approves one message awaiting approval (re-checking its target: an
+   * undeliverable one becomes `failed` with its reason), sends the task
+   * sender its receipt, and announces the change.
+   */
+  private async decideAwaiting(
+    message: TaskMessage,
+    edits?: ApproveMessageEdits,
+  ): Promise<TaskMessage> {
+    const { messages } = this.requireMessaging();
+    const now = this.deps.clock.now().toISOString();
+    const target = await this.deps.tasks.getTask(message.targetTaskId);
+    const reason = target
+      ? (undeliverableReason(target) ?? (await this.noSessionReason(target)))
+      : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
+    const result = reason
+      ? ((await messages.failMessage(message.id, now, reason)) ?? message)
+      : await messages.approveMessage(message.id, {
+          approvedAt: now,
+          ...(edits?.text !== undefined ? { text: edits.text } : {}),
+          ...(edits?.mode ? { mode: edits.mode } : {}),
+        });
     await this.sendReceipt(result, target);
     this.emitMessagesChanged(affectedTaskIds([result]));
     return result;

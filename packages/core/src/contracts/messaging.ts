@@ -155,6 +155,9 @@ export interface ApproveMessageEdits {
   allowBothWays?: boolean;
 }
 
+/** What approving returns: the approved message, plus (for "allow both ways") how many other waiting messages between the pair were released with it. */
+export type ApproveMessageResult = TaskMessage & { releasedCount?: number };
+
 /**
  * A pair grant: two tasks the user let message each other directly in both
  * directions. Unordered (`taskIds` is stored sorted). It ends when either

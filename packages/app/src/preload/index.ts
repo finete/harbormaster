@@ -281,7 +281,7 @@ const api: HarbormasterApi = {
     approveMessage: (
       messageId: string,
       edits?: { text?: string; mode?: MessageMode; allowBothWays?: boolean },
-    ): Promise<TaskMessage> =>
+    ): Promise<TaskMessage & { releasedCount?: number }> =>
       ipcRenderer.invoke("core:approveMessage", messageId, edits),
     revokePairGrant: (taskId: string, otherTaskId: string): Promise<void> =>
       ipcRenderer.invoke("core:revokePairGrant", taskId, otherTaskId),

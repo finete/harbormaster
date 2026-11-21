@@ -621,6 +621,65 @@ describe("direct messages between tasks", () => {
       expect(await c().listPairGrants()).toEqual([]);
     });
 
+    it("also releases every other waiting message between the pair, in both directions, and nothing else", async () => {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const a = await mk("Alpha");
+      const b = await mk("Beta");
+      const third = await mk("Gamma");
+      harness.setLive(a);
+      harness.setLive(b);
+      const first = await send(a, b, "A to B one", { mode: "followUp" });
+      const second = await send(a, b, "A to B two");
+      const reply = await send(b, a, "B to A");
+      const unrelated = await send(third, b, "from a third task");
+      const fromSession = await c().sendTaskMessage({
+        from: { kind: "session", cwd: "/work" },
+        targetTaskId: b,
+        text: "from a session",
+      });
+      const result = await c().approveMessage(first.message.id, {
+        allowBothWays: true,
+      });
+      expect(result.releasedCount).toBe(2);
+      const byId = new Map(
+        (await c().listMessages()).map((message) => [message.id, message]),
+      );
+      for (const released of [second, reply]) {
+        expect(byId.get(released.message.id)).toMatchObject({
+          status: "pending",
+          route: "approval", // released through the approval route: no loop-cap count
+          text: released.message.text,
+          requestedMode: released.message.requestedMode,
+        });
+        expect(byId.get(released.message.id)?.originalText).toBeUndefined();
+      }
+      expect(byId.get(first.message.id)?.requestedMode).toBe("followUp");
+      // Others stay waiting.
+      expect(byId.get(unrelated.message.id)?.status).toBe("awaiting_approval");
+      expect(byId.get(fromSession.message.id)?.status).toBe(
+        "awaiting_approval",
+      );
+      // Every task sender got its receipt (a: 2 approved, b: 1 approved).
+      const receipts = (await c().listMessages()).filter(
+        (message) => message.route === "receipt",
+      );
+      expect(
+        receipts.filter((message) => message.targetTaskId === a),
+      ).toHaveLength(2);
+      expect(
+        receipts.filter((message) => message.targetTaskId === b),
+      ).toHaveLength(1);
+      // Plain Approve releases nothing extra.
+      const x = await send(third, a, "x1");
+      const y = await send(third, a, "x2");
+      expect(
+        (await c().approveMessage(x.message.id)).releasedCount,
+      ).toBeUndefined();
+      expect(
+        (await c().listMessages()).find((m) => m.id === y.message.id)?.status,
+      ).toBe("awaiting_approval");
+    });
+
     it("plain Approve grants nothing", async () => {
       await boot({ messaging: { directRoutes: "parent-and-child" } });
       const a = await mk("Alpha");
