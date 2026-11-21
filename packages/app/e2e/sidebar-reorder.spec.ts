@@ -477,7 +477,7 @@ test("a nested child dragged out of its parent's block detaches; dragged back it
   const parentId = await rowId(row(window, "Alpha One"));
   const isNested = (title: string): Promise<boolean> =>
     row(window, title).evaluate(
-      (el) => el.parentElement?.classList.contains("ml-3") ?? false,
+      (el) => el.parentElement?.hasAttribute("data-lineage-indent") ?? false,
     );
   expect(await isNested("Kid Red")).toBe(true);
   await expect(
@@ -634,7 +634,7 @@ test("lineage wins over repo: a cross-repo child nests under its parent's repo g
   ).toHaveText(String(betaBefore.length));
   expect(
     await row(window, "Kid Beta").evaluate(
-      (el) => el.parentElement?.classList.contains("ml-3") ?? false,
+      (el) => el.parentElement?.hasAttribute("data-lineage-indent") ?? false,
     ),
   ).toBe(true);
   await expect(
