@@ -117,7 +117,8 @@ test("the key legend renders as a floating card on the board view", async () => 
   await expect(legend).not.toContainText("Review");
   await expect(legend).toContainText("Start");
   await expect(legend).toContainText("Refresh");
-  await expect(legend).toContainText("Archived");
+  await expect(legend).toContainText("Archive");
+  await expect(legend).toContainText("Show archived");
   await expect(legend).toContainText("Navigate");
   await expect(legend).toContainText("Workspace");
 });

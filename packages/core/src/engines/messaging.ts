@@ -237,7 +237,8 @@ export interface DeriveMessagingStatesInput {
 
 /**
  * Per-task chip state. `waitingOnParent` (decision 9) is the child's latest
- * child-to-parent question (not rejected/failed) until: a parent-to-child
+ * child-to-parent question (a message to its direct parent with
+ * `expectsReply`; a report without it never counts; not rejected/failed) until: a parent-to-child
  * message to that child is delivered after it; the user typed into the child
  * after it; the parent is Done, gone or not live; or `now >= deliveredAt +
  * timeout`. The parent's `childQuestionsWaiting` counts only questions it
@@ -300,6 +301,7 @@ export function deriveMessagingStates(
     for (const message of input.messages) {
       if (
         message.route !== "child-to-parent" ||
+        message.expectsReply !== true ||
         message.sender.kind !== "task" ||
         message.sender.taskId !== child.id ||
         message.targetTaskId !== parentId ||

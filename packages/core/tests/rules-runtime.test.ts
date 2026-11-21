@@ -382,6 +382,32 @@ describe("rules runtime through createCore", () => {
     expect(action?.from).not.toHaveProperty("awaitingKind");
   });
 
+  it("records a short reason beside the long detail when a move is not applied", async () => {
+    const { core } = await setup({
+      "rules/rules.yaml": `rules:
+  - id: stay-working
+    label: Stay working
+    on: harbormaster.task.appeared
+    do: [{ action: move, with: { to: working } }]
+`,
+    });
+    const task = await core.commands.createTask({
+      title: "Already working",
+      initialPrompt: "",
+      start: true,
+    });
+    await core.commands.refresh();
+    const action = (await core.commands.listEvents({ taskId: task.id })).find(
+      (entry): entry is Extract<AuditEntry, { kind: "action" }> =>
+        entry.kind === "action",
+    );
+    expect(action).toMatchObject({
+      outcome: "skipped",
+      detail: "already in working",
+      reason: "already there",
+    });
+  });
+
   it("does nothing automatic with the kill switch off", async () => {
     const { core } = await setup(
       { "rules/rules.yaml": RULES, "rules/checks.mjs": CHECKS },

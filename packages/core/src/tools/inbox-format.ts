@@ -39,7 +39,9 @@ export function buildInboxHeader(message: TaskMessage): string {
     case "parent-to-child":
       return `[Message from your parent task "${label}" (${taskId})]`;
     case "child-to-parent":
-      return `[Question from your child task "${label}" (${taskId})]`;
+      return message.expectsReply
+        ? `[Question from your child task "${label}" (${taskId})]`
+        : `[Message from your child task "${label}" (${taskId})]`;
     case "task-to-task":
       return `[Message from task "${label}" (${taskId})]`;
     case "approval":
@@ -59,11 +61,28 @@ export function buildInboxHeader(message: TaskMessage): string {
 }
 
 /**
- * The full text block: header, the message text, `Attachments:` with each
- * copied absolute path, the trust line (omitted for receipts and the user's own messages), and, for a
- * child's question, how the parent may answer.
+ * Appended at delivery time (never stored) to what a task WITH a parent
+ * receives: a new turn drops its reported outcome, so it must report again.
  */
-export function buildInboxMessageText(message: TaskMessage): string {
+export const REPORT_STATUS_REMINDER =
+  "(When you have finished this, call the Harbormaster report_status tool again.)";
+
+/** What the receiving task looks like to the formatter; decided by the receiver, whoever sent the message. */
+export interface InboxFormatOptions {
+  /** The receiving task has a parent (`parentTaskId` set): add the report_status reminder. */
+  receiverHasParent?: boolean;
+}
+
+/**
+ * The full text block: header, the message text, `Attachments:` with each
+ * copied absolute path, the trust line (omitted for receipts and the user's own messages), for a
+ * child's question (`expectsReply`), how the parent may answer, and, for a
+ * receiver with a parent, the report_status reminder.
+ */
+export function buildInboxMessageText(
+  message: TaskMessage,
+  options: InboxFormatOptions = {},
+): string {
   const sections: string[] = [buildInboxHeader(message), message.text];
   if (message.attachments.length) {
     sections.push(
@@ -74,11 +93,16 @@ export function buildInboxMessageText(message: TaskMessage): string {
   if (message.route !== "receipt" && message.route !== "user") {
     sections.push(TRUST_LINE);
   }
-  if (message.route === "child-to-parent" && message.sender.kind === "task") {
+  if (
+    message.route === "child-to-parent" &&
+    message.expectsReply &&
+    message.sender.kind === "task"
+  ) {
     sections.push(
       `Reply with the send_to_task tool to ${message.sender.taskId} only if your brief or context settles it; product or scope decisions go to the user (ask them, then relay the answer).`,
     );
   }
+  if (options.receiverHasParent) sections.push(REPORT_STATUS_REMINDER);
   return sections.join("\n\n");
 }
 
@@ -96,9 +120,10 @@ export type ReadAttachment = (
 export async function buildInboxMessageContent(
   message: TaskMessage,
   readAttachment: ReadAttachment,
+  options: InboxFormatOptions = {},
 ): Promise<InboxContentBlock[]> {
   const blocks: InboxContentBlock[] = [
-    { type: "text", text: buildInboxMessageText(message) },
+    { type: "text", text: buildInboxMessageText(message, options) },
   ];
   for (const [index, attachment] of message.attachments.entries()) {
     if (attachment.prunedAt || !attachment.mimeType?.startsWith("image/")) {
@@ -135,12 +160,17 @@ export interface FormattedInboxMessage {
 export async function formatInboxMessage(
   message: TaskMessage,
   readAttachment: ReadAttachment,
+  options: InboxFormatOptions = {},
 ): Promise<FormattedInboxMessage> {
-  const content = await buildInboxMessageContent(message, readAttachment);
+  const content = await buildInboxMessageContent(
+    message,
+    readAttachment,
+    options,
+  );
   return {
     customType: HARBORMASTER_MESSAGE_TYPE,
     content,
-    text: buildInboxMessageText(message),
+    text: buildInboxMessageText(message, options),
     details: {
       messageId: message.id,
       route: message.route,

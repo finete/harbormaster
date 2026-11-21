@@ -13,6 +13,7 @@ import type {
   ProbeOutcome,
 } from "../contracts/onboarding.js";
 import { type RunOutcome, runOutcome } from "../utilities/run.js";
+import { CURSOR_IDE_ROUTING_ENV } from "./cursor-code-access.js";
 
 /** Per-probe wall-clock limit. */
 export const ONBOARDING_PROBE_TIMEOUT_MS = 8_000;
@@ -107,7 +108,10 @@ export class LocalOnboardingProbeAccess implements OnboardingProbeAccess {
     args: readonly string[],
   ): Promise<ProbeOutcome> {
     return toProbe(
-      await runOutcome(command, [...args], { timeoutMs: this.timeoutMs }),
+      await runOutcome(command, [...args], {
+        timeoutMs: this.timeoutMs,
+        unsetEnv: CURSOR_IDE_ROUTING_ENV,
+      }),
     );
   }
 

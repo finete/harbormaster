@@ -234,7 +234,20 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   stateChangedAt: string;
+  /**
+   * When the task first entered `working` (created started, started from
+   * the backlog, launched, or a parked idea's reopen from Done); kept
+   * through later moves and reopens. Absent on a task that never started
+   * (parked, or Done straight from the backlog), and on tasks from before
+   * this field existed.
+   */
+  startedAt?: string;
   completedAt?: string;
+  /**
+   * Off the board: a Done task the user archived (`CoreCommands.archiveTask`)
+   * or one the refresh sweep archived after 7 days in Done. Only Done tasks
+   * carry it; leaving Done (reopen, a move) clears it.
+   */
   archivedAt?: string;
   lastError?: string;
   /**

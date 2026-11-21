@@ -652,10 +652,12 @@ test("the composer layout at 1200px: the prompt box footer holds only the mode s
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Working", async () => {
+test("s on a selected parked card (cards carry no workflow buttons) creates its worktree and moves it to Working", async () => {
   const card = cardLocator("Parked Work");
   const taskId = await cardTaskId(card);
-  await expect(card.locator("button")).toHaveCount(0);
+  await expect(
+    card.locator('button:not([data-testid="card-archive-button"])'),
+  ).toHaveCount(0);
   await selectCard(window, taskId);
   await window.keyboard.press("s");
 

@@ -303,6 +303,7 @@ describe("deriveMessagingStates", () => {
       status: "delivered",
       deliveredAt: at(2),
       text: "which db?",
+      expectsReply: true,
       ...extra,
     });
   const state = (
@@ -363,6 +364,52 @@ describe("deriveMessagingStates", () => {
       expiresAt: at(32),
     });
     expect(state({ messages: [q] }, "p")?.childQuestionsWaiting).toBe(1);
+  });
+
+  it("a report (no expectsReply) is not a question: the child is not waiting and the parent has nothing to answer", () => {
+    const report = question({ text: "Posted the review: <url>" });
+    delete report.expectsReply;
+    expect(state({ messages: [report] }, "c")).toBeUndefined();
+    expect(state({ messages: [report] }, "p")).toBeUndefined();
+    // An explicit false is the same as absent (a message stored before the field existed).
+    expect(
+      state({ messages: [question({ expectsReply: false })] }, "c"),
+    ).toBeUndefined();
+    // A report next to an older question does not hide the question.
+    const asked = question();
+    const later = message("c", "p", "child-to-parent", 3, {
+      status: "delivered",
+      deliveredAt: at(4),
+    });
+    expect(state({ messages: [asked, later] }, "c")?.waitingOnParent).toEqual(
+      expect.objectContaining({ messageId: asked.id }),
+    );
+  });
+
+  it("expectsReply only counts on a child's message to its direct parent", () => {
+    // Parent-to-child, approval and user routes store it but never wait.
+    for (const route of ["parent-to-child", "approval", "user"] as const) {
+      const sent = message("p", "c", route, 1, {
+        status: "delivered",
+        deliveredAt: at(2),
+        expectsReply: true,
+      });
+      expect(state({ messages: [sent] }, "c")).toBeUndefined();
+      expect(state({ messages: [sent] }, "p")).toBeUndefined();
+    }
+    // A child's question to a task that is not its parent (sibling approval route).
+    const sibling = message("c", "o", "approval", 1, {
+      status: "delivered",
+      expectsReply: true,
+    });
+    expect(state({ messages: [sibling] }, "c")).toBeUndefined();
+    // A message from some other child to this parent does not put "c" on hold.
+    const stranger = message("x", "p", "child-to-parent", 1, {
+      status: "delivered",
+      deliveredAt: at(2),
+      expectsReply: true,
+    });
+    expect(state({ messages: [stranger] }, "c")).toBeUndefined();
   });
 
   it("a not-yet-delivered question waits with no deadline", () => {

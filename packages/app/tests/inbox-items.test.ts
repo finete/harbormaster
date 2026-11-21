@@ -9,6 +9,7 @@ import type {
 import {
   assembleInbox,
   emptyLocalState,
+  entriesClearedByOpening,
   groupEntries,
   type InboxSources,
   moveSelection,
@@ -171,12 +172,12 @@ describe("assembleInbox", () => {
       ["idle:t3:2026-11-11T09:03:00.000Z", "idle", false, true],
       ["reported:t2:2026-11-11T09:02:00.000Z", "reported", true, true],
       ["i1", "rule", true, true],
-      ["asked:t1:2026-11-11T09:00:00.000Z", "asked", true, false],
+      ["asked:t1:2026-11-11T09:00:00.000Z", "asked", true, true],
       ["i2", "rule", false, true],
     ]);
     const asked = entries.find((e) => e.kind === "asked");
     expect(asked?.title).toBe("Which DB?");
-    expect(asked?.actions.map((a) => a.label)).toEqual(["Open"]);
+    expect(asked?.actions.map((a) => a.label)).toEqual(["Open", "Dismiss"]);
     expect(
       entries.find((e) => e.kind === "reported")?.actions.map((a) => a.label),
     ).toEqual(["Open", "To Done", "Dismiss"]);
@@ -203,6 +204,60 @@ describe("assembleInbox", () => {
         .find((e) => e.kind === "launch-failed")
         ?.actions.map((a) => a.label),
     ).toEqual(["Open", "Retry", "Dismiss"]);
+  });
+
+  it("a dismissed question hides locally; the next question (new time) shows again", () => {
+    const local = {
+      ...emptyLocalState(),
+      dismissed: { "asked:t1:2026-11-11T09:00:00.000Z": "2026-11-11T09:10:00" },
+    };
+    const now = Date.parse("2026-11-11T10:00:00.000Z");
+    const asked = (entries: ReturnType<typeof assembleInbox>) =>
+      visibleEntries(entries, local, now).filter((e) => e.kind === "asked");
+    expect(asked(assembleInbox(everything))).toEqual([]);
+    const next = assembleInbox({
+      ...everything,
+      presence: {
+        ...everything.presence,
+        t1: live({
+          status: {
+            state: "blocked",
+            message: "Which cache?",
+            at: "2026-11-11T09:30:00.000Z",
+          },
+        }),
+      },
+    });
+    expect(asked(next).map((e) => e.id)).toEqual([
+      "asked:t1:2026-11-11T09:30:00.000Z",
+    ]);
+  });
+
+  it("opening a task clears only its reported / done / idle entries", () => {
+    const entries = assembleInbox(everything);
+    const ids = (taskId: string): string[] =>
+      entriesClearedByOpening(entries, taskId).map((e) => e.id);
+    expect(ids("t2")).toEqual(["reported:t2:2026-11-11T09:02:00.000Z"]);
+    expect(ids("t3")).toEqual(["idle:t3:2026-11-11T09:03:00.000Z"]);
+    expect(ids("t4")).toEqual(["done:t4:2026-11-11T09:04:00.000Z"]);
+    // Still waiting on the user, or a failure / landing / approval: kept.
+    expect(ids("t1")).toEqual([]);
+    expect(ids("t5")).toEqual([]);
+    expect(ids("t6")).toEqual([]);
+    // t3's persisted rule item (i2) is not derived: kept alongside its idle.
+    expect(entries.some((e) => e.id === "i2" && e.taskId === "t3")).toBe(true);
+    expect(entriesClearedByOpening(entries, "nope")).toEqual([]);
+    // Dismissed by id: hidden now, a later signal (new id) shows again.
+    const local = {
+      ...emptyLocalState(),
+      dismissed: Object.fromEntries(
+        entriesClearedByOpening(entries, "t3").map((e) => [e.id, "x"]),
+      ),
+    };
+    const now = Date.parse("2026-11-11T10:00:00.000Z");
+    const visible = visibleEntries(entries, local, now).map((e) => e.id);
+    expect(visible).not.toContain("idle:t3:2026-11-11T09:03:00.000Z");
+    expect(visible).toContain("i2");
   });
 
   it("leaves out running agents, Done tasks and tasks waiting on their parent", () => {

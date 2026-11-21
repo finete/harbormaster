@@ -308,6 +308,21 @@ export function App({
     },
     [closeTask],
   );
+  // A task archived anywhere (this window, another, the 7-day sweep) closes
+  // its workspace; only the transition counts, so one opened from the
+  // sidebar's Archived section stays open.
+  const archivedById = useRef<Map<string, boolean> | null>(null);
+  useEffect(() => {
+    const previous = archivedById.current;
+    const current = new Map(
+      flatRows.map(({ task }) => [task.id, Boolean(task.archivedAt)]),
+    );
+    archivedById.current = current;
+    if (!previous) return;
+    for (const [taskId, archived] of current) {
+      if (archived && previous.get(taskId) === false) requestCloseTask(taskId);
+    }
+  }, [flatRows, requestCloseTask]);
 
   // No auto-open *by board order* on launch: opening a task spawns its pi
   // session, and doing that for whatever happens to sort first on the board
@@ -412,8 +427,11 @@ export function App({
     storeFocusedTaskId(window.localStorage, focusedTaskId);
   }, [restoreComplete, focusedTaskId]);
 
+  const { markTaskSeen } = inbox;
   const openTask = useCallback(
     (taskId: string) => {
+      // Looking at the task answers its "look at this" inbox items.
+      markTaskSeen(taskId);
       setFocusedTaskId(taskId);
       setOpenedTaskIds((prev) =>
         prev.has(taskId) ? prev : new Set(prev).add(taskId),
@@ -423,7 +441,7 @@ export function App({
       setDraftFocused(false);
       setView("workspace");
     },
-    [appendOpened],
+    [appendOpened, markTaskSeen],
   );
 
   // Entry point for every "open/focus this task" action (sidebar row, board

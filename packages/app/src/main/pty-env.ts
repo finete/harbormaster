@@ -8,6 +8,8 @@
  * Pure function: no Node imports, injected deps → testable without spawning.
  */
 
+import { CURSOR_IDE_ROUTING_ENV } from "@harbormaster/core";
+
 /** Environment vars that reveal another emulator's identity and must be removed. */
 const EMULATOR_MARKERS = [
   "TERM_PROGRAM",
@@ -33,6 +35,7 @@ const EMULATOR_MARKERS = [
   "STY",
   "VSCODE_INJECTION",
   "VSCODE_GIT_IPC_HANDLE",
+  ...CURSOR_IDE_ROUTING_ENV,
   "TERMINAL_EMULATOR",
   "ZED_TERM",
 ] as const;

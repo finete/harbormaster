@@ -20,6 +20,7 @@ import type {
   HarnessModelCatalog,
   InboxItem,
   InboxPriorityInput,
+  InstalledUpdate,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
@@ -195,6 +196,11 @@ const api: HarbormasterApi = {
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult> =>
       ipcRenderer.invoke("core:toDone", taskId, options),
+    archiveTask: (
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult> =>
+      ipcRenderer.invoke("core:archiveTask", taskId, options),
     retryDoneCleanup: (taskId: string): Promise<Task> =>
       ipcRenderer.invoke("core:retryDoneCleanup", taskId),
     abandonDoneCleanup: (taskId: string): Promise<Task> =>
@@ -448,6 +454,20 @@ const api: HarbormasterApi = {
       ipcRenderer.on("app:update-available", handler);
       return () => ipcRenderer.removeListener("app:update-available", handler);
     },
+    getInstalledUpdate: (): Promise<InstalledUpdate | null> =>
+      ipcRenderer.invoke("app:getInstalledUpdate"),
+    onInstalledUpdate: (
+      listener: (update: InstalledUpdate) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        update: InstalledUpdate,
+      ): void => listener(update);
+      ipcRenderer.on("app:installed-update", handler);
+      return () => ipcRenderer.removeListener("app:installed-update", handler);
+    },
+    restartToUpdate: (): Promise<void> =>
+      ipcRenderer.invoke("app:restartToUpdate"),
     copyText: (text: string): Promise<void> =>
       ipcRenderer.invoke("app:copyText", text),
     exportDiagnostics: (): Promise<string | null> =>

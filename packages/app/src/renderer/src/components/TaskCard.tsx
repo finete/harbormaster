@@ -1,20 +1,25 @@
 import { useDraggable } from "@dnd-kit/core";
+import { X } from "lucide-react";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
+import { taskAgentLabel } from "../lib/task-agent";
 import { lineageIndentPx } from "../lib/task-lineage";
 import {
   deriveMessagingChips,
   loopCapLabel,
 } from "../lib/task-messaging-chips";
+import { archiveTaskMutation, canArchive } from "../lib/task-mutations";
 import {
   deriveLaunchMarker,
   deriveOutcomeLine,
   derivePresenceActivity,
 } from "../lib/task-status-lines";
 import {
+  absoluteDateTime,
   lastInteractionTimestamp,
   relativeTime,
+  taskStartMoment,
   waitingDurationText,
 } from "../lib/time-format";
 import { cardUsageLine } from "../lib/usage";
@@ -29,13 +34,15 @@ import { RunningSpinner } from "./ui/running-spinner";
 type TaskCardPresence = PresenceBadge | undefined;
 
 /**
- * One board card: title, branch + repo chip, PR/presence/unread chrome only, plus a
+ * One board card: title, branch + repo chip, the agent line (harness ·
+ * model · when it started), PR/presence/unread chrome only, plus a
  * muted relative-time indicator (top-right of the title row) and, for
  * Awaiting cards, a "waiting <duration>" fragment in the sub-line — ported
  * from pi-home's card anatomy (`withLastInteraction` +
  * `awaitingSourceText`, src/presentation/home-controller.ts and
- * home-board.ts). Cards carry no action buttons — the workflow verbs live
- * in the workspace header, the board's keys (s/r/x, see BoardKeyLegend),
+ * home-board.ts). The one button on a card is the hover × (Archive, asks
+ * first; it takes the time slot while shown) — the workflow verbs live in
+ * the workspace header, the board's keys (s/r/x/e, see BoardKeyLegend),
  * and drag-and-drop.
  *
  * `overlay` renders the same card as a presentation-only lookalike for
@@ -143,6 +150,11 @@ function TaskCardFace({
   // cards; otherwise revealed on hover / focus over the time slot, so a
   // card at rest is laid out exactly as without it.
   const usageLine = isOverlay ? undefined : cardUsageLine(task.usage);
+  // The hover × (never on the drag preview, nor on an archived card).
+  const archivable = !isOverlay && canArchive(task);
+  const agentLabel = taskAgentLabel(task);
+  const start = taskStartMoment(task);
+  const startText = absoluteDateTime(start.iso, now);
 
   return (
     <Card
@@ -200,7 +212,11 @@ function TaskCardFace({
           data-testid="card-time"
           data-slot="time"
           title={lastInteractionTimestamp(task, presence)}
-          className="shrink-0 font-mono text-[10px] leading-tight text-muted-foreground"
+          className={cn(
+            "shrink-0 font-mono text-[10px] leading-tight text-muted-foreground",
+            archivable &&
+              "group-focus-within/card:invisible group-hover/card:invisible",
+          )}
         >
           {relativeTime(lastInteractionTimestamp(task, presence), now)}
         </span>
@@ -208,10 +224,34 @@ function TaskCardFace({
           <span
             data-testid="card-usage-line"
             data-pinned="false"
-            className="pointer-events-none invisible absolute right-3 top-3 max-w-[calc(100%-1.5rem)] truncate bg-card pl-2 font-mono text-[10px] leading-[1.125rem] text-muted-foreground group-focus-within/card:visible group-hover/card:visible"
+            className={cn(
+              "pointer-events-none invisible absolute top-3 truncate bg-card pl-2 font-mono text-[10px] leading-[1.125rem] text-muted-foreground group-focus-within/card:visible group-hover/card:visible",
+              archivable
+                ? "right-8 max-w-[calc(100%-3rem)]"
+                : "right-3 max-w-[calc(100%-1.5rem)]",
+            )}
           >
             {usageLine}
           </span>
+        )}
+        {archivable && (
+          <button
+            type="button"
+            data-testid="card-archive-button"
+            aria-label={`Archive ${task.title}`}
+            title="Archive (e)"
+            className="invisible absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground group-focus-within/card:visible group-hover/card:visible"
+            // Neither a drag (dnd-kit listens on the card) nor a card
+            // click (opens the task).
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void archiveTaskMutation(task.id);
+            }}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
       {/* Mono sub-line: branch → target / waiting duration, plus the quiet
@@ -237,6 +277,15 @@ function TaskCardFace({
         )}
         <RepoChip task={task} testId="card-repo-chip" className="ml-auto" />
       </div>
+      <p
+        className="truncate text-xs text-muted-foreground"
+        data-slot="agent"
+        data-testid="card-agent-line"
+        title={`${agentLabel} · ${start.label} ${new Date(start.iso).toLocaleString()}`}
+      >
+        <span className="font-mono">{agentLabel}</span>
+        {startText && ` · ${start.label} ${startText}`}
+      </p>
       {parentTitle && (
         <p
           className="truncate text-xs text-muted-foreground"

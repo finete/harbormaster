@@ -43,19 +43,23 @@ Utility) that `packages/core` follows. Pi-home's `src/` layout
 
 ## Identity
 
-This repository belongs to the `finete` GitHub account. Repo-local git config
-pins `finete <34818222+finete@users.noreply.github.com>`; the remote embeds
-the username (`https://finete@github.com/...`) so gh's credential helper
-routes to the right account. Never copy this repo's git config elsewhere, and
-never change this repo's config to any other identity.
+Which GitHub account works on this repository is each developer's local
+setup, never named here: commits use the repo-local `user.name` /
+`user.email`, and the account for `gh` is the repo-local
+`harbormaster.ghUser` (`git config harbormaster.ghUser <account>`). Agents
+never change either.
 
-**Hard user separation:** every git and GitHub operation on this repository,
-including push, `gh` API calls, and anything else, must act as `finete` and no other account.
-If a `gh` command is ever needed here, prefix it:
-`GH_TOKEN="$(gh auth token --user finete)" gh …`. Never add other accounts
-as collaborators.
+Every `gh` command here runs as that account:
+`u=$(git config harbormaster.ghUser) && t=$(gh auth token --user "$u") && GH_TOKEN="$t" gh …`.
+Each step must succeed before `gh` runs: `gh auth token --user ""` prints
+the active account's token, and an empty `GH_TOKEN` falls back to it too.
+If the chain stops (`harbormaster.ghUser` unset, or that account not logged
+in to `gh`), stop and ask the developer; never fall back to gh's active
+account. Never add other accounts as collaborators.
 
-**Workflow:** solo development, directly on `main`, with no pull requests and no
+## Workflow
+
+Solo development, directly on `main`, with no pull requests and no
 review ceremony. Subagents/implementers work on short-lived local branches or
 worktrees purely as transport; the supervisor reviews, merges to `main`, and
 pushes. Keep `main` green (typecheck + tests pass at every commit).

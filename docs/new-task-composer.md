@@ -230,6 +230,14 @@ recorded by `claimSessionLaunch`: the configured default, else the harness's
 own default from `HarnessAdapter.defaults()`); just `pi` when unknown. The
 thinking level is in the tooltip.
 
+Board cards carry the same agent label plus when the task started:
+`claude-code · claude-opus-4-8 · started Nov 20, 2:32 PM` (locale date and
+time, the year only when not the current one). "Started" is `Task.startedAt`,
+stamped the first time the task enters Working; a task that never started
+(parked, or Done straight from the backlog) says `created …` instead, and a
+Working or Awaiting task from before `startedAt` existed falls back to
+`createdAt`.
+
 ## Out of scope
 
 Agent profiles, switching agents

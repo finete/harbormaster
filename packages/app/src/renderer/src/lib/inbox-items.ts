@@ -51,7 +51,7 @@ export interface InboxEntry {
   createdAt: string;
   /** The producer's default tab (before the optional priority filter). */
   priority: boolean;
-  /** D may hide it (never approvals or live questions). */
+  /** D may hide it (never approvals; cleanup-failed has its own D). */
   dismissable: boolean;
   /** Stored in core (dismiss / snooze go through `resolveInboxItem`). */
   persisted: boolean;
@@ -295,9 +295,11 @@ function presenceItem(
       ...(status.message ? { body: status.message } : {}),
       createdAt: at,
       priority: true,
-      // Live: leaves by itself when the agent's state changes.
-      dismissable: false,
-      actions: [OPEN],
+      // Leaves by itself when the agent's state changes. D is only a local
+      // hide (the sidebar keeps showing the task's "your move"); the id
+      // embeds the question's time, so a new question shows again.
+      dismissable: true,
+      actions: [OPEN, DISMISS],
     };
   }
   if (status?.state === "done") {
@@ -395,6 +397,27 @@ export function parseLocalState(raw: string | null): LocalInboxState {
   } catch {
     return emptyLocalState();
   }
+}
+
+/**
+ * The entries opening `taskId` clears: its derived "look at this" items
+ * (reported / done / idle). Never `asked` (still waiting on the user),
+ * approvals, failures, ready-to-land, or persisted rule items: those need
+ * an answer, not a look. Dismissed by id like D, so a NEW signal later (its
+ * id embeds the signal time) shows again.
+ */
+export function entriesClearedByOpening(
+  entries: readonly InboxEntry[],
+  taskId: string,
+): InboxEntry[] {
+  return entries.filter(
+    (entry) =>
+      entry.taskId === taskId &&
+      !entry.persisted &&
+      (entry.kind === "reported" ||
+        entry.kind === "done" ||
+        entry.kind === "idle"),
+  );
 }
 
 // --- tabs and groups ----------------------------------------------------

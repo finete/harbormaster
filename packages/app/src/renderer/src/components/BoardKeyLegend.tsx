@@ -7,8 +7,9 @@ const ENTRIES: Array<{ key: string; label: string }> = [
   { key: "s", label: "Start" },
   { key: "r", label: "Await (review)" },
   { key: "x", label: "Done" },
+  { key: "e", label: "Archive" },
   { key: "g", label: "Refresh" },
-  { key: "a", label: "Archived" },
+  { key: "a", label: "Show archived" },
   { key: "\u2190\u2191\u2193\u2192", label: "Navigate" },
   { key: "esc", label: "Workspace" },
 ];
@@ -19,7 +20,7 @@ const ENTRIES: Array<{ key: string; label: string }> = [
  * two-column block (see home-board.ts's `shortcutPairs`) out as a compact
  * 2-column grid. pointer-events-none so it never blocks card clicks or drags.
  * The workflow keys are the three verbs: s start, r await (opens the kind
- * picker with review preselected), x done. Purely informational: every key
+ * picker with review preselected), x done, plus e archive (off the board). Purely informational: every key
  * here is wired in Board.tsx's keydown handler, nothing here dispatches.
  */
 export function BoardKeyLegend(): JSX.Element {

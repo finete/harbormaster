@@ -6,6 +6,7 @@ import {
   countActiveTasks,
   deriveChildOutcome,
   deriveChildRunState,
+  deriveWaitingOnUser,
   formatChildStatusLine,
   formatChildStatusText,
 } from "../src/tools/child-status.js";
@@ -181,6 +182,82 @@ describe("tasks below a child", () => {
     const entry = buildChildStatusEntry(baseTask(), presence(), 0);
     expect("activeBelow" in entry).toBe(false);
     expect(formatChildStatusLine(entry)).not.toContain("below");
+  });
+});
+
+function liveWithRecord(
+  record: Partial<NonNullable<PresenceStatus["record"]>>,
+  runningTurn = false,
+): PresenceStatus {
+  return presence({
+    live: true,
+    runningTurn,
+    record: {
+      taskId: "child-1",
+      sessionPath: "/s",
+      pid: 1,
+      mode: "interactive",
+      startedAt: "t",
+      heartbeatAt: "t",
+      ...record,
+    },
+  });
+}
+
+describe("waiting on the user", () => {
+  const asking = {
+    status: {
+      state: "blocked" as const,
+      message: " Which database should I use? ",
+      at: "2026-01-01T00:00:10.000Z",
+    },
+  };
+
+  it("shows the open question of a live, idle, blocked child", () => {
+    const task = baseTask({ launch: { status: "started", requestedAt: "t" } });
+    const entry = buildChildStatusEntry(task, liveWithRecord(asking));
+    expect(entry.waitingOnUser).toEqual({
+      question: "Which database should I use?",
+      at: "2026-01-01T00:00:10.000Z",
+    });
+    expect(formatChildStatusLine(entry)).toBe(
+      '"Fix the flaky test" (child-1) · Working · your move · waiting on the user: Which database should I use?',
+    );
+  });
+
+  it("is absent while the child is running a turn", () => {
+    expect(deriveWaitingOnUser(liveWithRecord(asking, true))).toBeUndefined();
+  });
+
+  it("is absent when the child is idle or has no message", () => {
+    expect(
+      deriveWaitingOnUser(
+        liveWithRecord({ status: { state: "idle", at: "t" } }),
+      ),
+    ).toBeUndefined();
+    expect(
+      deriveWaitingOnUser(
+        liveWithRecord({ status: { state: "blocked", at: "t" } }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("is absent when the child is no longer live", () => {
+    const status = presence({
+      live: false,
+      record: liveWithRecord(asking).record,
+    });
+    expect(deriveWaitingOnUser(status)).toBeUndefined();
+  });
+
+  it("is absent once a newer outcome was reported", () => {
+    const reported = liveWithRecord({
+      ...asking,
+      outcome: { status: "done", note: "ok", at: "2026-01-01T00:00:20.000Z" },
+    });
+    expect(deriveWaitingOnUser(reported)).toBeUndefined();
+    const entry = buildChildStatusEntry(baseTask(), reported);
+    expect(entry).not.toHaveProperty("waitingOnUser");
   });
 });
 

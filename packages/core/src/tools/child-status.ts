@@ -81,6 +81,31 @@ export function deriveChildOutcome(
     : undefined;
 }
 
+/** A question a child stopped to ask the user directly (the inbox's "agent asked"). */
+export interface ChildOpenQuestion {
+  question: string;
+  at: string;
+}
+
+/**
+ * The child's open question for the USER: it is live, not running a turn, and
+ * its last program-status report is `blocked` with a message, with no
+ * reported outcome at or after that report (an outcome supersedes it, as in
+ * the inbox). `undefined` otherwise. Direct children only: callers never
+ * pass a grandchild.
+ */
+export function deriveWaitingOnUser(
+  presence: PresenceStatus,
+): ChildOpenQuestion | undefined {
+  if (!presence.live || presence.runningTurn) return undefined;
+  const status = presence.record?.status;
+  const question = status?.message?.trim();
+  if (status?.state !== "blocked" || !question) return undefined;
+  const outcome = presence.record?.outcome;
+  if (outcome && outcome.at >= status.at) return undefined;
+  return { question, at: status.at };
+}
+
 export interface ChildStatusEntry {
   id: string;
   title: string;
@@ -91,6 +116,7 @@ export interface ChildStatusEntry {
   outcome?: ChildOutcome;
   /** Tasks below this child (any depth) that are not Done yet; absent when none. */
   activeBelow?: number;
+  waitingOnUser?: ChildOpenQuestion;
 }
 
 /** Build one child's structured status, for both the tool's plain text and its `details`. */
@@ -100,6 +126,7 @@ export function buildChildStatusEntry(
   activeBelow = 0,
 ): ChildStatusEntry {
   const outcome = deriveChildOutcome(presence);
+  const waitingOnUser = deriveWaitingOnUser(presence);
   return {
     id: task.id,
     title: task.title,
@@ -124,6 +151,7 @@ export function buildChildStatusEntry(
     runState: deriveChildRunState(task, presence),
     ...(outcome ? { outcome } : {}),
     ...(activeBelow > 0 ? { activeBelow } : {}),
+    ...(waitingOnUser ? { waitingOnUser } : {}),
   };
 }
 
@@ -134,7 +162,7 @@ export function countActiveTasks(
   return descendants.filter((task) => task.state !== "done").length;
 }
 
-/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · N tasks below not done yet]`. */
+/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · N tasks below not done yet][ · waiting on the user: <question>]`. */
 export function formatChildStatusLine(entry: ChildStatusEntry): string {
   const parts: string[] = [`"${entry.title}" (${entry.id})`];
   const column = entry.awaiting
@@ -156,6 +184,9 @@ export function formatChildStatusLine(entry: ChildStatusEntry): string {
     parts.push(
       `${entry.activeBelow} task${entry.activeBelow === 1 ? "" : "s"} below not done yet`,
     );
+  }
+  if (entry.waitingOnUser) {
+    parts.push(`waiting on the user: ${entry.waitingOnUser.question}`);
   }
   return parts.join(" · ");
 }

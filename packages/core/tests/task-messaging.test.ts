@@ -286,6 +286,39 @@ describe("send-time rules", () => {
     expect(result.willWake).toBe(false);
   });
 
+  it("stores expectsReply on any route, only when true; only a child's question waits on the parent", async () => {
+    const p = await mk("Parent");
+    const k = await child(p, "Kid");
+    harness.setLive(p);
+    harness.setLive(k);
+    const stateOf = async (id: string) =>
+      (await c().getMessagingStates()).find((s) => s.taskId === id);
+
+    const report = await send(k, p, "Posted the review: <url>");
+    expect(report.message.expectsReply).toBeUndefined();
+    expect(await stateOf(k)).toBeUndefined();
+    expect(await stateOf(p)).toBeUndefined();
+
+    const down = await send(p, k, "carry on", { expectsReply: true });
+    expect(down.message.expectsReply).toBe(true);
+    const other = await mk("Other");
+    const approval = await send(p, other, "fyi", { expectsReply: true });
+    expect(approval.message).toMatchObject({
+      route: "approval",
+      expectsReply: true,
+    });
+    expect(
+      (await c().listMessages({ taskId: k })).find(
+        (m) => m.id === down.message.id,
+      )?.expectsReply,
+    ).toBe(true);
+    expect(await stateOf(k)).toBeUndefined(); // parent-to-child never waits
+
+    await send(k, p, "which db?", { expectsReply: true });
+    expect((await stateOf(k))?.waitingOnParent).toBeDefined();
+    expect((await stateOf(p))?.childQuestionsWaiting).toBe(1);
+  });
+
   it("child → Done parent is rejected as Done", async () => {
     const p = await mk("Parent");
     const k = await child(p, "Kid");
@@ -964,7 +997,7 @@ describe("derived messaging states", () => {
     const k = await child(p, "Kid");
     harness.setLive(p);
     harness.setLive(k);
-    const sent = await send(k, p, "which db?");
+    const sent = await send(k, p, "which db?", { expectsReply: true });
     return { p, k, question: sent.message.id };
   }
   const stateOf = async (id: string) =>

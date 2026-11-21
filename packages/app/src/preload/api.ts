@@ -487,6 +487,16 @@ export interface HarbormasterApi {
       taskId: string,
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult>;
+    /**
+     * Take a task off the board. A Done task is archived at once; any other
+     * task asks and completes exactly like `toDone` (same question, same
+     * `force` answers, same process teardown in main) and lands archived.
+     * See `CoreCommands.archiveTask`.
+     */
+    archiveTask(
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult>;
     /** The cleanup inbox item's Retry: force the Done task's cleanup again now. See `CoreCommands.retryDoneCleanup`. */
     retryDoneCleanup(taskId: string): Promise<Task>;
     /** The cleanup inbox item's Dismiss: give up on the Done task's cleanup. See `CoreCommands.abandonDoneCleanup`. */
@@ -716,6 +726,12 @@ export interface HarbormasterApi {
     getUpdate(): Promise<UpdateInfo | null>;
     /** Main's update check found a newer release (startup, then every 6h). */
     onUpdateAvailable(listener: (update: UpdateInfo) => void): () => void;
+    /** A newer copy of the app installed over this running one, or `null`. */
+    getInstalledUpdate(): Promise<InstalledUpdate | null>;
+    /** Main noticed the installed app was replaced (checked on window focus and every 5 s). */
+    onInstalledUpdate(listener: (update: InstalledUpdate) => void): () => void;
+    /** Quits and relaunches into the installed app. */
+    restartToUpdate(): Promise<void>;
     /** Writes `text` to the system clipboard via main (works without window focus). */
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
@@ -800,4 +816,11 @@ export interface UpdateInfo {
   version: string;
   /** The command that upgrades the installed app (`brew update && brew upgrade --cask harbormaster`). */
   command: string;
+}
+
+/** The app on disk was replaced while this copy runs (see main/app-bundle-guard.ts). */
+export interface InstalledUpdate {
+  /** The installed version, or `null` when unreadable. */
+  version: string | null;
+  runningVersion: string;
 }

@@ -386,7 +386,14 @@ export interface AuditActionEntry extends AuditBase {
   /** Where a `move` started: the task's column (and awaiting kind) before it ran. */
   from?: { state: TaskState; awaitingKind?: string };
   outcome: RuleActionOutcome;
+  /** The long explanation: free-form, may hold a path or a raw git error. */
   detail?: string;
+  /**
+   * A few plain words naming why the outcome was not `applied` ("worktree in
+   * use", "uncommitted changes", "git error"), for one-line surfaces. Absent
+   * on applied entries and on entries recorded before this field existed.
+   */
+  reason?: string;
 }
 
 export interface AuditWarningEntry extends AuditBase {

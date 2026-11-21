@@ -311,6 +311,7 @@ function validTask(value: unknown): value is Task {
     isString(value.createdAt) &&
     isString(value.updatedAt) &&
     isString(value.stateChangedAt) &&
+    isOptionalString(value.startedAt) &&
     isOptionalString(value.completedAt) &&
     isOptionalString(value.archivedAt) &&
     isOptionalString(value.lastError)
