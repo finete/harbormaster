@@ -15,10 +15,11 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import type {
-  GitWorktreeAccess,
-  RepositoryInfo,
-  WorktreeInfo,
+import {
+  DirtyWorktreeError,
+  type GitWorktreeAccess,
+  type RepositoryInfo,
+  type WorktreeInfo,
 } from "../contracts/workspace.js";
 import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
 import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
@@ -163,9 +164,7 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       return;
     }
     if (!force && (await this.isWorktreeDirty(path))) {
-      throw new Error(
-        `Refusing to remove dirty worktree: ${path} (pass force to override)`,
-      );
+      throw new DirtyWorktreeError(path);
     }
     // A worktree is registered to the checkout that created it, which for
     // repos with several checkouts (or pi-home-era migrations) need not be
