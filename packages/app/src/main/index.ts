@@ -194,6 +194,7 @@ import {
   sessionSizes,
   setProgramStatusListener,
   setReadyUrlListener,
+  stopTaskAgent,
   tapPrimaryOutput,
   writeToPrimarySession,
   writeToSession,
@@ -213,6 +214,7 @@ import {
 } from "./review-transport";
 import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
+import { stopTaskAgents } from "./stop-task-agents";
 import { systemFetch } from "./system-fetch";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import {
@@ -1184,9 +1186,14 @@ function registerCoreIpc(): void {
       taskId: string,
       options: { force?: ToDoneForce } | undefined,
     ) => {
+      // `stopDescendants` is the app's own answer: main stops the agents
+      // itself, so core only ever hears `leaveChildren` (it cannot stop a
+      // process, and never gets a flag it cannot honour).
+      const stopDescendants = options?.force?.stopDescendants === true;
       const force = {
         confirmed: options?.force?.confirmed === true,
-        leaveChildren: options?.force?.leaveChildren === true,
+        leaveChildren:
+          options?.force?.leaveChildren === true || stopDescendants,
       };
       if (!force.confirmed) {
         // The question only. A closed tab's warm pi is no pane the user can
@@ -1205,6 +1212,25 @@ function registerCoreIpc(): void {
       // renderer closes the task's panes too) so nothing keeps the worktree
       // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
+      // "Also stop these N tasks": the agents of every active task below
+      // go (their tasks stay on the board, worktrees untouched).
+      let notStopped: string[] = [];
+      if (stopDescendants) {
+        const active = (await core.commands.listDescendants(taskId)).filter(
+          (descendant) => descendant.state !== "done",
+        );
+        const result = await stopTaskAgents(
+          active.map((descendant) => descendant.id),
+          {
+            presence: (id) => harness.presence(id),
+            markInterrupted: (ids) =>
+              core.commands.markLaunchesInterrupted(ids),
+            stop: stopTaskAgent,
+          },
+        );
+        const titles = new Map(active.map((d) => [d.id, d.title]));
+        notStopped = result.notStopped.map((id) => titles.get(id) ?? id);
+      }
       const [task, binding] = await Promise.all([
         core.commands.getTask(taskId).catch(() => undefined),
         core.commands.getTaskWorkspace(taskId).catch(() => undefined),
@@ -1214,10 +1240,19 @@ function registerCoreIpc(): void {
       if (task?.repositoryId && binding?.worktreePath) {
         disposeSessionsUnder(binding.worktreePath);
       }
-      return core.commands.toDone(taskId, {
+      const landed = await core.commands.toDone(taskId, {
         protectedPaths: activeSessionCwds(),
         force,
       });
+      // Tell the user about agents this app could not stop (a terminal elsewhere).
+      if (notStopped.length > 0 && !("requiresConfirmation" in landed)) {
+        const note = `Could not stop ${notStopped.join(", ")}: not running in this app's terminals, so still running.`;
+        return {
+          ...landed,
+          warning: landed.warning ? `${landed.warning} ${note}` : note,
+        };
+      }
+      return landed;
     },
   );
   ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>

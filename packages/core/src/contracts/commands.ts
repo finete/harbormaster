@@ -196,8 +196,8 @@ export interface CreateTaskInput extends TaskAgentInput {
   folderPath?: string;
   /**
    * Nest under this task (`Task.parentTaskId`), like `launchTask`'s `child`
-   * relation but without a background launch or kickoff contract. One level
-   * only.
+   * relation but without a background launch or kickoff contract. Refused
+   * when that task is already at `launch.maxNestingDepth`.
    */
   parentTaskId?: string;
   /** Branch the worktree off this ref instead of the repository's default branch. Kept for a parked task. */
@@ -254,7 +254,7 @@ export interface ToDoneOptions {
   force?: {
     /** Answers the "Mark done?" confirmation (`requiresConfirmation: "done"`). */
     confirmed?: boolean;
-    /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+    /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it on the board, nested under it (core never touches them). A frontend that also stops their agents does that itself (it owns the processes; `listDescendants` names the tasks) and then answers with this. */
     leaveChildren?: boolean;
   };
 }
@@ -266,8 +266,10 @@ export interface ToDoneOptions {
  */
 export interface ToDoneConfirmation {
   requiresConfirmation: "done" | "activeChildren";
-  /** Human-readable context for the question (task title, or active-child titles/count). */
+  /** Human-readable context for the question (task title, or active-task titles/count). */
   detail: string;
+  /** `activeChildren` only: every active (not Done) task anywhere below the task, at any depth. */
+  activeTasks?: { id: string; title: string }[];
   /**
    * `done` only: the dialog's body, computed up front ("The worktree <path>
    * will be removed.", "N uncommitted changes will be discarded.", "Branch
@@ -387,8 +389,9 @@ export interface OrphanWorktreeReport {
 export interface LaunchTaskInput {
   /**
    * `child`: nests under `fromTaskId` (`parentTaskId`), pollable, and a Done
-   * parent with this still active asks for confirmation. One level only "-
-   * rejects when `fromTaskId`'s task itself has a `parentTaskId`.
+   * parent with this still active asks for confirmation. Trees nest up to
+   * `GlobalConfig.launch.maxNestingDepth` levels (`/docs/task-trees.md`):
+   * rejects when `fromTaskId`'s task is already at the max depth.
    * `standalone`: no lineage, only display-only provenance
    * (`launchedFromTaskId`) when `fromTaskId` is given.
    */
@@ -453,6 +456,8 @@ export interface LaunchTaskInput {
 /** Effective launch settings (`CoreCommands.getLaunchSettings`). */
 export interface LaunchSettings {
   maxConcurrent: number;
+  /** `launch.maxNestingDepth` in effect (1 to 4). */
+  maxNestingDepth: number;
   defaultModel?: string;
   /** The agent a new task gets when none is chosen (decision R8): the repository's override, else the global default, else Pi. */
   defaultHarness: string;
@@ -542,8 +547,7 @@ export interface CoreCommands {
    * task and queue it to start running in the background. Lands in `working`
    * with `launch: { status: "queued" }`; `CoreCommands.claimPendingLaunches`
    * is what actually starts it. Rejects an unknown `fromTaskId`, a `child`
-   * relation from a task that already has a `parentTaskId` (one level
-   * only), and an invalid `baseBranch: "parent"` (not a child, cross-
+   * relation from a task already at the max nesting depth, and an invalid `baseBranch: "parent"` (not a child, cross-
    * repository, or a parent with no branch yet). A `{ cloneUrl }`
    * repository reuses any known checkout with the same remote (under
    * `codeRoot` or a registered folder), else is cloned under
@@ -567,12 +571,15 @@ export interface CoreCommands {
   markLaunchesInterrupted(taskIds: string[]): Promise<void>;
   /** Every task with `parentTaskId === parentTaskId`, any state, oldest first. */
   listChildren(parentTaskId: string): Promise<Task[]>;
+  /** Every task below `taskId` at any depth, any state, breadth-first (never `taskId` itself). */
+  listDescendants(taskId: string): Promise<Task[]>;
   /**
    * Re-parent an existing task: nest it under `parentTaskId`
-   * (`Task.parentTaskId`), or make it standalone again with `null`. Same
-   * one-level rule as `createTask`/`launchTask`: rejects an unknown task or
-   * parent, the task itself as parent, a parent that is itself a child, and
-   * a task that already has children of its own. Setting the parent it
+   * (`Task.parentTaskId`), or make it standalone again with `null`. The
+   * task moves WITH its whole subtree. Rejects an unknown task or parent,
+   * the task itself or one of its own descendants as parent (a cycle), and a
+   * result deeper than `launch.maxNestingDepth` (depth of the new parent +
+   * the task's subtree height). Setting the parent it
    * already has (or clearing an absent one) is a no-op that returns the task
    * unchanged. Lineage only: the task's branch, worktree, and session are
    * untouched (`baseBranch: "parent"` is a launch-time choice).
@@ -698,10 +705,12 @@ export interface CoreCommands {
   ): Promise<Task>;
   /**
    * Move a task to `done`; "Done" is final and the worktree housekeeping
-   * is the app's. A parent task (`listChildren` non-empty) with any
-   * non-done child asks first (`requiresConfirmation: "activeChildren"`)
-   * unless `options.force.leaveChildren` is set; children are never touched
-   * either way. Then every manual Done asks ONE question
+   * is the app's. A task with any non-done task anywhere below it
+   * (`listDescendants`) asks first (`requiresConfirmation:
+   * "activeChildren"`, naming them all in `activeTasks`) unless
+   * `options.force.leaveChildren` is set; core never touches those tasks
+   * either way (stopping their agents is the frontend's, which then answers
+   * with `leaveChildren`). Then every manual Done asks ONE question
    * (`requiresConfirmation: "done"`, its `lines` computed up front: the
    * worktree that will be removed, uncommitted changes that will be
    * discarded, an unmerged branch that will be deleted, a live pane that

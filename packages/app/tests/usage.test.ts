@@ -273,6 +273,25 @@ describe("usage summaries and aggregation", () => {
     });
     expect(subtaskRollup(tasks, "c1")).toBeUndefined();
   });
+
+  it("includes every task below at any depth, each counted once (listed in any order)", () => {
+    const tasks = [
+      task("g", ready(100, { cost: 10 }), { parentTaskId: "c" }),
+      task("p", ready(1)),
+      task("c", ready(10, { cost: 1 }), { parentTaskId: "p" }),
+      task("gg", ready(1000, { cost: 100 }), { parentTaskId: "g" }),
+    ];
+    expect(subtaskRollup(tasks, "p")).toEqual({
+      input: 1110,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      count: 3,
+      cost: 111,
+    });
+    expect(subtaskRollup(tasks, "c")).toMatchObject({ input: 1100, count: 2 });
+    expect(subtaskRollup(tasks, "gg")).toBeUndefined();
+  });
 });
 
 describe("Costs table: subtask roll-up, search, still counting", () => {

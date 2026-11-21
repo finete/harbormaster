@@ -7,6 +7,10 @@
 // `formatTokenCount` is core's own utility (a dependency-free module),
 // imported by path: the package index pulls in core's Node-only runtime,
 // which must never reach the renderer bundle.
+import {
+  childrenIndex,
+  descendantsOf,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import { formatTokenCount } from "@harbormaster/core/dist/utilities/format-token-count.js";
 import type {
   Task,
@@ -80,7 +84,7 @@ export function shortSessionId(sessionPath: string): string {
   return id.slice(0, 8);
 }
 
-/** Direct children's ready usage summed, like core's `subtaskUsage` (cost only if every child with turns had one). */
+/** Ready usage of every task below `parentTaskId` (any depth, each once) summed, like core's `subtaskUsage` (cost only if every such task with turns had one). */
 export function subtaskRollup(
   tasks: readonly Task[],
   parentTaskId: string,
@@ -90,8 +94,11 @@ export function subtaskRollup(
   let cost = 0;
   let costed = 0;
   let priced = true;
+  const below = new Set(
+    descendantsOf(parentTaskId, childrenIndex(tasks)).map((t) => t.id),
+  );
   for (const task of tasks) {
-    if (task.parentTaskId !== parentTaskId) continue;
+    if (!below.has(task.id)) continue;
     const usage = task.usage;
     if (usage?.status !== "ready") continue;
     sum.input += usage.totals.input;

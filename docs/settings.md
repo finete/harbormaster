@@ -45,6 +45,7 @@ inherited or locked.
 | Agents | Default model | `launch.defaultModel` | applies to the default agent only |
 | Agents | Skip permission prompts for launched tasks | `launch.bypassPermissions` | "overridden in N repos" |
 | Agents | Max tasks running at once | `launch.maxConcurrent` | default 6 |
+| Agents | Max nesting depth | `launch.maxNestingDepth` | 1 to 4, default 3; note when deeper trees exist (`docs/task-trees.md`) |
 | Agents | Custom agents | `agents.custom[]` | list only (S9) |
 | Code review | Plannotator status per agent | — | `CodeReviewSettings` |
 | Code review | Open agents' local pages in the app | `captureAgentBrowser` | |

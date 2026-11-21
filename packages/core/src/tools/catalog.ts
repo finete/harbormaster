@@ -13,6 +13,7 @@
 import type { CoreCommands, LaunchTaskInput } from "../contracts/commands.js";
 import {
   buildChildStatusEntry,
+  countActiveTasks,
   formatChildStatusText,
 } from "./child-status.js";
 import {
@@ -192,7 +193,7 @@ const launchTask: ToolDefinition = {
   name: "launch_task",
   title: "Harbormaster launch task",
   description:
-    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `mode` mirrors the app\'s Task / Review / Chat switch: "review" works on an existing pull request, "chat" runs in place with no worktree. To review or continue an EXISTING pull request, ALWAYS pass pullRequest (with mode "review" to review it): without it the task gets a fresh branch off the default branch, never sees the PR\'s code, and is not linked to the PR on the board. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
+    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `mode` mirrors the app\'s Task / Review / Chat switch: "review" works on an existing pull request, "chat" runs in place with no worktree. To review or continue an EXISTING pull request, ALWAYS pass pullRequest (with mode "review" to review it): without it the task gets a fresh branch off the default branch, never sees the PR\'s code, and is not linked to the PR on the board. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status; tasks can nest only up to the user\'s max nesting depth, and a launch from a task already at that depth is refused, so then do the work yourself or launch a standalone task); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
   inputSchema: {
     type: "object",
     properties: {
@@ -427,14 +428,18 @@ const subtaskStatus: ToolDefinition = {
   name: "subtask_status",
   title: "Harbormaster subtask status",
   description:
-    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), and the reported outcome. Only valid inside a Harbormaster task session.',
+    'List this task\'s DIRECT child tasks (launched with relation "child"; not grandchildren): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and how many tasks below that child (any depth) are not Done yet, e.g. "2 tasks below not done yet". A child with tasks of its own tracks those itself: call subtask_status from that child\'s session. Only valid inside a Harbormaster task session.',
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, { commands, caller }) {
     const taskId = requireTaskCaller(caller, "subtask_status");
     const children = await commands.listChildren(taskId);
     const entries = await Promise.all(
       children.map(async (child) =>
-        buildChildStatusEntry(child, await commands.getPresence(child.id)),
+        buildChildStatusEntry(
+          child,
+          await commands.getPresence(child.id),
+          countActiveTasks(await commands.listDescendants(child.id)),
+        ),
       ),
     );
     return {

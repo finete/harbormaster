@@ -104,4 +104,20 @@ describe("buildLaunchKickoffPrompt", () => {
     expect(chat).toContain("directly in the user's folder (no worktree)");
     expect(chat).not.toMatch(/worktree\.|Run the repository's|Commit with/);
   });
+
+  it("a task AT the max nesting depth gets one line saying it cannot launch subtasks", () => {
+    const at = buildLaunchKickoffPrompt({
+      hasRepository: true,
+      atMaxNestingDepth: 3,
+    });
+    expect(at).toContain(
+      "You are at the max nesting depth (3), so you cannot launch subtasks: do the work yourself, or launch standalone tasks.",
+    );
+    expect(at.match(/max nesting depth/g)).toHaveLength(1);
+    expect(at).toMatch(/\n7\. As your FINAL action/);
+    // Below the max: no such line, numbering unchanged.
+    const below = buildLaunchKickoffPrompt({ hasRepository: true });
+    expect(below).not.toContain("nesting depth");
+    expect(below).toMatch(/\n6\. As your FINAL action/);
+  });
 });

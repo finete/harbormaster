@@ -44,3 +44,10 @@ export function useConfigValues(): ConfigValues | null {
     configValuesStore.getSnapshot,
   );
 }
+
+/** `launch.maxNestingDepth` as currently configured (docs/task-trees.md decision 7); 3 until the first read lands. */
+export function useMaxNestingDepth(): number {
+  const values = useConfigValues()?.values;
+  const value = values?.["launch.maxNestingDepth"];
+  return typeof value === "number" ? value : 3;
+}

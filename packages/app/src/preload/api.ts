@@ -180,8 +180,10 @@ export interface MessagingChangedPayload {
 export interface ToDoneForce {
   /** Answers the single "Mark done?" question: Done is final, the app owns the cleanup. */
   confirmed?: boolean;
-  /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+  /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it running and nested under it. */
   leaveChildren?: boolean;
+  /** Answers it too, and also stops the agents of the active tasks below. App-level only: main stops the agents when the Done is confirmed (core hears `leaveChildren`), names any it could not stop in the result's `warning`; the tasks stay on the board, worktrees untouched. */
+  stopDescendants?: boolean;
 }
 
 /**
@@ -508,7 +510,7 @@ export interface HarbormasterApi {
     launchTask(input: LaunchTaskInput): Promise<Task>;
     /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
     listChildren(parentTaskId: string): Promise<Task[]>;
-    /** Nest an existing task under `parentTaskId`, or make it standalone with `null` (one level only). See `CoreCommands.setTaskParent`. */
+    /** Nest an existing task under `parentTaskId`, or make it standalone with `null`, with its whole subtree. See `CoreCommands.setTaskParent`. */
     setTaskParent(taskId: string, parentTaskId: string | null): Promise<Task>;
     /** Every task with computed usage, filtered by `query`, most tokens first; parents carry their children's roll-up (docs/costs.md). See `CoreCommands.listTaskUsage`. */
     listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;

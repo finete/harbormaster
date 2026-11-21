@@ -250,6 +250,33 @@ describe("projectTaskDrop", () => {
   });
 });
 
+describe("deeper trees", () => {
+  // P ─ C ─ G (grandchild), and a sibling of C: C2. Q is another top-level row.
+  const DEEP: SectionRow[] = [
+    { id: "P", nested: false },
+    { id: "C", nested: true, parentId: "P" },
+    { id: "G", nested: true, parentId: "C" },
+    { id: "C2", nested: true, parentId: "P" },
+    { id: "Q", nested: false },
+  ];
+  const ids = (rows: readonly SectionRow[]): string[] => rows.map((r) => r.id);
+
+  it("a dragged grandchild sees its own parent chain, so its parent is there to attach to", () => {
+    expect(ids(dragVisibleRows(DEEP, "G"))).toEqual(["P", "C", "G", "Q"]);
+    // Dragging the middle task hides its own child and shows its siblings.
+    expect(ids(dragVisibleRows(DEEP, "C"))).toEqual(["P", "C", "C2", "Q"]);
+  });
+
+  it("a hidden subtree follows its row: moving a middle task keeps its children under it", () => {
+    const moved = projectTaskDrop(DEEP, "C", "C2", 0);
+    expect(moved?.sequence).toEqual(["P", "C2", "C", "G", "Q"]);
+    // Detached to the top level (dropped after Q, pointer left): its subtree comes along.
+    const detached = projectTaskDrop(DEEP, "C", "Q", -NEST_INDENT_PX);
+    expect(detached?.attached).toBe(false);
+    expect(detached?.sequence).toEqual(["P", "C2", "Q", "C", "G"]);
+  });
+});
+
 describe("projectGroupDrop (R17/R19)", () => {
   it("moves a group to the over position", () => {
     expect(projectGroupDrop(["a", "b", "c"], "a", "c")).toEqual([

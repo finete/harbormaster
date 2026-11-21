@@ -64,6 +64,7 @@ describe("settings description", () => {
         "launch.defaultModel",
         "launch.bypassPermissions",
         "launch.maxConcurrent",
+        "launch.maxNestingDepth",
         "captureAgentBrowser",
         "sources.github.enabled",
         "messaging.parentReplyTimeoutMinutes",

@@ -18,6 +18,13 @@
 //    can never fight the group-collapse / drag-and-drop /
 //    keyboard-selection grid, all of which stay scoped per group.
 //
+// Trees nest more than one level (docs/task-trees.md, up to
+// `launch.maxNestingDepth` = 4 levels): both steps work per link. A task
+// follows its parent into the parent's final group, so a grandchild lands
+// wherever its own parent does, and the layout draws one indent per level
+// (`indent`, at most `MAX_LINEAGE_INDENT`), each parent collapsing on its
+// own (a collapsed parent hides everything below it).
+//
 // Everywhere else (a different column, a different awaiting kind, or —
 // sidebar-only — a parent that isn't open or a user-detached child) the
 // child keeps its own repo group / position and gets a muted
@@ -25,6 +32,11 @@
 // gives "a Done parent's children stay attached to it" for free: the Done
 // parent still reports its full child count (`children.count`), even
 // though none of them render nested there once they're off in Working.
+import {
+  depthOf,
+  descendantsOf,
+  subtreeHeight,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import type { Task } from "../../../preload/api";
 
 /** One task's lineage neighborhood, indexed once per render from the full (unfiltered) board. */
@@ -51,25 +63,55 @@ export function buildLineageIndex(tasks: Iterable<Task>): LineageIndex {
   return { childrenByParent, taskById };
 }
 
+/** `launch.maxNestingDepth` default, for a caller that has not read the setting yet. */
+export const DEFAULT_MAX_NESTING_DEPTH = 3;
+
+/** The deepest indent drawn: a top-level row plus three nested levels (4 levels). */
+export const MAX_LINEAGE_INDENT = 3;
+
+/** Left margin for a row `indent` levels in (`stepPx` per level), never past `MAX_LINEAGE_INDENT` levels. */
+export function lineageIndentPx(indent: number, stepPx: number): number {
+  return Math.min(Math.max(indent, 0), MAX_LINEAGE_INDENT) * stepPx;
+}
+
+/** 1 for a top-level task, 2 for its children, and so on (core's tree engine over this index). */
+export function taskDepth(task: Task, index: LineageIndex): number {
+  return depthOf(task, index.taskById);
+}
+
+/** The Settings → Agents note under "Max nesting depth" (decision 9); `undefined` when no tree is deeper. */
+export function deeperTreesNote(count: number): string | undefined {
+  if (count <= 0) return undefined;
+  return count === 1
+    ? "1 task tree is deeper than this; it's left as it is"
+    : `${count} task trees are deeper than this; they're left as they are`;
+}
+
 /**
  * The tasks `task` may be re-parented under (core's `setTaskParent`), in
- * `pool` order: none when `task` has children of its own (one level only);
- * else every non-archived task in `pool` that is not `task`, not its current
- * parent, and not itself a child.
+ * `pool` order: every non-archived task in `pool` that is not `task`, not
+ * its current parent, not one of its own descendants (a cycle), and shallow
+ * enough that the task's whole subtree still fits under `maxDepth`
+ * (depth(candidate) + subtree height <= `maxDepth`).
  */
 export function parentCandidates(
   task: Task,
   pool: Iterable<Task>,
   index: LineageIndex,
+  maxDepth: number = DEFAULT_MAX_NESTING_DEPTH,
 ): Task[] {
-  if ((index.childrenByParent.get(task.id)?.length ?? 0) > 0) return [];
+  const below = new Set(
+    descendantsOf(task.id, index.childrenByParent).map((t) => t.id),
+  );
+  const height = subtreeHeight(task.id, index.childrenByParent);
   const candidates: Task[] = [];
   for (const other of pool) {
     if (
       other.id !== task.id &&
       other.id !== task.parentTaskId &&
-      !other.parentTaskId &&
-      !other.archivedAt
+      !other.archivedAt &&
+      !below.has(other.id) &&
+      taskDepth(other, index) + height <= maxDepth
     ) {
       candidates.push(other);
     }
@@ -98,28 +140,45 @@ export function hoistChildrenIntoParentGroups<G, T>(
   access: LineageGroupAccess<G, T>,
 ): G[] {
   const groupOfTask = new Map<string, number>();
+  const taskOf = new Map<string, Task>();
   groups.forEach((group, index) => {
     for (const item of access.items(group)) {
-      groupOfTask.set(access.task(item).id, index);
+      const task = access.task(item);
+      groupOfTask.set(task.id, index);
+      taskOf.set(task.id, task);
     }
   });
   const scopeOf = (index: number): string => {
     const group = groups[index];
     return group === undefined || !access.scope ? "" : access.scope(group);
   };
+  // Where a task ends up: its parent's final group when the parent is in
+  // another group of the same scope (so a grandchild follows its parent,
+  // wherever that went), else its own. `visiting` stops a corrupt parent loop.
+  const finalGroup = (taskId: string, visiting: Set<string>): number => {
+    const own = groupOfTask.get(taskId) as number;
+    const parentId = taskOf.get(taskId)?.parentTaskId;
+    const parentGroup =
+      parentId === undefined ? undefined : groupOfTask.get(parentId);
+    if (
+      parentId === undefined ||
+      parentGroup === undefined ||
+      visiting.has(parentId) ||
+      scopeOf(parentGroup) !== scopeOf(own)
+    ) {
+      return own;
+    }
+    visiting.add(parentId);
+    return finalGroup(parentId, visiting);
+  };
   const staying: T[][] = groups.map(() => []);
   const incoming: T[][] = groups.map(() => []);
   let moved = false;
   groups.forEach((group, index) => {
     for (const item of access.items(group)) {
-      const parentId = access.task(item).parentTaskId;
-      const host =
-        parentId === undefined ? undefined : groupOfTask.get(parentId);
-      if (
-        host !== undefined &&
-        host !== index &&
-        scopeOf(host) === scopeOf(index)
-      ) {
+      const taskId = access.task(item).id;
+      const host = finalGroup(taskId, new Set([taskId]));
+      if (host !== index) {
         incoming[host]?.push(item);
         moved = true;
       } else {
@@ -142,9 +201,9 @@ export interface LineageItem {
 }
 
 export interface LineageChildrenChip {
-  /** Total children anywhere on the board (what the "N children" chip reports). */
+  /** Direct children anywhere on the board (what the "N children" chip reports). */
   count: number;
-  /** Whether the caller's saved set currently hides this parent's same-group children. */
+  /** Whether the caller's saved set currently hides everything below this parent in the same group. */
   collapsed: boolean;
   /** Whether any of those children actually render nested here (false = every child is elsewhere; the chip still shows the count but has nothing to toggle). */
   nestedHere: boolean;
@@ -154,6 +213,8 @@ export interface LineageRow<T extends LineageItem> {
   item: T;
   /** Rendered indented, directly under its parent's own row. */
   nested: boolean;
+  /** Indent levels, one per level below the group's top-level row, capped at `MAX_LINEAGE_INDENT`; 0 when not nested. */
+  indent: number;
   /** Set only on a row that has at least one child somewhere on the board. */
   children?: LineageChildrenChip;
   /** Set when this row has a parent it is NOT nested under here — render the "↳ <parent title>" line. Absent when the parent task is unknown (deleted). */
@@ -188,39 +249,55 @@ export function layoutLineageRows<T extends LineageItem>(
     itemById.has(task.parentTaskId) &&
     !detached?.has(task.id);
   const rows: LineageRow<T>[] = [];
-  for (const item of items) {
+  const emitted = new Set<string>();
+  const emit = (item: T, level: number): void => {
     const { task } = item;
-    if (isNestedHere(task)) {
-      continue; // rendered nested under its parent's row below, not here
-    }
-    const row: LineageRow<T> = { item, nested: false };
-    if (task.parentTaskId) {
+    emitted.add(task.id);
+    const row: LineageRow<T> = {
+      item,
+      nested: level > 0,
+      indent: Math.min(level, MAX_LINEAGE_INDENT),
+    };
+    if (level === 0 && task.parentTaskId) {
       const parentTitle = index.taskById.get(task.parentTaskId)?.title;
       if (parentTitle) row.parentTitle = parentTitle;
     }
     const allChildren = index.childrenByParent.get(task.id) ?? [];
-    if (allChildren.length > 0) {
-      const nestedChildren = sortSiblings(
-        allChildren.filter(
-          (child) => itemById.has(child.id) && isNestedHere(child),
-        ),
-        options.siblingOrder,
-      );
-      row.children = {
-        count: allChildren.length,
-        collapsed: collapsedParents.has(task.id),
-        nestedHere: nestedChildren.length > 0,
-      };
+    if (allChildren.length === 0) {
       rows.push(row);
-      if (nestedChildren.length > 0 && !collapsedParents.has(task.id)) {
-        for (const child of nestedChildren) {
-          const childItem = itemById.get(child.id);
-          if (childItem) rows.push({ item: childItem, nested: true });
-        }
-      }
-    } else {
-      rows.push(row);
+      return;
     }
+    const nestedChildren = sortSiblings(
+      allChildren.filter(
+        (child) =>
+          itemById.has(child.id) &&
+          isNestedHere(child) &&
+          !emitted.has(child.id),
+      ),
+      options.siblingOrder,
+    );
+    row.children = {
+      count: allChildren.length,
+      collapsed: collapsedParents.has(task.id),
+      nestedHere: nestedChildren.length > 0,
+    };
+    rows.push(row);
+    if (collapsedParents.has(task.id)) return;
+    for (const child of nestedChildren) {
+      const childItem = itemById.get(child.id);
+      if (childItem) emit(childItem, level + 1);
+    }
+  };
+  for (const item of items) {
+    // Nested rows are emitted under their parent's row, not here.
+    if (!isNestedHere(item.task)) emit(item, 0);
+  }
+  // A corrupt parent loop inside the group leaves no top-level row to hang
+  // its members from: show them flat rather than lose them. (A task hidden
+  // under a collapsed parent is not part of a loop and is skipped.)
+  const hidden = hiddenNestedChildIds(items, collapsedParents, detached);
+  for (const item of items) {
+    if (!emitted.has(item.task.id) && !hidden.has(item.task.id)) emit(item, 0);
   }
   return rows;
 }
@@ -245,21 +322,36 @@ function sortSiblings(
 }
 
 /**
- * Task ids hidden from `items` right now because their parent is in the
- * same group and collapsed (see `layoutLineageRows`) — reused by the
+ * Task ids hidden from `items` right now because a parent above them in
+ * the same group is collapsed (see `layoutLineageRows`) — reused by the
  * board's keyboard-selection grid (lib/board-selection.ts) so arrow-key
  * navigation never lands on a card that isn't actually on screen.
  */
 export function hiddenNestedChildIds(
   items: readonly LineageItem[],
   collapsedParents: ReadonlySet<string>,
+  detachedIds?: ReadonlySet<string>,
 ): Set<string> {
-  const idsHere = new Set(items.map((item) => item.task.id));
+  const byId = new Map(items.map((item) => [item.task.id, item.task] as const));
   const hidden = new Set<string>();
   for (const item of items) {
-    const parentId = item.task.parentTaskId;
-    if (parentId && idsHere.has(parentId) && collapsedParents.has(parentId)) {
-      hidden.add(item.task.id);
+    // Walk up through parents that are in this group (and not detached): any
+    // collapsed one hides the task. A parent loop ends at the first repeat.
+    const seen = new Set<string>([item.task.id]);
+    let task: Task = item.task;
+    while (
+      task.parentTaskId &&
+      !detachedIds?.has(task.id) &&
+      !seen.has(task.parentTaskId)
+    ) {
+      const parent = byId.get(task.parentTaskId);
+      if (!parent) break;
+      if (collapsedParents.has(parent.id)) {
+        hidden.add(item.task.id);
+        break;
+      }
+      seen.add(parent.id);
+      task = parent;
     }
   }
   return hidden;

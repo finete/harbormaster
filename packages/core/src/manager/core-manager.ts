@@ -95,6 +95,7 @@ import {
   DEFAULT_HARNESS_ID,
   DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
+  DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
@@ -215,9 +216,20 @@ import { effectivePipeline } from "../engines/rules/views.js";
 import { shouldWatchSessionFile } from "../engines/session-file-check.js";
 import { builtinSources } from "../engines/sources/index.js";
 import {
+  atMaxDepth,
+  childLaunchRefusal,
+  reparentRefusal,
+} from "../engines/task-nesting.js";
+import {
   assertAllowedTransition,
   assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
+import {
+  childrenIndex,
+  depthOf,
+  descendantsOf,
+  indexTasks,
+} from "../engines/task-tree.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { awaitsUsageBackfill, buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
@@ -773,16 +785,28 @@ export class CoreManager implements CoreCommands {
     return next;
   }
 
-  /** One level only: the parent must exist and must not itself be a child. */
+  /** The parent must exist and not already be at the max nesting depth. */
   private async requireParentCandidate(parentTaskId: string): Promise<Task> {
     const parent = await this.deps.tasks.getTask(parentTaskId);
     if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
-    if (parent.parentTaskId) {
-      throw new Error(
-        "A child task cannot launch further children (one level only); launch a standalone task instead",
-      );
-    }
+    await this.assertMayHaveChild(parent);
     return parent;
+  }
+
+  /** `launch.maxNestingDepth`, defaulted at read time. */
+  private async maxNestingDepth(): Promise<number> {
+    const config = await this.deps.config.load();
+    return config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
+  }
+
+  /** Refuses a `child` under `launcher` when the launcher is already at the max nesting depth. */
+  private async assertMayHaveChild(launcher: Task): Promise<void> {
+    const refusal = childLaunchRefusal(
+      launcher,
+      await this.deps.tasks.listTasks(),
+      await this.maxNestingDepth(),
+    );
+    if (refusal) throw new Error(refusal);
   }
 
   async getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined> {
@@ -2008,15 +2032,20 @@ export class CoreManager implements CoreCommands {
     assertAllowedTransition(task.state, "done");
     const force = options?.force ?? {};
     const protectedPaths = options?.protectedPaths ?? [];
-    // A parent with active children asks first (children are never touched
-    // either way): it is about other tasks, so it stays its own question.
+    // A task with active tasks anywhere below it asks first (they are never
+    // touched here; a frontend that stops their agents does so itself): it is about other tasks, so it stays its own question.
     if (!force.leaveChildren) {
-      const children = await this.listChildren(task.id);
-      const active = children.filter((child) => child.state !== "done");
+      const active = (await this.listDescendants(task.id)).filter(
+        (descendant) => descendant.state !== "done",
+      );
       if (active.length > 0) {
         return {
           requiresConfirmation: "activeChildren",
-          detail: `${task.title} has ${active.length} active child task${active.length === 1 ? "" : "s"}: ${active.map((child) => child.title).join(", ")}`,
+          detail: `${task.title} has ${active.length} active task${active.length === 1 ? "" : "s"} below it: ${active.map((descendant) => descendant.title).join(", ")}`,
+          activeTasks: active.map((descendant) => ({
+            id: descendant.id,
+            title: descendant.title,
+          })),
         };
       }
     }
@@ -2110,6 +2139,10 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const id = this.deps.ids.next();
     const config = await this.deps.config.load();
+    // Loaded once for the depth rules: the child-launch check and the kickoff.
+    const maxNestingDepth =
+      config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
+    const allTasks = await this.deps.tasks.listTasks();
 
     let parentTaskId: string | undefined;
     let launchedFromTaskId: string | undefined;
@@ -2122,11 +2155,8 @@ export class CoreManager implements CoreCommands {
       }
       parentTask = await this.deps.tasks.getTask(input.fromTaskId);
       if (!parentTask) throw new Error(`Task not found: ${input.fromTaskId}`);
-      if (parentTask.parentTaskId) {
-        throw new Error(
-          "A child task cannot launch further children (one level only); launch a standalone task instead",
-        );
-      }
+      const refusal = childLaunchRefusal(parentTask, allTasks, maxNestingDepth);
+      if (refusal) throw new Error(refusal);
       parentTaskId = parentTask.id;
     } else if (input.fromTaskId) {
       launchedFromTaskId = input.fromTaskId;
@@ -2190,8 +2220,15 @@ export class CoreManager implements CoreCommands {
       dependencyBranch = baseRef;
     }
 
+    // The new task's own depth: one below its launcher, else top level.
+    const launchedDepth = parentTask
+      ? depthOf(parentTask, indexTasks(allTasks)) + 1
+      : 1;
     const kickoff = buildLaunchKickoffPrompt({
       hasRepository,
+      ...(atMaxDepth(launchedDepth, maxNestingDepth)
+        ? { atMaxNestingDepth: maxNestingDepth }
+        : {}),
       ...(where.kind === "folder" ? { inPlace: true } : {}),
       ...(bound?.pr
         ? {
@@ -2341,25 +2378,24 @@ export class CoreManager implements CoreCommands {
       await this.publishTaskChange(next);
       return next;
     }
-    if (parentTaskId === taskId) {
-      throw new Error("A task cannot be its own parent");
-    }
     const parent = await this.deps.tasks.getTask(parentTaskId);
     if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
-    if (parent.parentTaskId) {
-      throw new Error(
-        `${parent.title} is itself a child task; tasks nest one level only`,
-      );
-    }
-    if ((await this.listChildren(taskId)).length > 0) {
-      throw new Error(
-        `${task.title} has children of its own; tasks nest one level only`,
-      );
-    }
+    const refusal = reparentRefusal(
+      task,
+      parent,
+      await this.deps.tasks.listTasks(),
+      await this.maxNestingDepth(),
+    );
+    if (refusal) throw new Error(refusal);
     const next: Task = { ...task, parentTaskId: parent.id, updatedAt: now };
     await this.deps.tasks.replaceTask(next);
     await this.publishTaskChange(next);
     return next;
+  }
+
+  async listDescendants(taskId: string): Promise<Task[]> {
+    const tasks = await this.deps.tasks.listTasks();
+    return descendantsOf(taskId, childrenIndex(tasks));
   }
 
   async getLaunchSettings(repositoryId?: string): Promise<LaunchSettings> {
@@ -2370,6 +2406,8 @@ export class CoreManager implements CoreCommands {
     return {
       maxConcurrent:
         config.launch?.maxConcurrent ?? DEFAULT_LAUNCH_MAX_CONCURRENT,
+      maxNestingDepth:
+        config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
       ...(config.launch?.defaultModel
         ? { defaultModel: config.launch.defaultModel }
         : {}),

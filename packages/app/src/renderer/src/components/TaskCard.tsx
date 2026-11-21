@@ -2,6 +2,7 @@ import { useDraggable } from "@dnd-kit/core";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
+import { lineageIndentPx } from "../lib/task-lineage";
 import {
   deriveMessagingChips,
   loopCapLabel,
@@ -68,6 +69,8 @@ interface TaskCardProps {
   unread?: boolean | undefined;
   /** Rendered indented/attached under its parent's card (see lib/task-lineage.ts); purely visual. */
   nested?: boolean;
+  /** Indent levels under the group's top-level card (one per tree level, max 3); 1 when `nested` and unset. */
+  indent?: number;
   /** A child elsewhere (different column/group) whose parent still exists: the "\u21b3 parent title" lineage line (lib/task-lineage.ts). */
   parentTitle?: string;
   /** A standalone launch's display-only provenance line (lib/task-status-lines.ts). */
@@ -103,6 +106,7 @@ function TaskCardFace({
   selected,
   unread,
   nested,
+  indent,
   parentTitle,
   provenanceTitle,
   usagePinned,
@@ -165,8 +169,14 @@ function TaskCardFace({
         !isOverlay && selected && "border-primary hover:border-primary",
         // Attached under its parent's card (see lib/task-lineage.ts): a
         // visible left rail + indent, pi-home-style tree attachment.
-        nested && "ml-4 border-l-2 border-l-primary/30",
+        nested && "border-l-2 border-l-primary/30",
       )}
+      {...(nested
+        ? {
+            style: { marginLeft: lineageIndentPx(indent ?? 1, 16) },
+            "data-lineage-indent": indent ?? 1,
+          }
+        : {})}
       {...dragProps}
     >
       <div className="flex min-w-0 items-baseline gap-2" data-slot="title-row">

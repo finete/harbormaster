@@ -17,7 +17,11 @@ import type {
   RepositoryConfig,
   SourceConfig,
 } from "../contracts/model.js";
-import { defaultGlobalConfig } from "../contracts/model.js";
+import {
+  defaultGlobalConfig,
+  MAX_LAUNCH_MAX_NESTING_DEPTH,
+  MIN_LAUNCH_MAX_NESTING_DEPTH,
+} from "../contracts/model.js";
 import type {
   ConfigAccess,
   ConfigAccessSnapshot,
@@ -690,6 +694,19 @@ function normalizeLaunch(value: unknown): GlobalConfig["launch"] | undefined {
       throw new Error("launch.maxConcurrent must be a positive integer");
     }
     launch.maxConcurrent = value.maxConcurrent;
+  }
+  if (value.maxNestingDepth !== undefined) {
+    if (
+      typeof value.maxNestingDepth !== "number" ||
+      !Number.isInteger(value.maxNestingDepth) ||
+      value.maxNestingDepth < MIN_LAUNCH_MAX_NESTING_DEPTH ||
+      value.maxNestingDepth > MAX_LAUNCH_MAX_NESTING_DEPTH
+    ) {
+      throw new Error(
+        `launch.maxNestingDepth must be an integer from ${MIN_LAUNCH_MAX_NESTING_DEPTH} to ${MAX_LAUNCH_MAX_NESTING_DEPTH}`,
+      );
+    }
+    launch.maxNestingDepth = value.maxNestingDepth;
   }
   if (value.defaultModel !== undefined) {
     if (typeof value.defaultModel !== "string" || !value.defaultModel.trim()) {
