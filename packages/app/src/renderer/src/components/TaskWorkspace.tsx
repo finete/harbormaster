@@ -134,7 +134,11 @@ export const TaskWorkspace = memo(function TaskWorkspace({
     };
   }, [taskId, taskState]);
   const cwdLoaded = cwdReadFor !== null;
-  const cwdFresh = cwdLoaded && cwdReadFor === taskState;
+  // Also waits for the task to be on the board: a workspace restored at
+  // launch can read its binding before the board store fills, and a Done
+  // task read as "no state" would get a plain shell instead of its card.
+  const cwdFresh =
+    cwdLoaded && taskState !== undefined && cwdReadFor === taskState;
   // A Done task with nothing to run in (its worktree cleaned up) gets the
   // Resume card instead of a first pane, and keeps it until the resumed
   // cycle's worktree arrives. Decided before the first pane only: panes a

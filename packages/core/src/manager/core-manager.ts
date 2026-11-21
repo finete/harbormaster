@@ -1746,7 +1746,17 @@ export class CoreManager implements CoreCommands {
           });
         }
       }
-      await this.deps.tasks.replaceTask(reopened);
+      try {
+        await this.deps.tasks.replaceTask(reopened);
+      } catch (error) {
+        // No half-reopened task: the binding goes back to how Done left it.
+        if (parked) {
+          await this.deps.bindings.replaceBinding(parked).catch(() => {});
+        } else {
+          await this.deps.bindings.removeBinding(taskId).catch(() => {});
+        }
+        throw error;
+      }
       await this.publishTaskChange(reopened);
       return { task: reopened };
     }
