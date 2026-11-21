@@ -14,7 +14,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { JSX } from "react";
+import type { JSX, RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TaskState } from "../../../preload/api";
@@ -32,7 +32,7 @@ import {
   moveSelection,
   resolveSelection,
 } from "../lib/board-selection";
-import { isTypingTarget } from "../lib/keyboard-guard";
+import { isOutsideKeyScope, isTypingTarget } from "../lib/keyboard-guard";
 import {
   readBoardCollapsedColumns,
   readBoardCollapsedGroups,
@@ -123,13 +123,15 @@ const boardMeasuring: MeasuringConfiguration = {
  * the start/await/done verbs (r opens the Await… picker with review
  * preselected), n/g/a, Escape returns to the workspace view. Only
  * live while `active` (the board is the visible view, per App.tsx) and
- * never while a dialog is open or focus is in a text field/the terminal
- * (lib/keyboard-guard.ts).
+ * never while a dialog is open, focus is in a text field/the terminal
+ * (lib/keyboard-guard.ts) or outside `keyScopeRef`, or something focused
+ * already handled the key.
  */
 export function Board({
   onSelectTask,
   onNewTask,
   active = true,
+  keyScopeRef,
   onBackToWorkspace,
   focusedTaskId = null,
 }: {
@@ -138,6 +140,8 @@ export function Board({
   onNewTask: () => void;
   /** Whether the board is the currently-visible view; gates the single-key TUI shortcuts. */
   active?: boolean;
+  /** The part of the window whose focus the keymap serves; keys aimed elsewhere are left alone. */
+  keyScopeRef?: RefObject<HTMLElement | null>;
   /** Escape: back to the workspace view (App.tsx owns the view switch). */
   onBackToWorkspace?: () => void;
   /** App's currently-focused task (see core-client.ts's useUnreadTaskIds); absent outside the workspace view's own tracking. */
@@ -400,8 +404,9 @@ export function Board({
   // The TUI-style single-key board keymap (pi-home parity, see
   // lib/board-selection.ts and AGENTS.md's "port the spirit" brief): only
   // live while this board is the visible view, no dialog is open, and focus
-  // isn't in a text field or the terminal (lib/keyboard-guard.ts) — the
-  // xterm terminal must receive every keystroke verbatim when focused.
+  // isn't in a text field, the terminal or the sidebar beside the board
+  // (lib/keyboard-guard.ts) — the xterm terminal must receive every
+  // keystroke verbatim when focused.
   // biome-ignore lint/correctness/useExhaustiveDependencies: collapsedColumns/peekedColumns are listed directly (not the derived effectiveCollapsedColumns the callback reads) since that Set is recreated every render and would never let this settle.
   useEffect(() => {
     if (!active) return;
@@ -409,7 +414,11 @@ export function Board({
       if (awaitTaskId || isConfirmOpen()) return;
       if (dragKeyGuardRef.current) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented) return;
       if (isTypingTarget(event.target)) return;
+      if (isOutsideKeyScope(event.target, keyScopeRef?.current ?? null)) {
+        return;
+      }
 
       const grid = buildSelectionGrid(
         columns,
@@ -493,6 +502,7 @@ export function Board({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     active,
+    keyScopeRef,
     onNewTask,
     awaitTaskId,
     columns,

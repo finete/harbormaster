@@ -29,6 +29,7 @@ import type {
   LaunchTaskInput,
   ListEventsFilter,
   ListInboxOptions,
+  ListSlashCommandsInput,
   MessageMode,
   MoveTaskOptions,
   OnboardingState,
@@ -48,6 +49,7 @@ import type {
   SetDefaultAgentInput,
   SettingsPatch,
   SettingsSnapshot,
+  SlashCommandCatalog,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -105,6 +107,7 @@ export type {
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListSlashCommandsInput,
   MessageAttachment,
   MessageMode,
   MessageRoute,
@@ -142,6 +145,8 @@ export type {
   SettingsSource,
   SettingType,
   SettingValue,
+  SlashCommand,
+  SlashCommandCatalog,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -429,6 +434,10 @@ export interface HarbormasterApi {
     listBranches(repositoryId: string): Promise<string[]>;
     /** See `CoreCommands.listModels`. */
     listModels(): Promise<HarnessModelCatalog[]>;
+    /** The composer's `/` menu. See `CoreCommands.listSlashCommands`. */
+    listSlashCommands(
+      input: ListSlashCommandsInput,
+    ): Promise<SlashCommandCatalog>;
     /** Every registered agent's descriptor (labels, install hints, version floors). See `CoreCommands.listHarnessDescriptors`. */
     listHarnessDescriptors(): Promise<HarnessDescriptorInfo[]>;
     /** Runs `git status` (fresh `dirty`): never on a periodic path. See `CoreCommands.getTaskWorkspace`. */

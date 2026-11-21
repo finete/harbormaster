@@ -372,6 +372,7 @@ export function Sidebar({
   onSelectTask,
   onCloseTask,
   onShowBoard,
+  boardActive,
   onOpenInbox,
   inboxCount,
   inboxActive,
@@ -397,7 +398,10 @@ export function Sidebar({
   onDetachedChange: (ids: ReadonlySet<string>) => void;
   onSelectTask: (taskId: string) => void;
   onCloseTask: (taskId: string) => void;
+  /** Toggle the board (App owns it; same as Cmd+Shift+B). */
   onShowBoard: () => void;
+  /** The board is showing. */
+  boardActive: boolean;
   /** Toggle the inbox view (App owns it; same as Cmd+I). */
   onOpenInbox: () => void;
   /** Priority inbox items: the Inbox row's badge (docs/release-plan.md "Inbox"). */
@@ -1255,6 +1259,7 @@ export function Sidebar({
             icon={<LayoutGrid aria-hidden />}
             label="Board"
             shortcut={boardShortcut}
+            active={boardActive}
             onClick={onShowBoard}
             testId="board-button"
           />
@@ -1359,6 +1364,7 @@ export function Sidebar({
           icon={<LayoutGrid aria-hidden />}
           label="Board"
           shortcut={boardShortcut}
+          active={boardActive}
           onClick={onShowBoard}
           testId="board-button"
         />

@@ -27,6 +27,7 @@ import type {
   LaunchTaskInput,
   ListEventsFilter,
   ListInboxOptions,
+  ListSlashCommandsInput,
   MessageMode,
   MoveTaskOptions,
   ReopenTaskInput,
@@ -1117,6 +1118,11 @@ function registerCoreIpc(): void {
     core.commands.listBranches(repositoryId),
   );
   ipcMain.handle("core:listModels", () => core.commands.listModels());
+  ipcMain.handle(
+    "core:listSlashCommands",
+    (_event, input: ListSlashCommandsInput) =>
+      core.commands.listSlashCommands(input),
+  );
   ipcMain.handle("core:listHarnessDescriptors", () =>
     core.commands.listHarnessDescriptors(),
   );

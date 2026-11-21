@@ -6,6 +6,7 @@
 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { PiSlashCommandAccess } from "../access/local-slash-command-access.js";
 import { PiModelCatalogAccess } from "../access/pi-model-catalog-access.js";
 import { readPiSessionUsage } from "../access/pi-session-usage-access.js";
 import { SessionPresenceAccess } from "../access/session-presence-access.js";
@@ -18,9 +19,11 @@ import type {
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
   HarnessReviewCapability,
+  HarnessSlashCommandAccess,
   LaunchSpec,
   PresenceStatus,
   SessionLaunch,
+  SlashCommand,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { Clock, PresenceAccess } from "../contracts/services.js";
@@ -75,6 +78,8 @@ export interface PiHarnessAdapterOptions {
   cliPath?: string;
   /** Pi's agent dir (sessions live in `<agentDir>/sessions`); defaults to `$PI_CODING_AGENT_DIR` or `~/.pi/agent`, as Pi resolves it. */
   agentDir?: string;
+  /** The composer's `/` menu; injectable for tests. */
+  slashCommands?: HarnessSlashCommandAccess;
 }
 
 /** Marker env var every launched Pi session can check to detect it is Harbormaster-hosted. */
@@ -343,6 +348,7 @@ export class PiHarnessAdapter implements HarnessAdapter {
   private readonly livenessOptions: PresenceLivenessOptions;
   private readonly cliPath: string | undefined;
   private readonly agentDir: string | undefined;
+  private readonly slashCommands: HarnessSlashCommandAccess;
 
   constructor(options: PiHarnessAdapterOptions = {}) {
     this.presenceAccess =
@@ -355,6 +361,16 @@ export class PiHarnessAdapter implements HarnessAdapter {
     this.models = options.models ?? new PiModelCatalogAccess();
     this.cliPath = options.cliPath;
     this.agentDir = options.agentDir;
+    this.slashCommands =
+      options.slashCommands ??
+      new PiSlashCommandAccess(
+        options.agentDir ? { agentDir: options.agentDir } : {},
+      );
+  }
+
+  /** Pi's prompt templates (`/name`) and skills (`/skill:name`). */
+  listSlashCommands(cwd?: string): Promise<SlashCommand[]> {
+    return this.slashCommands.listSlashCommands(cwd);
   }
 
   /** Pi keys its session dir by its resolved cwd (`/tmp` → `/private/tmp` on macOS). */
