@@ -272,6 +272,25 @@ describe("buildTaskUsageRows", () => {
     );
   });
 
+  it("a task's subtask total includes every task below it at any depth, each counted once", () => {
+    const deep = [
+      task("root", { usage: ready(10, 1) }),
+      task("kid", { parentTaskId: "root", usage: ready(5, 0.5) }),
+      task("grandkid", { parentTaskId: "kid", usage: ready(3, 0.3) }),
+      task("grandkid-2", { parentTaskId: "kid", usage: ready(2, 0.2) }),
+      task("great", { parentTaskId: "grandkid", usage: ready(1, 0.1) }),
+    ];
+    const rows = buildTaskUsageRows(deep);
+    const sub = (id: string) =>
+      rows.find((row) => row.taskId === id)?.subtaskUsage;
+    // root: kid + grandkid + grandkid-2 + great, none twice.
+    expect(sub("root")).toMatchObject({ input: 11, count: 4, cost: 1.1 });
+    expect(sub("kid")).toMatchObject({ input: 6, count: 3, cost: 0.6 });
+    expect(sub("grandkid")).toMatchObject({ input: 1, count: 1, cost: 0.1 });
+    expect(sub("grandkid-2")).toBeUndefined();
+    expect(sub("great")).toBeUndefined();
+  });
+
   it("filters by repository, harness, model, range and archive", () => {
     const ids = (query: Parameters<typeof buildTaskUsageRows>[1]) =>
       buildTaskUsageRows(tasks, query)

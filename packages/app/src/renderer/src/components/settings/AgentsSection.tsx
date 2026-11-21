@@ -1,11 +1,13 @@
 // Settings → Agents (docs/settings.md "Settings in v1"): default agent
 // (built-ins + custom agents), default model (from the `listModels`
 // catalog of the default agent; free text when it lists none), skipping
-// permission prompts for launched tasks, the concurrency cap, and the
+// permission prompts for launched tasks, the concurrency cap, the max
+// nesting depth (with a note when deeper trees exist), and the
 // custom agents as a read-only list (S9) with found / not found from the
 // same detection the wizard uses. "Overridden in N repositories" under the
 // default agent and the bypass switch (S8).
 
+import { treesDeeperThan } from "@harbormaster/core/dist/engines/task-nesting.js";
 import { Check, X } from "lucide-react";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
@@ -14,6 +16,7 @@ import type {
   HarnessModelCatalog,
   SettingsSnapshot,
 } from "../../../../preload/api";
+import { flattenBoard, useBoard } from "../../core-client";
 import {
   findSetting,
   modelChoices,
@@ -21,6 +24,7 @@ import {
   parseStringDraft,
   valueText,
 } from "../../lib/settings-form";
+import { deeperTreesNote } from "../../lib/task-lineage";
 import type { SettingsModel } from "../../lib/use-settings";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -96,6 +100,16 @@ export function AgentsSection({
     snapshot.harnesses.find((option) => option.id === defaultHarness)?.label ??
     defaultHarness;
   const modelSetting = findSetting(snapshot, "launch.defaultModel");
+  // Trees already deeper than the max stay as they are (decision 9): say so.
+  const maxNestingDepth = snapshot.values["launch.maxNestingDepth"];
+  const board = useBoard();
+  const deeperTrees =
+    typeof maxNestingDepth === "number"
+      ? treesDeeperThan(
+          flattenBoard(board).map((row) => row.task),
+          maxNestingDepth,
+        )
+      : 0;
   return (
     <div className="flex flex-col gap-6">
       <SettingsCard>
@@ -163,6 +177,12 @@ export function AgentsSection({
           model={model}
           snapshot={snapshot}
           settingKey="launch.maxConcurrent"
+        />
+        <DescribedSetting
+          model={model}
+          snapshot={snapshot}
+          settingKey="launch.maxNestingDepth"
+          note={deeperTreesNote(deeperTrees)}
         />
       </SettingsCard>
       <SettingsCard>

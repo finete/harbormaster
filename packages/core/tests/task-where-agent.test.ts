@@ -443,7 +443,7 @@ describe.skipIf(!gitAvailable)("registered folders", () => {
 });
 
 describe.skipIf(!gitAvailable)("createTask parent + baseRef", () => {
-  it("nests under a parent and refuses a grandchild", async () => {
+  it("nests under a parent and allows a grandchild up to the max depth", async () => {
     const f = await fixture();
     const parent = await f.core.commands.createTask({
       title: "Parent",
@@ -456,13 +456,20 @@ describe.skipIf(!gitAvailable)("createTask parent + baseRef", () => {
     });
     expect(child.parentTaskId).toBe(parent.id);
     expect(child.initialPrompt).toBe("");
+    const grandchild = await f.core.commands.createTask({
+      title: "Grandchild",
+      initialPrompt: "",
+      parentTaskId: child.id,
+    });
+    expect(grandchild.parentTaskId).toBe(child.id);
+    // Depth 3 is the default max: the grandchild cannot have children.
     await expect(
       f.core.commands.createTask({
-        title: "Grandchild",
+        title: "Great-grandchild",
         initialPrompt: "",
-        parentTaskId: child.id,
+        parentTaskId: grandchild.id,
       }),
-    ).rejects.toThrow(/one level only/);
+    ).rejects.toThrow(/max nesting depth \(3\)/);
   });
 
   it("a parked task branches off its baseRef when started", async () => {

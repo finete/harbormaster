@@ -68,13 +68,15 @@ types at the boundaries.
 One core command, `launchTask`, creates a task and queues it to start in
 the background. `relation` is required with no default (guessing went wrong
 in Orca): `child` (nested under the launcher, pollable with
-`harbormaster_subtask_status`, Done-with-active-children confirmation; one
-level only) or `standalone` (display-only `launchedFromTaskId`
+`harbormaster_subtask_status`, Done-with-active-tasks-below confirmation;
+trees nest up to `launch.maxNestingDepth` levels, default 3, see
+`docs/task-trees.md`) or `standalone` (display-only `launchedFromTaskId`
 provenance). Every launch gets its own task, worktree, branch, and session;
 a same-repository child may opt into `baseBranch: "parent"` (stacked
 work). Lineage is not fixed at launch: `setTaskParent` nests an existing
-task under another (or un-nests it) under the same one-level rule, as
-lineage only (branch, worktree, and session stay put); the rail's row
+task under another (or un-nests it) with its whole subtree, refused only
+past the max nesting depth or into its own subtree (`docs/task-trees.md`
+decision 10), as lineage only (branch, worktree, and session stay put); the rail's row
 context menu drives it ("Make child of…" / "Remove from parent"). `mode` mirrors the composer's Task / Review / Chat switch: `review`
 binds the launch to an existing PR (`pullRequest` + `role`, worktree on the
 PR head; a reviewer's kickoff forbids commit/push/PR), `chat` runs in place
@@ -339,11 +341,14 @@ difference not listed here is a bug.
   mid-turn agent is never evicted. A warm session ends when its task goes to
   Done or is deleted, so it never blocks worktree cleanup. "+ terminal"
   shells still die with their tab. See `packages/app/src/main/warm-sessions.ts`.
-- **Tasks can steer tasks.** Parent ↔ child messages deliver directly
-  (loop-capped, child questions show "waiting on parent"); every other
-  cross-task send needs the user's approval in the app. Delivery is a
+- **Tasks can steer tasks.** Which task → task sends deliver directly is the
+  user's setting `messaging.directRoutes` (parent and child; the same task
+  tree, the default; or any task), plus per-pair grants ("Approve and allow
+  both ways"). Direct pairs are loop-capped; child questions to the direct
+  parent show "waiting on parent". Everything else, and every non-task
+  sender, needs the user's approval in the app. Delivery is a
   harness-adapter concern behind a core message log. See
-  `docs/task-messaging.md`.
+  `docs/task-messaging.md` and `docs/task-trees.md`.
 - **The sidebar rail order is fixed and user-owned.** Nothing reorders rows
   except an explicit drag: no activity sort, no board-column order, no
   reaction to presence or core pushes. Rows keep one persisted global task
@@ -355,7 +360,10 @@ difference not listed here is a bug.
   parent's block detaches into a top-level row with the "↳ parent" line
   (`harbormaster.sidebar.detachedChildIds`) until it is dragged back. The
   order is committed once, on drop.
-- **Lineage wins over repo within a column.** On the board, a child nests
+- **Lineage wins over repo within a column.** Trees nest several levels
+  (`docs/task-trees.md` decision 11): one indent per level (max 4 levels),
+  each parent collapsing on its own, and every rule below applies per
+  parent link. On the board, a child nests
   under its parent whenever both are in the same column (in Awaiting: the
   same awaiting kind), whatever their repositories; on the rail, whenever
   both are open (and neither is pinned). The parent's repo group hosts the

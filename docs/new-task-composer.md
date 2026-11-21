@@ -125,8 +125,8 @@ e.g. `Options · parent: Fix MEV · skip prompts: off`.
 - **Parent task**: never pre-filled. Manual drafts are almost always
   standalone; subtasks usually come from agents via the launch tool.
   `Choose…` turns the popover into a searchable task picker with the
-  focused task suggested first. Tasks that are themselves children are not
-  offered (one level only). Once set, the row shows the parent with a
+  focused task suggested first. Tasks already at the max nesting depth
+  (`launch.maxNestingDepth`) are not offered. Once set, the row shows the parent with a
   remove (×).
 - The composer no longer offers "standalone with provenance". Provenance is
   still recorded for agent-launched standalone tasks.

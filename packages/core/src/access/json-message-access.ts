@@ -21,6 +21,7 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type {
   MessageAttachment,
   MessageStoreSnapshot,
+  PairGrant,
   TaskMessage,
 } from "../contracts/messaging.js";
 import type {
@@ -53,13 +54,21 @@ interface MessageStoreFile {
   version: 1;
   messages: TaskMessage[];
   userInputs: Record<string, string>;
+  /** Absent in files written before pair grants existed. */
+  grants?: PairGrant[];
 }
 
 const emptyStore = (): MessageStoreFile => ({
   version: 1,
   messages: [],
   userInputs: {},
+  grants: [],
 });
+
+/** A pair's grant identity: the two ids, sorted (the pair is unordered). */
+function pairOf(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
 
 /** Never trust an id or file name as a path component (same rule as the presence access; `.`/`..` are neutralized too). */
 function sanitize(component: string): string {
@@ -96,8 +105,12 @@ export class JsonMessageAccess implements MessageAccess {
   }
 
   async readStore(): Promise<MessageStoreSnapshot> {
-    const { messages, userInputs } = await this.cache.read();
-    return structuredClone({ messages, userInputs });
+    const { messages, userInputs, grants } = await this.cache.read();
+    return structuredClone({ messages, userInputs, grants: grants ?? [] });
+  }
+
+  async readGrants(): Promise<PairGrant[]> {
+    return structuredClone((await this.cache.read()).grants ?? []);
   }
 
   async getMessage(id: string): Promise<TaskMessage | undefined> {
@@ -126,7 +139,9 @@ export class JsonMessageAccess implements MessageAccess {
     await this.mutate((state) => {
       if (state.messages.some((item) => item.id === message.id))
         throw new Error(`Message already exists: ${message.id}`);
-      options?.precondition?.(structuredClone(state));
+      options?.precondition?.(
+        structuredClone({ ...state, grants: state.grants ?? [] }),
+      );
       state.messages.push(structuredClone(message));
       return message.status === "pending" ? [message.targetTaskId] : [];
     });
@@ -254,6 +269,57 @@ export class JsonMessageAccess implements MessageAccess {
       state.userInputs[taskId] = at;
       return [];
     });
+  }
+
+  async grantPair(
+    taskA: string,
+    taskB: string,
+    grantedAt: string,
+  ): Promise<void> {
+    const taskIds = pairOf(taskA, taskB);
+    await this.mutate((state) => {
+      state.grants ??= [];
+      const grants = state.grants;
+      if (!grants.some((grant) => samePair(grant.taskIds, taskIds))) {
+        grants.push({ taskIds, grantedAt });
+      }
+      return [];
+    });
+  }
+
+  async revokePair(taskA: string, taskB: string): Promise<boolean> {
+    const taskIds = pairOf(taskA, taskB);
+    let removed = false;
+    await this.mutate((state) => {
+      state.grants ??= [];
+      const before = state.grants.length;
+      state.grants = state.grants.filter(
+        (grant) => !samePair(grant.taskIds, taskIds),
+      );
+      removed = state.grants.length < before;
+      return [];
+    });
+    return removed;
+  }
+
+  async revokeGrantsForTask(taskId: string): Promise<string[]> {
+    const others: string[] = [];
+    // Called on every change to a Done task: skip the lock and write when
+    // there is nothing to remove.
+    const current = await this.cache.read();
+    if (!(current.grants ?? []).some((grant) => grant.taskIds.includes(taskId)))
+      return others;
+    await this.mutate((state) => {
+      state.grants = (state.grants ?? []).filter((grant) => {
+        if (!grant.taskIds.includes(taskId)) return true;
+        others.push(
+          grant.taskIds[0] === taskId ? grant.taskIds[1] : grant.taskIds[0],
+        );
+        return false;
+      });
+      return [];
+    });
+    return others;
   }
 
   async markAttachmentsPruned(id: string, prunedAt: string): Promise<void> {
@@ -412,12 +478,31 @@ export class JsonMessageAccess implements MessageAccess {
     if (!isRecord(value) || value.version !== 1) throw bad();
     if (!Array.isArray(value.messages) || !isRecord(value.userInputs))
       throw bad();
+    if (
+      value.grants !== undefined &&
+      (!Array.isArray(value.grants) || !value.grants.every(validGrant))
+    )
+      throw bad();
     const ids = new Set<string>();
     for (const item of value.messages) {
       if (!validMessage(item) || ids.has(item.id)) throw bad();
       ids.add(item.id);
     }
   }
+}
+
+function samePair(a: readonly string[], b: readonly string[]): boolean {
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+function validGrant(value: unknown): value is PairGrant {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.taskIds) &&
+    value.taskIds.length === 2 &&
+    value.taskIds.every((id) => typeof id === "string" && id.length > 0) &&
+    typeof value.grantedAt === "string"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -434,6 +519,7 @@ const STATUSES = [
 const ROUTES = [
   "parent-to-child",
   "child-to-parent",
+  "task-to-task",
   "approval",
   "receipt",
   "user",

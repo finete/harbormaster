@@ -32,6 +32,7 @@ import {
   roundCost,
   totalTokens,
 } from "../utilities/usage-accumulator.js";
+import { ancestorsOf, indexTasks } from "./task-tree.js";
 
 export { totalTokens } from "../utilities/usage-accumulator.js";
 
@@ -254,7 +255,7 @@ function matches(task: Task, query: TaskUsageQuery): boolean {
   return true;
 }
 
-/** Children's ready usage per parent id. */
+/** Ready usage of every task below each task (any depth, each task counted once per ancestor), by ancestor id. */
 function subtaskRollups(tasks: readonly Task[]): Map<string, SubtaskUsage> {
   const sums = new Map<
     string,
@@ -266,30 +267,34 @@ function subtaskRollups(tasks: readonly Task[]): Map<string, SubtaskUsage> {
       costed: number;
     }
   >();
+  const byId = indexTasks(tasks);
   for (const task of tasks) {
     if (!task.parentTaskId || task.usage?.status !== "ready") continue;
-    let sum = sums.get(task.parentTaskId);
-    if (!sum) {
-      sum = {
-        buckets: emptyBuckets(),
-        count: 0,
-        cost: 0,
-        priced: true,
-        costed: 0,
-      };
-      sums.set(task.parentTaskId, sum);
-    }
     const { totals, cost } = task.usage;
-    sum.buckets.input += totals.input;
-    sum.buckets.output += totals.output;
-    sum.buckets.cacheRead += totals.cacheRead;
-    sum.buckets.cacheWrite += totals.cacheWrite;
-    sum.count += 1;
-    if (cost === undefined) {
-      if (totals.turns > 0) sum.priced = false;
-    } else {
-      sum.cost += cost;
-      sum.costed += 1;
+    // Every ancestor's total includes this task, once (ancestorsOf never repeats one).
+    for (const ancestor of ancestorsOf(task, byId)) {
+      let sum = sums.get(ancestor.id);
+      if (!sum) {
+        sum = {
+          buckets: emptyBuckets(),
+          count: 0,
+          cost: 0,
+          priced: true,
+          costed: 0,
+        };
+        sums.set(ancestor.id, sum);
+      }
+      sum.buckets.input += totals.input;
+      sum.buckets.output += totals.output;
+      sum.buckets.cacheRead += totals.cacheRead;
+      sum.buckets.cacheWrite += totals.cacheWrite;
+      sum.count += 1;
+      if (cost === undefined) {
+        if (totals.turns > 0) sum.priced = false;
+      } else {
+        sum.cost += cost;
+        sum.costed += 1;
+      }
     }
   }
   return new Map(

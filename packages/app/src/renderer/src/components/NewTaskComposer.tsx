@@ -19,6 +19,7 @@ import type {
   Task,
 } from "../../../preload/api";
 import { shellEscapePaths } from "../../../shared/shell-escape";
+import { useMaxNestingDepth } from "../lib/config-values";
 import { DEFAULT_HARNESS_ID } from "../lib/harnesses";
 import {
   alternateAction,
@@ -45,6 +46,7 @@ import {
   type SlashTrigger,
   slashTrigger,
 } from "../lib/slash-commands";
+import { buildLineageIndex, taskDepth } from "../lib/task-lineage";
 import {
   ACTION_LABELS,
   AgentModelPicker,
@@ -210,13 +212,19 @@ export function NewTaskComposer({
   const parent = draft.parentTaskId
     ? (tasks.find((task) => task.id === draft.parentTaskId) ?? null)
     : null;
-  // One level only: a task that is itself a child can't be a parent.
-  const parentCandidates = useMemo(
-    () => tasks.filter((task) => !task.parentTaskId && task.state !== "done"),
-    [tasks],
+  // A task already at the max nesting depth can't have a child.
+  const maxNestingDepth = useMaxNestingDepth();
+  const lineageIndex = useMemo(() => buildLineageIndex(tasks), [tasks]);
+  const mayHaveChild = useCallback(
+    (task: Task): boolean =>
+      task.state !== "done" && taskDepth(task, lineageIndex) < maxNestingDepth,
+    [lineageIndex, maxNestingDepth],
   );
-  const suggestedParent =
-    origin && !origin.parentTaskId && origin.state !== "done" ? origin : null;
+  const parentCandidates = useMemo(
+    () => tasks.filter(mayHaveChild),
+    [tasks, mayHaveChild],
+  );
+  const suggestedParent = origin && mayHaveChild(origin) ? origin : null;
 
   const selectedRepo =
     where.kind === "repository"

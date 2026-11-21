@@ -64,9 +64,11 @@ import type { CoreLogger, CoreOperation } from "../contracts/logger.js";
 import { noopCoreLogger } from "../contracts/logger.js";
 import type {
   ApproveMessageEdits,
+  ApproveMessageResult,
   FindTasksOptions,
   MessageSender,
   MessageStoreSnapshot,
+  PairGrant,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -95,6 +97,8 @@ import {
   DEFAULT_HARNESS_ID,
   DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
+  DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
+  DEFAULT_MESSAGE_DIRECT_ROUTES,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
@@ -183,12 +187,16 @@ import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
   buildReceiptText,
+  canMessageDirectly,
   classifyRoute,
   countLoopMessages,
+  type DirectRoutePolicy,
   defaultMode,
   deriveAgentActivity,
   deriveMessagingStates,
   deriveRunState,
+  isDirectRoute,
+  isPairGranted,
   matchTasks,
   resolveDeliveredMode,
   selectMessagesToPrune,
@@ -216,9 +224,20 @@ import { effectivePipeline } from "../engines/rules/views.js";
 import { shouldWatchSessionFile } from "../engines/session-file-check.js";
 import { builtinSources } from "../engines/sources/index.js";
 import {
+  atMaxDepth,
+  childLaunchRefusal,
+  reparentRefusal,
+} from "../engines/task-nesting.js";
+import {
   assertAllowedTransition,
   assertMayReturnToWorking,
 } from "../engines/task-transitions.js";
+import {
+  childrenIndex,
+  depthOf,
+  descendantsOf,
+  indexTasks,
+} from "../engines/task-tree.js";
 import { deriveTaskBranch } from "../engines/task-workspace.js";
 import { awaitsUsageBackfill, buildTaskUsageRows } from "../engines/usage.js";
 import { collectWorktreeStatus } from "../engines/worktree-status.js";
@@ -774,16 +793,28 @@ export class CoreManager implements CoreCommands {
     return next;
   }
 
-  /** One level only: the parent must exist and must not itself be a child. */
+  /** The parent must exist and not already be at the max nesting depth. */
   private async requireParentCandidate(parentTaskId: string): Promise<Task> {
     const parent = await this.deps.tasks.getTask(parentTaskId);
     if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
-    if (parent.parentTaskId) {
-      throw new Error(
-        "A child task cannot launch further children (one level only); launch a standalone task instead",
-      );
-    }
+    await this.assertMayHaveChild(parent);
     return parent;
+  }
+
+  /** `launch.maxNestingDepth`, defaulted at read time. */
+  private async maxNestingDepth(): Promise<number> {
+    const config = await this.deps.config.load();
+    return config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
+  }
+
+  /** Refuses a `child` under `launcher` when the launcher is already at the max nesting depth. */
+  private async assertMayHaveChild(launcher: Task): Promise<void> {
+    const refusal = childLaunchRefusal(
+      launcher,
+      await this.deps.tasks.listTasks(),
+      await this.maxNestingDepth(),
+    );
+    if (refusal) throw new Error(refusal);
   }
 
   async getTaskWorkspace(taskId: string): Promise<TaskWorkspace | undefined> {
@@ -1857,6 +1888,7 @@ export class CoreManager implements CoreCommands {
     }
     await this.deps.bindings.removeBinding(id).catch(() => {});
     await this.deps.tasks.removeTask(id);
+    await this.endPairGrants(id);
     await this.removeLaunchFiles(id);
     await this.publishBoard();
   }
@@ -2051,15 +2083,20 @@ export class CoreManager implements CoreCommands {
     assertAllowedTransition(task.state, "done");
     const force = options?.force ?? {};
     const protectedPaths = options?.protectedPaths ?? [];
-    // A parent with active children asks first (children are never touched
-    // either way): it is about other tasks, so it stays its own question.
+    // A task with active tasks anywhere below it asks first (they are never
+    // touched here; a frontend that stops their agents does so itself): it is about other tasks, so it stays its own question.
     if (!force.leaveChildren) {
-      const children = await this.listChildren(task.id);
-      const active = children.filter((child) => child.state !== "done");
+      const active = (await this.listDescendants(task.id)).filter(
+        (descendant) => descendant.state !== "done",
+      );
       if (active.length > 0) {
         return {
           requiresConfirmation: "activeChildren",
-          detail: `${task.title} has ${active.length} active child task${active.length === 1 ? "" : "s"}: ${active.map((child) => child.title).join(", ")}`,
+          detail: `${task.title} has ${active.length} active task${active.length === 1 ? "" : "s"} below it: ${active.map((descendant) => descendant.title).join(", ")}`,
+          activeTasks: active.map((descendant) => ({
+            id: descendant.id,
+            title: descendant.title,
+          })),
         };
       }
     }
@@ -2157,6 +2194,10 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const id = this.deps.ids.next();
     const config = await this.deps.config.load();
+    // Loaded once for the depth rules: the child-launch check and the kickoff.
+    const maxNestingDepth =
+      config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
+    const allTasks = await this.deps.tasks.listTasks();
 
     let parentTaskId: string | undefined;
     let launchedFromTaskId: string | undefined;
@@ -2169,11 +2210,8 @@ export class CoreManager implements CoreCommands {
       }
       parentTask = await this.deps.tasks.getTask(input.fromTaskId);
       if (!parentTask) throw new Error(`Task not found: ${input.fromTaskId}`);
-      if (parentTask.parentTaskId) {
-        throw new Error(
-          "A child task cannot launch further children (one level only); launch a standalone task instead",
-        );
-      }
+      const refusal = childLaunchRefusal(parentTask, allTasks, maxNestingDepth);
+      if (refusal) throw new Error(refusal);
       parentTaskId = parentTask.id;
     } else if (input.fromTaskId) {
       launchedFromTaskId = input.fromTaskId;
@@ -2237,8 +2275,15 @@ export class CoreManager implements CoreCommands {
       dependencyBranch = baseRef;
     }
 
+    // The new task's own depth: one below its launcher, else top level.
+    const launchedDepth = parentTask
+      ? depthOf(parentTask, indexTasks(allTasks)) + 1
+      : 1;
     const kickoff = buildLaunchKickoffPrompt({
       hasRepository,
+      ...(atMaxDepth(launchedDepth, maxNestingDepth)
+        ? { atMaxNestingDepth: maxNestingDepth }
+        : {}),
       ...(where.kind === "folder" ? { inPlace: true } : {}),
       ...(bound?.pr
         ? {
@@ -2389,25 +2434,24 @@ export class CoreManager implements CoreCommands {
       await this.publishTaskChange(next);
       return next;
     }
-    if (parentTaskId === taskId) {
-      throw new Error("A task cannot be its own parent");
-    }
     const parent = await this.deps.tasks.getTask(parentTaskId);
     if (!parent) throw new Error(`Task not found: ${parentTaskId}`);
-    if (parent.parentTaskId) {
-      throw new Error(
-        `${parent.title} is itself a child task; tasks nest one level only`,
-      );
-    }
-    if ((await this.listChildren(taskId)).length > 0) {
-      throw new Error(
-        `${task.title} has children of its own; tasks nest one level only`,
-      );
-    }
+    const refusal = reparentRefusal(
+      task,
+      parent,
+      await this.deps.tasks.listTasks(),
+      await this.maxNestingDepth(),
+    );
+    if (refusal) throw new Error(refusal);
     const next: Task = { ...task, parentTaskId: parent.id, updatedAt: now };
     await this.deps.tasks.replaceTask(next);
     await this.publishTaskChange(next);
     return next;
+  }
+
+  async listDescendants(taskId: string): Promise<Task[]> {
+    const tasks = await this.deps.tasks.listTasks();
+    return descendantsOf(taskId, childrenIndex(tasks));
   }
 
   async getLaunchSettings(repositoryId?: string): Promise<LaunchSettings> {
@@ -2418,6 +2462,8 @@ export class CoreManager implements CoreCommands {
     return {
       maxConcurrent:
         config.launch?.maxConcurrent ?? DEFAULT_LAUNCH_MAX_CONCURRENT,
+      maxNestingDepth:
+        config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
       ...(config.launch?.defaultModel
         ? { defaultModel: config.launch.defaultModel }
         : {}),
@@ -3592,6 +3638,13 @@ export class CoreManager implements CoreCommands {
     const { harness } = this.requireMessaging();
     const tasks = await this.deps.tasks.listTasks();
     const matches = matchTasks(query, tasks, options);
+    const policy = await this.directRoutePolicy(
+      tasks,
+      await this.deps.config.load(),
+    );
+    const searcher = options?.fromTaskId
+      ? tasks.find((task) => task.id === options.fromTaskId)
+      : undefined;
     return Promise.all(
       matches.map(async ({ task, relation }): Promise<TaskSearchResult> => {
         const presence =
@@ -3607,6 +3660,16 @@ export class CoreManager implements CoreCommands {
           ...(task.pr ? { prNumber: task.pr.number } : {}),
           run: deriveRunState(task, presence),
           relation,
+          // Only a task sender can ever send directly (a plain session always
+          // needs approval); a task can't send to itself.
+          ...(task.id === searcher?.id
+            ? {}
+            : {
+                send:
+                  searcher && canMessageDirectly(searcher, task, policy)
+                    ? ("direct" as const)
+                    : ("needs-approval" as const),
+              }),
         };
       }),
     );
@@ -3640,12 +3703,17 @@ export class CoreManager implements CoreCommands {
       undeliverableReason(target) ?? (await this.noSessionReason(target));
     if (unavailable) throw new Error(unavailable);
 
-    // 3. Route from lineage (non-task senders always need approval).
-    const route = classifyRoute(input.from, senderTask, target);
+    // 3. Route from lineage, the user's `messaging.directRoutes` setting and
+    //    pair grants (non-task senders always need approval).
+    const config = await this.deps.config.load();
+    const policy = await this.directRoutePolicy(
+      await this.deps.tasks.listTasks(),
+      config,
+    );
+    const route = classifyRoute(input.from, senderTask, target, policy);
 
     // 4. Child → parent: the parent must be live (and not Done, above) and
     //    the child's own harness must be able to receive the answer.
-    const config = await this.deps.config.load();
     if (route === "child-to-parent") {
       if (!(await harness.presence(target.id)).live) {
         throw new Error(
@@ -3668,22 +3736,20 @@ export class CoreManager implements CoreCommands {
       );
     }
 
-    // 6. Lineage routes check the loop cap.
+    // 6. Every direct task → task route checks the per-pair loop cap.
     const cap = config.messaging?.loopCap ?? DEFAULT_MESSAGE_LOOP_CAP;
     const capCheck =
-      senderTask && (route === "parent-to-child" || route === "child-to-parent")
+      senderTask && isDirectRoute(route)
         ? (store: MessageStoreSnapshot) => {
-            const parent = route === "parent-to-child" ? senderTask : target;
-            const child = route === "parent-to-child" ? target : senderTask;
             const count = countLoopMessages(
               store.messages,
               store.userInputs,
-              parent.id,
-              child.id,
+              senderTask.id,
+              target.id,
             );
             if (count >= cap) {
               throw new Error(
-                `Message cap reached between "${child.title}" and "${parent.title}" (${cap} since the user last typed); stop and ask the user.`,
+                `Message cap reached between "${senderTask.title}" and "${target.title}" (${cap} since the user last typed); stop and ask the user.`,
               );
             }
           }
@@ -3727,15 +3793,15 @@ export class CoreManager implements CoreCommands {
         willWake: false,
         note:
           input.from.kind === "task"
-            ? "Awaiting the user's approval in the Harbormaster app; you'll get a follow-up with the result. Don't wait for it -- continue or end your turn."
-            : "Awaiting the user's approval in the Harbormaster app; no result is reported back to this session.",
+            ? `Not delivered yet: waiting for the user's approval in the Harbormaster app (a message to "${target.title}" needs it under the user's current setting). You'll get a follow-up with the result. Don't wait for it -- continue or end your turn.`
+            : "Not delivered yet: waiting for the user's approval in the Harbormaster app; no result is reported back to this session.",
       };
     }
     if (target.launch?.status === "queued") {
       return {
         message,
         willWake: false,
-        note: `"${target.title}" has a queued launch; the message will be delivered as soon as it starts.`,
+        note: `Sent directly, no approval needed. "${target.title}" has a queued launch; the message is delivered as soon as it starts.`,
       };
     }
     if ((await harness.presence(target.id)).live) {
@@ -3752,7 +3818,7 @@ export class CoreManager implements CoreCommands {
     return {
       message,
       willWake: true,
-      note: `"${target.title}" isn't running; Harbormaster will wake it and deliver the message.`,
+      note: `Sent directly, no approval needed. "${target.title}" isn't running; Harbormaster will wake it and deliver the message.`,
     };
   }
 
@@ -4003,27 +4069,73 @@ export class CoreManager implements CoreCommands {
   async approveMessage(
     messageId: string,
     edits?: ApproveMessageEdits,
-  ): Promise<TaskMessage> {
+  ): Promise<ApproveMessageResult> {
     const { messages } = this.requireMessaging();
     const message = await this.requireAwaitingApproval(messageId);
     if (edits?.text !== undefined && !edits.text.trim()) {
       throw new Error("Message text is empty.");
     }
+    if (edits?.allowBothWays && message.sender.kind !== "task") {
+      throw new Error(
+        "Only a message from a task can be approved with both ways allowed.",
+      );
+    }
+    const result = await this.decideAwaiting(message, edits);
+    if (!edits?.allowBothWays || message.sender.kind !== "task") return result;
+    if (result.status === "failed") return { ...result, releasedCount: 0 };
+
+    // "Approve and allow both ways" (docs/task-trees.md decision 15): the
+    // grant, then every OTHER message still awaiting approval between the
+    // two tasks (either direction, task senders only) is approved as if
+    // individually, keeping its own text and mode.
+    const sender = message.sender.taskId;
+    const other = message.targetTaskId;
+    await messages.grantPair(
+      sender,
+      other,
+      this.deps.clock.now().toISOString(),
+    );
+    let releasedCount = 0;
+    for (const waiting of await messages.listMessages()) {
+      if (
+        waiting.id === messageId ||
+        waiting.status !== "awaiting_approval" ||
+        waiting.sender.kind !== "task"
+      )
+        continue;
+      const from = waiting.sender.taskId;
+      const between =
+        (from === sender && waiting.targetTaskId === other) ||
+        (from === other && waiting.targetTaskId === sender);
+      if (!between) continue;
+      const released = await this.decideAwaiting(waiting);
+      if (released.status !== "failed") releasedCount += 1;
+    }
+    return { ...result, releasedCount };
+  }
+
+  /**
+   * Approves one message awaiting approval (re-checking its target: an
+   * undeliverable one becomes `failed` with its reason), sends the task
+   * sender its receipt, and announces the change.
+   */
+  private async decideAwaiting(
+    message: TaskMessage,
+    edits?: ApproveMessageEdits,
+  ): Promise<TaskMessage> {
+    const { messages } = this.requireMessaging();
     const now = this.deps.clock.now().toISOString();
     const target = await this.deps.tasks.getTask(message.targetTaskId);
     const reason = target
       ? (undeliverableReason(target) ?? (await this.noSessionReason(target)))
       : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
-    let result: TaskMessage;
-    if (reason) {
-      result = (await messages.failMessage(messageId, now, reason)) ?? message;
-    } else {
-      result = await messages.approveMessage(messageId, {
-        approvedAt: now,
-        ...(edits?.text !== undefined ? { text: edits.text } : {}),
-        ...(edits?.mode ? { mode: edits.mode } : {}),
-      });
-    }
+    const result = reason
+      ? ((await messages.failMessage(message.id, now, reason)) ?? message)
+      : await messages.approveMessage(message.id, {
+          approvedAt: now,
+          ...(edits?.text !== undefined ? { text: edits.text } : {}),
+          ...(edits?.mode ? { mode: edits.mode } : {}),
+        });
     await this.sendReceipt(result, target);
     this.emitMessagesChanged(affectedTaskIds([result]));
     return result;
@@ -4042,6 +4154,57 @@ export class CoreManager implements CoreCommands {
     );
     this.emitMessagesChanged(affectedTaskIds([result]));
     return result;
+  }
+
+  async listPairGrants(): Promise<PairGrant[]> {
+    const { messages } = this.requireMessaging();
+    const [store, tasks] = await Promise.all([
+      messages.readStore(),
+      this.deps.tasks.listTasks(),
+    ]);
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    return store.grants.filter((grant) =>
+      isPairGranted({ grants: store.grants, tasks: byId }, ...grant.taskIds),
+    );
+  }
+
+  async revokePairGrant(taskId: string, otherTaskId: string): Promise<void> {
+    const { messages } = this.requireMessaging();
+    if (await messages.revokePair(taskId, otherTaskId)) {
+      this.emitMessagesChanged([taskId, otherTaskId]);
+    }
+  }
+
+  /**
+   * A task went Done or was deleted: its pair grants end (docs/task-trees.md
+   * decision 15). A grant whose task is Done is inert anyway (`isPairGranted`
+   * reads task state), so a failure here is only clutter that would let a
+   * reopened task's old grant come back; never fail the transition over it.
+   */
+  private async endPairGrants(taskId: string): Promise<void> {
+    const { messages } = this.deps;
+    if (!messages) return;
+    try {
+      const others = await messages.revokeGrantsForTask(taskId);
+      if (others.length > 0) this.emitMessagesChanged([taskId, ...others]);
+    } catch {
+      /* see above */
+    }
+  }
+
+  /** The user's `messaging.directRoutes` setting plus the grants on record, over the given tasks. */
+  private async directRoutePolicy(
+    tasks: readonly Task[],
+    config: GlobalConfig,
+  ): Promise<DirectRoutePolicy> {
+    const { messages } = this.requireMessaging();
+    return {
+      directRoutes:
+        config.messaging?.directRoutes ?? DEFAULT_MESSAGE_DIRECT_ROUTES,
+      tasks: new Map(tasks.map((task) => [task.id, task])),
+      // Just the grants: the message log is large and kept forever.
+      grants: await messages.readGrants(),
+    };
   }
 
   async listTasksWithPendingMessages(): Promise<string[]> {
@@ -4089,6 +4252,7 @@ export class CoreManager implements CoreCommands {
     );
     return deriveMessagingStates({
       tasks,
+      grants: store.grants,
       messages: store.messages,
       userInputs: store.userInputs,
       liveTaskIds,
@@ -4227,6 +4391,8 @@ export class CoreManager implements CoreCommands {
   }
 
   private async publishTaskChange(task: Task): Promise<void> {
+    // Every route into Done (moveTask, toDone, rules) lands here.
+    if (task.state === "done") await this.endPairGrants(task.id);
     this.deps.events.emit("task-changed", { task });
     await this.publishBoard();
   }

@@ -13,6 +13,7 @@
 import type { CoreCommands, LaunchTaskInput } from "../contracts/commands.js";
 import {
   buildChildStatusEntry,
+  countActiveTasks,
   formatChildStatusText,
 } from "./child-status.js";
 import {
@@ -192,7 +193,7 @@ const launchTask: ToolDefinition = {
   name: "launch_task",
   title: "Harbormaster launch task",
   description:
-    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `mode` mirrors the app\'s Task / Review / Chat switch: "review" works on an existing pull request, "chat" runs in place with no worktree. To review or continue an EXISTING pull request, ALWAYS pass pullRequest (with mode "review" to review it): without it the task gets a fresh branch off the default branch, never sees the PR\'s code, and is not linked to the PR on the board. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
+    'Launch a new Harbormaster task that starts running immediately in the background, in its own git worktree/branch and its own session, never in this one. `mode` mirrors the app\'s Task / Review / Chat switch: "review" works on an existing pull request, "chat" runs in place with no worktree. To review or continue an EXISTING pull request, ALWAYS pass pullRequest (with mode "review" to review it): without it the task gets a fresh branch off the default branch, never sees the PR\'s code, and is not linked to the PR on the board. `relation` is REQUIRED with no default; choose explicitly every time: "child" ONLY when the work is part of / depends on the current task (nested under it on the board; poll it with subtask_status; tasks can nest only up to the user\'s max nesting depth, and a launch from a task already at that depth is refused, so then do the work yourself or launch a standalone task); "standalone" for an independent fix, a different repository, or an unrelated follow-up that parts ways from this one. A "child" requires calling this from a Harbormaster task session. The launch is QUEUED: it starts in the background once the Harbormaster app picks it up, so never assume the work has begun. Call this tool once per task; call it again (with a fresh prompt) to launch several.',
   inputSchema: {
     type: "object",
     properties: {
@@ -427,14 +428,18 @@ const subtaskStatus: ToolDefinition = {
   name: "subtask_status",
   title: "Harbormaster subtask status",
   description:
-    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and the question a child is waiting on the user to answer ("waiting on the user"). Check it before report_status and name any such child in your summary. Only valid inside a Harbormaster task session.',
+    'List this task\'s DIRECT child tasks (launched with relation "child"; not grandchildren): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, how many tasks below that child (any depth) are not Done yet (e.g. "2 tasks below not done yet"), and the question a child is waiting on the user to answer ("waiting on the user"). A child with tasks of its own tracks those itself: call subtask_status from that child\'s session. Check it before report_status and name any such child in your summary. Only valid inside a Harbormaster task session.',
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, { commands, caller }) {
     const taskId = requireTaskCaller(caller, "subtask_status");
     const children = await commands.listChildren(taskId);
     const entries = await Promise.all(
       children.map(async (child) =>
-        buildChildStatusEntry(child, await commands.getPresence(child.id)),
+        buildChildStatusEntry(
+          child,
+          await commands.getPresence(child.id),
+          countActiveTasks(await commands.listDescendants(child.id)),
+        ),
       ),
     );
     return {
@@ -448,7 +453,7 @@ const findTasks: ToolDefinition = {
   name: "find_tasks",
   title: "Harbormaster find tasks",
   description:
-    "Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated) and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.",
+    'Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated), whether a message from this task would be "direct" (delivered at once) or "needs approval" (waits for the user), and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.',
   inputSchema: {
     type: "object",
     properties: {
@@ -480,7 +485,7 @@ const sendToTask: ToolDefinition = {
   name: "send_to_task",
   title: "Harbormaster send to task",
   description:
-    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Messages to your own children or to your parent are delivered directly. ANY other target (sibling, unrelated task, or any send from a plain non-task session) goes to the user\'s approval in the Harbormaster app, so send those ONLY when the user explicitly asked you to. mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). When you ask your PARENT a question and end your turn to wait for the answer, set expectsReply: true (it then shows you as waiting on your parent); omit it for reports and results ("done, here is the PR"), which need no answer. Do not poll for a reply. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
+    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Whether the message is delivered at once or waits for the user\'s approval depends on the user\'s setting (and any pair they allowed), not on anything you choose: find_tasks marks each task "direct" or "needs approval" for you, and a message to your own parent or child is always direct. Send approval-route messages ONLY when the user explicitly asked you to; any send from a plain non-task session needs approval. The result says plainly whether the message was "delivered" or is "waiting for the user\'s approval". mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). When you ask your PARENT a question and end your turn to wait for the answer, set expectsReply: true (it then shows you as waiting on your parent); omit it for reports and results ("done, here is the PR"), which need no answer. Do not poll for a reply. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
   inputSchema: {
     type: "object",
     properties: {
@@ -494,7 +499,7 @@ const sendToTask: ToolDefinition = {
         type: "string",
         enum: ["steer", "followUp"],
         description:
-          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to a parent.",
+          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to your parent or any other task.",
       },
       expectsReply: {
         type: "boolean",

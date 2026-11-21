@@ -207,3 +207,88 @@ test("an approval-route message shows in the inbox; editing + approving delivers
     })
     .toBe(true);
 });
+
+test("Approve and allow both ways delivers the message and makes the pair direct until it is removed from a task's menu", async () => {
+  // A plain session's approval never offers the pair grant.
+  const fromSession = await external.commands.sendTaskMessage({
+    from: { kind: "session", cwd: "/work/elsewhere" },
+    targetTaskId: targetId,
+    text: "hello from a plain session",
+  });
+  const fromTask = await external.commands.sendTaskMessage({
+    from: { kind: "task", taskId: senderId },
+    targetTaskId: targetId,
+    text: "second message, same pair",
+  });
+  expect(fromTask.message.status).toBe("awaiting_approval");
+
+  // The previous test leaves the inbox open; the nav row toggles it.
+  if (!(await window.getByTestId("inbox-view").isVisible())) {
+    await window.getByTestId("inbox-button").click();
+  }
+  await expect(window.getByTestId("inbox-view")).toBeVisible();
+  await window
+    .getByTestId(`inbox-row-approval:${fromSession.message.id}`)
+    .click();
+  await expect(
+    window.getByTestId(`approval-card-${fromSession.message.id}`),
+  ).toBeVisible();
+  await expect(window.getByTestId("approval-approve-both-ways")).toHaveCount(0);
+
+  await window.getByTestId(`inbox-row-approval:${fromTask.message.id}`).click();
+  await expect(
+    window.getByTestId(`approval-card-${fromTask.message.id}`),
+  ).toBeVisible();
+  await window.getByTestId("approval-approve-both-ways").click();
+
+  await expect
+    .poll(
+      async () =>
+        (await external.commands.listMessages()).find(
+          (item) => item.id === fromTask.message.id,
+        )?.status,
+    )
+    .toBe("pending");
+  // The grant is recorded right after the approval itself.
+  await expect
+    .poll(async () =>
+      (await external.commands.listPairGrants()).map((grant) =>
+        [...grant.taskIds].sort(),
+      ),
+    )
+    .toEqual([[senderId, targetId].sort()]);
+
+  // From now on the pair talks directly, in both directions.
+  for (const [from, to] of [
+    [targetId, senderId],
+    [senderId, targetId],
+  ] as const) {
+    const direct = await external.commands.sendTaskMessage({
+      from: { kind: "task", taskId: from },
+      targetTaskId: to,
+      text: "no approval needed",
+    });
+    expect(direct.message).toMatchObject({
+      route: "task-to-task",
+      status: "pending",
+    });
+  }
+
+  // "Stop direct messages with <title>" in the task's sidebar menu removes the grant.
+  // Opening the task from its board card puts its row on the rail.
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${senderId}`).click();
+  const row = window.getByTestId(`sidebar-task-row-${senderId}`);
+  await expect(row).toBeVisible();
+  await row.click({ button: "right" });
+  await window
+    .getByTestId(`sidebar-row-context-menu-item-stop-direct-${targetId}`)
+    .click();
+  await expect.poll(() => external.commands.listPairGrants()).toEqual([]);
+  const again = await external.commands.sendTaskMessage({
+    from: { kind: "task", taskId: targetId },
+    targetTaskId: senderId,
+    text: "needs approval again",
+  });
+  expect(again.message.status).toBe("awaiting_approval");
+});

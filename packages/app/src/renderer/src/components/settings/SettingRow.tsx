@@ -373,7 +373,7 @@ function SettingControl({
           value={valueText(value)}
           options={(setting.values ?? []).map((entry) => ({
             value: entry,
-            label: entry,
+            label: setting.valueLabels?.[entry] ?? entry,
           }))}
           onChange={change}
           testId={testId}

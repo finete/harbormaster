@@ -20,6 +20,23 @@ process.env.HARBORMASTER_SKIP_ONBOARDING ??= "1";
 // app never sets it.
 process.env.HARBORMASTER_E2E_FAKE_CLIPBOARD ??= "1";
 
+// A run started inside a Harbormaster task session (an agent running the
+// suite) inherits that session's identity markers (core's
+// harness/adapter-common.ts `baseLaunchEnv`). Specs spread `process.env`
+// into the CLI and agents they spawn, which would then reach the user's
+// real app instead of the test app. Drop them so every run is the same
+// from a task, a terminal, or CI.
+for (const key of [
+  "HARBORMASTER",
+  "HARBORMASTER_TASK_ID",
+  "HARBORMASTER_SESSION_ID",
+  "HARBORMASTER_STATE_DIR",
+  "HARBORMASTER_SOCKET",
+  "HARBORMASTER_CLI",
+]) {
+  delete process.env[key];
+}
+
 // Smoke-lane e2e config for the Electron app shell. Playwright drives the
 // already-built electron-vite output (`out/main/index.js`) via its Electron
 // support (`_electron.launch`) — see e2e/smoke.spec.ts. `npm run build` must

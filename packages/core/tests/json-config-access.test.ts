@@ -30,6 +30,25 @@ describe("JsonConfigAccess", () => {
     expect(onDisk.codeRoot).toBe(join(homedir(), "Code"));
   });
 
+  it("validates messaging.directRoutes like messaging.loopCap", async () => {
+    for (const value of ["parent-and-child", "same-task-tree", "any-task"]) {
+      await writeFile(
+        path,
+        JSON.stringify({ messaging: { directRoutes: value } }),
+      );
+      expect((await new JsonConfigAccess(path).load()).messaging).toEqual({
+        directRoutes: value,
+      });
+    }
+    await writeFile(
+      path,
+      JSON.stringify({ messaging: { directRoutes: "everyone" } }),
+    );
+    await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+      /messaging\.directRoutes must be one of: parent-and-child, same-task-tree, any-task/,
+    );
+  });
+
   it("round-trips a saved config with custom codeRoot and branchPrefix", async () => {
     const access = new JsonConfigAccess(path);
     const config = await access.load();
@@ -257,6 +276,25 @@ describe("JsonConfigAccess", () => {
     await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
       "maxConcurrent",
     );
+
+    for (const bad of [0, 5, 2.5, "3"]) {
+      await writeFile(
+        path,
+        JSON.stringify({ launch: { maxNestingDepth: bad } }),
+      );
+      await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+        "maxNestingDepth",
+      );
+    }
+    for (const good of [1, 4]) {
+      await writeFile(
+        path,
+        JSON.stringify({ launch: { maxNestingDepth: good } }),
+      );
+      expect((await new JsonConfigAccess(path).load()).launch).toEqual({
+        maxNestingDepth: good,
+      });
+    }
 
     await writeFile(path, JSON.stringify({ launch: { defaultModel: "" } }));
     await expect(new JsonConfigAccess(path).load()).rejects.toThrow(

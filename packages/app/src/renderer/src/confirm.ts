@@ -14,7 +14,18 @@ export interface ConfirmRequest {
   confirmLabel: string;
   /** The cancel button's label ("Cancel" when omitted). */
   cancelLabel?: string;
-  resolve: (confirmed: boolean) => void;
+  /** An opt-in checkbox under the body, unchecked each time the dialog opens (e.g. Done's "Also stop these N tasks"). */
+  option?: ConfirmOption;
+  resolve: (confirmed: boolean, optionChecked?: boolean) => void;
+}
+
+/** A checkbox on a confirm question, with a warning line shown beside it. */
+export interface ConfirmOption {
+  label: string;
+  /** Muted warning under the checkbox (what ticking it costs). */
+  warning: string;
+  /** Test id of the checkbox input. */
+  testId: string;
 }
 
 type Listener = (request: ConfirmRequest | undefined) => void;
@@ -26,35 +37,61 @@ function emit(): void {
   for (const listener of listeners) listener(queue[0]);
 }
 
-/** Ask a yes/no question; resolves `true` only on an explicit confirm. */
-export function requestConfirm(question: {
+interface ConfirmQuestion {
   title: string;
   message: string;
   lines?: string[];
   enterConfirms?: boolean;
   confirmLabel?: string;
   cancelLabel?: string;
-}): Promise<boolean> {
-  return new Promise((resolve) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    queue = [
-      ...queue,
-      {
-        id,
-        title: question.title,
-        message: question.message,
-        ...(question.lines?.length ? { lines: question.lines } : {}),
-        ...(question.enterConfirms ? { enterConfirms: true } : {}),
-        confirmLabel: question.confirmLabel ?? "Confirm",
-        ...(question.cancelLabel ? { cancelLabel: question.cancelLabel } : {}),
-        resolve: (confirmed) => {
-          queue = queue.filter((request) => request.id !== id);
-          emit();
-          resolve(confirmed);
-        },
+}
+
+function enqueue(
+  question: ConfirmQuestion,
+  option: ConfirmOption | undefined,
+  done: (confirmed: boolean, optionChecked: boolean) => void,
+): void {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  queue = [
+    ...queue,
+    {
+      id,
+      title: question.title,
+      message: question.message,
+      ...(question.lines?.length ? { lines: question.lines } : {}),
+      ...(question.enterConfirms ? { enterConfirms: true } : {}),
+      confirmLabel: question.confirmLabel ?? "Confirm",
+      ...(question.cancelLabel ? { cancelLabel: question.cancelLabel } : {}),
+      ...(option ? { option } : {}),
+      resolve: (confirmed, optionChecked = false) => {
+        queue = queue.filter((request) => request.id !== id);
+        emit();
+        done(confirmed, confirmed && optionChecked);
       },
-    ];
-    emit();
+    },
+  ];
+  emit();
+}
+
+/** Ask a yes/no question; resolves `true` only on an explicit confirm. */
+export function requestConfirm(question: ConfirmQuestion): Promise<boolean> {
+  return new Promise((resolve) => {
+    enqueue(question, undefined, (confirmed) => resolve(confirmed));
+  });
+}
+
+/**
+ * A yes/no question with one opt-in checkbox (unchecked every time the
+ * dialog opens). `checked` is only ever true alongside `confirmed`.
+ */
+export function requestConfirmWithOption(
+  question: ConfirmQuestion,
+  option: ConfirmOption,
+): Promise<{ confirmed: boolean; checked: boolean }> {
+  return new Promise((resolve) => {
+    enqueue(question, option, (confirmed, checked) =>
+      resolve({ confirmed, checked }),
+    );
   });
 }
 

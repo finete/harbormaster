@@ -3,6 +3,7 @@ import type { PresenceStatus } from "../src/contracts/harness.js";
 import type { Task } from "../src/contracts/model.js";
 import {
   buildChildStatusEntry,
+  countActiveTasks,
   deriveChildOutcome,
   deriveChildRunState,
   deriveWaitingOnUser,
@@ -154,6 +155,33 @@ describe("buildChildStatusEntry / formatChildStatusLine", () => {
     expect(formatChildStatusLine(entry)).toBe(
       '"Fix the flaky test" (child-1) · Working · queued',
     );
+  });
+});
+
+describe("tasks below a child", () => {
+  it("counts only active (not Done) tasks below, (Backlog and Awaiting included) and shows the count on the line", () => {
+    expect(
+      countActiveTasks([
+        { state: "working" },
+        { state: "done" },
+        { state: "awaiting" },
+      ]),
+    ).toBe(2);
+    const task = baseTask({ launch: { status: "queued", requestedAt: "t" } });
+    const entry = buildChildStatusEntry(task, presence(), 2);
+    expect(entry.activeBelow).toBe(2);
+    expect(formatChildStatusLine(entry)).toBe(
+      '"Fix the flaky test" (child-1) · Working · queued · 2 tasks below not done yet',
+    );
+    expect(
+      formatChildStatusLine(buildChildStatusEntry(task, presence(), 1)),
+    ).toMatch(/ · 1 task below not done yet$/);
+  });
+
+  it("shows nothing when no task below is active", () => {
+    const entry = buildChildStatusEntry(baseTask(), presence(), 0);
+    expect("activeBelow" in entry).toBe(false);
+    expect(formatChildStatusLine(entry)).not.toContain("below");
   });
 });
 

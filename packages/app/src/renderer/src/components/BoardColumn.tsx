@@ -19,7 +19,7 @@ import {
 } from "../lib/board-selection";
 import { repoColorClass } from "../lib/repo-color";
 import type { LineageIndex } from "../lib/task-lineage";
-import { layoutLineageRows } from "../lib/task-lineage";
+import { layoutLineageRows, lineageIndentPx } from "../lib/task-lineage";
 import { deriveProvenanceLabel } from "../lib/task-status-lines";
 import { cn } from "../lib/utils";
 import { TaskCard } from "./TaskCard";
@@ -312,7 +312,7 @@ export function BoardColumn({
                       group.tasks.map((task) => ({ task })),
                       lineageIndex,
                       collapsedLineageParents,
-                    ).map(({ item, nested, children, parentTitle }) => {
+                    ).map(({ item, nested, indent, children, parentTitle }) => {
                       const task = item.task;
                       const provenanceTitle = deriveProvenanceLabel(
                         task,
@@ -327,6 +327,7 @@ export function BoardColumn({
                             selected={selectedTaskId === task.id}
                             unread={unreadTaskIds?.has(task.id)}
                             nested={nested}
+                            indent={indent}
                             usagePinned={
                               pinnedUsageTaskIds?.has(task.id) ?? false
                             }
@@ -344,6 +345,9 @@ export function BoardColumn({
                                   : undefined
                               }
                               onClick={() => onToggleLineageChildren(task.id)}
+                              style={{
+                                marginLeft: lineageIndentPx(indent, 16),
+                              }}
                               className={cn(
                                 "-mt-1 flex items-center gap-1 self-start pl-1 text-[11px] text-muted-foreground",
                                 children.nestedHere
