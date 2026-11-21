@@ -180,8 +180,10 @@ export interface MessagingChangedPayload {
 export interface ToDoneForce {
   /** Answers the single "Mark done?" question: Done is final, the app owns the cleanup. */
   confirmed?: boolean;
-  /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+  /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it running and nested under it. */
   leaveChildren?: boolean;
+  /** Answers it too, and also stops the agents of the active tasks below (main does it when the Done is confirmed): the tasks stay on the board, worktrees untouched. */
+  stopDescendants?: boolean;
 }
 
 /**

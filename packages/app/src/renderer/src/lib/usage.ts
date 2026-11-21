@@ -80,7 +80,7 @@ export function shortSessionId(sessionPath: string): string {
   return id.slice(0, 8);
 }
 
-/** Direct children's ready usage summed, like core's `subtaskUsage` (cost only if every child with turns had one). */
+/** Ready usage of every task below `parentTaskId` (any depth, each once) summed, like core's `subtaskUsage` (cost only if every such task with turns had one). */
 export function subtaskRollup(
   tasks: readonly Task[],
   parentTaskId: string,
@@ -90,8 +90,24 @@ export function subtaskRollup(
   let cost = 0;
   let costed = 0;
   let priced = true;
+  const below = new Set<string>([parentTaskId]);
+  // Collect the subtree (parents may be listed after their children).
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const task of tasks) {
+      if (
+        task.parentTaskId !== undefined &&
+        below.has(task.parentTaskId) &&
+        !below.has(task.id)
+      ) {
+        below.add(task.id);
+        grew = true;
+      }
+    }
+  }
+  below.delete(parentTaskId);
   for (const task of tasks) {
-    if (task.parentTaskId !== parentTaskId) continue;
+    if (!below.has(task.id)) continue;
     const usage = task.usage;
     if (usage?.status !== "ready") continue;
     sum.input += usage.totals.input;

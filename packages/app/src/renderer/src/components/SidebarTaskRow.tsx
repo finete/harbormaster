@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
 import { taskAgentLabel } from "../lib/task-agent";
+import { lineageIndentPx } from "../lib/task-lineage";
 import {
   deriveMessagingChips,
   loopCapLabel,
@@ -255,6 +256,7 @@ export function SidebarTaskRow({
   onContextMenu,
   rowRef,
   nested = false,
+  indent = 1,
   parentTitle,
   provenanceTitle,
   childrenInfo,
@@ -284,6 +286,8 @@ export function SidebarTaskRow({
   /** Brief highlight after a reveal/scroll-to-current (item 1); self-clears in the parent. */
   /** Rendered indented under its parent's row (see lib/task-lineage.ts); purely visual. */
   nested?: boolean;
+  /** Indent levels under the section's top-level row (one per tree level, max 3); 1 when `nested` and unset. */
+  indent?: number;
   /** A child elsewhere whose parent still exists: the "\u21b3 parent title" lineage line. */
   parentTitle?: string;
   /** A standalone launch's display-only provenance line (lib/task-status-lines.ts). */
@@ -384,11 +388,15 @@ export function SidebarTaskRow({
   return (
     <div
       ref={drag?.setNodeRef}
-      style={drag?.style}
+      style={{
+        ...drag?.style,
+        ...(nested ? { marginLeft: lineageIndentPx(indent, 12) } : {}),
+      }}
+      {...(nested ? { "data-lineage-indent": indent } : {})}
       className={cn(
         "border-b border-border/40 px-1.5 py-1 last:border-b-0",
         // Attached under its parent's row (see lib/task-lineage.ts).
-        nested && "ml-3 border-l-2 border-l-primary/30 pl-1",
+        nested && "border-l-2 border-l-primary/30 pl-1",
         overlay && "rounded-lg border border-primary bg-card",
         drag?.isDragging && "opacity-40",
       )}

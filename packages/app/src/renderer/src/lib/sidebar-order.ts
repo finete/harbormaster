@@ -132,18 +132,30 @@ export interface SectionRow {
 
 /**
  * The rows visible while `activeId` is dragged (R10/R15): every top-level
- * row, plus only the nested rows of the dragged child's own parent block.
+ * row, the dragged row's own ancestors (so its parent is there to attach
+ * to), and only the nested rows of the dragged child's own parent block.
  * The dragged row's own children and every other block are hidden, so each
- * visible row is either top-level or a sibling of the dragged child.
+ * visible row is top-level, an ancestor, or a sibling of the dragged child.
  */
 export function dragVisibleRows(
   full: readonly SectionRow[],
   activeId: string,
 ): SectionRow[] {
-  const ownParent = full.find((row) => row.id === activeId)?.parentId;
+  const byId = new Map(full.map((row) => [row.id, row] as const));
+  const ownParent = byId.get(activeId)?.parentId;
+  const ancestors = new Set<string>();
+  for (
+    let id = ownParent;
+    id !== undefined && !ancestors.has(id);
+    id = byId.get(id)?.parentId
+  ) {
+    ancestors.add(id);
+  }
   return full.filter(
     (row) =>
-      !row.nested || (ownParent !== undefined && row.parentId === ownParent),
+      !row.nested ||
+      ancestors.has(row.id) ||
+      (ownParent !== undefined && row.parentId === ownParent),
   );
 }
 
@@ -193,19 +205,19 @@ export function projectTaskDrop(
 
   const movedIds = new Set(moved.map((row) => row.id));
   const sequence: string[] = [];
-  for (const row of moved) {
-    sequence.push(row.id);
-    const isTop = row.id === activeId ? attached !== true : !row.nested;
-    if (!isTop) continue;
+  // A row's hidden descendants (not in `moved`) follow it, whole subtree, in
+  // their expanded order.
+  const appendBelow = (rowId: string): void => {
     for (const child of full) {
-      if (
-        child.nested &&
-        child.parentId === row.id &&
-        !movedIds.has(child.id)
-      ) {
+      if (child.nested && child.parentId === rowId && !movedIds.has(child.id)) {
         sequence.push(child.id);
+        appendBelow(child.id);
       }
     }
+  };
+  for (const row of moved) {
+    sequence.push(row.id);
+    appendBelow(row.id);
   }
   const changed =
     !sameSequence(

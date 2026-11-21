@@ -194,6 +194,7 @@ import {
   sessionSizes,
   setProgramStatusListener,
   setReadyUrlListener,
+  stopTaskAgent,
   tapPrimaryOutput,
   writeToPrimarySession,
   writeToSession,
@@ -213,6 +214,7 @@ import {
 } from "./review-transport";
 import { getLastUncleanExit, listRecentCrashReports } from "./run-sentinel";
 import { createSpawnHostRunner } from "./spawn-host-client";
+import { stopTaskAgents } from "./stop-task-agents";
 import { systemFetch } from "./system-fetch";
 import { registerTerminalHostIpc } from "./terminal-host-ipc";
 import {
@@ -1187,6 +1189,7 @@ function registerCoreIpc(): void {
       const force = {
         confirmed: options?.force?.confirmed === true,
         leaveChildren: options?.force?.leaveChildren === true,
+        stopDescendants: options?.force?.stopDescendants === true,
       };
       if (!force.confirmed) {
         // The question only. A closed tab's warm pi is no pane the user can
@@ -1205,6 +1208,23 @@ function registerCoreIpc(): void {
       // renderer closes the task's panes too) so nothing keeps the worktree
       // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
+      // "Also stop these N tasks": the agents of every active task below
+      // go (their tasks stay on the board, worktrees untouched).
+      if (force.stopDescendants) {
+        const active = (await core.commands.listDescendants(taskId)).filter(
+          (descendant) => descendant.state !== "done",
+        );
+        await stopTaskAgents(
+          active.map((descendant) => descendant.id),
+          {
+            isMidTurn: async (id) =>
+              (await harness.presence(id)).runningTurn === true,
+            markInterrupted: (ids) =>
+              core.commands.markLaunchesInterrupted(ids),
+            stop: stopTaskAgent,
+          },
+        );
+      }
       const [task, binding] = await Promise.all([
         core.commands.getTask(taskId).catch(() => undefined),
         core.commands.getTaskWorkspace(taskId).catch(() => undefined),

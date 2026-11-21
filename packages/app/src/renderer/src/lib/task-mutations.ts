@@ -13,7 +13,11 @@ import type {
   ToAwaitOptions,
   ToDoneForce,
 } from "../../../preload/api";
-import { requestConfirm } from "../confirm";
+import {
+  type ConfirmOption,
+  requestConfirm,
+  requestConfirmWithOption,
+} from "../confirm";
 import { describeThrown, pushToast } from "../toast";
 import {
   doneLosesCommentsLine,
@@ -91,6 +95,45 @@ export function subscribeTaskPanesClosing(
   };
 }
 
+/**
+ * The "Complete with active tasks below?" question (docs/task-trees.md
+ * decision 12): every active task below is listed, and the opt-in checkbox
+ * "Also stop these N tasks" carries the warning. Unchecked by default; the
+ * confirm bus resets it every time the dialog opens.
+ */
+export function activeTasksQuestion(
+  tasks: readonly { id: string; title: string }[],
+  detail: string,
+): {
+  question: {
+    title: string;
+    message: string;
+    lines: string[];
+    confirmLabel: string;
+  };
+  option: ConfirmOption;
+} {
+  const count = tasks.length;
+  return {
+    question: {
+      title: "Complete with active tasks below?",
+      message:
+        count > 0
+          ? `${count} task${count === 1 ? " is" : "s are"} still active below it. They keep running and stay nested under it once it's Done.`
+          : `They keep running and stay nested under it once it's Done. (${detail})`,
+      lines: tasks.map((task) => `\u2022 ${task.title}`),
+      confirmLabel: "Complete anyway",
+    },
+    option: {
+      label:
+        count === 1 ? "Also stop this task" : `Also stop these ${count} tasks`,
+      warning:
+        "Their agents are interrupted mid-work. The tasks stay on the board; worktrees and uncommitted changes are left as they are.",
+      testId: "done-stop-descendants",
+    },
+  };
+}
+
 /** What the single Done question looks like (title, button), body lines from core. */
 export const DONE_QUESTION = {
   title: "Mark done?",
@@ -121,17 +164,23 @@ export async function toDoneMutation(taskId: string): Promise<void> {
       if (!("requiresConfirmation" in result)) return;
       if (result.requiresConfirmation === "activeChildren") {
         // Core asks this at most once (the answer accumulates); never loop.
-        if (force.leaveChildren) {
+        if (force.leaveChildren || force.stopDescendants) {
           pushToast(result.detail, "error");
           return;
         }
-        const confirmed = await requestConfirm({
-          title: "Complete with active children?",
-          message: `They keep running and stay nested under it once it's Done. (${result.detail})`,
-          confirmLabel: "Complete anyway",
-        });
-        if (!confirmed) return;
-        force.leaveChildren = true;
+        const question = activeTasksQuestion(
+          result.activeTasks ?? [],
+          result.detail,
+        );
+        const answer = await requestConfirmWithOption(
+          question.question,
+          question.option,
+        );
+        if (!answer.confirmed) return;
+        // Ticked: their agents are stopped (main does it when the Done is
+        // confirmed); either way the tasks stay on the board.
+        if (answer.checked) force.stopDescendants = true;
+        else force.leaveChildren = true;
         continue;
       }
       if (force.confirmed) {
