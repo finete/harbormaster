@@ -281,6 +281,17 @@ difference not listed here is a bug.
   still asks about unsent comments). Archiving a task already Done ends
   nothing in its worktree; its Done cleanup already ran or keeps retrying.
   Reopen (or any move out of Done) clears the flag.
+- **Every Done task is resumable; opening one never resumes it by
+  itself.** Done cleanup leaves nothing to run in, so a Done or archived
+  task's workspace (a card or rail row click) shows a Resume card instead
+  of a pane: no stray plain shell in the app's cwd. Resume (focused, so
+  Enter) is Reopen without the objective question: back to Working in a
+  fresh branch + worktree (a folder task in its folder, a scratch task in
+  its scratch directory, which Done only parked) and the workspace's first
+  pane forks or resumes the previous conversation. A Done card dropped on
+  Working is the same reopen, as Backlog → Working is Start; a bare move
+  would leave a Working task with no worktree. A Done task whose cleanup
+  left its worktree in place still opens its agent there.
 - **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at
