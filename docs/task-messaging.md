@@ -1,6 +1,8 @@
 # Task messaging: tasks steering tasks
 
-Status: agreed design (grilled 2026-10-26), replaces the earlier
+Status: agreed design (grilled 2026-10-26); decisions 2 and 10 are revised by
+`docs/task-trees.md` (which tasks message directly, and the per-pair loop
+cap). Replaces the earlier
 "report-and-poll only; no parent↔child messaging" rule. Researched against
 pi-subagents (`subagent` steer + `contact_supervisor`), Codex multi-agent
 (`send_input` / `send_message` / `followup_task`), Claude Code agent teams
@@ -13,10 +15,10 @@ pi-subagents (`subagent` steer + `contact_supervisor`), Codex multi-agent
 | # | Decision |
 |---|---|
 | 1 | **The need:** "tell task X to do Y" in plain words from whatever session the user is in (any task or a plain Pi session), plus parent↔child steering. |
-| 2 | **Approval policy** by route (core decides the route, never the agent): |
-|   | • *parent → its own child*: no approval; the parent may steer on its own initiative. |
-|   | • *child → its parent*: no approval; a question (see 3). |
-|   | • *anything else* (sibling, standalone, unrelated task, non-task Pi session sender): **user approval in the Harbormaster app**. |
+| 2 | **Approval policy** by route (core decides the route, never the agent; revised by `docs/task-trees.md` decisions 1, 2, 15): |
+|   | • *a task and its own parent* (either direction): no approval, always. |
+|   | • *any other task → task send*: no approval when the user's setting `messaging.directRoutes` allows it (`parent-and-child`: nothing more; `same-task-tree`, the default: any two tasks under the same top-level task; `any-task`: any two tasks) or when the pair has a grant ("Approve and allow both ways", ends when either task is Done or deleted, removable from either task's menu). Otherwise **user approval in the Harbormaster app**. |
+|   | • *non-task senders* (a plain Pi session, a rule `message` action): always user approval. |
 | 3 | **Child asks parent:** the child sends its question and ends its turn (no blocking tool call). The parent answers by steering the child, or asks the user. Guardrails: sending fails when the parent is not running or is Done (the child then stops and asks the user), and fails when the child's own harness cannot receive (the answer could never arrive). The parent's prompt says: answer only what your brief/context settles; product or scope decisions go to the user. |
 | 4 | **Delivery timing:** the sender requests `steer` (lands after the current assistant turn's tool calls) or `followUp` (lands once the target finished its pending work). Defaults: parent→child `steer`, child→parent `followUp`, approval route `steer` (the approval card can switch it). Each harness adapter declares what it can deliver; an unsupported `steer` falls back to `followUp`; a harness that cannot receive at all makes the send **fail clearly**. Core records requested and actual mode. No hard interrupt. |
 | 5 | **Target states:** running / your move → deliver. Queued launch → held, delivered right after the session starts. Not running / interrupted → **woken** by the app's background launcher (resumes the session without a pane, respects `maxConcurrent`; waits for the app when it is closed). Done → reject. Backlog → reject (no session yet). No workspace binding → reject (it can never host a session). Child→parent is the exception: a not-running parent rejects. |
@@ -24,7 +26,7 @@ pi-subagents (`subagent` steer + `contact_supervisor`), Codex multi-agent
 | 7 | **Non-task senders** (a plain Pi session) may send; every such send goes through approval, labelled "Pi session in `<cwd>`". No result is delivered back (no inbox). |
 | 8 | **Approval UI:** an approval is a Priority item in the app's inbox view (docs/release-plan.md "Inbox"; revised from the original header badge + side sheet): its detail pane shows sender → target, the exact text (editable), mode toggle, attachment thumbnails, Approve / Reject. The target's board card and sidebar row show a "message awaiting approval" chip. Nothing pops up or steals focus. The result (approved / edited / rejected) is delivered back to a task sender as a `followUp`. |
 | 9 | **Waiting on parent:** after a child's question, the child shows a neutral "waiting on parent" state (not amber), with the question as a secondary line; the parent shows a "child asked a question" chip. The parent's chip ends as soon as it replies (a reply still pending while the child finishes its turn already answers it from the parent's side). The child's state ends when: a parent→child message is delivered (back to normal); the parent stops running or is Done (amber immediately); the user types into the child (cleared); or `messaging.parentReplyTimeoutMinutes` (default **30**) passes **counted from delivery to the parent** (amber). |
-| 10 | **Loop cap:** only autonomous lineage messages (parent→child, child→parent) count, both directions, per parent–child pair; approved sends and receipts never count. The counter resets whenever the user types into either task. At **8** (`messaging.loopCap`) the send fails with "message cap reached between X and Y; ask the user" and a chip shows it. |
+| 10 | **Loop cap:** every directly delivered task → task message counts (parent, child, setting-allowed and granted pairs), per unordered pair, both directions; approved sends and receipts never count. The counter resets whenever the user types into either task. At **8** (`messaging.loopCap`) the send fails with "message cap reached between X and Y; ask the user" and a chip shows it on both tasks. |
 | 11 | **Content:** text plus optional attachment paths. Core **copies** attachments at send time into `<stateDir>/messages/attachments/<messageId>/` (≤ 10 MB each, ≤ 8 files) so temp-dir cleanup or worktree removal cannot break a held message. On the wire it is always text with the copies' absolute paths; adapters that support images (Pi) also inline them. |
 | 12 | **Retention:** message records forever (they feed the future central prompt view). Attachment files pruned 30 days after both the sender task and the target task are Done (a non-task sender counts as Done); the record keeps `prunedAt`. |
 | 13 | **Delivery mechanics:** the target's own harness integration reads its task's inbox (subscribe + atomic claim) and delivers natively. The app only wakes not-running targets, hosts the approval inbox, and prunes. No pty typing, no new app↔extension IPC. (One exception outside messaging: the Review button types its slash command into the task's primary pty when the agent is at its prompt; see docs/plannotator.md "Review button". A second: Codex's idle wake-up is a `codex queue` the app runs, typed into the pane only when unconfirmed after 60 s; docs/harness-additions.md X5. A third: Cursor has no outside channel at all, so an idle Cursor session's pending messages are typed into its pane at its prompt; C4.) |
@@ -96,6 +98,7 @@ export type MessageSender =
 export type MessageRoute =
   | "parent-to-child"   // no approval, counts toward the loop cap
   | "child-to-parent"   // no approval, a question, counts toward the loop cap
+  | "task-to-task"    // no approval: the setting or a pair grant allows it; counts toward the loop cap
   | "approval"          // everything else: needs the user's approval
   | "receipt";          // approval result back to a task sender
 
@@ -222,11 +225,13 @@ pruneMessageAttachments(): Promise<number>;
 ```
 
 Send-time rules (in order): sender ≠ target; target exists and is not
-Done/Backlog; route from lineage (`target.parentTaskId === sender` →
-parent-to-child; `sender.parentTaskId === target` → child-to-parent; else
-approval; non-task senders always approval); child-to-parent requires the
+Done/Backlog; route from lineage, the `messaging.directRoutes` setting and
+pair grants (`target.parentTaskId === sender` → parent-to-child;
+`sender.parentTaskId === target` → child-to-parent; another pair the setting
+or a grant allows → task-to-task; else approval; non-task senders always
+approval); child-to-parent requires the
 parent live and not Done and the child's harness able to receive; the
-target's harness must be able to receive; lineage routes check the loop cap;
+target's harness must be able to receive; every direct route checks the per-pair loop cap;
 attachments validated and copied. Approval-route messages start
 `awaiting_approval`; others start `pending`. Approve re-checks the target
 (Done → `failed`). Approve/reject of a task sender's message enqueues a
@@ -270,9 +275,10 @@ session).
 - `find_tasks({ query, includeDone? })` → `findTasks`.
 - `send_to_task({ taskId, message, mode?, attachments? })` →
   `sendTaskMessage`, with `from` = the calling task, else
-  `{ kind: "session", cwd, sessionId }`. The description states the
-  approval rule ("only when the user explicitly asked, for non-lineage
-  targets"), exact ids only, "after asking your parent, end your turn".
+  `{ kind: "session", cwd, sessionId }`. The description says the route
+  depends on the user's setting (`find_tasks` marks each task `direct` or
+  `needs approval`; send approval-route messages only when the user
+  explicitly asked), exact ids only, "after asking your parent, end your turn".
 - `inbox_claim({ idle? })` → `claimInboxMessages`, returned already
   formatted (`tools/inbox-format.ts`): a header naming the sender and
   route, the text, attachment paths (image attachments also inlined as

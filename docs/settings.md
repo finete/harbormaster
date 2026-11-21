@@ -52,8 +52,9 @@ inherited or locked.
 | GitHub & sources | GitHub on/off | `sources.github.enabled` | |
 | GitHub & sources | Review requests / mentions / interval | `sources.github.settings.*` | interval shown in minutes |
 | GitHub & sources | Add-on sources | `sources.<id>.*` | automatic forms |
+| Inbox & messaging | Messages between tasks | `messaging.directRoutes` | Parent and child / Same task tree / Any task; default Same task tree |
 | Inbox & messaging | Parent reply timeout | `messaging.parentReplyTimeoutMinutes` | default 30 |
-| Inbox & messaging | Message loop cap | `messaging.loopCap` | default 8 |
+| Inbox & messaging | Message loop cap | `messaging.loopCap` | default 8; per pair of tasks talking directly |
 | Inbox & messaging | Priority filter | `inbox.priorityFilter` | "Edit in config.json" only |
 | (Notifications) | Desktop notifications | new (e.g. `notifications.enabled`) | section: General unless a better home emerges |
 
