@@ -7,6 +7,7 @@
 // later means "replaced". A missing one (mid-swap, or uninstalled) does not:
 // the next check looks again.
 import { readFileSync, statSync } from "node:fs";
+import { midTurnRestartWarning } from "../shared/mid-turn";
 
 export interface BundleStamp {
   ino: number;
@@ -78,5 +79,54 @@ export function createAppBundleGuard(input: {
       if (!current || sameStamp(initial, current)) return undefined;
       return { installedVersion: installedVersion() };
     },
+  };
+}
+
+export type ReplacedAppChoice = "restart" | "quit" | "cancel";
+
+export interface ReplacedAppPrompt {
+  message: string;
+  detail: string;
+  buttons: string[];
+  /** What each of `buttons` does, by index. */
+  choices: ReplacedAppChoice[];
+  defaultId: number;
+  cancelId: number;
+}
+
+/**
+ * The native question shown instead of loading a window from a replaced app.
+ * With agents mid-turn it warns like the update card and offers Cancel, which
+ * keeps them running and loads nothing.
+ */
+export function replacedAppPrompt(
+  update: { version: string | null; runningVersion: string },
+  midTurn: number,
+): ReplacedAppPrompt {
+  const reinstalled = update.version === update.runningVersion;
+  const message = reinstalled
+    ? "Harbormaster was reinstalled while it was running."
+    : update.version
+      ? `Harbormaster ${update.version} was installed while ${update.runningVersion} was running.`
+      : "Harbormaster was updated while it was running.";
+  if (midTurn > 0) {
+    return {
+      message,
+      detail: midTurnRestartWarning(midTurn),
+      buttons: ["Restart anyway", "Cancel"],
+      choices: ["restart", "cancel"],
+      defaultId: 1,
+      cancelId: 1,
+    };
+  }
+  return {
+    message,
+    detail: reinstalled
+      ? "Restart to keep things working."
+      : "Restart to open the new version.",
+    buttons: ["Restart", "Quit"],
+    choices: ["restart", "quit"],
+    defaultId: 0,
+    cancelId: 1,
   };
 }

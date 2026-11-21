@@ -1,6 +1,7 @@
 import { ArrowUpCircle, Check, Copy, RotateCw, X } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
 import type { InstalledUpdate, UpdateInfo } from "../../../preload/api";
+import { midTurnRestartWarning } from "../../../shared/mid-turn";
 import { usePresenceMap } from "../core-client";
 
 /** Dismissing hides the banner for that version only; a newer release shows again. */
@@ -186,7 +187,7 @@ function RestartCard({
           <p className="font-medium">{title}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {asking
-              ? `${midTurn === 1 ? "An agent is" : `${midTurn} agents are`} mid-turn; restarting interrupts ${midTurn === 1 ? "it" : "them"}.`
+              ? midTurnRestartWarning(midTurn)
               : `${detail} Restarting stops running agents.`}
           </p>
         </div>

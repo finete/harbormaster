@@ -4,7 +4,8 @@
 // a CPU profile (the bundle must carry it, plus the runtime files: ptys,
 // agent `ps`, session files, the renderer's long frames and focus), then the
 // card's Restart once a fake app bundle is swapped under the running app,
-// which asks first while a (fake) Claude Code agent is mid-turn.
+// which asks first while a (fake) Claude Code agent is mid-turn, as does
+// Reload's native question.
 // One launch covers all three seams;
 // semver comparison, redaction and the zip format are unit-tested
 // (tests/update-check.test.ts, tests/diagnostics.test.ts).
@@ -346,7 +347,7 @@ async function startMidTurnClaudeChat(title: string): Promise<Task> {
 }
 
 // Last: Restart quits the app.
-test("an app replaced on disk while running turns the card into Restart, which asks first while an agent is mid-turn, then quits", async () => {
+test("an app replaced on disk while running turns the card into Restart, which (like Reload's native question) asks first while an agent is mid-turn, then quits", async () => {
   expect(
     await window.evaluate(() => window.harbormaster.app.getInstalledUpdate()),
   ).toBeNull();
@@ -369,6 +370,50 @@ test("an app replaced on disk while running turns the card into Restart, which a
   await expect(card).toContainText(
     "An agent is mid-turn; restarting interrupts it.",
   );
+  expect(mainOutput).not.toContain("[main] restart requested");
+
+  // Reload can't load a replaced app either, so it asks natively; Cancel
+  // leaves the agent running and the window as it was.
+  await app.evaluate(({ dialog }) => {
+    const prompts: { detail?: string; buttons?: string[] }[] = [];
+    (globalThis as unknown as { __prompts: typeof prompts }).__prompts =
+      prompts;
+    dialog.showMessageBoxSync = ((
+      ...args: { detail?: string; buttons?: string[]; cancelId?: number }[]
+    ) => {
+      const options = args[args.length - 1];
+      prompts.push({ detail: options.detail, buttons: options.buttons });
+      return options.cancelId ?? 0;
+    }) as typeof dialog.showMessageBoxSync;
+  });
+  await window.evaluate(() => {
+    (window as unknown as { __notReloaded: boolean }).__notReloaded = true;
+  });
+  await app.evaluate(({ BrowserWindow, Menu }) => {
+    Menu.getApplicationMenu()
+      ?.getMenuItemById("reload")
+      ?.click(undefined, BrowserWindow.getAllWindows()[0]);
+  });
+  expect(
+    await app.evaluate(
+      () =>
+        (
+          globalThis as unknown as {
+            __prompts: { detail?: string; buttons?: string[] }[];
+          }
+        ).__prompts,
+    ),
+  ).toEqual([
+    {
+      detail: "An agent is mid-turn; restarting interrupts it.",
+      buttons: ["Restart anyway", "Cancel"],
+    },
+  ]);
+  expect(
+    await window.evaluate(
+      () => (window as unknown as { __notReloaded?: boolean }).__notReloaded,
+    ),
+  ).toBe(true);
   expect(mainOutput).not.toContain("[main] restart requested");
 
   const exited = new Promise((resolve) => app.process().once("exit", resolve));

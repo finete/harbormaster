@@ -704,7 +704,7 @@ export interface HarbormasterApi {
     onUpdateAvailable(listener: (update: UpdateInfo) => void): () => void;
     /** A newer copy of the app installed over this running one, or `null`. */
     getInstalledUpdate(): Promise<InstalledUpdate | null>;
-    /** Main noticed the installed app was replaced (checked on window focus). */
+    /** Main noticed the installed app was replaced (checked on window focus and every 5 s). */
     onInstalledUpdate(listener: (update: InstalledUpdate) => void): () => void;
     /** Quits and relaunches into the installed app. */
     restartToUpdate(): Promise<void>;

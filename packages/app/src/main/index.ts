@@ -90,7 +90,7 @@ import {
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
-import { createAppBundleGuard } from "./app-bundle-guard";
+import { createAppBundleGuard, replacedAppPrompt } from "./app-bundle-guard";
 import { appClipboard } from "./app-clipboard";
 import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
@@ -2723,30 +2723,28 @@ function restartIntoInstalledApp(): void {
 /**
  * A window about to load (dock click with none open, Reload) would render
  * garbage from a replaced app, and there is no working window to show the
- * update card in: asks Restart or Quit natively instead. Returns `true`
- * when the app is quitting.
+ * update card in: asks natively instead (`replacedAppPrompt`). Returns
+ * `true` when the caller must not load the window.
  */
 function restartIfBundleReplaced(): boolean {
   const update = checkInstalledUpdate();
   if (!update) return false;
-  const reinstalled = update.version === update.runningVersion;
-  const choice = dialog.showMessageBoxSync({
-    type: "info",
-    message: reinstalled
-      ? "Harbormaster was reinstalled while it was running."
-      : update.version
-        ? `Harbormaster ${update.version} was installed while ${update.runningVersion} was running.`
-        : "Harbormaster was updated while it was running.",
-    detail: reinstalled
-      ? "Restart to keep things working."
-      : "Restart to open the new version.",
-    buttons: ["Restart", "Quit"],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  });
-  if (choice === 0) restartIntoInstalledApp();
-  else app.quit();
+  const prompt = replacedAppPrompt(update, runningTaskIds.size);
+  const choice =
+    prompt.choices[
+      dialog.showMessageBoxSync({
+        type: "info",
+        message: prompt.message,
+        detail: prompt.detail,
+        buttons: prompt.buttons,
+        defaultId: prompt.defaultId,
+        cancelId: prompt.cancelId,
+        noLink: true,
+      })
+    ];
+  if (choice === "restart") restartIntoInstalledApp();
+  else if (choice === "quit") app.quit();
+  else console.log("[main] restart cancelled: agents are mid-turn");
   return true;
 }
 
@@ -3048,11 +3046,12 @@ function installApplicationMenu(): void {
       label: "View",
       submenu: [
         {
+          id: "reload",
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
-          click: () => {
+          click: (_item, win) => {
             if (restartIfBundleReplaced()) return;
-            BrowserWindow.getFocusedWindow()?.webContents.reload();
+            if (win instanceof BrowserWindow) win.webContents.reload();
           },
         },
         { role: "toggleDevTools" },
@@ -3273,7 +3272,12 @@ app.on("window-all-closed", () => {
   // launches are marked interrupted first, exactly like a real quit.
   void interruptMidTurnLaunches()
     .catch(() => {})
-    .finally(() => disposeAllSessions());
+    .finally(() => {
+      disposeAllSessions();
+      // Polling stops with the last window; a dock click's restart question
+      // must not count agents that were just stopped.
+      runningTaskIds = new Set();
+    });
 });
 
 /**

@@ -4,6 +4,7 @@ import {
   type BundleStamp,
   createAppBundleGuard,
   plistVersion,
+  replacedAppPrompt,
 } from "../src/main/app-bundle-guard";
 
 const EXE = "/Applications/Harbormaster.app/Contents/MacOS/Harbormaster";
@@ -82,5 +83,49 @@ describe("plistVersion", () => {
     expect(
       plistVersion("<key>CFBundleVersion</key><string>9</string>"),
     ).toBeUndefined();
+  });
+});
+
+describe("replacedAppPrompt", () => {
+  it.each([
+    {
+      update: { version: "0.7.1", runningVersion: "0.6.0" },
+      message: "Harbormaster 0.7.1 was installed while 0.6.0 was running.",
+      detail: "Restart to open the new version.",
+    },
+    {
+      update: { version: "0.6.0", runningVersion: "0.6.0" },
+      message: "Harbormaster was reinstalled while it was running.",
+      detail: "Restart to keep things working.",
+    },
+    {
+      update: { version: null, runningVersion: "0.6.0" },
+      message: "Harbormaster was updated while it was running.",
+      detail: "Restart to open the new version.",
+    },
+  ])("with no agent mid-turn: $message", ({ update, message, detail }) => {
+    const prompt = replacedAppPrompt(update, 0);
+    expect(prompt).toMatchObject({
+      message,
+      detail,
+      buttons: ["Restart", "Quit"],
+    });
+    expect(prompt.choices[prompt.defaultId]).toBe("restart");
+    expect(prompt.choices[prompt.cancelId]).toBe("quit");
+  });
+
+  it.each([
+    [1, "An agent is mid-turn; restarting interrupts it."],
+    [2, "2 agents are mid-turn; restarting interrupts them."],
+  ])("with %i mid-turn, warns and defaults to Cancel", (count, detail) => {
+    const prompt = replacedAppPrompt(
+      { version: "0.7.1", runningVersion: "0.6.0" },
+      count,
+    );
+    expect(prompt.detail).toBe(detail);
+    expect(prompt.buttons).toEqual(["Restart anyway", "Cancel"]);
+    expect(prompt.choices[prompt.defaultId]).toBe("cancel");
+    expect(prompt.choices[prompt.cancelId]).toBe("cancel");
+    expect(prompt.choices[0]).toBe("restart");
   });
 });
