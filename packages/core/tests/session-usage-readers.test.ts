@@ -166,6 +166,23 @@ describe("Claude Code readSessionUsage", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("lists the session's subagent transcripts for the change check", async () => {
+    await expect(
+      claude.extraUsageFiles(join(FIXTURES, "claude", `${SID}.jsonl`)),
+    ).resolves.toEqual([
+      join(
+        FIXTURES,
+        "claude",
+        SID,
+        "subagents",
+        "agent-a1b2c3d4e5f6a7b8.jsonl",
+      ),
+    ]);
+    await expect(
+      claude.extraUsageFiles(join(FIXTURES, "claude", "missing.jsonl")),
+    ).resolves.toEqual([]);
+  });
+
   it("locates a session's transcript under the cwd's project slug", () => {
     const adapter = new ClaudeCodeHarnessAdapter({
       presence: noPresence,

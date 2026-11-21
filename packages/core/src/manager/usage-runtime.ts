@@ -30,6 +30,13 @@ import { logErrorMessage } from "../utilities/timed.js";
 /** Tasks per backfill-drain batch: one board push per batch at most. */
 const DRAIN_BATCH = 16;
 const BACKFILL_CONCURRENCY = 4;
+/**
+ * The refresh tick re-parses a counted task's changed files only once the
+ * newest has been quiet this long: a working agent's transcript changes on
+ * nearly every tick, and the parse is synchronous on the app's main process
+ * (~2.5 ms per MB). Turn ends recount right away (a `stop` boundary).
+ */
+const TICK_QUIET_MS = 15_000;
 
 /** Let other work (IPC, timers, a refresh) run between drain batches. */
 function yieldToEventLoop(): Promise<void> {
@@ -60,6 +67,11 @@ export interface UpdateUsageOptions {
   binding?: WorkspaceBinding;
   /** Emit `task-changed` when the usage changed (default true). */
   publish?: boolean;
+  /**
+   * Keep a `ready` usage while its newest file changed less than this long
+   * ago (ms): no re-parse until the files go quiet (the refresh tick).
+   */
+  quietMs?: number;
 }
 
 /** `computeUsage` outcome: nothing to report yet, the stored usage still holds, or a new one. */
@@ -76,8 +88,14 @@ function sameUsage(a: TaskUsage | undefined, b: TaskUsage): boolean {
 }
 
 export class UsageRuntime {
-  /** One computation per task at a time (a trigger mid-run joins it). */
-  private readonly inFlight = new Map<string, Promise<TaskUsage | undefined>>();
+  /**
+   * One computation per task at a time (a trigger mid-run joins it);
+   * `quiet` marks a run that may skip fresh files (`quietMs`).
+   */
+  private readonly inFlight = new Map<
+    string,
+    { run: Promise<TaskUsage | undefined>; quiet: boolean }
+  >();
   /** The backfill drain in flight (single-flight, see `drain`). */
   private draining: Promise<void> | undefined;
   /** Ready tasks already queued once for a missing `lastActivityAt` (never retried this process). */
@@ -91,25 +109,38 @@ export class UsageRuntime {
     options: UpdateUsageOptions = {},
   ): Promise<TaskUsage | undefined> {
     const running = this.inFlight.get(taskId);
-    if (running && !options.force) return running;
+    const quiet = options.quietMs !== undefined;
+    // A quiet-gated run (the tick) may skip a fresh change, so a caller
+    // without the gate (a turn end) starts its own instead of joining it.
+    if (running && !options.force && (quiet || !running.quiet)) {
+      return running.run;
+    }
     const run = this.runUpdate(taskId, options).finally(() => {
-      if (this.inFlight.get(taskId) === run) this.inFlight.delete(taskId);
+      if (this.inFlight.get(taskId)?.run === run) this.inFlight.delete(taskId);
     });
-    this.inFlight.set(taskId, run);
+    this.inFlight.set(taskId, { run, quiet });
     return run;
   }
 
   /**
-   * One refresh tick's re-check of tasks still `pending` (a session being
-   * written; cheap). Awaited by the refresh. Resolves with whether any
-   * task changed. Never-computed tasks are the drain's (see `drain`).
+   * One refresh tick's re-check of tasks still being worked on: `pending`
+   * ones (a session not written yet) and `ready` ones not Done (the agent
+   * may have run turns since the last count, docs/costs.md follow-up 6).
+   * Cheap: unchanged files are only stat'ed, and changed ones of a counted
+   * task are re-parsed only once quiet (`TICK_QUIET_MS`). Awaited by the
+   * refresh. Resolves with whether any task changed. Never-computed tasks
+   * are the drain's (see `drain`).
    */
-  async recheckPending(
+  async recheckOpen(
     tasks: readonly Task[],
     bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
   ): Promise<boolean> {
-    const pending = tasks.filter((task) => task.usage?.status === "pending");
-    return this.computeAll(pending, bindingFor);
+    const open = tasks.filter(
+      (task) =>
+        task.usage?.status === "pending" ||
+        (task.usage?.status === "ready" && task.state !== "done"),
+    );
+    return this.computeAll(open, bindingFor, { quietMs: TICK_QUIET_MS });
   }
 
   /**
@@ -180,12 +211,14 @@ export class UsageRuntime {
   private async computeAll(
     tasks: readonly Task[],
     bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
+    options: Pick<UpdateUsageOptions, "quietMs"> = {},
   ): Promise<boolean> {
     let changed = false;
     await forEachConcurrently(tasks, BACKFILL_CONCURRENCY, async (task) => {
       const before = task.usage;
       const binding = await bindingFor(task.id);
       const after = await this.update(task.id, {
+        ...options,
         publish: false,
         ...(binding ? { binding } : {}),
       });
@@ -255,8 +288,23 @@ export class UsageRuntime {
         : { kind: "none" };
     }
 
+    // The change check also covers files the reader counts besides the
+    // sessions (Claude Code's subagent transcripts): a subagent can run
+    // for minutes while the main transcript stays quiet.
+    const extra =
+      adapter.extraUsageFiles && this.deps.sessions.stat
+        ? (
+            await Promise.all(
+              paths.map((path) =>
+                (adapter.extraUsageFiles?.(path) ?? Promise.resolve([])).catch(
+                  (): string[] => [],
+                ),
+              ),
+            )
+          ).flat()
+        : [];
     const stats = await Promise.all(
-      paths.map(async (sessionPath) => ({
+      [...paths, ...extra].map(async (sessionPath) => ({
         sessionPath,
         stat: this.deps.sessions.stat
           ? await this.deps.sessions.stat(sessionPath).catch(() => undefined)
@@ -278,6 +326,16 @@ export class UsageRuntime {
       if (lastActivityAt && task.usage.lastActivityAt !== lastActivityAt) {
         return { kind: "usage", usage: { ...task.usage, lastActivityAt } };
       }
+      return { kind: "unchanged" };
+    }
+    if (
+      !options.force &&
+      options.quietMs !== undefined &&
+      task.usage?.status === "ready" &&
+      lastActivityAt &&
+      Date.parse(now) - Date.parse(lastActivityAt) < options.quietMs
+    ) {
+      // Still being written (an agent mid-turn): count it once it is quiet.
       return { kind: "unchanged" };
     }
 
