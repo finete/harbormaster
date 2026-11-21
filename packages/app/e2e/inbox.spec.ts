@@ -217,7 +217,7 @@ const row = (kind: string, text?: string): Locator => {
   return text ? byKind.filter({ hasText: text }) : byKind;
 };
 
-test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc) and Create review task", async () => {
+test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc), Create review task and opening a task clears its done item", async () => {
   const asker = await startAgentChat("Asker");
   const idler = await startAgentChat("Idler");
   asker.report(
@@ -355,14 +355,13 @@ test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc) and Create re
   await window.keyboard.press("Escape");
   await expect(window.getByTestId("board-view")).toBeVisible();
   await expect(window.getByTestId("inbox-view")).toHaveCount(0);
-});
 
-test("opening a task clears its done item and keeps another task's question", async () => {
-  // The first test ended on the board; the workspace brings the sidebar back.
+  // Opening a task clears its done item but keeps another task's question.
+  // The board hides the sidebar; the workspace brings it back.
   await window.getByTestId("workspace-button").click();
   const finisher = await startAgentChat("Finisher");
   finisher.report("state=done");
-  // The question from the first test (Asker) is still waiting on the user.
+  // Asker's question (re-asked above) is still waiting on the user.
   await window.keyboard.press(`${MOD}+i`);
   await expect(window.getByTestId("inbox-view")).toBeVisible();
   await expect(row("asked", "Which cache?")).toBeVisible();
