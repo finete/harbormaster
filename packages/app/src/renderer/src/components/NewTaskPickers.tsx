@@ -698,7 +698,7 @@ export type OptionsView = "main" | "parent";
  * (decision R7: whether a *Run in background* launch skips the agent's
  * permission prompts; starts on the repository / app default, never
  * sticky; Start & open never bypasses) and "Parent task" (the searchable
- * task picker, one level only). The chip's label lists the values that
+ * task picker). The chip's label lists the values that
  * differ from the default, e.g. `Options · parent: Fix MEV`.
  */
 export function OptionsPicker({

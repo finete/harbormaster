@@ -510,7 +510,7 @@ export interface HarbormasterApi {
     launchTask(input: LaunchTaskInput): Promise<Task>;
     /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
     listChildren(parentTaskId: string): Promise<Task[]>;
-    /** Nest an existing task under `parentTaskId`, or make it standalone with `null` (one level only). See `CoreCommands.setTaskParent`. */
+    /** Nest an existing task under `parentTaskId`, or make it standalone with `null`, with its whole subtree. See `CoreCommands.setTaskParent`. */
     setTaskParent(taskId: string, parentTaskId: string | null): Promise<Task>;
     /** Every task with computed usage, filtered by `query`, most tokens first; parents carry their children's roll-up (docs/costs.md). See `CoreCommands.listTaskUsage`. */
     listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;

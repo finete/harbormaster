@@ -196,8 +196,8 @@ export interface CreateTaskInput extends TaskAgentInput {
   folderPath?: string;
   /**
    * Nest under this task (`Task.parentTaskId`), like `launchTask`'s `child`
-   * relation but without a background launch or kickoff contract. One level
-   * only.
+   * relation but without a background launch or kickoff contract. Refused
+   * when that task is already at `launch.maxNestingDepth`.
    */
   parentTaskId?: string;
   /** Branch the worktree off this ref instead of the repository's default branch. Kept for a parked task. */
