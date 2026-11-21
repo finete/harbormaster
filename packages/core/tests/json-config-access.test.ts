@@ -258,6 +258,25 @@ describe("JsonConfigAccess", () => {
       "maxConcurrent",
     );
 
+    for (const bad of [0, 5, 2.5, "3"]) {
+      await writeFile(
+        path,
+        JSON.stringify({ launch: { maxNestingDepth: bad } }),
+      );
+      await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
+        "maxNestingDepth",
+      );
+    }
+    for (const good of [1, 4]) {
+      await writeFile(
+        path,
+        JSON.stringify({ launch: { maxNestingDepth: good } }),
+      );
+      expect((await new JsonConfigAccess(path).load()).launch).toEqual({
+        maxNestingDepth: good,
+      });
+    }
+
     await writeFile(path, JSON.stringify({ launch: { defaultModel: "" } }));
     await expect(new JsonConfigAccess(path).load()).rejects.toThrow(
       "defaultModel",

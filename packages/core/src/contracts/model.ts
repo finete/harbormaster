@@ -241,11 +241,12 @@ export interface Task {
    * Set for a `child`-launched task (see `CoreCommands.launchTask`): the
    * launching task's id; `createTask`'s `parentTaskId` and
    * `CoreCommands.setTaskParent` set (or clear) it too. Nested under the parent on the board; the parent
-   * can poll it (`listChildren`) and a Done parent with active children
-   * asks for confirmation (`toDone`'s `activeChildren` case). One level
-   * only — a task with `parentTaskId` set can never itself become a parent
-   * (`launchTask` rejects a `child` relation from it, `setTaskParent` a
-   * parent that is itself a child or a task that has children).
+   * can poll it (`listChildren`) and a Done parent with active tasks below
+   * it asks for confirmation (`toDone`'s `activeChildren` case). Trees nest
+   * up to `GlobalConfig.launch.maxNestingDepth` levels (default 3; see
+   * `/docs/task-trees.md`): `launchTask` refuses a `child` relation from a
+   * task already at the max depth, `setTaskParent` moves a task with its
+   * whole subtree and refuses a result deeper than the max or a cycle.
    */
   parentTaskId?: string;
   /**
@@ -482,6 +483,8 @@ export interface GlobalConfig {
   /** Background-task-launch settings (see `/docs/design-decisions.md "Launching tasks from an agent"`). */
   launch?: {
     maxConcurrent?: number;
+    /** Deepest task tree a launch or re-parent may build, 1 to 4 (a top-level task is depth 1; 1 = no children); absent = `DEFAULT_LAUNCH_MAX_NESTING_DEPTH`. */
+    maxNestingDepth?: number;
     /** Applies only to tasks on the default agent (`defaultHarness`); other agents start on their own default. */
     defaultModel?: string;
     /** Agent (harness id) for new tasks (decision R8); absent = `DEFAULT_HARNESS_ID`. */
@@ -517,6 +520,13 @@ export interface GlobalConfig {
 
 /** `launch.maxConcurrent` default when unset: launched tasks whose agent is *running* (see `GlobalConfig.launch`). */
 export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
+
+/** `launch.maxNestingDepth` default when unset (docs/task-trees.md decision 7): children and grandchildren. */
+export const DEFAULT_LAUNCH_MAX_NESTING_DEPTH = 3;
+
+/** `launch.maxNestingDepth` bounds (inclusive). */
+export const MIN_LAUNCH_MAX_NESTING_DEPTH = 1;
+export const MAX_LAUNCH_MAX_NESTING_DEPTH = 4;
 
 /** `launch.bypassPermissions` default (decision R7): launched tasks skip permission prompts. */
 export const DEFAULT_LAUNCH_BYPASS_PERMISSIONS = true;

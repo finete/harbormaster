@@ -23,7 +23,7 @@ import type {
   PullRequestAccess,
   VersionAccess,
 } from "../src/contracts/github.js";
-import type { Clock } from "../src/contracts/index.js";
+import type { Clock, Task } from "../src/contracts/index.js";
 import { type Core, createCore, isToDoneConfirmation } from "../src/index.js";
 import {
   type CaptureLogger,
@@ -146,6 +146,23 @@ async function fixture(): Promise<{
   };
 }
 
+/** Rewrites the fixture's config.json with `launch.maxNestingDepth` set. */
+async function setMaxNestingDepth(
+  f: { stateDir: string },
+  maxNestingDepth: number,
+): Promise<void> {
+  await writeFile(
+    join(f.stateDir, "config.json"),
+    JSON.stringify({
+      automation: false,
+      movers: [],
+      codeRoot: join(f.stateDir, "..", "Code"),
+      branchPrefix: "",
+      launch: { maxNestingDepth },
+    }),
+  );
+}
+
 describe.skipIf(!gitAvailable)("launchTask", () => {
   it("standalone: lands in working, queued, with the kickoff contract appended to the prompt", async () => {
     const f = await fixture();
@@ -229,8 +246,9 @@ describe.skipIf(!gitAvailable)("launchTask", () => {
     expect(await f.core.commands.listChildren(parent.id)).toEqual([child]);
   });
 
-  it("rejects a child launched from a task that already has a parent (one level only)", async () => {
+  it("rejects a child launched from a task already at the max nesting depth", async () => {
     const f = await fixture();
+    await setMaxNestingDepth(f, 2);
     const parent = await f.core.commands.launchTask({
       relation: "standalone",
       title: "Parent",
@@ -252,7 +270,9 @@ describe.skipIf(!gitAvailable)("launchTask", () => {
         prompt: "nope",
         repository: { repositoryId: f.repositoryId },
       }),
-    ).rejects.toThrow(/one level only/);
+    ).rejects.toThrow(
+      "you're at the max nesting depth (2); do the work yourself or launch a standalone task",
+    );
 
     // A child *can* still launch a standalone task.
     const standalone = await f.core.commands.launchTask({
@@ -497,6 +517,7 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
     const f = await fixture();
     expect(await f.core.commands.getLaunchSettings()).toEqual({
       maxConcurrent: 6,
+      maxNestingDepth: 3,
       defaultHarness: "pi",
       bypassPermissions: true,
       customAgents: [],
@@ -519,6 +540,7 @@ describe.skipIf(!gitAvailable)("getLaunchSettings", () => {
     );
     expect(await f.core.commands.getLaunchSettings()).toEqual({
       maxConcurrent: 2,
+      maxNestingDepth: 3,
       defaultModel: "anthropic/claude",
       defaultHarness: "pi",
       bypassPermissions: true,
@@ -719,6 +741,150 @@ describe.skipIf(!gitAvailable)("toDone: activeChildren confirmation", () => {
       force: { confirmed: true },
     });
     expect(isToDoneConfirmation(result)).toBe(false);
+  });
+});
+
+describe.skipIf(!gitAvailable)("task trees: nesting depth", () => {
+  type F = Awaited<ReturnType<typeof fixture>>;
+  const launch = (f: F, title: string, from?: { id: string }): Promise<Task> =>
+    f.core.commands.launchTask({
+      relation: from ? "child" : "standalone",
+      ...(from ? { fromTaskId: from.id } : {}),
+      title,
+      prompt: `${title} work`,
+      repository: { repositoryId: f.repositoryId },
+    });
+
+  it("launches children down to the default max depth (3) and refuses below it; the kickoff names the limit only at the max", async () => {
+    const f = await fixture();
+    const root = await launch(f, "Root");
+    const child = await launch(f, "Child", root);
+    const grandchild = await launch(f, "Grandchild", child);
+    expect(grandchild.parentTaskId).toBe(child.id);
+    expect(root.initialPrompt).not.toContain("nesting depth");
+    expect(child.initialPrompt).not.toContain("nesting depth");
+    // Launched AT depth 3 == the max: one line saying it cannot launch subtasks.
+    expect(grandchild.initialPrompt).toContain(
+      "You are at the max nesting depth (3), so you cannot launch subtasks",
+    );
+    await expect(launch(f, "Great", grandchild)).rejects.toThrow(
+      "you're at the max nesting depth (3); do the work yourself or launch a standalone task",
+    );
+    expect(
+      (await f.core.commands.listDescendants(root.id)).map((t) => t.id),
+    ).toEqual([child.id, grandchild.id]);
+  });
+
+  it("depth 1 allows no children, and its standalone tasks say so in the kickoff", async () => {
+    const f = await fixture();
+    await setMaxNestingDepth(f, 1);
+    const root = await launch(f, "Root");
+    expect(root.initialPrompt).toContain(
+      "You are at the max nesting depth (1)",
+    );
+    await expect(launch(f, "Child", root)).rejects.toThrow(/max nesting depth/);
+  });
+
+  it("lowering the setting never moves or detaches existing tasks; it only blocks new nesting", async () => {
+    const f = await fixture();
+    const root = await launch(f, "Root");
+    const child = await launch(f, "Child", root);
+    const grandchild = await launch(f, "Grandchild", child);
+    await setMaxNestingDepth(f, 1);
+    const after = await Promise.all(
+      [root, child, grandchild].map((t) => f.core.commands.getTask(t.id)),
+    );
+    expect(after.map((t) => t?.parentTaskId)).toEqual([
+      undefined,
+      root.id,
+      child.id,
+    ]);
+    await expect(launch(f, "More", grandchild)).rejects.toThrow(/max nesting/);
+    await expect(launch(f, "More", root)).rejects.toThrow(/max nesting/);
+  });
+
+  it("setTaskParent moves the task with its whole subtree, refusing only too-deep results and cycles", async () => {
+    const f = await fixture();
+    const a = await launch(f, "A");
+    const b = await launch(f, "B", a);
+    const c = await launch(f, "C", b);
+    const x = await launch(f, "X");
+    const y = await launch(f, "Y", x);
+    // B (with C below) under X: depth 1 + height 2 = 3 fits.
+    const moved = await f.core.commands.setTaskParent(b.id, x.id);
+    expect(moved.parentTaskId).toBe(x.id);
+    expect((await f.core.commands.getTask(c.id))?.parentTaskId).toBe(b.id);
+    expect(
+      (await f.core.commands.listDescendants(x.id)).map((t) => t.id).sort(),
+    ).toEqual([b.id, c.id, y.id].sort());
+    // X (height 3) under A: 1 + 3 = 4 > 3.
+    await expect(f.core.commands.setTaskParent(x.id, a.id)).rejects.toThrow(
+      /4 levels deep; the max nesting depth is 3/,
+    );
+    // B under its own descendant, and X under itself.
+    await expect(f.core.commands.setTaskParent(b.id, c.id)).rejects.toThrow(
+      /own subtask/,
+    );
+    await expect(f.core.commands.setTaskParent(x.id, c.id)).rejects.toThrow(
+      /own subtask/,
+    );
+    await expect(f.core.commands.setTaskParent(x.id, x.id)).rejects.toThrow(
+      /own parent/,
+    );
+    // Raising the max lets the same move through.
+    await setMaxNestingDepth(f, 4);
+    expect((await f.core.commands.setTaskParent(x.id, a.id)).parentTaskId).toBe(
+      a.id,
+    );
+  });
+
+  it("Done checks the whole subtree, lists every active descendant, and leaves them untouched", async () => {
+    const f = await fixture();
+    const root = await launch(f, "Root");
+    const child = await launch(f, "Child", root);
+    const grandchild = await launch(f, "Grandchild", child);
+    const finished = await launch(f, "Finished", child);
+    await f.core.commands.toDone(finished.id, { force: { confirmed: true } });
+
+    const asked = await f.core.commands.toDone(root.id);
+    expect(isToDoneConfirmation(asked)).toBe(true);
+    if (!isToDoneConfirmation(asked)) return;
+    expect(asked.requiresConfirmation).toBe("activeChildren");
+    expect(asked.activeTasks).toEqual([
+      { id: child.id, title: "Child" },
+      { id: grandchild.id, title: "Grandchild" },
+    ]);
+    expect(asked.detail).toContain(
+      "2 active tasks below it: Child, Grandchild",
+    );
+
+    // A grandchild alone (child Done) still holds the root's question.
+    await f.core.commands.toDone(child.id, {
+      force: { leaveChildren: true, confirmed: true },
+    });
+    const again = await f.core.commands.toDone(root.id);
+    expect(again).toMatchObject({
+      requiresConfirmation: "activeChildren",
+      activeTasks: [{ id: grandchild.id, title: "Grandchild" }],
+    });
+
+    // The stop flag answers the question like leaveChildren; core touches nobody.
+    const next = await f.core.commands.toDone(root.id, {
+      force: { stopDescendants: true },
+    });
+    expect(next).toMatchObject({ requiresConfirmation: "done" });
+    const landed = await f.core.commands.toDone(root.id, {
+      force: { stopDescendants: true, confirmed: true },
+    });
+    expect(isToDoneConfirmation(landed)).toBe(false);
+    const after = await f.core.commands.getTask(grandchild.id);
+    expect(after?.state).toBe("working");
+    expect(after?.parentTaskId).toBe(child.id);
+    expect(
+      await exists(
+        (await f.core.commands.getTaskWorkspace(grandchild.id))!.worktreePath!,
+      ),
+    ).toBe(true);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   DEFAULT_HARNESS_ID,
   DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
+  DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
 } from "./model.js";
@@ -168,6 +169,16 @@ export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
     max: 64,
     title: "Max tasks running at once",
     help: "Launched tasks beyond this wait in a queue.",
+    section: "agents",
+  },
+  {
+    key: "launch.maxNestingDepth",
+    type: "integer",
+    default: DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
+    min: 1,
+    max: 4,
+    title: "Max nesting depth",
+    help: "How many levels a task tree may have: 1 means tasks cannot launch subtasks, 3 allows subtasks of subtasks. Lowering it never moves existing tasks.",
     section: "agents",
   },
   // --- Code review -----------------------------------------------------
