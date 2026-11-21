@@ -357,8 +357,7 @@ test("Priority / Other, badge, keys (J/K, A, R, D, C, H, Tab, Esc), Create revie
   await expect(window.getByTestId("inbox-view")).toHaveCount(0);
 
   // Opening a task clears its done item but keeps another task's question.
-  // The board hides the sidebar; the workspace brings it back.
-  await window.getByTestId("workspace-button").click();
+  // The sidebar stays beside the board, so its New task button is right there.
   const finisher = await startAgentChat("Finisher");
   finisher.report("state=done");
   // Asker's question (re-asked above) is still waiting on the user.
