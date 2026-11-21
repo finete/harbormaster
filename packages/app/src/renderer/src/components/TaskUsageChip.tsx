@@ -5,7 +5,7 @@
 // push); the refresh button recomputes it through `refreshTaskUsage`.
 import { RefreshCw } from "lucide-react";
 import type { JSX } from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Task, TaskUsage } from "../../../preload/api";
 import { flattenBoard, useBoard } from "../core-client";
 import {
@@ -16,6 +16,7 @@ import {
   subtaskRollup,
   totalTokens,
   unavailableReason,
+  usageChipView,
   usageSummary,
 } from "../lib/usage";
 import { cn } from "../lib/utils";
@@ -35,7 +36,18 @@ export function TaskUsageChip({ task }: { task: Task }): JSX.Element | null {
       ),
     [columns, task.id],
   );
+  // Core marks a recount `pending` with empty totals, so the renderer
+  // remembers the last ready summary per task (core's pending semantics
+  // feed the Costs view's "counting…" rows and must not change).
+  const lastReady = useRef<{ taskId: string; text: string }>();
   if (!usage) return null;
+  if (usage.status === "ready") {
+    lastReady.current = { taskId: task.id, text: usageSummary(usage) };
+  }
+  const view = usageChipView(
+    usage,
+    lastReady.current?.taskId === task.id ? lastReady.current.text : undefined,
+  );
   const title =
     usage.status === "unavailable"
       ? unavailableReason(usage)
@@ -50,10 +62,14 @@ export function TaskUsageChip({ task }: { task: Task }): JSX.Element | null {
           data-testid="task-usage-chip"
           data-status={usage.status}
           title={title}
-          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-[11px] text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-accent"
+          data-dimmed={view.dimmed || undefined}
+          className={cn(
+            "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-[11px] tabular-nums text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-accent",
+            view.dimmed && "opacity-60",
+          )}
         >
           <span aria-hidden>◔</span>
-          {usageSummary(usage)}
+          {view.text}
         </button>
       </PopoverTrigger>
       <PopoverContent

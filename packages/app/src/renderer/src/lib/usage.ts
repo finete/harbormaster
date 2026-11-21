@@ -61,6 +61,28 @@ export function usageSummary(usage: TaskUsage): string {
     : tokens;
 }
 
+export interface UsageChipView {
+  text: string;
+  /** Recounting: the text is the last known figure, shown muted. */
+  dimmed: boolean;
+}
+
+/**
+ * What the workspace chip shows. While usage is `pending` (a recount) it
+ * keeps the last ready summary, dimmed, so the chip does not shrink to "…"
+ * and grow back; "…" only when no number was ever known. `lastReady` is
+ * the previous ready summary the renderer remembered for this task.
+ */
+export function usageChipView(
+  usage: TaskUsage,
+  lastReady: string | undefined,
+): UsageChipView {
+  if (usage.status === "pending" && lastReady !== undefined) {
+    return { text: lastReady, dimmed: true };
+  }
+  return { text: usageSummary(usage), dimmed: false };
+}
+
 /** A board card's usage line (`"◔ 9.8M tok · ~$23.10"`): ready usage with tokens only. */
 export function cardUsageLine(
   usage: TaskUsage | undefined,

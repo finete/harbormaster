@@ -14,6 +14,7 @@ import {
   subtaskRollup,
   tokensFigure,
   topUsageTaskIds,
+  usageChipView,
   usageCsvFileName,
   usageRangeBounds,
   usageRowsToCsv,
@@ -215,6 +216,25 @@ describe("usage summaries and aggregation", () => {
     expect(usageSummary({ ...ready(0), status: "unavailable" })).toBe(
       "usage n/a",
     );
+  });
+
+  it("keeps the last known figure, dimmed, while recounting", () => {
+    const pending = { ...ready(0), status: "pending" } as TaskUsage;
+    expect(usageChipView(ready(9_800_000), "1k tok")).toEqual({
+      text: "9.8M tok",
+      dimmed: false,
+    });
+    expect(usageChipView(pending, "9.8M tok")).toEqual({
+      text: "9.8M tok",
+      dimmed: true,
+    });
+    expect(usageChipView(pending, undefined)).toEqual({
+      text: "…",
+      dimmed: false,
+    });
+    expect(
+      usageChipView({ ...ready(0), status: "unavailable" }, "9.8M tok"),
+    ).toEqual({ text: "usage n/a", dimmed: false });
   });
 
   it("totals own usage only and omits $ when no row has a cost", () => {
