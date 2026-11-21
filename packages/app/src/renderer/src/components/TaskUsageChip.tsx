@@ -50,7 +50,7 @@ export function TaskUsageChip({ task }: { task: Task }): JSX.Element | null {
           data-testid="task-usage-chip"
           data-status={usage.status}
           title={title}
-          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-[11px] text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-accent"
+          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border bg-muted px-2 font-mono text-[11px] tabular-nums text-muted-foreground outline-none transition-colors duration-[120ms] ease-out hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-accent"
         >
           <span aria-hidden>◔</span>
           {usageSummary(usage)}

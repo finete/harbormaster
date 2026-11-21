@@ -350,8 +350,8 @@ export const TaskWorkspace = memo(function TaskWorkspace({
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <SidebarRevealButton />
-          {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
           {task && <TaskUsageChip task={task} />}
+          {task && <TaskAudit taskId={task.id} revision={task.updatedAt} />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <OpenInButton path={cwd} />
