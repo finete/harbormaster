@@ -636,13 +636,12 @@ const harnessDeliveries = new HarnessDeliveries({
         messageIds,
       })
     ).length,
-  type: async (taskId, text) => {
-    const typed = await typeText(
-      (data) => writeToPrimarySession(taskId, data),
-      text,
-    );
-    if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
-    return typed;
+  // Typing an agent's message is not the user typing (it would reset the
+  // loop cap and end "waiting on parent"); only the Review command is.
+  type: (taskId, text) =>
+    typeText((data) => writeToPrimarySession(taskId, data), text),
+  recordUserInput: (taskId) => {
+    void core.commands.recordUserInput(taskId).catch(() => {});
   },
   onEvent: (event, details) =>
     console.log(`[delivery] ${event} ${JSON.stringify(details)}`),
@@ -667,6 +666,7 @@ async function queueReviewCommand(
     deliver,
     command,
     messageId ? [messageId] : [],
+    { userInput: true },
   );
 }
 
@@ -759,7 +759,7 @@ async function typeIdleMessages(
   console.log(
     `[delivery] typed ${JSON.stringify({ taskId, messages: claimed.length, typed })}`,
   );
-  if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
+  // Not recordUserInput: this is an agent's message, not the user typing.
 }
 
 const queuedReviews = new QueuedReviews({
@@ -807,7 +807,11 @@ async function requestReviewFromButton(input: {
         deliver: "message",
       });
       const ids = result.messageId ? [result.messageId] : [];
-      if (await harnessDeliveries.send(input.taskId, deliver, command, ids)) {
+      if (
+        await harnessDeliveries.send(input.taskId, deliver, command, ids, {
+          userInput: true,
+        })
+      ) {
         void core.commands.recordUserInput(input.taskId).catch(() => {});
         return { command, delivery: "typed" };
       }
