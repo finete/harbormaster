@@ -81,6 +81,31 @@ export function deriveChildOutcome(
     : undefined;
 }
 
+/** A question a child stopped to ask the user directly (the inbox's "agent asked"). */
+export interface ChildOpenQuestion {
+  question: string;
+  at: string;
+}
+
+/**
+ * The child's open question for the USER: it is live, not running a turn, and
+ * its last program-status report is `blocked` with a message, with no
+ * reported outcome at or after that report (an outcome supersedes it, as in
+ * the inbox). `undefined` otherwise. Direct children only: callers never
+ * pass a grandchild.
+ */
+export function deriveWaitingOnUser(
+  presence: PresenceStatus,
+): ChildOpenQuestion | undefined {
+  if (!presence.live || presence.runningTurn) return undefined;
+  const status = presence.record?.status;
+  const question = status?.message?.trim();
+  if (status?.state !== "blocked" || !question) return undefined;
+  const outcome = presence.record?.outcome;
+  if (outcome && outcome.at >= status.at) return undefined;
+  return { question, at: status.at };
+}
+
 export interface ChildStatusEntry {
   id: string;
   title: string;
@@ -89,6 +114,7 @@ export interface ChildStatusEntry {
   pr?: { number: number; state: TaskPullRequest["state"]; url?: string };
   runState: ChildRunState;
   outcome?: ChildOutcome;
+  waitingOnUser?: ChildOpenQuestion;
 }
 
 /** Build one child's structured status, for both the tool's plain text and its `details`. */
@@ -97,6 +123,7 @@ export function buildChildStatusEntry(
   presence: PresenceStatus,
 ): ChildStatusEntry {
   const outcome = deriveChildOutcome(presence);
+  const waitingOnUser = deriveWaitingOnUser(presence);
   return {
     id: task.id,
     title: task.title,
@@ -120,10 +147,11 @@ export function buildChildStatusEntry(
       : {}),
     runState: deriveChildRunState(task, presence),
     ...(outcome ? { outcome } : {}),
+    ...(waitingOnUser ? { waitingOnUser } : {}),
   };
 }
 
-/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]]`. */
+/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · waiting on the user: <question>]`. */
 export function formatChildStatusLine(entry: ChildStatusEntry): string {
   const parts: string[] = [`"${entry.title}" (${entry.id})`];
   const column = entry.awaiting
@@ -140,6 +168,9 @@ export function formatChildStatusLine(entry: ChildStatusEntry): string {
     parts.push(
       `outcome: ${entry.outcome.status}${entry.outcome.note ? ` — ${entry.outcome.note}` : ""}`,
     );
+  }
+  if (entry.waitingOnUser) {
+    parts.push(`waiting on the user: ${entry.waitingOnUser.question}`);
   }
   return parts.join(" · ");
 }

@@ -13,6 +13,7 @@ import type {
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
+  ListSlashCommandsInput,
   MoveTaskOptions,
   OrphanWorktreeReport,
   PresenceReport,
@@ -48,6 +49,7 @@ import type {
   ProgramStatusReading,
   ReviewTarget,
   SessionLaunch,
+  SlashCommandCatalog,
 } from "../contracts/harness.js";
 import type {
   InboxAccess,
@@ -145,11 +147,12 @@ import type {
   TaskUsageQuery,
   TaskUsageRow,
 } from "../contracts/usage.js";
-import type {
-  GitRepositoryAccess,
-  GitWorktreeAccess,
-  RepositoryInfo,
-  WorktreeInfo,
+import {
+  DirtyWorktreeError,
+  type GitRepositoryAccess,
+  type GitWorktreeAccess,
+  type RepositoryInfo,
+  type WorktreeInfo,
 } from "../contracts/workspace.js";
 import { detectedAgent } from "../engines/agent-version.js";
 import {
@@ -588,6 +591,39 @@ export class CoreManager implements CoreCommands {
     });
   }
 
+  async listSlashCommands(
+    input: ListSlashCommandsInput,
+  ): Promise<SlashCommandCatalog> {
+    const config = await this.deps.config.load();
+    const harness = input.harness || config.launch?.defaultHarness;
+    const adapter = await this.harnessFor(
+      harness ? { harness } : undefined,
+      config,
+    );
+    const empty = { harness: adapter.id, label: adapter.label, commands: [] };
+    if (!adapter.listSlashCommands) return empty;
+    // The workspace a task there would run in: a repository's primary
+    // checkout (its worktree is cut from it), or the folder itself.
+    let cwd: string | undefined;
+    if (input.repositoryId) {
+      cwd = (
+        await this.findRepository(input.repositoryId, config).catch(
+          () => undefined,
+        )
+      )?.root;
+    } else if (input.folderPath) {
+      cwd = input.folderPath;
+    }
+    try {
+      return { ...empty, commands: await adapter.listSlashCommands(cwd) };
+    } catch (error) {
+      return {
+        ...empty,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   /** Every registered agent (built-ins, then the config's custom agents). */
   private harnessList(config: GlobalConfig): HarnessAdapter[] {
     if (this.deps.harnesses) {
@@ -885,6 +921,7 @@ export class CoreManager implements CoreCommands {
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
+      ...(startNow ? { startedAt: now } : {}),
     };
 
     if (startNow && repo && branch) {
@@ -992,6 +1029,7 @@ export class CoreManager implements CoreCommands {
       targetBranch: task.targetBranch ?? repo.defaultBranch,
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: task.startedAt ?? now,
     };
     delete next.awaiting;
     await this.provisionTaskWorkspace(
@@ -1586,6 +1624,7 @@ export class CoreManager implements CoreCommands {
       state: "working",
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: task.startedAt ?? now,
     };
     delete reopened.completedAt;
     delete reopened.archivedAt;
@@ -1745,6 +1784,10 @@ export class CoreManager implements CoreCommands {
         updatedAt: now,
         stateChangedAt: stateChanged ? now : task.stateChangedAt,
         ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
+        ...((task.state === "backlog" || task.state === "done") &&
+        state === "working"
+          ? { startedAt: task.startedAt ?? now }
+          : {}),
       };
       if (state === "awaiting" && options?.awaiting) {
         moved.awaiting = options.awaiting;
@@ -1968,7 +2011,42 @@ export class CoreManager implements CoreCommands {
     );
   }
 
-  async toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
+  toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
+    return this.completeTask(taskId, options, false);
+  }
+
+  async archiveTask(
+    taskId: string,
+    options?: ToDoneOptions,
+  ): Promise<ToDoneResult> {
+    const task = await this.requireTask(taskId);
+    if (task.state !== "done") return this.completeTask(taskId, options, true);
+    if (task.archivedAt) return { task };
+    // Nothing else happens to a Done task (no lines), but archiving always
+    // asks once, whatever the task's state.
+    if (!options?.force?.confirmed) {
+      return { requiresConfirmation: "done", detail: task.title, lines: [] };
+    }
+    const now = this.deps.clock.now().toISOString();
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
+      if (fresh.state !== "done" || fresh.archivedAt) return undefined;
+      return { ...fresh, archivedAt: now, updatedAt: now };
+    });
+    if (!next) return { task: await this.requireTask(taskId) };
+    await this.publishTaskChange(next);
+    return { task: next };
+  }
+
+  /**
+   * The manual Done (`toDone`), and `archiveTask` for a task not yet Done:
+   * the same questions and cleanup; `archive` lands it archived in the
+   * same write, so it never shows up in Done on its way off the board.
+   */
+  private async completeTask(
+    taskId: string,
+    options: ToDoneOptions | undefined,
+    archive: boolean,
+  ): Promise<ToDoneResult> {
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "done");
     const force = options?.force ?? {};
@@ -1993,7 +2071,11 @@ export class CoreManager implements CoreCommands {
     const binding = await this.deps.bindings
       .getBindingForTask(task.id)
       .catch(() => undefined);
-    const landed = await this.executeConfirmedDone(task, protectedPaths);
+    const landed = await this.executeConfirmedDone(
+      task,
+      protectedPaths,
+      archive,
+    );
     if (!landed) throw new Error(`Task not found: ${taskId}`);
     const usage = await this.usage.update(task.id, {
       ...(binding ? { binding } : {}),
@@ -2207,6 +2289,7 @@ export class CoreManager implements CoreCommands {
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: now,
     };
 
     if (repo) {
@@ -2811,13 +2894,21 @@ export class CoreManager implements CoreCommands {
           warnings.push(
             `${task.title}: deployed and ready to land — mark it Done (${result.warning})`,
           );
-          return { outcome: "stayed", detail: result.warning ?? "" };
+          return {
+            outcome: "stayed",
+            detail: result.warning ?? "",
+            ...(result.reason ? { reason: result.reason } : {}),
+          };
         }
         if (result.warning) warnings.push(`${task.title}: ${result.warning}`);
         return { outcome: "applied" };
       }
       default:
-        return { outcome: "skipped", detail: `cannot move to ${move.state}` };
+        return {
+          outcome: "skipped",
+          detail: `cannot move to ${move.state}`,
+          reason: "move not supported",
+        };
     }
   }
 
@@ -2836,6 +2927,8 @@ export class CoreManager implements CoreCommands {
   ): Promise<{
     task?: Task;
     warning?: string;
+    /** Short cause when `stayed` (AuditActionEntry.reason). */
+    reason?: string;
     stayed?: boolean;
   }> {
     const start = performance.now();
@@ -2892,6 +2985,8 @@ export class CoreManager implements CoreCommands {
   ): Promise<{
     task?: Task;
     warning?: string;
+    /** Short cause when `stayed` (AuditActionEntry.reason). */
+    reason?: string;
     stayed?: boolean;
   }> {
     let warning: string | undefined;
@@ -2911,7 +3006,11 @@ export class CoreManager implements CoreCommands {
       try {
         repo = await this.findRepository(task.repositoryId);
       } catch (error) {
-        return { stayed: true, warning: describeError(error) };
+        return {
+          stayed: true,
+          warning: describeError(error),
+          reason: "repository unavailable",
+        };
       }
       const binding = await this.deps.bindings.getBindingForTask(task.id);
       if (binding?.worktreePath) {
@@ -2922,6 +3021,7 @@ export class CoreManager implements CoreCommands {
           return {
             stayed: true,
             warning: `worktree left in place: it is open in a live session (${path})`,
+            reason: "worktree in use",
           };
         }
         try {
@@ -2930,6 +3030,10 @@ export class CoreManager implements CoreCommands {
           return {
             stayed: true,
             warning: `worktree left in place: ${describeError(error)}`,
+            reason:
+              error instanceof DirtyWorktreeError
+                ? "uncommitted changes"
+                : "git error",
           };
         }
         await this.parkBinding(binding);
@@ -2952,11 +3056,13 @@ export class CoreManager implements CoreCommands {
   /**
    * Patch the move onto the task as persisted now (cleanup can take a
    * while, and a concurrent refresh may have updated the PR snapshot
-   * meanwhile), optionally recording the app-owned `cleanup`, and publish.
+   * meanwhile), optionally recording the app-owned `cleanup` and archiving
+   * it (`archiveTask`), and publish.
    */
   private async landInDone(
     taskId: string,
     cleanup?: TaskCleanup,
+    archive = false,
   ): Promise<Task | undefined> {
     const now = this.deps.clock.now().toISOString();
     const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
@@ -2968,6 +3074,7 @@ export class CoreManager implements CoreCommands {
         stateChangedAt: now,
         completedAt: fresh.completedAt ?? now,
         ...(cleanup ? { cleanup } : {}),
+        ...(archive ? { archivedAt: fresh.archivedAt ?? now } : {}),
       };
       delete landed.awaiting;
       return landed;
@@ -3043,6 +3150,7 @@ export class CoreManager implements CoreCommands {
   private async executeConfirmedDone(
     task: Task,
     protectedPaths: readonly string[],
+    archive: boolean,
   ): Promise<Task | undefined> {
     const binding = await this.deps.bindings
       .getBindingForTask(task.id)
@@ -3069,7 +3177,7 @@ export class CoreManager implements CoreCommands {
           }
         : { completedAt: now }),
     };
-    const landed = await this.landInDone(task.id, cleanup);
+    const landed = await this.landInDone(task.id, cleanup, archive);
     if (!landed || !repoBacked) return landed;
     return (await this.runForcedCleanup(task.id, protectedPaths)) ?? landed;
   }
@@ -3598,6 +3706,7 @@ export class CoreManager implements CoreCommands {
       route,
       text,
       requestedMode: mode,
+      ...(input.expectsReply === true ? { expectsReply: true } : {}),
       attachments,
       status: route === "approval" ? "awaiting_approval" : "pending",
       createdAt: this.deps.clock.now().toISOString(),

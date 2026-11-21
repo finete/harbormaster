@@ -23,10 +23,12 @@ import type {
   BoardColumn,
   CreateTaskActionInput,
   CreateTaskInput,
+  InboxFormatOptions,
   InboxPriorityInput,
   LaunchTaskInput,
   ListEventsFilter,
   ListInboxOptions,
+  ListSlashCommandsInput,
   MessageMode,
   MoveTaskOptions,
   ReopenTaskInput,
@@ -75,6 +77,7 @@ import {
   utilityProcess,
 } from "electron";
 import type {
+  InstalledUpdate,
   MessagingChangedPayload,
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -89,6 +92,7 @@ import {
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
+import { createAppBundleGuard, replacedAppPrompt } from "./app-bundle-guard";
 import { appClipboard } from "./app-clipboard";
 import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
@@ -636,13 +640,12 @@ const harnessDeliveries = new HarnessDeliveries({
         messageIds,
       })
     ).length,
-  type: async (taskId, text) => {
-    const typed = await typeText(
-      (data) => writeToPrimarySession(taskId, data),
-      text,
-    );
-    if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
-    return typed;
+  // Typing an agent's message is not the user typing (it would reset the
+  // loop cap and end "waiting on parent"); only the Review command is.
+  type: (taskId, text) =>
+    typeText((data) => writeToPrimarySession(taskId, data), text),
+  recordUserInput: (taskId) => {
+    void core.commands.recordUserInput(taskId).catch(() => {});
   },
   onEvent: (event, details) =>
     console.log(`[delivery] ${event} ${JSON.stringify(details)}`),
@@ -667,6 +670,7 @@ async function queueReviewCommand(
     deliver,
     command,
     messageId ? [messageId] : [],
+    { userInput: true },
   );
 }
 
@@ -702,7 +706,13 @@ async function runHarnessDeliveryPass(
         await core.commands.listMessages({ taskId }),
       );
       if (messages.length === 0) continue;
-      const text = queueTextFor(messages);
+      // Decided by the receiver: a task with a parent is reminded to report.
+      const format = {
+        receiverHasParent: Boolean(
+          (await core.commands.getTask(taskId))?.parentTaskId,
+        ),
+      };
+      const text = queueTextFor(messages, format);
       const deliver = await core.commands.harnessDeliverCommand(
         taskId,
         "wakeIdle",
@@ -712,7 +722,7 @@ async function runHarnessDeliveryPass(
         // No deliver command, but the harness takes a message typed at
         // its prompt (Cursor, docs/harness-additions.md C4; Claude Code):
         // claim, type.
-        await typeIdleMessages(taskId, messages, text);
+        await typeIdleMessages(taskId, messages, text, format);
         continue;
       }
       await harnessDeliveries.send(
@@ -740,6 +750,7 @@ async function typeIdleMessages(
   taskId: string,
   messages: readonly { id: string }[],
   text: string,
+  format: InboxFormatOptions,
 ): Promise<void> {
   const adapter = await harnessForTask(taskId).catch(() => undefined);
   if (adapter?.capabilities.delivery.channels.wakeIdle !== PTY_TYPING_CHANNEL) {
@@ -754,12 +765,12 @@ async function typeIdleMessages(
   if (claimed.length === 0) return;
   const typed = await typeText(
     (data) => writeToPrimarySession(taskId, data),
-    claimed.length === messages.length ? text : queueTextFor(claimed),
+    claimed.length === messages.length ? text : queueTextFor(claimed, format),
   );
   console.log(
     `[delivery] typed ${JSON.stringify({ taskId, messages: claimed.length, typed })}`,
   );
-  if (typed) void core.commands.recordUserInput(taskId).catch(() => {});
+  // Not recordUserInput: this is an agent's message, not the user typing.
 }
 
 const queuedReviews = new QueuedReviews({
@@ -807,7 +818,11 @@ async function requestReviewFromButton(input: {
         deliver: "message",
       });
       const ids = result.messageId ? [result.messageId] : [];
-      if (await harnessDeliveries.send(input.taskId, deliver, command, ids)) {
+      if (
+        await harnessDeliveries.send(input.taskId, deliver, command, ids, {
+          userInput: true,
+        })
+      ) {
         void core.commands.recordUserInput(input.taskId).catch(() => {});
         return { command, delivery: "typed" };
       }
@@ -1117,6 +1132,11 @@ function registerCoreIpc(): void {
     core.commands.listBranches(repositoryId),
   );
   ipcMain.handle("core:listModels", () => core.commands.listModels());
+  ipcMain.handle(
+    "core:listSlashCommands",
+    (_event, input: ListSlashCommandsInput) =>
+      core.commands.listSlashCommands(input),
+  );
   ipcMain.handle("core:listHarnessDescriptors", () =>
     core.commands.listHarnessDescriptors(),
   );
@@ -1170,11 +1190,13 @@ function registerCoreIpc(): void {
     core.commands.startTask(taskId),
   );
   // Main owns the ptys, so it (not the renderer) supplies the live pane
-  // cwds core must never remove a worktree out from under.
-  ipcMain.handle(
-    "core:toDone",
+  // cwds core must never remove a worktree out from under. Archive is the
+  // same verb for a task not yet Done (it completes on the way), so both
+  // share this path.
+  const completeTask =
+    (verb: "toDone" | "archiveTask") =>
     async (
-      _event,
+      _event: unknown,
       taskId: string,
       options: { force?: ToDoneForce } | undefined,
     ) => {
@@ -1189,8 +1211,20 @@ function registerCoreIpc(): void {
         const warm = new Set(
           warmSessions.ids().filter((id) => getSession(id)?.taskId === taskId),
         );
-        return core.commands.toDone(taskId, {
+        return core.commands[verb](taskId, {
           protectedPaths: activeSessionCwds({ excludeIds: warm }),
+          force,
+        });
+      }
+      const [task, binding] = await Promise.all([
+        core.commands.getTask(taskId).catch(() => undefined),
+        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
+      ]);
+      // Archiving a task already Done only flags it: its Done cleanup ran
+      // (or keeps retrying) on its own, so nothing in its worktree ends here.
+      if (verb === "archiveTask" && task?.state === "done") {
+        return core.commands.archiveTask(taskId, {
+          protectedPaths: activeSessionCwds(),
           force,
         });
       }
@@ -1199,21 +1233,18 @@ function registerCoreIpc(): void {
       // renderer closes the task's panes too) so nothing keeps the worktree
       // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
-      const [task, binding] = await Promise.all([
-        core.commands.getTask(taskId).catch(() => undefined),
-        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
-      ]);
       // Only a repository worktree is removed: a scratch dir or a folder
       // task's own folder stays, and so do the panes running in it.
       if (task?.repositoryId && binding?.worktreePath) {
         disposeSessionsUnder(binding.worktreePath);
       }
-      return core.commands.toDone(taskId, {
+      return core.commands[verb](taskId, {
         protectedPaths: activeSessionCwds(),
         force,
       });
-    },
-  );
+    };
+  ipcMain.handle("core:toDone", completeTask("toDone"));
+  ipcMain.handle("core:archiveTask", completeTask("archiveTask"));
   ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>
     core.commands.retryDoneCleanup(taskId, {
       protectedPaths: activeSessionCwds(),
@@ -2242,6 +2273,9 @@ function createWindow(): void {
   win.once("ready-to-show", () =>
     offscreen ? win.showInactive() : win.show(),
   );
+  win.on("focus", () => {
+    checkInstalledUpdate();
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   // Cmd+W (mac) or Ctrl+W (other) closes the focused task workspace, not the
@@ -2659,6 +2693,90 @@ function startUpdateChecks(): void {
   updateChecker.start();
 }
 
+// e2e stamps a scratch "bundle" instead (HARBORMASTER_BUNDLE_EXECUTABLE);
+// the app never sets it.
+const bundleExecutable =
+  process.env.HARBORMASTER_BUNDLE_EXECUTABLE ??
+  (app.isPackaged ? process.execPath : undefined);
+const appBundleGuard = bundleExecutable
+  ? createAppBundleGuard({
+      executablePath: bundleExecutable,
+      infoPlistPath: join(dirname(bundleExecutable), "..", "Info.plist"),
+    })
+  : undefined;
+let installedUpdate: InstalledUpdate | undefined;
+
+/**
+ * Whether the installed app was replaced since launch (see
+ * app-bundle-guard.ts). The first time it was, every window is told so its
+ * update card offers a restart while the window still works.
+ */
+function checkInstalledUpdate(): InstalledUpdate | undefined {
+  if (installedUpdate) return installedUpdate;
+  const replaced = appBundleGuard?.replacement();
+  if (!replaced) return undefined;
+  installedUpdate = {
+    version: replaced.installedVersion ?? null,
+    runningVersion: app.getVersion(),
+  };
+  console.log(
+    `[main] app replaced on disk (running ${installedUpdate.runningVersion}, installed ${installedUpdate.version ?? "unknown"})`,
+  );
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "app:installed-update", installedUpdate);
+  }
+  return installedUpdate;
+}
+
+/** One stat every 5 s: the upgrade usually runs while the window already has focus (a pane's shell). */
+const INSTALLED_UPDATE_POLL_MS = 5_000;
+
+function startInstalledUpdateWatch(): void {
+  if (!appBundleGuard) return;
+  const timer = setInterval(() => {
+    if (checkInstalledUpdate()) clearInterval(timer);
+  }, INSTALLED_UPDATE_POLL_MS);
+  timer.unref();
+}
+
+function restartIntoInstalledApp(): void {
+  if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
+    console.log("[main] restart requested (test instance: quit only)");
+  } else {
+    console.log("[main] restarting into the installed app");
+    app.relaunch();
+  }
+  app.quit();
+}
+
+/**
+ * A window about to load (dock click with none open, Reload) would render
+ * garbage from a replaced app, and there is no working window to show the
+ * update card in: asks natively instead (`replacedAppPrompt`). Returns
+ * `true` when the caller must not load the window.
+ */
+function restartIfBundleReplaced(): boolean {
+  const update = checkInstalledUpdate();
+  if (!update) return false;
+  const prompt = replacedAppPrompt(update, runningTaskIds.size);
+  const choice =
+    prompt.choices[
+      dialog.showMessageBoxSync({
+        type: "info",
+        message: prompt.message,
+        detail: prompt.detail,
+        buttons: prompt.buttons,
+        defaultId: prompt.defaultId,
+        cancelId: prompt.cancelId,
+        noLink: true,
+      })
+    ];
+  if (choice === "restart") restartIntoInstalledApp();
+  else if (choice === "quit") app.quit();
+  else console.log("[main] restart cancelled: agents are mid-turn");
+  return true;
+}
+
 /** Best-effort `harbormaster rules list` for the diagnostics bundle. */
 function rulesListOutput(): Promise<string> {
   const cli = cliPathForTools();
@@ -2956,7 +3074,15 @@ function installApplicationMenu(): void {
     {
       label: "View",
       submenu: [
-        { role: "reload" },
+        {
+          id: "reload",
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: (_item, win) => {
+            if (restartIfBundleReplaced()) return;
+            if (win instanceof BrowserWindow) win.webContents.reload();
+          },
+        },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
@@ -3002,6 +3128,11 @@ function registerReleaseIpc(): void {
   ipcMain.handle("app:getUpdate", (): UpdateInfo | null => {
     return updateChecker.latest() ?? null;
   });
+  ipcMain.handle(
+    "app:getInstalledUpdate",
+    (): InstalledUpdate | null => checkInstalledUpdate() ?? null,
+  );
+  ipcMain.handle("app:restartToUpdate", () => restartIntoInstalledApp());
   ipcMain.handle("app:copyText", (_event, text: unknown): void => {
     if (typeof text === "string") appClipboard.writeText(text);
   });
@@ -3135,6 +3266,7 @@ app.whenReady().then(async () => {
   startPresencePolling();
   startRefreshLoop();
   startUpdateChecks();
+  startInstalledUpdateWatch();
   wireSleepWakeGating();
   wireWakeLog();
   // Queued launches (from a previous run, or a launch_task call
@@ -3143,7 +3275,10 @@ app.whenReady().then(async () => {
   void backgroundLauncher.runPass();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (restartIfBundleReplaced()) return;
+      createWindow();
+    }
     startPresencePolling();
     startRefreshLoop();
   });
@@ -3166,7 +3301,12 @@ app.on("window-all-closed", () => {
   // launches are marked interrupted first, exactly like a real quit.
   void interruptMidTurnLaunches()
     .catch(() => {})
-    .finally(() => disposeAllSessions());
+    .finally(() => {
+      disposeAllSessions();
+      // Polling stops with the last window; a dock click's restart question
+      // must not count agents that were just stopped.
+      runningTaskIds = new Set();
+    });
 });
 
 /**

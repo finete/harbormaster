@@ -156,7 +156,7 @@ const reportStatus: ToolDefinition = {
   name: "report_status",
   title: "Harbormaster report status",
   description:
-    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
+    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
   inputSchema: {
     type: "object",
     properties: {
@@ -427,7 +427,7 @@ const subtaskStatus: ToolDefinition = {
   name: "subtask_status",
   title: "Harbormaster subtask status",
   description:
-    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), and the reported outcome. Only valid inside a Harbormaster task session.',
+    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and the question a child is waiting on the user to answer ("waiting on the user"). Check it before report_status and name any such child in your summary. Only valid inside a Harbormaster task session.',
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, { commands, caller }) {
     const taskId = requireTaskCaller(caller, "subtask_status");
@@ -480,7 +480,7 @@ const sendToTask: ToolDefinition = {
   name: "send_to_task",
   title: "Harbormaster send to task",
   description:
-    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Messages to your own children or to your parent are delivered directly. ANY other target (sibling, unrelated task, or any send from a plain non-task session) goes to the user\'s approval in the Harbormaster app, so send those ONLY when the user explicitly asked you to. mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). After asking your parent a question, end your turn and wait for the reply; do not poll. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
+    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Messages to your own children or to your parent are delivered directly. ANY other target (sibling, unrelated task, or any send from a plain non-task session) goes to the user\'s approval in the Harbormaster app, so send those ONLY when the user explicitly asked you to. mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). When you ask your PARENT a question and end your turn to wait for the answer, set expectsReply: true (it then shows you as waiting on your parent); omit it for reports and results ("done, here is the PR"), which need no answer. Do not poll for a reply. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
   inputSchema: {
     type: "object",
     properties: {
@@ -496,6 +496,11 @@ const sendToTask: ToolDefinition = {
         description:
           "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to a parent.",
       },
+      expectsReply: {
+        type: "boolean",
+        description:
+          "true when this is a question you will end your turn to wait on; leave out (false) for reports and results. Default false.",
+      },
       attachments: {
         type: "array",
         items: { type: "string" },
@@ -510,6 +515,7 @@ const sendToTask: ToolDefinition = {
     const targetTaskId = readString(args, "taskId", true);
     const text = readString(args, "message", true);
     const mode = readEnum(args, "mode", ["steer", "followUp"] as const, false);
+    const expectsReply = readBoolean(args, "expectsReply");
     const cwd = caller.cwd ?? process.cwd();
     const attachments = resolveAttachmentPaths(
       readStringArray(args, "attachments"),
@@ -525,6 +531,7 @@ const sendToTask: ToolDefinition = {
       targetTaskId,
       text,
       ...(mode ? { mode } : {}),
+      ...(expectsReply !== undefined ? { expectsReply } : {}),
       ...(attachments ? { attachments } : {}),
     });
     return {
@@ -559,10 +566,17 @@ const inboxClaim: ToolDefinition = {
     const taskId = requireTaskCaller(caller, "inbox_claim");
     const idle = readBoolean(args, "idle") ?? true;
     const claimed = await commands.claimInboxMessages(taskId, { idle });
+    // The reminder depends on the receiver (this task), not the sender.
+    const receiverHasParent =
+      claimed.length > 0 &&
+      Boolean((await commands.getTask(taskId))?.parentTaskId);
     const messages = await Promise.all(
       claimed.map((message) =>
-        formatInboxMessage(message, (messageId, index) =>
-          commands.readMessageAttachment(messageId, index),
+        formatInboxMessage(
+          message,
+          (messageId, index) =>
+            commands.readMessageAttachment(messageId, index),
+          { receiverHasParent },
         ),
       ),
     );

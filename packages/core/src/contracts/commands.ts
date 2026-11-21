@@ -10,6 +10,7 @@ import type {
   HarnessModelCatalog,
   PresenceStatus,
   SessionLaunch,
+  SlashCommandCatalog,
 } from "./harness.js";
 import type {
   InboxItem,
@@ -123,6 +124,18 @@ export interface HarnessTurnUsage {
   cacheWrite: number;
   /** ISO time of the report. */
   at?: string;
+}
+
+/**
+ * `CoreCommands.listSlashCommands`: whose `/` menu, and for which workspace
+ * (a repository's primary checkout or a registered folder; neither = the
+ * user-level commands only).
+ */
+export interface ListSlashCommandsInput {
+  /** Harness id; absent = the configured default agent. */
+  harness?: string;
+  repositoryId?: string;
+  folderPath?: string;
 }
 
 export interface ReopenTaskInput {
@@ -475,6 +488,16 @@ export interface CoreCommands {
   /** One catalog per registered harness, for the composer's Agent · Model picker. */
   listModels(): Promise<HarnessModelCatalog[]>;
   /**
+   * The composer's `/` menu: the skills and commands `input.harness` runs
+   * when a prompt starts with one, the workspace's own included. Reads the
+   * harness's files on every call (no cache). Never throws for a harness
+   * without commands or a failed listing: those come back as an empty list
+   * and `error`.
+   */
+  listSlashCommands(
+    input: ListSlashCommandsInput,
+  ): Promise<SlashCommandCatalog>;
+  /**
    * Every registered agent's descriptor (built-ins, then the config's
    * custom agents): labels, install/upgrade one-liners, version floors.
    * No probing; what frontends use instead of naming agents.
@@ -691,6 +714,17 @@ export interface CoreCommands {
    * it with backoff.
    */
   toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
+  /**
+   * Take a task off the board (`task.archivedAt`). Always asks once first
+   * (`requiresConfirmation: "done"`, answered with `force.confirmed`). A
+   * Done task's question has no lines (nothing else happens to it). Any
+   * other task is completed on the way, exactly like `toDone` (same
+   * confirmations and lines, same `force` flags, same cleanup), and lands
+   * in Done already archived, in a single move. An already-archived task comes back unchanged. Archived
+   * tasks stay listed (the board shows them only on request); reopening one
+   * clears the flag.
+   */
+  archiveTask(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
   /**
    * Run a Done task's forced cleanup (`task.cleanup.mode === "forced"`)
    * right now, ignoring the sweep's backoff (the inbox item's Retry).

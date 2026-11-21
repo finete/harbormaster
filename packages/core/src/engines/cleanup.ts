@@ -14,7 +14,7 @@ import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
 /** Done tasks older than this many days (default) are flagged archived. */
 export const DEFAULT_ARCHIVE_RETENTION_DAYS = 7;
 
-/** Whether a done task has sat long enough to flag `archivedAt` (computed on refresh; no UI reads it yet). */
+/** Whether a done task has sat long enough to flag `archivedAt` (the refresh sweep; the board hides archived tasks). */
 export function shouldArchive(
   task: Task,
   now: Date,

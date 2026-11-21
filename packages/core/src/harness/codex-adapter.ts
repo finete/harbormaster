@@ -47,6 +47,7 @@ import {
   LocalCodexTranscriptAccess,
 } from "../access/codex-code-access.js";
 import { readCodexSessionUsage } from "../access/codex-session-usage-access.js";
+import { CodexSlashCommandAccess } from "../access/local-slash-command-access.js";
 import type {
   BuildLaunchSpecInput,
   HarnessAdapter,
@@ -56,10 +57,12 @@ import type {
   HarnessModelCatalog,
   HarnessModelCatalogAccess,
   HarnessReviewCapability,
+  HarnessSlashCommandAccess,
   LaunchSpec,
   PresenceStatus,
   ReviewTarget,
   SessionLaunch,
+  SlashCommand,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
@@ -340,6 +343,8 @@ export interface CodexHarnessAdapterOptions extends PresenceReaderOptions {
   transcripts?: CodexTranscriptAccess;
   /** Codex's home (`$CODEX_HOME` or `~/.codex`). */
   homeDir?: string;
+  /** The composer's `/` menu; injectable for tests. */
+  slashCommands?: HarnessSlashCommandAccess;
 }
 
 export class CodexHarnessAdapter implements HarnessAdapter {
@@ -355,6 +360,7 @@ export class CodexHarnessAdapter implements HarnessAdapter {
   private readonly readPresence: (taskId: string) => Promise<PresenceStatus>;
   private readonly models: HarnessModelCatalogAccess;
   private readonly transcripts: CodexTranscriptAccess;
+  private readonly slashCommands: HarnessSlashCommandAccess;
   private readonly cliPath: string | undefined;
 
   constructor(options: CodexHarnessAdapterOptions = {}) {
@@ -363,7 +369,17 @@ export class CodexHarnessAdapter implements HarnessAdapter {
     this.models = options.models ?? new CodexModelCatalogAccess(access);
     this.transcripts =
       options.transcripts ?? new LocalCodexTranscriptAccess(access);
+    this.slashCommands =
+      options.slashCommands ??
+      new CodexSlashCommandAccess(
+        options.homeDir ? { codexHome: options.homeDir } : {},
+      );
     this.cliPath = options.cliPath;
+  }
+
+  /** Codex's skills, which a prompt names as `$name`. */
+  listSlashCommands(cwd?: string): Promise<SlashCommand[]> {
+    return this.slashCommands.listSlashCommands(cwd);
   }
 
   /** Per-model tokens from the rollout (`token_usage_record` lines); no cost. */

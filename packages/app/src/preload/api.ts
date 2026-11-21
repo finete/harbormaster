@@ -29,6 +29,7 @@ import type {
   LaunchTaskInput,
   ListEventsFilter,
   ListInboxOptions,
+  ListSlashCommandsInput,
   MessageMode,
   MoveTaskOptions,
   OnboardingState,
@@ -48,6 +49,7 @@ import type {
   SetDefaultAgentInput,
   SettingsPatch,
   SettingsSnapshot,
+  SlashCommandCatalog,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -105,6 +107,7 @@ export type {
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListSlashCommandsInput,
   MessageAttachment,
   MessageMode,
   MessageRoute,
@@ -142,6 +145,8 @@ export type {
   SettingsSource,
   SettingType,
   SettingValue,
+  SlashCommand,
+  SlashCommandCatalog,
   Task,
   TaskMessage,
   TaskMessagingState,
@@ -429,6 +434,10 @@ export interface HarbormasterApi {
     listBranches(repositoryId: string): Promise<string[]>;
     /** See `CoreCommands.listModels`. */
     listModels(): Promise<HarnessModelCatalog[]>;
+    /** The composer's `/` menu. See `CoreCommands.listSlashCommands`. */
+    listSlashCommands(
+      input: ListSlashCommandsInput,
+    ): Promise<SlashCommandCatalog>;
     /** Every registered agent's descriptor (labels, install hints, version floors). See `CoreCommands.listHarnessDescriptors`. */
     listHarnessDescriptors(): Promise<HarnessDescriptorInfo[]>;
     /** Runs `git status` (fresh `dirty`): never on a periodic path. See `CoreCommands.getTaskWorkspace`. */
@@ -473,6 +482,16 @@ export interface HarbormasterApi {
      * cleanup (`task.cleanup`). See `CoreCommands.toDone`.
      */
     toDone(
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult>;
+    /**
+     * Take a task off the board. A Done task is archived at once; any other
+     * task asks and completes exactly like `toDone` (same question, same
+     * `force` answers, same process teardown in main) and lands archived.
+     * See `CoreCommands.archiveTask`.
+     */
+    archiveTask(
       taskId: string,
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult>;
@@ -702,6 +721,12 @@ export interface HarbormasterApi {
     getUpdate(): Promise<UpdateInfo | null>;
     /** Main's update check found a newer release (startup, then every 6h). */
     onUpdateAvailable(listener: (update: UpdateInfo) => void): () => void;
+    /** A newer copy of the app installed over this running one, or `null`. */
+    getInstalledUpdate(): Promise<InstalledUpdate | null>;
+    /** Main noticed the installed app was replaced (checked on window focus and every 5 s). */
+    onInstalledUpdate(listener: (update: InstalledUpdate) => void): () => void;
+    /** Quits and relaunches into the installed app. */
+    restartToUpdate(): Promise<void>;
     /** Writes `text` to the system clipboard via main (works without window focus). */
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
@@ -786,4 +811,11 @@ export interface UpdateInfo {
   version: string;
   /** The command that upgrades the installed app (`brew update && brew upgrade --cask harbormaster`). */
   command: string;
+}
+
+/** The app on disk was replaced while this copy runs (see main/app-bundle-guard.ts). */
+export interface InstalledUpdate {
+  /** The installed version, or `null` when unreadable. */
+  version: string | null;
+  runningVersion: string;
 }

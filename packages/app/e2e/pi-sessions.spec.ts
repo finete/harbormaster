@@ -246,7 +246,7 @@ test.describe("OSC 7501 program status drives the badges (no probe: PI_PROGRAM_S
     );
     await expect(attention).toBeVisible({ timeout: 10_000 });
     await expect(attention).toHaveText("your move");
-    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("board-button").click();
     await expect(row.getByTestId("sidebar-row-attention-dot")).toBeVisible({
       timeout: 10_000,
     });
@@ -426,7 +426,7 @@ test.describe("outside-observation corroboration: a pane-pid mismatch distrusts 
     // The row must flip to idle well under the ~5s poll interval (the
     // instant-death push on the pane's own exit event), not on the next
     // scheduled tick.
-    await window.getByTestId("workspace-button").click();
+    await window.getByTestId("board-button").click();
     const row2 = window
       .locator('[data-testid^="sidebar-task-row-"]')
       .filter({ hasText: "Corroboration Task" });

@@ -162,6 +162,51 @@ into the task's state directory (`<stateDir>/task-attachments/<taskId>/`) and
 the prompt is rewritten to point there, so a parked task never ends up with
 a dead temp path.
 
+## Slash commands
+
+Added 2026-11-20. Typing `/` as the prompt's first character opens a menu
+of what the effective agent (the Agent chip's, else the default) can run
+from the start of a message: its skills and custom commands, the
+workspace's own included. It filters as you type (a name prefix first,
+then a namespace segment's like `check` in `/@acme/build:check`, then a
+word's, then anywhere, then the description); ↑/↓ move, Enter or Tab
+inserts the command plus a space, Escape closes the menu (typing reopens
+it), ⌘↵ still submits. It only opens at the very start (an agent runs a
+command only when the message starts with it) and only while the caret is
+in that first word; a leading path (`/tmp/x.png`) matches nothing and shows
+no menu.
+
+`CoreCommands.listSlashCommands({ harness, repositoryId | folderPath })`
+asks the adapter's optional `listSlashCommands(cwd)`, `cwd` being the
+repository's primary checkout (a task's worktree is cut from it) or the
+folder; no Where, a clone, or an unknown repository = the user's own only.
+The composer fetches it ahead of the first `/` and again when the agent or
+the Where changes (Claude's plugin listing takes ~0.6 s). What each agent
+offers, read-only from its own files
+(`access/local-slash-command-access.ts`):
+
+| Agent | Sources | Inserted as |
+|---|---|---|
+| Claude Code | `skills/*/SKILL.md` and `commands/**/*.md` in `<cwd>/.claude/` and `$CLAUDE_CONFIG_DIR` (`~/.claude`); enabled plugins (`claude plugin list --json` with the binary the adapter launches, in `cwd`) with their `skills/`, `commands/` and any manifest paths. `user-invocable: false` is hidden. | `/name`; a plugin's `/plugin:name` (plugin name from `.claude-plugin/plugin.json`) |
+| Pi | Prompt templates: direct `.md` children of `<agentDir>/prompts` and `<cwd>/.pi/prompts`. Skills (with a description): `<agentDir>/skills`, `<cwd>/.pi/skills`, `~/.agents/skills`, `.agents/skills` from `cwd` up to the git root. Pi packages' and settings paths' are not listed. | `/name`; skills `/skill:name` |
+| Codex | Skills: `.agents/skills` from `cwd` up to the git root, `$CODEX_HOME/skills` (and its bundled `.system`), `~/.agents/skills`. | `$name` (Codex has no `/` form) |
+| Cursor, custom agents | Nothing listed yet; the menu says so. | |
+
+Built-in interactive commands (`/model`, `/clear`, …) are not offered: a
+new task has no session yet, and the chips already pick model and
+thinking.
+
+A long prompt (over `INLINE_PROMPT_MAX_CHARS`) normally travels as a file
+the agent is pointed at, which would bury a leading command inside the
+file. For Claude Code, `deliverInitialPrompt` keeps a leading command
+(`leadingCommand`: `/name`, `/@scope/plugin:name`, `$name`; not a path or
+`$HOME`) inline, with "Read the file … and follow it as your task brief."
+as its arguments, and puts only the rest in the file. Other agents get the
+whole prompt in the file until they are verified to run a command from
+their launch prompt (Pi 1.6.0 passed `pi "/hm-probe 42"` to the model
+unexpanded; Codex is untested). An adapter opts in with
+`keepLeadingCommand`; the harness contract test covers both.
+
 ## Model list
 
 `HarnessAdapter.listModels()`; Pi's comes from `pi --list-models` plus Pi's
@@ -173,7 +218,8 @@ fake `pi` for this: set `HARBORMASTER_PI_LIST_MODELS_COMMAND` to a stand-in.
 
 ⌘P Repository (Where) · ⌘⇧M Model · ⌘⇧P Parent (the Options popover, on
 its task search). Each picker opens with its search focused and returns
-focus to the prompt.
+focus to the prompt. `/` at the start of the prompt opens the skills and
+commands menu (see "Slash commands").
 
 ## Task rows
 
@@ -183,6 +229,14 @@ own choice, else what its first session started with (`Task.sessionModel`,
 recorded by `claimSessionLaunch`: the configured default, else the harness's
 own default from `HarnessAdapter.defaults()`); just `pi` when unknown. The
 thinking level is in the tooltip.
+
+Board cards carry the same agent label plus when the task started:
+`claude-code · claude-opus-4-8 · started Nov 20, 2:32 PM` (locale date and
+time, the year only when not the current one). "Started" is `Task.startedAt`,
+stamped the first time the task enters Working; a task that never started
+(parked, or Done straight from the backlog) says `created …` instead, and a
+Working or Awaiting task from before `startedAt` existed falls back to
+`createdAt`.
 
 ## Out of scope
 

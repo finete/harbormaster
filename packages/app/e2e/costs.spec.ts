@@ -9,7 +9,8 @@
 // line until it shows up. One launch, three surfaces:
 // the Costs page (filters, totals, group-by, open a task), its CSV export
 // (main's save path stubbed by HARBORMASTER_E2E_SAVE_PATH), and the
-// workspace usage chip + popover (with its refresh) plus the board line.
+// workspace usage chip + popover (with its refresh) plus the board line,
+// and the workspace header line it leads (a seeded rule action that stayed).
 import {
   appendFileSync,
   existsSync,
@@ -205,6 +206,32 @@ test.beforeAll(async () => {
         binding("waiting-task", waitingSession),
       ],
     }),
+  );
+
+  // The parent's last rule action, as the rules tick writes it: a Done move
+  // that stayed, with core's short reason and its long free-form detail
+  // (a worktree path long enough to run under the header's buttons if the
+  // header ever printed it).
+  mkdirSync(path.join(stateDir, "events"), { recursive: true });
+  writeFileSync(
+    path.join(stateDir, "events", `${recent.slice(0, 10)}.jsonl`),
+    `${JSON.stringify({
+      kind: "action",
+      at: recent,
+      taskId: "costly-parent",
+      ruleId: "pr-merged-done",
+      ruleLabel: "PR merged",
+      file: "rules.yaml",
+      line: 1,
+      eventId: "seed-event-1",
+      eventType: "github.pr.stateChanged",
+      action: "move",
+      with: { to: "done" },
+      from: { state: "awaiting", awaitingKind: "review" },
+      outcome: "stayed",
+      detail: `worktree left in place: it is open in a live session (${path.join(root, "worktrees", "a-very-long-repository-name", "a-very-long-task-branch-name-that-keeps-going-and-going-0123456789abcdef")})`,
+      reason: "worktree in use",
+    })}\n`,
   );
 
   app = await electron.launch({
@@ -455,6 +482,27 @@ test("the workspace usage chip opens a breakdown and recounts on refresh; top ca
   await cardLocator("Costly parent").click();
   const chip = window.locator('[data-testid="task-usage-chip"]:visible');
   await expect(chip).toContainText("1.2M tok · ~$3.50");
+
+  // The header line: the chip leads it, so nothing beside it can move it;
+  // the last rule action shows core's short reason (the long detail is
+  // only on hover) and stays clear of the buttons to its right.
+  const header = window.locator('[data-testid="workspace-header"]:visible');
+  const last = header.getByTestId("task-audit-last");
+  await expect(last).toBeVisible();
+  const box = async (locator: Locator) => {
+    const found = await locator.boundingBox();
+    if (!found) throw new Error("not laid out");
+    return found;
+  };
+  const chipBox = await box(chip);
+  const lineText = await box(last.locator("span").first());
+  const history = await box(header.getByTestId("task-audit-history-button"));
+  expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(lineText.x);
+  expect(lineText.x + lineText.width).toBeLessThanOrEqual(history.x);
+  await expect(last).toHaveText(/^Didn't move to Done: worktree in use\s*· /);
+  await expect(last).toHaveAttribute("data-tone", "warn");
+  await expect(last).toHaveAttribute("title", /open in a live session \(/);
+
   await chip.click();
   const popover = window.getByTestId("task-usage-popover");
   await expect(popover.getByTestId("task-usage-total")).toContainText(

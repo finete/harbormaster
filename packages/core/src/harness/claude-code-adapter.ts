@@ -35,6 +35,7 @@ import {
   claudeSubagentFiles,
   readClaudeSessionUsage,
 } from "../access/claude-session-usage-access.js";
+import { ClaudeSlashCommandAccess } from "../access/local-slash-command-access.js";
 import {
   type BuildLaunchSpecInput,
   type ExpectedSessionFile,
@@ -44,11 +45,13 @@ import {
   type HarnessModelCatalog,
   type HarnessModelCatalogAccess,
   type HarnessReviewCapability,
+  type HarnessSlashCommandAccess,
   type LaunchSpec,
   type PresenceStatus,
   type ProgramStatusReading,
   PTY_TYPING_CHANNEL,
   type SessionLaunch,
+  type SlashCommand,
 } from "../contracts/harness.js";
 import type { HarnessMessagingCapabilities } from "../contracts/messaging.js";
 import type { ThinkingLevel } from "../contracts/model.js";
@@ -337,6 +340,8 @@ export interface ClaudeCodeHarnessAdapterOptions extends PresenceReaderOptions {
   models?: HarnessModelCatalogAccess;
   /** Transcript existence (resume vs. re-create); injectable for tests. */
   transcripts?: ClaudeTranscriptAccess;
+  /** The composer's `/` menu; injectable for tests. */
+  slashCommands?: HarnessSlashCommandAccess;
   /** Claude's config directory (transcripts under `<configDir>/projects`); defaults to `$CLAUDE_CONFIG_DIR` or `~/.claude`. */
   configDir?: string;
 }
@@ -355,6 +360,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   private readonly readPresence: (taskId: string) => Promise<PresenceStatus>;
   private readonly models: HarnessModelCatalogAccess;
   private readonly transcripts: ClaudeTranscriptAccess;
+  private readonly slashCommands: HarnessSlashCommandAccess;
   private readonly cliPath: string | undefined;
   private readonly configDir: string | undefined;
 
@@ -364,6 +370,17 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
     this.transcripts = options.transcripts ?? new LocalClaudeTranscriptAccess();
     this.cliPath = options.cliPath;
     this.configDir = options.configDir;
+    this.slashCommands =
+      options.slashCommands ??
+      new ClaudeSlashCommandAccess({
+        ...(options.configDir ? { configDir: options.configDir } : {}),
+        command: () => harnessLaunchCommand(this),
+      });
+  }
+
+  /** Claude's skills, commands and enabled plugins' (`/name`, `/plugin:name`). */
+  listSlashCommands(cwd?: string): Promise<SlashCommand[]> {
+    return this.slashCommands.listSlashCommands(cwd);
   }
 
   /** `<configDir>/projects/<slug of the resolved cwd>/<sessionId>.jsonl` (Claude slugs `process.cwd()`: `/tmp` → `/private/tmp` on macOS). */
@@ -437,6 +454,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
       input,
       claudePromptArgs,
       claudePromptFileArgs,
+      { keepLeadingCommand: true },
     );
     return {
       command: harnessLaunchCommand(this),

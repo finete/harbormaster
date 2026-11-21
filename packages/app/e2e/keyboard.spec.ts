@@ -2,8 +2,9 @@
 // TUI-style single-key shortcuts (n/x/r/s/g/a/Escape; r opens the Await
 // picker with review preselected), the pi-home-style key
 // legend, kbd hint chips on the Board/New task buttons, and the guard that
-// keeps every shortcut out of the way while a dialog is open or the
-// terminal is focused (see lib/keyboard-guard.ts, lib/board-selection.ts).
+// keeps every shortcut out of the way while a dialog is open, the
+// terminal is focused or focus sits in the sidebar beside the board (see
+// lib/keyboard-guard.ts, lib/board-selection.ts).
 // Real @harbormaster/core against a scratch (repository-less) state dir —
 // same no-fixture pattern as e2e/smoke.spec.ts — since every scenario here
 // only needs repository-less tasks (Start on a repo-less backlog task
@@ -116,7 +117,8 @@ test("the key legend renders as a floating card on the board view", async () => 
   await expect(legend).not.toContainText("Review");
   await expect(legend).toContainText("Start");
   await expect(legend).toContainText("Refresh");
-  await expect(legend).toContainText("Archived");
+  await expect(legend).toContainText("Archive");
+  await expect(legend).toContainText("Show archived");
   await expect(legend).toContainText("Navigate");
   await expect(legend).toContainText("Workspace");
 });
@@ -125,12 +127,9 @@ test("kbd hint chips are visible on the Board and New task buttons", async () =>
   await expect(
     window.getByTestId("board-new-task-button").locator("kbd"),
   ).toBeVisible();
-  await window.getByTestId("workspace-button").click();
   // Sidebar nav rows reveal their shortcut on hover (Claude/Codex style).
   await window.getByTestId("board-button").hover();
   await expect(window.getByTestId("board-button").locator("kbd")).toBeVisible();
-  await window.getByTestId("board-button").click();
-  await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
 test("selection starts on the first card and arrow keys move it", async () => {
@@ -177,6 +176,28 @@ test("Enter opens the selected task's workspace", async () => {
 
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
+});
+
+test("keys aimed at the sidebar beside the board never drive the board", async () => {
+  await window.keyboard.press("ArrowUp");
+  await expect(cardLocator("Keyboard Alpha")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+
+  await window.getByTestId("sidebar-resize-handle").focus();
+  await window.keyboard.press("ArrowDown");
+  const inboxRow = window.getByTestId("inbox-button");
+  await inboxRow.focus();
+  await window.keyboard.press("Enter");
+  await expect(window.getByTestId("inbox-view")).toBeVisible();
+
+  await inboxRow.click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+  await expect(cardLocator("Keyboard Alpha")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
 });
 
 test('"n" opens the new-task draft composer, and typing inside it does not also trigger single-key shortcuts', async () => {

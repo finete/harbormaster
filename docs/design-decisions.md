@@ -34,7 +34,7 @@ control the other:
 | 8 | Attachment | Takeover-offer semantics (verified: Pi has no concurrent-attachment protection, append-only JSONL, no locking). `openGuarded` ports from pi-home; the multiplexer branch becomes "focus the app pane". |
 | 9 | Stack | Electron + Vite + React + TS (no Next.js, no router). Verified as the stack coding agents generate most reliably in 2026. |
 | 10 | Design system | Tailwind + shadcn/ui (copy-in ownership), dnd-kit for the board (Kibo UI / Georgegriff shadcn kanban as starting blocks; astryx templates as layout reference: Kanban Board, IDE, Work Item Detail, Side Nav). Re-skin anything lifted from pi-gui. |
-| 11 | Layout engine | dockview: tabs and splits are one panel model. Three top-level views: workspace (task sidebar + per-task dockview terminal workspaces, the default), kanban board (the "home" triage screen, full-width, reached via sidebar button / Cmd+Shift+B; clicking a card enters the task's workspace), and the inbox (sidebar stays, the main area lists everything that needs a human; sidebar button / Cmd+I, Esc back; see docs/release-plan.md "Inbox"). Cmd+B (or the sidebar's hide button) hides the sidebar entirely, as in most macOS apps; each main-area header then shows a Show sidebar button. Per-task dockview instances persist across view switches. Drag/split → extra `$SHELL` pty in the same worktree. Built-in layout serialization for restore-on-restart. |
+| 11 | Layout engine | dockview: tabs and splits are one panel model. Three top-level views: workspace (task sidebar + per-task dockview terminal workspaces, the default), kanban board (the "home" triage screen, in place of the task workspace with the sidebar staying, reached via sidebar button / Cmd+Shift+B, either one again or Esc going back; clicking a card enters the task's workspace), and the inbox (sidebar stays, the main area lists everything that needs a human; sidebar button / Cmd+I, Esc back; see docs/release-plan.md "Inbox"). Cmd+B (or the sidebar's hide button) hides the sidebar entirely, as in most macOS apps; each main-area header then shows a Show sidebar button. Per-task dockview instances persist across view switches. Drag/split → extra `$SHELL` pty in the same worktree. Built-in layout serialization for restore-on-restart. |
 | 12 | Terminals | @xterm/xterm + node-pty (lift pi-gui's `terminal-service.ts` wiring). Pane↔process lifecycle glue is ours. |
 | 13 | Multi-agent future | Harness adapter interface in core (spawn / attach / presence / running-detection). Pi is the only adapter v1. |
 | 14 | Name | Harbormaster (npm free, no serious collisions). Private repo `finete/harbormaster`, default branch `main`, monorepo. |
@@ -120,8 +120,9 @@ without new commands; rules already consume kinds purely as data.
 - Frontends render the registry (`listAwaitingKinds`: labels, inputs,
   per-task availability and side-effect notices) and never branch on kind
   names for controls. Kind-specific *display* (group headings, state chips)
-  is fine. Board cards carry no action buttons: the verbs live in the
-  workspace header, the board keys, and drag-and-drop.
+  is fine. Board cards carry no workflow buttons: the verbs live in the
+  workspace header, the board keys, and drag-and-drop. The one button on a
+  card is its hover × (Archive, which asks first).
 
 ## Column names: Working, and running agents
 
@@ -263,6 +264,20 @@ difference not listed here is a bug.
   thing the user ever sees about it. pi-home asked "Discard uncommitted
   changes?" / "Delete unmerged task workspace?" one after the other and
   kept a live pane's worktree with a warning.
+- **Archive is Done, then off the board.** `archiveTask` (workspace header
+  Archive, a card's hover ×, `e` on the board, the rail row's menu) is not
+  a fourth verb. It always asks once ("Archive?"): a Done task's question
+  has no other lines and it gets `archivedAt`; any other task gets the Done
+  question's lines and lands in Done already archived, in one write, so
+  nothing keeps running unseen. Archived tasks are listed behind the Done
+  column's "show archived" (`a`) and in the rail's collapsible "Archived"
+  section under the tasks (newest first, ten at a time behind "Show more";
+  never as a task row). Whenever a task becomes archived (here, in another
+  window, or by the 7-day sweep, which archives old Done tasks the same
+  way) its open workspace closes (the user's own close, so a live review
+  still asks about unsent comments). Archiving a task already Done ends
+  nothing in its worktree; its Done cleanup already ran or keeps retrying.
+  Reopen (or any move out of Done) clears the flag.
 - **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
 - **Worktree layout.** Task worktrees live at

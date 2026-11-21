@@ -20,6 +20,15 @@ export interface ProcessRunRequest {
   cwd?: string;
   timeoutMs: number;
   maxBuffer: number;
+  /** Variables of this process's environment the child must not inherit. */
+  unsetEnv?: string[];
+}
+
+function childEnv(unset: string[] | undefined): NodeJS.ProcessEnv | undefined {
+  if (!unset?.length) return undefined;
+  const env = { ...process.env };
+  for (const name of unset) delete env[name];
+  return env;
 }
 
 export interface ProcessRunResult {
@@ -44,6 +53,7 @@ export const execFileRunner: ProcessRunner = (request) =>
       request.args,
       {
         cwd: request.cwd,
+        env: childEnv(request.unsetEnv),
         maxBuffer: request.maxBuffer,
         timeout: request.timeoutMs,
         // SIGKILL, not the default SIGTERM: a child wedged on a prompt or in
@@ -91,6 +101,8 @@ export const LONG_RUN_TIMEOUT_MS = 10 * 60_000;
 export interface RunOptions {
   /** Kill the child (SIGKILL) and fail after this many ms. Defaults to {@link DEFAULT_RUN_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /** Variables of this process's environment the child must not inherit. */
+  unsetEnv?: readonly string[];
 }
 
 function request(
@@ -105,6 +117,7 @@ function request(
     ...(cwd ? { cwd } : {}),
     maxBuffer: MAX_BUFFER,
     timeoutMs: options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+    ...(options?.unsetEnv?.length ? { unsetEnv: [...options.unsetEnv] } : {}),
   };
 }
 
@@ -218,11 +231,11 @@ export interface RunOutcome {
 export async function runOutcome(
   command: string,
   args: string[],
-  options?: RunOptions,
+  options?: RunOptions & { cwd?: string },
 ): Promise<RunOutcome> {
   try {
     const result = await activeRunner(
-      request(command, args, undefined, options),
+      request(command, args, options?.cwd, options),
     );
     return {
       ok: true,

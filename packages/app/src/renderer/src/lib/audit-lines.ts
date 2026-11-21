@@ -65,7 +65,7 @@ export function auditActionVerb(entry: AuditActionEntry): string {
           ? `${columnName(entry.from.state, entry.from.awaitingKind)} → ${target}`
           : `Moved to ${target}`;
       case "stayed":
-        return `Tried ${target}, stayed${detail}`;
+        return `Didn't move to ${target}${detail}`;
       case "superseded":
         return `Would move to ${target} (an earlier rule won)`;
       case "skipped":
@@ -85,6 +85,53 @@ export function auditActionVerb(entry: AuditActionEntry): string {
   return entry.outcome === "applied"
     ? what
     : `${humanize(entry.outcome)}: ${what[0]?.toLowerCase()}${what.slice(1)}${detail}`;
+}
+
+/** How the header line is colored: ok = moved, warn = did not apply, muted = another rule won. */
+export type AuditTone = "ok" | "warn" | "muted";
+
+export interface AuditHeaderLine {
+  /** The short action: "Dev → Done", "Didn't move to Done: worktree in use". */
+  text: string;
+  /** Compact age: "2m", "now". */
+  age: string;
+  tone: AuditTone;
+  /** Hover text: the full sentence (with detail), the age, the rule and the technical why. */
+  title: string;
+}
+
+/**
+ * The workspace header's one-line form of a rule action: the verb without
+ * its free-form `detail`, plus the entry's short `reason` when core
+ * recorded one (older entries have none and read as just the action).
+ * The long sentence, rule name and technical why go to the hover title.
+ */
+export function auditHeaderLine(
+  entry: AuditActionEntry,
+  now: number,
+): AuditHeaderLine {
+  const { detail: _detail, ...bare } = entry;
+  const verb = auditActionVerb(bare);
+  // A superseded verb already says why ("an earlier rule won").
+  const reason =
+    entry.reason && entry.outcome !== "superseded" ? entry.reason : "";
+  const text = !reason
+    ? verb
+    : entry.action === "move"
+      ? `${verb}: ${reason}`
+      : `${verb} (${reason})`;
+  const age = relativeTime(entry.at, now);
+  return {
+    text,
+    age,
+    tone:
+      entry.outcome === "applied"
+        ? "ok"
+        : entry.outcome === "superseded"
+          ? "muted"
+          : "warn",
+    title: `${auditActionVerb(entry)} · ${auditAge(entry.at, now)}\nRule: ${auditRuleLabel(entry)}\n${auditActionWhy(entry)}`,
+  };
 }
 
 /** "2h ago" / "just now". */

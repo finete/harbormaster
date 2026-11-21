@@ -339,6 +339,29 @@ test.beforeAll(async () => {
   notesFolder = path.join(root, "notes");
   mkdirSync(notesFolder);
 
+  // The composer's `/` menu reads Pi's own files: a prompt template and a
+  // skill in the agent dir, and the repository's own template (untracked,
+  // kept out of `git status`). `hm-e2e-` names keep the developer's real
+  // `~/.agents/skills` (Pi reads it too) out of the assertions.
+  mkdirSync(path.join(piAgentDir, "prompts"));
+  writeFileSync(
+    path.join(piAgentDir, "prompts", "hm-e2e-review.md"),
+    "---\ndescription: Review the staged changes\n---\nReview them.\n",
+  );
+  mkdirSync(path.join(piAgentDir, "skills", "hm-e2e-pdf"), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(piAgentDir, "skills", "hm-e2e-pdf", "SKILL.md"),
+    "---\nname: hm-e2e-pdf\ndescription: Extract text from PDFs\n---\nUse pdftotext.\n",
+  );
+  mkdirSync(path.join(repoCheckout, ".pi", "prompts"), { recursive: true });
+  writeFileSync(
+    path.join(repoCheckout, ".pi", "prompts", "hm-e2e-ship.md"),
+    "Ship the fixture\n",
+  );
+  writeFileSync(path.join(repoCheckout, ".git", "info", "exclude"), ".pi/\n");
+
   app = await electron.launch({
     args: [mainEntry],
     env: {
@@ -434,6 +457,65 @@ test("the composer gates submit on a title/prompt and a Where; Start is primary,
   await window.getByTestId("confirm-dialog-confirm").click();
   await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await expect(window.getByTestId("sidebar-draft-row")).toHaveCount(0);
+  await window.getByTestId("board-button").click();
+  await expect(window.getByTestId("board-view")).toBeVisible();
+});
+
+test("typing / at the start of the prompt offers the agent's skills and commands, the repository's own included; arrows + Enter insert one, Escape closes the menu", async () => {
+  await openNewTaskComposer();
+  await chooseWhere(window, REPO_ID);
+  const prompt = window.getByTestId("new-task-prompt-input");
+  await prompt.click();
+  const menu = window.getByTestId("slash-command-menu");
+  const commands = (): Promise<(string | null)[]> =>
+    menu
+      .getByTestId("slash-command-option")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-command")),
+      );
+
+  await window.keyboard.type("/");
+  await expect(menu).toBeVisible();
+  await window.keyboard.type("hm-e2e");
+  // Pi's names: templates as /name (the repository's first), skills as
+  // /skill:name; a name prefix ranks above a namespace segment's.
+  await expect
+    .poll(commands)
+    .toEqual(["/hm-e2e-ship", "/hm-e2e-review", "/skill:hm-e2e-pdf"]);
+  await expect(menu).toContainText("Review the staged changes");
+  await expect(
+    menu.locator('[data-testid="slash-command-option"][data-selected="true"]'),
+  ).toHaveAttribute("data-command", "/hm-e2e-ship");
+
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("Enter");
+  await expect(prompt).toHaveValue("/skill:hm-e2e-pdf ");
+  await expect(menu).toHaveCount(0);
+  // Past the first word the menu stays shut.
+  await window.keyboard.type("report.pdf");
+  await expect(prompt).toHaveValue("/skill:hm-e2e-pdf report.pdf");
+  await expect(menu).toHaveCount(0);
+
+  // Escape closes the menu, not the draft; typing reopens it.
+  await prompt.fill("");
+  await window.keyboard.type("/hm-e2e-r");
+  await expect.poll(commands).toEqual(["/hm-e2e-review"]);
+  await window.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(window.getByTestId("new-task-composer")).toBeVisible();
+  await window.keyboard.type("e");
+  await expect.poll(commands).toEqual(["/hm-e2e-review"]);
+  await window.keyboard.press("Tab");
+  await expect(prompt).toHaveValue("/hm-e2e-review ");
+
+  // A leading path is not a command: nothing matches, no menu.
+  await prompt.fill("/tmp/screenshot.png");
+  await expect(menu).toHaveCount(0);
+
+  await window.getByTestId("sidebar-draft-close").click();
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(window.getByTestId("new-task-composer")).toHaveCount(0);
   await window.getByTestId("board-button").click();
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
@@ -570,10 +652,12 @@ test("the composer layout at 1200px: the prompt box footer holds only the mode s
   await expect(window.getByTestId("board-view")).toBeVisible();
 });
 
-test("s on a selected parked card (cards carry no buttons) creates its worktree and moves it to Working", async () => {
+test("s on a selected parked card (cards carry no workflow buttons) creates its worktree and moves it to Working", async () => {
   const card = cardLocator("Parked Work");
   const taskId = await cardTaskId(card);
-  await expect(card.locator("button")).toHaveCount(0);
+  await expect(
+    card.locator('button:not([data-testid="card-archive-button"])'),
+  ).toHaveCount(0);
   await selectCard(window, taskId);
   await window.keyboard.press("s");
 
