@@ -50,10 +50,12 @@ setup, never named here: commits use the repo-local `user.name` /
 never change either.
 
 Every `gh` command here runs as that account:
-`GH_TOKEN="$(gh auth token --user "$(git config harbormaster.ghUser)")" gh …`.
-If `harbormaster.ghUser` is unset, stop and ask the developer which account
-to use; never fall back to gh's active account. Never add other accounts as
-collaborators.
+`u=$(git config harbormaster.ghUser) && t=$(gh auth token --user "$u") && GH_TOKEN="$t" gh …`.
+Each step must succeed before `gh` runs: `gh auth token --user ""` prints
+the active account's token, and an empty `GH_TOKEN` falls back to it too.
+If the chain stops (`harbormaster.ghUser` unset, or that account not logged
+in to `gh`), stop and ask the developer; never fall back to gh's active
+account. Never add other accounts as collaborators.
 
 ## Workflow
 
