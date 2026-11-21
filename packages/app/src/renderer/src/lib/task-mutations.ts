@@ -161,7 +161,10 @@ export async function toDoneMutation(taskId: string): Promise<void> {
       const result = await window.harbormaster.core.toDone(taskId, { force });
       // Landed. Cleanup outcomes live on `task.cleanup` (inbox item after
       // repeated failures), never in a toast.
-      if (!("requiresConfirmation" in result)) return;
+      if (!("requiresConfirmation" in result)) {
+        if (result.warning) pushToast(result.warning, "warning");
+        return;
+      }
       if (result.requiresConfirmation === "activeChildren") {
         // Core asks this at most once (the answer accumulates); never loop.
         if (force.leaveChildren || force.stopDescendants) {

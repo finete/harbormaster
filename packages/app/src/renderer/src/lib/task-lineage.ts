@@ -32,6 +32,11 @@
 // gives "a Done parent's children stay attached to it" for free: the Done
 // parent still reports its full child count (`children.count`), even
 // though none of them render nested there once they're off in Working.
+import {
+  depthOf,
+  descendantsOf,
+  subtreeHeight,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import type { Task } from "../../../preload/api";
 
 /** One task's lineage neighborhood, indexed once per render from the full (unfiltered) board. */
@@ -69,79 +74,9 @@ export function lineageIndentPx(indent: number, stepPx: number): number {
   return Math.min(Math.max(indent, 0), MAX_LINEAGE_INDENT) * stepPx;
 }
 
-/** 1 for a top-level task, 2 for its children, and so on (cycle-safe; a missing parent ends the walk). */
+/** 1 for a top-level task, 2 for its children, and so on (core's tree engine over this index). */
 export function taskDepth(task: Task, index: LineageIndex): number {
-  let depth = 1;
-  const seen = new Set<string>([task.id]);
-  let parentId = task.parentTaskId;
-  while (parentId && !seen.has(parentId)) {
-    const parent = index.taskById.get(parentId);
-    if (!parent) break;
-    seen.add(parentId);
-    depth++;
-    parentId = parent.parentTaskId;
-  }
-  return depth;
-}
-
-/** Every task below `taskId`, at any depth (never `taskId` itself). */
-export function descendantsOfTask(taskId: string, index: LineageIndex): Task[] {
-  const result: Task[] = [];
-  const seen = new Set<string>([taskId]);
-  const queue = [taskId];
-  for (let i = 0; i < queue.length; i++) {
-    for (const child of index.childrenByParent.get(queue[i] as string) ?? []) {
-      if (seen.has(child.id)) continue;
-      seen.add(child.id);
-      result.push(child);
-      queue.push(child.id);
-    }
-  }
-  return result;
-}
-
-/** Levels in the subtree rooted at `taskId`, counting itself (1 for a task with no children). */
-export function subtreeHeightOf(taskId: string, index: LineageIndex): number {
-  let height = 0;
-  const seen = new Set<string>();
-  let level = [taskId];
-  while (level.length > 0) {
-    height++;
-    const next: string[] = [];
-    for (const id of level) {
-      seen.add(id);
-      for (const child of index.childrenByParent.get(id) ?? []) {
-        if (!seen.has(child.id)) next.push(child.id);
-      }
-    }
-    level = next;
-  }
-  return height;
-}
-
-/**
- * How many task trees are deeper than `maxDepth` (Settings → Agents note,
- * docs/task-trees.md decision 9). A tree counts once, by its top-level task.
- */
-export function treesDeeperThan(
-  tasks: Iterable<Task>,
-  maxDepth: number,
-): number {
-  const index = buildLineageIndex(tasks);
-  const roots = new Set<string>();
-  for (const task of index.taskById.values()) {
-    if (taskDepth(task, index) <= maxDepth) continue;
-    let root = task;
-    const seen = new Set<string>([task.id]);
-    while (root.parentTaskId && !seen.has(root.parentTaskId)) {
-      const parent = index.taskById.get(root.parentTaskId);
-      if (!parent) break;
-      seen.add(parent.id);
-      root = parent;
-    }
-    roots.add(root.id);
-  }
-  return roots.size;
+  return depthOf(task, index.taskById);
 }
 
 /** The Settings → Agents note under "Max nesting depth" (decision 9); `undefined` when no tree is deeper. */
@@ -165,8 +100,10 @@ export function parentCandidates(
   index: LineageIndex,
   maxDepth: number = DEFAULT_MAX_NESTING_DEPTH,
 ): Task[] {
-  const below = new Set(descendantsOfTask(task.id, index).map((t) => t.id));
-  const height = subtreeHeightOf(task.id, index);
+  const below = new Set(
+    descendantsOf(task.id, index.childrenByParent).map((t) => t.id),
+  );
+  const height = subtreeHeight(task.id, index.childrenByParent);
   const candidates: Task[] = [];
   for (const other of pool) {
     if (

@@ -7,6 +7,10 @@
 // `formatTokenCount` is core's own utility (a dependency-free module),
 // imported by path: the package index pulls in core's Node-only runtime,
 // which must never reach the renderer bundle.
+import {
+  childrenIndex,
+  descendantsOf,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import { formatTokenCount } from "@harbormaster/core/dist/utilities/format-token-count.js";
 import type {
   Task,
@@ -90,22 +94,9 @@ export function subtaskRollup(
   let cost = 0;
   let costed = 0;
   let priced = true;
-  const below = new Set<string>([parentTaskId]);
-  // Collect the subtree (parents may be listed after their children).
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const task of tasks) {
-      if (
-        task.parentTaskId !== undefined &&
-        below.has(task.parentTaskId) &&
-        !below.has(task.id)
-      ) {
-        below.add(task.id);
-        grew = true;
-      }
-    }
-  }
-  below.delete(parentTaskId);
+  const below = new Set(
+    descendantsOf(parentTaskId, childrenIndex(tasks)).map((t) => t.id),
+  );
   for (const task of tasks) {
     if (!below.has(task.id)) continue;
     const usage = task.usage;

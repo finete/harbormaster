@@ -134,7 +134,7 @@ export function countActiveTasks(
   return descendants.filter((task) => task.state !== "done").length;
 }
 
-/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · N tasks below still running]`. */
+/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · N tasks below not done yet]`. */
 export function formatChildStatusLine(entry: ChildStatusEntry): string {
   const parts: string[] = [`"${entry.title}" (${entry.id})`];
   const column = entry.awaiting
@@ -154,7 +154,7 @@ export function formatChildStatusLine(entry: ChildStatusEntry): string {
   }
   if (entry.activeBelow) {
     parts.push(
-      `${entry.activeBelow} task${entry.activeBelow === 1 ? "" : "s"} below still running`,
+      `${entry.activeBelow} task${entry.activeBelow === 1 ? "" : "s"} below not done yet`,
     );
   }
   return parts.join(" · ");

@@ -182,7 +182,7 @@ export interface ToDoneForce {
   confirmed?: boolean;
   /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it running and nested under it. */
   leaveChildren?: boolean;
-  /** Answers it too, and also stops the agents of the active tasks below (main does it when the Done is confirmed): the tasks stay on the board, worktrees untouched. */
+  /** Answers it too, and also stops the agents of the active tasks below. App-level only: main stops the agents when the Done is confirmed (core hears `leaveChildren`), names any it could not stop in the result's `warning`; the tasks stay on the board, worktrees untouched. */
   stopDescendants?: boolean;
 }
 

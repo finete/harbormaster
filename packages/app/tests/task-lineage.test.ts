@@ -1,3 +1,7 @@
+import {
+  descendantsOf,
+  subtreeHeight,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import { describe, expect, it } from "vitest";
 import type { BoardColumn, Task } from "../src/preload/api";
 import {
@@ -7,14 +11,11 @@ import {
 import {
   buildLineageIndex,
   deeperTreesNote,
-  descendantsOfTask,
   hiddenNestedChildIds,
   hoistChildrenIntoParentGroups,
   layoutLineageRows,
   parentCandidates,
-  subtreeHeightOf,
   taskDepth,
-  treesDeeperThan,
 } from "../src/renderer/src/lib/task-lineage";
 
 const T0 = "2025-01-01T00:00:00.000Z";
@@ -457,24 +458,14 @@ describe("task trees (several levels)", () => {
       opts,
     );
 
-  it("measures depth, subtree height and counts too-deep trees once", () => {
+  it("measures depth and subtree height through core's tree engine", () => {
     expect(taskDepth(root, index)).toBe(1);
     expect(taskDepth(great, index)).toBe(4);
-    expect(subtreeHeightOf("root", index)).toBe(4);
-    expect(subtreeHeightOf("great", index)).toBe(1);
-    expect(descendantsOfTask("root", index).map((t) => t.id)).toEqual([
-      "kid",
-      "grand",
-      "great",
-    ]);
-    expect(treesDeeperThan(all, 4)).toBe(0);
-    expect(treesDeeperThan(all, 3)).toBe(1);
+    expect(subtreeHeight("root", index.childrenByParent)).toBe(4);
+    expect(subtreeHeight("great", index.childrenByParent)).toBe(1);
     expect(
-      treesDeeperThan(
-        [...all, task({ id: "x" }), task({ id: "y", parentTaskId: "x" })],
-        1,
-      ),
-    ).toBe(2);
+      descendantsOf("root", index.childrenByParent).map((t) => t.id),
+    ).toEqual(["kid", "grand", "great"]);
   });
 
   it("words the Settings note for deeper trees", () => {

@@ -868,13 +868,13 @@ describe.skipIf(!gitAvailable)("task trees: nesting depth", () => {
       activeTasks: [{ id: grandchild.id, title: "Grandchild" }],
     });
 
-    // The stop flag answers the question like leaveChildren; core touches nobody.
+    // leaveChildren answers the question; core touches nobody.
     const next = await f.core.commands.toDone(root.id, {
-      force: { stopDescendants: true },
+      force: { leaveChildren: true },
     });
     expect(next).toMatchObject({ requiresConfirmation: "done" });
     const landed = await f.core.commands.toDone(root.id, {
-      force: { stopDescendants: true, confirmed: true },
+      force: { leaveChildren: true, confirmed: true },
     });
     expect(isToDoneConfirmation(landed)).toBe(false);
     const after = await f.core.commands.getTask(grandchild.id);

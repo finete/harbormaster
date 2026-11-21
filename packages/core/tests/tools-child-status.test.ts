@@ -158,7 +158,7 @@ describe("buildChildStatusEntry / formatChildStatusLine", () => {
 });
 
 describe("tasks below a child", () => {
-  it("counts only active (not Done) tasks below, and shows the count on the line", () => {
+  it("counts only active (not Done) tasks below, (Backlog and Awaiting included) and shows the count on the line", () => {
     expect(
       countActiveTasks([
         { state: "working" },
@@ -170,11 +170,11 @@ describe("tasks below a child", () => {
     const entry = buildChildStatusEntry(task, presence(), 2);
     expect(entry.activeBelow).toBe(2);
     expect(formatChildStatusLine(entry)).toBe(
-      '"Fix the flaky test" (child-1) · Working · queued · 2 tasks below still running',
+      '"Fix the flaky test" (child-1) · Working · queued · 2 tasks below not done yet',
     );
     expect(
       formatChildStatusLine(buildChildStatusEntry(task, presence(), 1)),
-    ).toMatch(/ · 1 task below still running$/);
+    ).toMatch(/ · 1 task below not done yet$/);
   });
 
   it("shows nothing when no task below is active", () => {

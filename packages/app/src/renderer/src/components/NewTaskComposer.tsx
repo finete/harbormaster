@@ -215,16 +215,14 @@ export function NewTaskComposer({
   // A task already at the max nesting depth can't have a child.
   const maxNestingDepth = useMaxNestingDepth();
   const lineageIndex = useMemo(() => buildLineageIndex(tasks), [tasks]);
-  const mayHaveChild = (task: Task): boolean =>
-    task.state !== "done" && taskDepth(task, lineageIndex) < maxNestingDepth;
+  const mayHaveChild = useCallback(
+    (task: Task): boolean =>
+      task.state !== "done" && taskDepth(task, lineageIndex) < maxNestingDepth,
+    [lineageIndex, maxNestingDepth],
+  );
   const parentCandidates = useMemo(
-    () =>
-      tasks.filter(
-        (task) =>
-          task.state !== "done" &&
-          taskDepth(task, lineageIndex) < maxNestingDepth,
-      ),
-    [tasks, lineageIndex, maxNestingDepth],
+    () => tasks.filter(mayHaveChild),
+    [tasks, mayHaveChild],
   );
   const suggestedParent = origin && mayHaveChild(origin) ? origin : null;
 

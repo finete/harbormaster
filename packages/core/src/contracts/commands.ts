@@ -254,16 +254,8 @@ export interface ToDoneOptions {
   force?: {
     /** Answers the "Mark done?" confirmation (`requiresConfirmation: "done"`). */
     confirmed?: boolean;
-    /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it running and nested under it. */
+    /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it on the board, nested under it (core never touches them). A frontend that also stops their agents does that itself (it owns the processes; `listDescendants` names the tasks) and then answers with this. */
     leaveChildren?: boolean;
-    /**
-     * Answers the `activeChildren` confirmation like `leaveChildren` (the tasks
-     * stay on the board, in their columns, worktrees untouched), and says the
-     * caller also stops those tasks' agents. Core cannot: the agents are
-     * processes the frontend owns, so the frontend stops them
-     * (`listDescendants` names them) before it lands the Done.
-     */
-    stopDescendants?: boolean;
   };
 }
 
@@ -716,9 +708,9 @@ export interface CoreCommands {
    * is the app's. A task with any non-done task anywhere below it
    * (`listDescendants`) asks first (`requiresConfirmation:
    * "activeChildren"`, naming them all in `activeTasks`) unless
-   * `options.force.leaveChildren` or `stopDescendants` is set; core never
-   * touches those tasks either way (stopping their agents is the
-   * frontend's, see `ToDoneOptions.force.stopDescendants`). Then every manual Done asks ONE question
+   * `options.force.leaveChildren` is set; core never touches those tasks
+   * either way (stopping their agents is the frontend's, which then answers
+   * with `leaveChildren`). Then every manual Done asks ONE question
    * (`requiresConfirmation: "done"`, its `lines` computed up front: the
    * worktree that will be removed, uncommitted changes that will be
    * discarded, an unmerged branch that will be deleted, a live pane that

@@ -7,6 +7,7 @@
 // same detection the wizard uses. "Overridden in N repositories" under the
 // default agent and the bypass switch (S8).
 
+import { treesDeeperThan } from "@harbormaster/core/dist/engines/task-nesting.js";
 import { Check, X } from "lucide-react";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
@@ -23,7 +24,7 @@ import {
   parseStringDraft,
   valueText,
 } from "../../lib/settings-form";
-import { deeperTreesNote, treesDeeperThan } from "../../lib/task-lineage";
+import { deeperTreesNote } from "../../lib/task-lineage";
 import type { SettingsModel } from "../../lib/use-settings";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";

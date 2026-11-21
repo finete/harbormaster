@@ -2033,9 +2033,8 @@ export class CoreManager implements CoreCommands {
     const force = options?.force ?? {};
     const protectedPaths = options?.protectedPaths ?? [];
     // A task with active tasks anywhere below it asks first (they are never
-    // touched here, only left running or stopped by the frontend that owns
-    // their processes): it is about other tasks, so it stays its own question.
-    if (!force.leaveChildren && !force.stopDescendants) {
+    // touched here; a frontend that stops their agents does so itself): it is about other tasks, so it stays its own question.
+    if (!force.leaveChildren) {
       const active = (await this.listDescendants(task.id)).filter(
         (descendant) => descendant.state !== "done",
       );
@@ -2140,6 +2139,10 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const id = this.deps.ids.next();
     const config = await this.deps.config.load();
+    // Loaded once for the depth rules: the child-launch check and the kickoff.
+    const maxNestingDepth =
+      config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
+    const allTasks = await this.deps.tasks.listTasks();
 
     let parentTaskId: string | undefined;
     let launchedFromTaskId: string | undefined;
@@ -2152,7 +2155,8 @@ export class CoreManager implements CoreCommands {
       }
       parentTask = await this.deps.tasks.getTask(input.fromTaskId);
       if (!parentTask) throw new Error(`Task not found: ${input.fromTaskId}`);
-      await this.assertMayHaveChild(parentTask);
+      const refusal = childLaunchRefusal(parentTask, allTasks, maxNestingDepth);
+      if (refusal) throw new Error(refusal);
       parentTaskId = parentTask.id;
     } else if (input.fromTaskId) {
       launchedFromTaskId = input.fromTaskId;
@@ -2217,10 +2221,8 @@ export class CoreManager implements CoreCommands {
     }
 
     // The new task's own depth: one below its launcher, else top level.
-    const maxNestingDepth =
-      config.launch?.maxNestingDepth ?? DEFAULT_LAUNCH_MAX_NESTING_DEPTH;
     const launchedDepth = parentTask
-      ? depthOf(parentTask, indexTasks(await this.deps.tasks.listTasks())) + 1
+      ? depthOf(parentTask, indexTasks(allTasks)) + 1
       : 1;
     const kickoff = buildLaunchKickoffPrompt({
       hasRepository,

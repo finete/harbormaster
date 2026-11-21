@@ -428,7 +428,7 @@ const subtaskStatus: ToolDefinition = {
   name: "subtask_status",
   title: "Harbormaster subtask status",
   description:
-    'List this task\'s DIRECT child tasks (launched with relation "child"; not grandchildren): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and how many tasks below that child (any depth) are still active, e.g. "2 tasks below still running". A child with tasks of its own tracks those itself: call subtask_status from that child\'s session. Only valid inside a Harbormaster task session.',
+    'List this task\'s DIRECT child tasks (launched with relation "child"; not grandchildren): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and how many tasks below that child (any depth) are not Done yet, e.g. "2 tasks below not done yet". A child with tasks of its own tracks those itself: call subtask_status from that child\'s session. Only valid inside a Harbormaster task session.',
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, { commands, caller }) {
     const taskId = requireTaskCaller(caller, "subtask_status");

@@ -8,30 +8,48 @@
 // unit-testable without ptys.
 
 export interface StopTaskAgentsDeps {
-  /** Whether the task's agent is mid-turn right now (harness presence). */
-  isMidTurn(taskId: string): Promise<boolean>;
+  /** Whether the task's agent is live, and whether it is mid-turn (harness presence). */
+  presence(taskId: string): Promise<{ live: boolean; runningTurn: boolean }>;
   /** Records launched tasks' sessions as interrupted (core). */
   markInterrupted(taskIds: string[]): Promise<void>;
   /** Signals the task's live primary pty; its own exit path retires it. `false` when there is none. */
   stop(taskId: string): boolean;
 }
 
+export interface StopTaskAgentsResult {
+  /** Tasks whose app-owned agent process was signalled. */
+  stopped: string[];
+  /** Tasks whose agent is live but not in a pty this app owns (a terminal elsewhere): left running. */
+  notStopped: string[];
+}
+
 /**
- * Stops the agents of `taskIds` and returns the ids that had a live
- * process. Mid-turn tasks are marked interrupted first (so the board shows
- * "interrupted", not a silent stop); a failure of that bookkeeping never
- * keeps a process running.
+ * Stops the agents of `taskIds`. Mid-turn tasks are marked interrupted first
+ * (so the board shows "interrupted", not a silent stop); a failure of that
+ * bookkeeping never keeps a process running. A task with no app-owned
+ * process that is not live either has nothing to stop and is not reported.
  */
 export async function stopTaskAgents(
   taskIds: readonly string[],
   deps: StopTaskAgentsDeps,
-): Promise<string[]> {
+): Promise<StopTaskAgentsResult> {
+  const live = new Set<string>();
   const midTurn: string[] = [];
   for (const taskId of taskIds) {
-    if (await deps.isMidTurn(taskId).catch(() => false)) midTurn.push(taskId);
+    const status = await deps
+      .presence(taskId)
+      .catch(() => ({ live: false, runningTurn: false }));
+    if (status.live) live.add(taskId);
+    if (status.runningTurn) midTurn.push(taskId);
   }
   if (midTurn.length > 0) {
     await deps.markInterrupted(midTurn).catch(() => {});
   }
-  return taskIds.filter((taskId) => deps.stop(taskId));
+  const stopped: string[] = [];
+  const notStopped: string[] = [];
+  for (const taskId of taskIds) {
+    if (deps.stop(taskId)) stopped.push(taskId);
+    else if (live.has(taskId)) notStopped.push(taskId);
+  }
+  return { stopped, notStopped };
 }
