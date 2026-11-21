@@ -31,6 +31,13 @@ export function approvalDraftOf(message: TaskMessage): ApprovalDraft {
   return { text: message.text, mode: message.requestedMode };
 }
 
+export type ApprovalDecision = "approve" | "approve-both-ways" | "reject";
+
+/** Whether the message can be approved with "allow both ways": only a task's message (never a plain session's or a rule's). */
+export function canAllowBothWays(message: TaskMessage): boolean {
+  return message.sender.kind === "task";
+}
+
 /**
  * Approve (with the user's edits, if any) or reject one message. Success:
  * the messaging push drops the item. Errors surface as a toast; resolves
@@ -38,14 +45,30 @@ export function approvalDraftOf(message: TaskMessage): ApprovalDraft {
  */
 export async function decideApproval(
   message: TaskMessage,
-  kind: "approve" | "reject",
+  kind: ApprovalDecision,
   draft: ApprovalDraft,
 ): Promise<boolean> {
   try {
-    if (kind === "approve") {
+    if (kind === "approve" || kind === "approve-both-ways") {
       if (!canApprove(draft.text)) return false;
       const edits = approvalEdits(message, draft);
-      await window.harbormaster.core.approveMessage(message.id, edits);
+      const result = await window.harbormaster.core.approveMessage(
+        message.id,
+        kind === "approve-both-ways"
+          ? { ...edits, allowBothWays: true }
+          : edits,
+      );
+      // Core re-checks the target on approval: if it can no longer receive,
+      // the message is failed (and no grant is written). Say so.
+      if (result.status === "failed") {
+        pushToast(
+          `Not delivered: ${result.failureReason ?? "the task can no longer receive it"}.${
+            kind === "approve-both-ways"
+              ? " Direct messages were not allowed."
+              : ""
+          }`,
+        );
+      }
     } else {
       await window.harbormaster.core.rejectMessage(message.id);
     }
@@ -76,13 +99,13 @@ export function ApprovalDetail({
   editSignal: number;
 }): JSX.Element {
   const now = useNow();
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [busy, setBusy] = useState<ApprovalDecision | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     if (editSignal > 0) textRef.current?.focus();
   }, [editSignal]);
 
-  async function decide(kind: "approve" | "reject"): Promise<void> {
+  async function decide(kind: ApprovalDecision): Promise<void> {
     setBusy(kind);
     // Success: the push drops this item; stay disabled until it unmounts.
     if (!(await decideApproval(message, kind, draft))) setBusy(null);
@@ -104,6 +127,18 @@ export function ApprovalDetail({
           Approve
           <Kbd>A</Kbd>
         </Button>
+        {canAllowBothWays(message) && (
+          <Button
+            size="sm"
+            variant="secondary"
+            data-testid="approval-approve-both-ways"
+            disabled={busy !== null || !canApprove(draft.text)}
+            onClick={() => void decide("approve-both-ways")}
+            title="Approve this message, and let these two tasks message each other directly from now on"
+          >
+            Approve and allow both ways
+          </Button>
+        )}
         <Button
           size="sm"
           variant="secondary"

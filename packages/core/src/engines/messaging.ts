@@ -10,12 +10,14 @@ import type {
   MessageMode,
   MessageRoute,
   MessageSender,
+  PairGrant,
   TaskMessage,
   TaskMessagingState,
   TaskRunState,
   TaskSearchResult,
 } from "../contracts/messaging.js";
-import type { Task } from "../contracts/model.js";
+import type { MessageDirectRoutes, Task } from "../contracts/model.js";
+import { inSameTree } from "./task-tree.js";
 
 /** Attachment files are pruned this long after both ends are Done. */
 export const ATTACHMENT_RETENTION_DAYS = 30;
@@ -25,22 +27,91 @@ export const DEFAULT_FIND_TASKS_LIMIT = 20;
 /** The lineage fields the engine reads from a task. */
 export type LineageTask = Pick<Task, "id" | "parentTaskId">;
 
+/** The task fields routing reads: lineage for the tree walk, state for grant expiry. */
+export type RoutingTask = Pick<Task, "id" | "parentTaskId" | "state">;
+
+/** What the user's setting and grants say about who may message whom directly. */
+export interface DirectRoutePolicy {
+  /** `messaging.directRoutes`. */
+  directRoutes: MessageDirectRoutes;
+  /** Every task by id (the same-tree walk and grant expiry read it). */
+  tasks: ReadonlyMap<string, RoutingTask>;
+  /** Pair grants on record. */
+  grants: readonly PairGrant[];
+}
+
 /**
- * The route of a new message, from lineage (never from the agent):
- * `target.parentTaskId === sender` → parent-to-child; `sender.parentTaskId ===
- * target` → child-to-parent; the user themself → user (no approval);
- * everything else, and every other non-task sender, needs approval. `senderTask` is the sender's task when the sender is one.
+ * A grant is in force only while both tasks exist and neither is Done
+ * (docs/task-trees.md decision 15), whether or not the record has been
+ * cleaned up yet.
+ */
+export function isPairGranted(
+  policy: Pick<DirectRoutePolicy, "grants" | "tasks">,
+  a: string,
+  b: string,
+): boolean {
+  const first = policy.tasks.get(a);
+  const second = policy.tasks.get(b);
+  if (!first || !second || first.state === "done" || second.state === "done")
+    return false;
+  return policy.grants.some(
+    (grant) =>
+      (grant.taskIds[0] === a && grant.taskIds[1] === b) ||
+      (grant.taskIds[0] === b && grant.taskIds[1] === a),
+  );
+}
+
+/** Whether two tasks are joined by a direct parent link (either way). */
+function isDirectLink(a: LineageTask, b: LineageTask): boolean {
+  return a.parentTaskId === b.id || b.parentTaskId === a.id;
+}
+
+/**
+ * Whether a task → task send between these two goes without approval: a
+ * direct parent link always; any two tasks in the same tree under
+ * `same-task-tree`; any two tasks under `any-task`; or a pair grant.
+ */
+export function canMessageDirectly(
+  a: LineageTask,
+  b: LineageTask,
+  policy: DirectRoutePolicy,
+): boolean {
+  if (isDirectLink(a, b)) return true;
+  switch (policy.directRoutes) {
+    case "any-task":
+      return true;
+    case "same-task-tree":
+      if (inSameTree(a, b, policy.tasks)) return true;
+      break;
+    case "parent-and-child":
+      break;
+  }
+  return isPairGranted(policy, a.id, b.id);
+}
+
+/**
+ * The route of a new message, from lineage, the user's setting and pair
+ * grants (never from the agent): the user themself → user (no approval);
+ * `target.parentTaskId === sender` → parent-to-child; `sender.parentTaskId
+ * === target` → child-to-parent (both stay direct-parent-only: "waiting on
+ * parent" hangs on them); any other task → task pair the policy allows →
+ * task-to-task; everything else, and every non-task sender (a plain session,
+ * a rule), needs approval. `senderTask` is the sender's task when the sender
+ * is one.
  */
 export function classifyRoute(
   sender: MessageSender,
   senderTask: LineageTask | undefined,
   target: LineageTask,
+  policy: DirectRoutePolicy,
 ): Exclude<MessageRoute, "receipt"> {
   if (sender.kind === "user") return "user";
   if (sender.kind !== "task" || !senderTask) return "approval";
   if (target.parentTaskId === senderTask.id) return "parent-to-child";
   if (senderTask.parentTaskId === target.id) return "child-to-parent";
-  return "approval";
+  return canMessageDirectly(senderTask, target, policy)
+    ? "task-to-task"
+    : "approval";
 }
 
 /** The delivery mode a sender gets when it does not ask for one. */
@@ -48,7 +119,9 @@ export function defaultMode(route: MessageRoute): MessageMode {
   switch (route) {
     case "parent-to-child":
       return "steer";
+    // A peer's note should not interrupt the target mid-work; the sender may still ask for steer.
     case "child-to-parent":
+    case "task-to-task":
       return "followUp";
     case "approval":
     case "user":
@@ -66,9 +139,13 @@ export function resolveDeliveredMode(
   return requested === "steer" && !capabilities.steer ? "followUp" : requested;
 }
 
-/** Whether a route is one of the autonomous lineage routes that count toward the loop cap. */
-export function isLineageRoute(route: MessageRoute): boolean {
-  return route === "parent-to-child" || route === "child-to-parent";
+/** Whether a route is a direct task → task one that counts toward the loop cap (every route but approval, receipt and the user's own). */
+export function isDirectRoute(route: MessageRoute): boolean {
+  return (
+    route === "parent-to-child" ||
+    route === "child-to-parent" ||
+    route === "task-to-task"
+  );
 }
 
 function ms(iso: string | undefined): number {
@@ -77,34 +154,36 @@ function ms(iso: string | undefined): number {
   return Number.isNaN(value) ? Number.NEGATIVE_INFINITY : value;
 }
 
+/** Whether a message is a directly delivered task → task one that counts (rejected/failed ones never do). */
+function countsTowardCap(message: TaskMessage): boolean {
+  return (
+    message.sender.kind === "task" &&
+    isDirectRoute(message.route) &&
+    message.status !== "rejected" &&
+    message.status !== "failed"
+  );
+}
+
 /**
- * Autonomous lineage messages between one parent–child pair (both
- * directions) created after the user last typed into either task, excluding
- * rejected/failed ones. Approval-route messages and receipts never count.
+ * Directly delivered task → task messages between one pair of tasks (both
+ * directions, whatever the route: lineage, setting or grant) created after
+ * the user last typed into either task, excluding rejected/failed ones.
+ * Approved (approval-route) sends and receipts never count.
  */
 export function countLoopMessages(
   messages: readonly TaskMessage[],
   userInputs: Readonly<Record<string, string>>,
-  parentTaskId: string,
-  childTaskId: string,
+  taskA: string,
+  taskB: string,
 ): number {
-  const since = Math.max(
-    ms(userInputs[parentTaskId]),
-    ms(userInputs[childTaskId]),
-  );
+  const since = Math.max(ms(userInputs[taskA]), ms(userInputs[taskB]));
   let count = 0;
   for (const message of messages) {
-    if (message.status === "rejected" || message.status === "failed") continue;
-    if (message.sender.kind !== "task") continue;
+    if (!countsTowardCap(message) || message.sender.kind !== "task") continue;
     const from = message.sender.taskId;
     const to = message.targetTaskId;
     const inPair =
-      (message.route === "parent-to-child" &&
-        from === parentTaskId &&
-        to === childTaskId) ||
-      (message.route === "child-to-parent" &&
-        from === childTaskId &&
-        to === parentTaskId);
+      (from === taskA && to === taskB) || (from === taskB && to === taskA);
     if (inPair && ms(message.createdAt) > since) count += 1;
   }
   return count;
@@ -114,17 +193,39 @@ export function countLoopMessages(
 export function isLoopCapReached(
   messages: readonly TaskMessage[],
   userInputs: Readonly<Record<string, string>>,
-  parentTaskId: string,
-  childTaskId: string,
+  taskA: string,
+  taskB: string,
   cap: number,
 ): boolean {
-  return (
-    countLoopMessages(messages, userInputs, parentTaskId, childTaskId) >= cap
-  );
+  return countLoopMessages(messages, userInputs, taskA, taskB) >= cap;
+}
+
+/** One pass over the log: the count per unordered pair, each with its own reset point. */
+function countPairs(
+  messages: readonly TaskMessage[],
+  userInputs: Readonly<Record<string, string>>,
+): Array<{ a: string; b: string; count: number }> {
+  const pairs = new Map<string, { a: string; b: string; count: number }>();
+  for (const message of messages) {
+    if (!countsTowardCap(message) || message.sender.kind !== "task") continue;
+    const [a, b] =
+      message.sender.taskId < message.targetTaskId
+        ? [message.sender.taskId, message.targetTaskId]
+        : [message.targetTaskId, message.sender.taskId];
+    const since = Math.max(ms(userInputs[a]), ms(userInputs[b]));
+    if (ms(message.createdAt) <= since) continue;
+    const key = `${a}\u0000${b}`;
+    const entry = pairs.get(key);
+    if (entry) entry.count += 1;
+    else pairs.set(key, { a, b, count: 1 });
+  }
+  return [...pairs.values()];
 }
 
 export interface DeriveMessagingStatesInput {
   tasks: readonly Pick<Task, "id" | "state" | "parentTaskId">[];
+  /** Pair grants on record (only those still in force are reported). */
+  grants?: readonly PairGrant[];
   messages: readonly TaskMessage[];
   userInputs: Readonly<Record<string, string>>;
   /** Ids of tasks whose harness session is live right now (only parents' liveness is read). */
@@ -168,33 +269,29 @@ export function deriveMessagingStates(
     state.approvalsWaiting = (state.approvalsWaiting ?? 0) + 1;
   }
 
+  // Loop cap: every pair of tasks talking directly, on both tasks.
+  for (const { a, b, count } of countPairs(input.messages, input.userInputs)) {
+    if (count < input.loopCap || !byId.has(a) || !byId.has(b)) continue;
+    stateOf(a).loopCapReached ??= { otherTaskId: b, count, cap: input.loopCap };
+    stateOf(b).loopCapReached ??= { otherTaskId: a, count, cap: input.loopCap };
+  }
+
+  // Pair grants still in force, on both tasks.
+  const grants = input.grants ?? [];
+  for (const grant of grants) {
+    const [a, b] = grant.taskIds;
+    if (!isPairGranted({ grants, tasks: byId }, a, b)) continue;
+    const first = stateOf(a);
+    first.grantedWith = [...(first.grantedWith ?? []), b];
+    const second = stateOf(b);
+    second.grantedWith = [...(second.grantedWith ?? []), a];
+  }
+
   for (const child of input.tasks) {
     const parentId = child.parentTaskId;
     if (!parentId) continue;
     const parent = byId.get(parentId);
     if (!parent) continue;
-
-    // Loop cap, on both tasks of the pair.
-    const count = countLoopMessages(
-      input.messages,
-      input.userInputs,
-      parentId,
-      child.id,
-    );
-    if (count >= input.loopCap) {
-      const childState = stateOf(child.id);
-      childState.loopCapReached ??= {
-        otherTaskId: parentId,
-        count,
-        cap: input.loopCap,
-      };
-      const parentState = stateOf(parentId);
-      parentState.loopCapReached ??= {
-        otherTaskId: child.id,
-        count,
-        cap: input.loopCap,
-      };
-    }
 
     if (child.state === "done") continue;
     if (parent.state === "done" || !input.liveTaskIds.has(parentId)) continue;

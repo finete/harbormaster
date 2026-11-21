@@ -40,6 +40,8 @@ export function buildInboxHeader(message: TaskMessage): string {
       return `[Message from your parent task "${label}" (${taskId})]`;
     case "child-to-parent":
       return `[Question from your child task "${label}" (${taskId})]`;
+    case "task-to-task":
+      return `[Message from task "${label}" (${taskId})]`;
     case "approval":
       if (message.sender.kind === "task") {
         return `[Message from task "${label}" (${taskId}), approved by the user]`;

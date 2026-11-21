@@ -35,6 +35,9 @@ export interface OpDefinition {
 /** The id prefix a message approval carries in the inbox (app and CLI). */
 export const APPROVAL_ITEM_PREFIX = "approval:";
 
+/** The approval button that also lets the sender and target task message each other directly. */
+export const APPROVE_BOTH_WAYS_BUTTON = "approve-both-ways";
+
 /** One inbox entry as `inbox_list` returns it (persisted rule items + approvals). */
 export interface OpsInboxEntry {
   id: string;
@@ -120,6 +123,15 @@ export async function listOpsInbox(
         priority: true,
         buttons: [
           { id: "approve", label: "Approve" },
+          // Only a task → task approval can grant the pair (never a plain session or a rule).
+          ...(message.sender.kind === "task"
+            ? [
+                {
+                  id: APPROVE_BOTH_WAYS_BUTTON,
+                  label: "Approve and allow both ways",
+                },
+              ]
+            : []),
           { id: "reject", label: "Reject" },
         ],
       };
@@ -229,13 +241,36 @@ const inboxResolve: OpDefinition = {
       const verb = pressed?.toLowerCase();
       if (verb === "approve") {
         const message = await commands.approveMessage(messageId);
-        return { text: `Approved (${message.status})`, details: { message } };
+        return {
+          text:
+            message.status === "failed"
+              ? `Not delivered: ${message.failureReason ?? "the target can no longer receive it"}`
+              : `Approved (${message.status})`,
+          details: { message },
+        };
+      }
+      if (
+        verb === APPROVE_BOTH_WAYS_BUTTON ||
+        verb === "approve and allow both ways"
+      ) {
+        const message = await commands.approveMessage(messageId, {
+          allowBothWays: true,
+        });
+        return {
+          text:
+            message.status === "failed"
+              ? `Not delivered: ${message.failureReason ?? "the target can no longer receive it"}. No direct messages were allowed.`
+              : `Approved (${message.status}); the two tasks may now message each other directly`,
+          details: { message },
+        };
       }
       if (verb === "reject") {
         const message = await commands.rejectMessage(messageId);
         return { text: "Rejected", details: { message } };
       }
-      throw new Error("an approval resolves with approve or reject");
+      throw new Error(
+        `an approval resolves with approve, ${APPROVE_BOTH_WAYS_BUTTON} (task messages only) or reject`,
+      );
     }
     const item = (
       await commands.listInbox({ includeSnoozed: true, includeResolved: true })

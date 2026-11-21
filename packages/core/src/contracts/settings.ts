@@ -10,8 +10,10 @@ import {
   DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
   DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
+  DEFAULT_MESSAGE_DIRECT_ROUTES,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
+  MESSAGE_DIRECT_ROUTES,
 } from "./model.js";
 import type { JsonSchema } from "./rules.js";
 
@@ -50,6 +52,8 @@ export interface SettingDescription {
   max?: number;
   /** `enum`: the allowed values. */
   values?: readonly string[];
+  /** `enum`: display label per value (a value without one shows as itself). */
+  valueLabels?: Readonly<Record<string, string>>;
   /** `string`: whether `""` is a valid value (otherwise it must be non-empty once trimmed). */
   allowEmpty?: boolean;
   /** Display unit of a stored number (the UI may convert, e.g. ms shown as minutes). */
@@ -245,7 +249,21 @@ export const SETTINGS_DESCRIPTION: readonly SettingDescription[] = [
     min: 1,
     max: 100,
     title: "Message loop cap",
-    help: "Messages tasks may exchange on their own before you are asked.",
+    help: "How many messages any two tasks talking directly may exchange on their own before you are asked.",
+    section: "inbox",
+  },
+  {
+    key: "messaging.directRoutes",
+    type: "enum",
+    default: DEFAULT_MESSAGE_DIRECT_ROUTES,
+    values: MESSAGE_DIRECT_ROUTES,
+    valueLabels: {
+      "parent-and-child": "Parent and child",
+      "same-task-tree": "Same task tree",
+      "any-task": "Any task",
+    },
+    title: "Messages between tasks",
+    help: "Which tasks may message each other without asking you. A task and its parent always can; anything else waits for your approval. You can also allow one pair both ways when you approve a message.",
     section: "inbox",
   },
   {

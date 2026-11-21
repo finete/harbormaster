@@ -23,6 +23,7 @@ import type {
 import type {
   ApproveMessageEdits,
   FindTasksOptions,
+  PairGrant,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -864,7 +865,9 @@ export interface CoreCommands {
    * it becomes `pending` for the target. The target is re-checked first: a
    * Done/deleted/Backlog target makes the message `failed` (with
    * `failureReason`) instead. A task sender that can receive gets a
-   * `receipt` follow-up with the result.
+   * `receipt` follow-up with the result. `edits.allowBothWays` ("Approve
+   * and allow both ways", task → task approvals only) also records a pair
+   * grant: the two tasks message each other directly from then on.
    */
   approveMessage(
     messageId: string,
@@ -872,6 +875,10 @@ export interface CoreCommands {
   ): Promise<TaskMessage>;
   /** Reject a message awaiting approval; a task sender that can receive gets a `receipt` follow-up. */
   rejectMessage(messageId: string): Promise<TaskMessage>;
+  /** Pair grants in force (both tasks exist and neither is Done). A grant ends when either task goes Done or is deleted, or via `revokePairGrant`. */
+  listPairGrants(): Promise<PairGrant[]>;
+  /** Remove the pair grant between two tasks ("Stop direct messages with …"); a no-op when there is none. Either order works. */
+  revokePairGrant(taskId: string, otherTaskId: string): Promise<void>;
   /**
    * Task ids with deliverable (pending) messages, for the app's wake pass.
    * Messages whose target is Done/deleted are marked failed along the way

@@ -570,12 +570,15 @@ export interface HarbormasterApi {
      * Approve a message awaiting approval, optionally with the user's edited
      * text and/or switched delivery mode (sent only when changed). Rejects
      * when the message is no longer awaiting approval. See
-     * `CoreCommands.approveMessage`.
+     * `CoreCommands.approveMessage`. `allowBothWays` ("Approve and allow both
+     * ways", task senders only) also lets the pair message each other directly.
      */
     approveMessage(
       messageId: string,
-      edits?: { text?: string; mode?: MessageMode },
+      edits?: { text?: string; mode?: MessageMode; allowBothWays?: boolean },
     ): Promise<TaskMessage>;
+    /** Stop direct messages between two tasks (removes their pair grant). See `CoreCommands.revokePairGrant`. */
+    revokePairGrant(taskId: string, otherTaskId: string): Promise<void>;
     /** Reject a message awaiting approval. See `CoreCommands.rejectMessage`. */
     rejectMessage(messageId: string): Promise<TaskMessage>;
     /** Derived per-task chip state (approvals waiting, waiting on parent, ...). See `CoreCommands.getMessagingStates`. */

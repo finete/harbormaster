@@ -495,7 +495,12 @@ export interface GlobalConfig {
   /** Agents beyond the built-in Pi and Claude Code. */
   agents?: { custom?: CustomAgentConfig[] };
   /** Task-messaging settings (see `/docs/task-messaging.md`); defaults apply at read time. */
-  messaging?: { parentReplyTimeoutMinutes?: number; loopCap?: number };
+  messaging?: {
+    parentReplyTimeoutMinutes?: number;
+    loopCap?: number;
+    /** Which task → task sends skip approval (see `MessageDirectRoutes`); absent = `DEFAULT_MESSAGE_DIRECT_ROUTES`. */
+    directRoutes?: MessageDirectRoutes;
+  };
   /**
    * Inbox settings (docs/release-plan.md "Inbox"). `priorityFilter` is an
    * optional CEL expression over `item` (`kind`, `source`, `taskId`,
@@ -534,8 +539,30 @@ export const DEFAULT_LAUNCH_BYPASS_PERMISSIONS = true;
 /** `messaging.parentReplyTimeoutMinutes` default: how long a child's question may wait on its parent (counted from delivery) before the child shows amber. */
 export const DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES = 30;
 
-/** `messaging.loopCap` default: autonomous parent↔child messages per pair since the user last typed into either task. */
+/** `messaging.loopCap` default: directly delivered task → task messages per pair (both directions) since the user last typed into either task. */
 export const DEFAULT_MESSAGE_LOOP_CAP = 8;
+
+/**
+ * `messaging.directRoutes` (docs/task-trees.md decision 1): which task → task
+ * sends skip the user's approval. A task and its own parent are always
+ * direct; `parent-and-child` allows nothing more, `same-task-tree` any two
+ * tasks under the same top-level task, `any-task` any two tasks.
+ */
+export type MessageDirectRoutes =
+  | "parent-and-child"
+  | "same-task-tree"
+  | "any-task";
+
+/** Every `messaging.directRoutes` value, narrowest first. */
+export const MESSAGE_DIRECT_ROUTES: readonly MessageDirectRoutes[] = [
+  "parent-and-child",
+  "same-task-tree",
+  "any-task",
+];
+
+/** `messaging.directRoutes` default. */
+export const DEFAULT_MESSAGE_DIRECT_ROUTES: MessageDirectRoutes =
+  "same-task-tree";
 
 /** Written to a fresh config file. Automation rules live in `<stateDir>/rules/rules.yaml`. */
 export const defaultGlobalConfig = (): GlobalConfig => ({

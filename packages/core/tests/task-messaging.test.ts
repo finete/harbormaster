@@ -250,7 +250,7 @@ describe("send-time rules", () => {
     const result = await send(p, k);
     expect(result.willWake).toBe(true);
     expect(result.note).toBe(
-      `"Kid" isn't running; Harbormaster will wake it and deliver the message.`,
+      `Sent directly, no approval needed. "Kid" isn't running; Harbormaster will wake it and deliver the message.`,
     );
   });
 
@@ -307,7 +307,8 @@ describe("send-time rules", () => {
     expect(await c().listMessages()).toEqual([]);
   });
 
-  it("siblings, unrelated tasks and a parent's non-child targets need approval", async () => {
+  it("siblings, unrelated tasks and a parent's non-child targets need approval under parent-and-child", async () => {
+    await boot({ messaging: { directRoutes: "parent-and-child" } });
     const p = await mk("Parent");
     const k1 = await child(p, "Kid 1");
     const k2 = await child(p, "Kid 2");
@@ -324,13 +325,73 @@ describe("send-time rules", () => {
       expect(result.message.status).toBe("awaiting_approval");
       expect(result.message.requestedMode).toBe("steer");
       expect(result.willWake).toBe(false);
-      expect(result.note).toBe(
-        "Awaiting the user's approval in the Harbormaster app; you'll get a follow-up with the result. Don't wait for it -- continue or end your turn.",
-      );
+      expect(result.note).toContain("waiting for the user's approval");
+      expect(result.note).toContain("Not delivered yet");
     }
     // Nothing is deliverable until approved.
     expect(await c().listTasksWithPendingMessages()).toEqual([]);
     expect(await c().listPendingApprovals()).toHaveLength(4);
+  });
+
+  it("the default setting (same-task-tree) delivers within a tree and asks across trees", async () => {
+    const p = await mk("Parent");
+    const k1 = await child(p, "Kid 1");
+    const k2 = await child(p, "Kid 2");
+    const other = await mk("Other");
+    harness.setLive(k2);
+    harness.setLive(p);
+    harness.setLive(other);
+
+    const sibling = await send(k1, k2);
+    expect(sibling.message).toMatchObject({
+      route: "task-to-task",
+      status: "pending",
+      requestedMode: "followUp",
+    });
+    expect(sibling.note).toMatch(
+      /^Delivered to the inbox of "Kid 2" \(followUp\)/,
+    );
+    // A peer may still ask to steer.
+    expect(
+      (await send(k1, k2, "now", { mode: "steer" })).message.requestedMode,
+    ).toBe("steer");
+    // Deeper trees are covered by the engine's routing matrix: this branch
+    // cannot launch grandchildren yet (nesting depth is a separate change).
+    // The other tree still needs the user.
+    expect((await send(k1, other)).message.status).toBe("awaiting_approval");
+    expect((await send(other, k1)).message.status).toBe("awaiting_approval");
+  });
+
+  it("any-task delivers between unrelated tasks; plain sessions and rules still need approval", async () => {
+    await boot({ messaging: { directRoutes: "any-task" } });
+    const a = await mk("A");
+    const b = await mk("B");
+    harness.setLive(b);
+    expect((await send(a, b)).message).toMatchObject({
+      route: "task-to-task",
+      status: "pending",
+    });
+    for (const sender of [
+      { kind: "session" as const, cwd: "/work" },
+      { kind: "rule" as const, ruleId: "r1" },
+    ]) {
+      const result = await c().sendTaskMessage({
+        from: sender,
+        targetTaskId: b,
+        text: "hi",
+      });
+      expect(result.message.status).toBe("awaiting_approval");
+    }
+  });
+
+  it("a task → task send that needs approval says it is waiting, not delivered", async () => {
+    await boot({ messaging: { directRoutes: "parent-and-child" } });
+    const a = await mk("A");
+    const b = await mk("B");
+    const result = await send(a, b);
+    expect(result.note).toMatch(
+      /^Not delivered yet: waiting for the user's approval/,
+    );
   });
 
   it("a non-task sender always goes through approval, even to a child", async () => {
@@ -368,7 +429,7 @@ describe("loop cap", () => {
     const { p, k } = await pair();
     await exchange(p, k, 8);
     await expect(send(p, k)).rejects.toThrow(
-      'Message cap reached between "Kid" and "Parent" (8 since the user last typed); stop and ask the user.',
+      'Message cap reached between "Parent" and "Kid" (8 since the user last typed); stop and ask the user.',
     );
     await expect(send(k, p)).rejects.toThrow(/Message cap reached/);
     expect(
@@ -419,6 +480,182 @@ describe("loop cap", () => {
     expect(
       await readdir(join(stateDir, "messages", "attachments")).catch(() => []),
     ).toEqual([]);
+  });
+});
+
+describe("direct messages between tasks", () => {
+  const stateOf = async (id: string) =>
+    (await c().getMessagingStates()).find((s) => s.taskId === id);
+
+  it("loop cap counts sibling messages per pair, both directions, and a sibling pair does not share a count with another pair", async () => {
+    const p = await mk("Parent");
+    const k1 = await child(p, "Kid 1");
+    const k2 = await child(p, "Kid 2");
+    const k3 = await child(p, "Kid 3");
+    for (const id of [k1, k2, k3]) harness.setLive(id);
+    await boot({ messaging: { loopCap: 3 } });
+    await send(k1, k2);
+    await send(k2, k1);
+    await send(k1, k2);
+    await expect(send(k2, k1)).rejects.toThrow(
+      'Message cap reached between "Kid 2" and "Kid 1" (3 since the user last typed); stop and ask the user.',
+    );
+    expect((await stateOf(k1))?.loopCapReached).toMatchObject({
+      otherTaskId: k2,
+      count: 3,
+      cap: 3,
+    });
+    expect((await stateOf(k2))?.loopCapReached?.otherTaskId).toBe(k1);
+    // Another pair is unaffected, and so is the parent link.
+    await expect(send(k1, k3)).resolves.toBeDefined();
+    await expect(send(k1, p))
+      .resolves.toBeDefined()
+      .catch(() => {});
+    // The user typing into either task resets the pair.
+    await c().recordUserInput(k2);
+    await expect(send(k2, k1)).resolves.toBeDefined();
+    expect((await stateOf(k1))?.loopCapReached).toBeUndefined();
+  });
+
+  it("find_tasks marks each task direct or needs-approval for the searching task, and plain sessions always need approval", async () => {
+    await boot({ messaging: { directRoutes: "parent-and-child" } });
+    const p = await mk("Shared parent");
+    const k1 = await child(p, "Shared kid 1");
+    const k2 = await child(p, "Shared kid 2");
+    const found = async (from?: string) =>
+      Object.fromEntries(
+        (await c().findTasks("shared", from ? { fromTaskId: from } : {})).map(
+          (r) => [r.id, r.send],
+        ),
+      );
+    expect(await found(k1)).toEqual({
+      [p]: "direct",
+      [k1]: undefined,
+      [k2]: "needs-approval",
+    });
+    expect(await found()).toEqual({
+      [p]: "needs-approval",
+      [k1]: "needs-approval",
+      [k2]: "needs-approval",
+    });
+    await boot({ messaging: { directRoutes: "same-task-tree" } });
+    expect((await found(k1))[k2]).toBe("direct");
+  });
+
+  describe("pair grants (Approve and allow both ways)", () => {
+    /** Two unrelated tasks under parent-and-child, with one approved-and-granted message from a to b. */
+    async function granted(): Promise<{ a: string; b: string }> {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const a = await mk("Alpha");
+      const b = await mk("Beta");
+      harness.setLive(a);
+      harness.setLive(b);
+      const sent = await send(a, b, "first");
+      expect(sent.message.status).toBe("awaiting_approval");
+      const approved = await c().approveMessage(sent.message.id, {
+        allowBothWays: true,
+      });
+      expect(approved.status).toBe("pending");
+      return { a, b };
+    }
+
+    it("delivers the approved message and makes the pair direct both ways", async () => {
+      const { a, b } = await granted();
+      expect((await send(a, b, "again")).message).toMatchObject({
+        route: "task-to-task",
+        status: "pending",
+      });
+      expect((await send(b, a, "reply")).message).toMatchObject({
+        route: "task-to-task",
+        status: "pending",
+      });
+      expect((await stateOf(a))?.grantedWith).toEqual([b]);
+      expect((await stateOf(b))?.grantedWith).toEqual([a]);
+      expect(await c().listPairGrants()).toHaveLength(1);
+      // Only that pair: a third task still needs approval.
+      const third = await mk("Gamma");
+      expect((await send(a, third)).message.status).toBe("awaiting_approval");
+      // find_tasks shows the granted pair as direct.
+      expect(
+        (await c().findTasks("beta", { fromTaskId: a })).find((r) => r.id === b)
+          ?.send,
+      ).toBe("direct");
+    });
+
+    it("an approval that fails (target can no longer receive) records no grant and says so", async () => {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const a = await mk("Alpha");
+      const b = await mk("Beta");
+      const sent = await send(a, b);
+      await c().moveTask(b, "done");
+      const result = await c().approveMessage(sent.message.id, {
+        allowBothWays: true,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.failureReason).toBeDefined();
+      expect(await c().listPairGrants()).toEqual([]);
+    });
+
+    it("plain Approve grants nothing", async () => {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const a = await mk("Alpha");
+      const b = await mk("Beta");
+      const sent = await send(a, b);
+      await c().approveMessage(sent.message.id);
+      expect(await c().listPairGrants()).toEqual([]);
+      expect((await send(a, b)).message.status).toBe("awaiting_approval");
+    });
+
+    it("is refused for a non-task sender", async () => {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const b = await mk("Beta");
+      const sent = await c().sendTaskMessage({
+        from: { kind: "session", cwd: "/work" },
+        targetTaskId: b,
+        text: "hi",
+      });
+      await expect(
+        c().approveMessage(sent.message.id, { allowBothWays: true }),
+      ).rejects.toThrow(/Only a message from a task/);
+      expect((await c().listPendingApprovals()).map((m) => m.id)).toEqual([
+        sent.message.id,
+      ]);
+      expect(await c().listPairGrants()).toEqual([]);
+    });
+
+    it("counts toward the loop cap like any direct pair", async () => {
+      const { a, b } = await granted();
+      await boot({
+        messaging: { directRoutes: "parent-and-child", loopCap: 2 },
+      });
+      await send(a, b);
+      await send(b, a);
+      await expect(send(a, b)).rejects.toThrow(/Message cap reached/);
+    });
+
+    it("ends when either task is Done, and does not come back on reopen", async () => {
+      const { a, b } = await granted();
+      await c().moveTask(b, "done");
+      expect(await c().listPairGrants()).toEqual([]);
+      await c().reopenTask(b);
+      harness.setLive(b);
+      expect((await send(a, b)).message.status).toBe("awaiting_approval");
+    });
+
+    it("ends when either task is deleted", async () => {
+      const { a, b } = await granted();
+      await c().deleteTask(a);
+      expect(await c().listPairGrants()).toEqual([]);
+      expect((await stateOf(b))?.grantedWith).toBeUndefined();
+    });
+
+    it("can be removed from either side", async () => {
+      const { a, b } = await granted();
+      await c().revokePairGrant(b, a);
+      expect(await c().listPairGrants()).toEqual([]);
+      expect((await send(b, a)).message.status).toBe("awaiting_approval");
+      await c().revokePairGrant(b, a); // nothing left: a no-op
+    });
   });
 });
 

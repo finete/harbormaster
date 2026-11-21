@@ -453,7 +453,7 @@ const findTasks: ToolDefinition = {
   name: "find_tasks",
   title: "Harbormaster find tasks",
   description:
-    "Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated) and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.",
+    'Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated), whether a message from this task would be "direct" (delivered at once) or "needs approval" (waits for the user), and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.',
   inputSchema: {
     type: "object",
     properties: {
@@ -485,7 +485,7 @@ const sendToTask: ToolDefinition = {
   name: "send_to_task",
   title: "Harbormaster send to task",
   description:
-    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Messages to your own children or to your parent are delivered directly. ANY other target (sibling, unrelated task, or any send from a plain non-task session) goes to the user\'s approval in the Harbormaster app, so send those ONLY when the user explicitly asked you to. mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). After asking your parent a question, end your turn and wait for the reply; do not poll. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
+    'Send a message to another Harbormaster task\'s agent. taskId must be an EXACT task id (use find_tasks first; never guess). Whether the message is delivered at once or waits for the user\'s approval depends on the user\'s setting (and any pair they allowed), not on anything you choose: find_tasks marks each task "direct" or "needs approval" for you, and a message to your own parent or child is always direct. Send approval-route messages ONLY when the user explicitly asked you to; any send from a plain non-task session needs approval. The result says plainly whether the message was "delivered" or is "waiting for the user\'s approval". mode: "steer" lands after the target\'s current step (use for corrections); "followUp" lands after the target finishes its current work (the default for questions to your parent). After asking your parent a question, end your turn and wait for the reply; do not poll. attachments are file paths (e.g. pasted screenshots) that are copied and, for images, shown to the target; everything else is text only.',
   inputSchema: {
     type: "object",
     properties: {
@@ -499,7 +499,7 @@ const sendToTask: ToolDefinition = {
         type: "string",
         enum: ["steer", "followUp"],
         description:
-          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to a parent.",
+          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to your parent or any other task.",
       },
       attachments: {
         type: "array",

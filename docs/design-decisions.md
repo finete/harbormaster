@@ -326,11 +326,14 @@ difference not listed here is a bug.
   mid-turn agent is never evicted. A warm session ends when its task goes to
   Done or is deleted, so it never blocks worktree cleanup. "+ terminal"
   shells still die with their tab. See `packages/app/src/main/warm-sessions.ts`.
-- **Tasks can steer tasks.** Parent ↔ child messages deliver directly
-  (loop-capped, child questions show "waiting on parent"); every other
-  cross-task send needs the user's approval in the app. Delivery is a
+- **Tasks can steer tasks.** Which task → task sends deliver directly is the
+  user's setting `messaging.directRoutes` (parent and child; the same task
+  tree, the default; or any task), plus per-pair grants ("Approve and allow
+  both ways"). Direct pairs are loop-capped; child questions to the direct
+  parent show "waiting on parent". Everything else, and every non-task
+  sender, needs the user's approval in the app. Delivery is a
   harness-adapter concern behind a core message log. See
-  `docs/task-messaging.md`.
+  `docs/task-messaging.md` and `docs/task-trees.md`.
 - **The sidebar rail order is fixed and user-owned.** Nothing reorders rows
   except an explicit drag: no activity sort, no board-column order, no
   reaction to presence or core pushes. Rows keep one persisted global task

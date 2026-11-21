@@ -698,6 +698,75 @@ describe("harbormaster inbox list / resolve, events, rules, addons", () => {
     expect(bad.err()).toContain("Inbox item not found: nope");
   });
 
+  it("offers 'approve and allow both ways' only on task approvals, and it grants the pair", async () => {
+    const sender = await launch("Sender");
+    const target = await launch("Target");
+    const fromTask = await core.commands.sendTaskMessage({
+      from: { kind: "task", taskId: sender },
+      targetTaskId: target,
+      text: "from a task",
+    });
+    const fromSession = await core.commands.sendTaskMessage({
+      from: { kind: "session", cwd: "/work" },
+      targetTaskId: target,
+      text: "from a session",
+    });
+    const list = io();
+    expect(await main(["inbox", "list", "--json"], list)).toBe(0);
+    const buttons = (id: string) =>
+      (
+        JSON.parse(list.out()) as {
+          items: Array<{ id: string; buttons: Array<{ id: string }> }>;
+        }
+      ).items
+        .find((item) => item.id === `approval:${id}`)
+        ?.buttons.map((button) => button.id);
+    expect(buttons(fromTask.message.id)).toEqual([
+      "approve",
+      "approve-both-ways",
+      "reject",
+    ]);
+    expect(buttons(fromSession.message.id)).toEqual(["approve", "reject"]);
+
+    const refused = io();
+    expect(
+      await main(
+        [
+          "inbox",
+          "resolve",
+          `approval:${fromSession.message.id}`,
+          "approve-both-ways",
+        ],
+        refused,
+      ),
+    ).toBe(1);
+    expect(await core.commands.listPairGrants()).toEqual([]);
+
+    const approve = io();
+    expect(
+      await main(
+        [
+          "inbox",
+          "resolve",
+          `approval:${fromTask.message.id}`,
+          "approve-both-ways",
+        ],
+        approve,
+      ),
+    ).toBe(0);
+    expect(approve.out()).toContain("message each other directly");
+    const grants = await core.commands.listPairGrants();
+    expect(grants.map((grant) => [...grant.taskIds].sort())).toEqual([
+      [sender, target].sort(),
+    ]);
+    const after = await core.commands.sendTaskMessage({
+      from: { kind: "task", taskId: target },
+      targetTaskId: sender,
+      text: "reply",
+    });
+    expect(after.message.route).toBe("task-to-task");
+  });
+
   it("applies the configured priority filter (the same one the app uses)", async () => {
     await writeFile(
       join(stateDir, "config.json"),

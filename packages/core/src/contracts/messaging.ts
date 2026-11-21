@@ -20,6 +20,7 @@ export type MessageSender =
 export type MessageRoute =
   | "parent-to-child" // no approval, counts toward the loop cap
   | "child-to-parent" // no approval, a question, counts toward the loop cap
+  | "task-to-task" // no approval: the user's `messaging.directRoutes` setting or a pair grant allows it; counts toward the loop cap
   | "approval" // everything else: needs the user's approval
   | "receipt" // approval result back to a task sender
   | "user"; // sent by the user themself: no approval, no loop cap
@@ -104,6 +105,13 @@ export interface TaskSearchResult {
   prNumber?: number;
   run: TaskRunState;
   relation: "self" | "parent" | "child" | "sibling" | "none";
+  /**
+   * How a send from the searching task would go: `direct` (delivered, no
+   * approval) or `needs-approval` (waits for the user). Absent for the task
+   * itself. Without a searching task (a plain session) it is always
+   * `needs-approval`.
+   */
+  send?: "direct" | "needs-approval";
 }
 
 /** Per-task derived messaging state for chips; time-dependent fields carry their own deadline so the renderer can re-evaluate with its own clock. */
@@ -120,8 +128,10 @@ export interface TaskMessagingState {
   childQuestionsWaiting?: number;
   /** On a target: messages to it awaiting the user's approval. */
   approvalsWaiting?: number;
-  /** Set while a parent–child pair is at the loop cap (on both tasks). */
+  /** Set while a pair of tasks talking directly is at the loop cap (on both tasks). */
   loopCapReached?: { otherTaskId: string; count: number; cap: number };
+  /** Task ids this task has a pair grant with (direct messages both ways until either ends). */
+  grantedWith?: string[];
 }
 
 /** Options for `CoreCommands.findTasks`. */
@@ -137,6 +147,22 @@ export interface FindTasksOptions {
 export interface ApproveMessageEdits {
   text?: string;
   mode?: MessageMode;
+  /**
+   * "Approve and allow both ways" (docs/task-trees.md decision 15): also
+   * record a pair grant so the sender and target task message each other
+   * directly from now on. Only valid on a task → task approval.
+   */
+  allowBothWays?: boolean;
+}
+
+/**
+ * A pair grant: two tasks the user let message each other directly in both
+ * directions. Unordered (`taskIds` is stored sorted). It ends when either
+ * task is Done or deleted, or when the user removes it.
+ */
+export interface PairGrant {
+  taskIds: [string, string];
+  grantedAt: string;
 }
 
 /** Everything `messages.json` holds, as handed to Managers/Engines (read-only snapshot). */
@@ -144,4 +170,6 @@ export interface MessageStoreSnapshot {
   messages: TaskMessage[];
   /** Last time the user typed into each task's session (ISO). */
   userInputs: Record<string, string>;
+  /** Pair grants currently on record (the Manager ignores those whose tasks ended). */
+  grants: PairGrant[];
 }

@@ -67,6 +67,7 @@ import type {
   FindTasksOptions,
   MessageSender,
   MessageStoreSnapshot,
+  PairGrant,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -96,6 +97,7 @@ import {
   DEFAULT_LAUNCH_BYPASS_PERMISSIONS,
   DEFAULT_LAUNCH_MAX_CONCURRENT,
   DEFAULT_LAUNCH_MAX_NESTING_DEPTH,
+  DEFAULT_MESSAGE_DIRECT_ROUTES,
   DEFAULT_MESSAGE_LOOP_CAP,
   DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES,
   TASK_STATES,
@@ -183,12 +185,16 @@ import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
   buildReceiptText,
+  canMessageDirectly,
   classifyRoute,
   countLoopMessages,
+  type DirectRoutePolicy,
   defaultMode,
   deriveAgentActivity,
   deriveMessagingStates,
   deriveRunState,
+  isDirectRoute,
+  isPairGranted,
   matchTasks,
   resolveDeliveredMode,
   selectMessagesToPrune,
@@ -1873,6 +1879,7 @@ export class CoreManager implements CoreCommands {
     }
     await this.deps.bindings.removeBinding(id).catch(() => {});
     await this.deps.tasks.removeTask(id);
+    await this.endPairGrants(id);
     await this.removeLaunchFiles(id);
     await this.publishBoard();
   }
@@ -3557,6 +3564,13 @@ export class CoreManager implements CoreCommands {
     const { harness } = this.requireMessaging();
     const tasks = await this.deps.tasks.listTasks();
     const matches = matchTasks(query, tasks, options);
+    const policy = await this.directRoutePolicy(
+      tasks,
+      await this.deps.config.load(),
+    );
+    const searcher = options?.fromTaskId
+      ? tasks.find((task) => task.id === options.fromTaskId)
+      : undefined;
     return Promise.all(
       matches.map(async ({ task, relation }): Promise<TaskSearchResult> => {
         const presence =
@@ -3572,6 +3586,16 @@ export class CoreManager implements CoreCommands {
           ...(task.pr ? { prNumber: task.pr.number } : {}),
           run: deriveRunState(task, presence),
           relation,
+          // Only a task sender can ever send directly (a plain session always
+          // needs approval); a task can't send to itself.
+          ...(task.id === searcher?.id
+            ? {}
+            : {
+                send:
+                  searcher && canMessageDirectly(searcher, task, policy)
+                    ? ("direct" as const)
+                    : ("needs-approval" as const),
+              }),
         };
       }),
     );
@@ -3605,12 +3629,17 @@ export class CoreManager implements CoreCommands {
       undeliverableReason(target) ?? (await this.noSessionReason(target));
     if (unavailable) throw new Error(unavailable);
 
-    // 3. Route from lineage (non-task senders always need approval).
-    const route = classifyRoute(input.from, senderTask, target);
+    // 3. Route from lineage, the user's `messaging.directRoutes` setting and
+    //    pair grants (non-task senders always need approval).
+    const config = await this.deps.config.load();
+    const policy = await this.directRoutePolicy(
+      await this.deps.tasks.listTasks(),
+      config,
+    );
+    const route = classifyRoute(input.from, senderTask, target, policy);
 
     // 4. Child → parent: the parent must be live (and not Done, above) and
     //    the child's own harness must be able to receive the answer.
-    const config = await this.deps.config.load();
     if (route === "child-to-parent") {
       if (!(await harness.presence(target.id)).live) {
         throw new Error(
@@ -3633,22 +3662,20 @@ export class CoreManager implements CoreCommands {
       );
     }
 
-    // 6. Lineage routes check the loop cap.
+    // 6. Every direct task → task route checks the per-pair loop cap.
     const cap = config.messaging?.loopCap ?? DEFAULT_MESSAGE_LOOP_CAP;
     const capCheck =
-      senderTask && (route === "parent-to-child" || route === "child-to-parent")
+      senderTask && isDirectRoute(route)
         ? (store: MessageStoreSnapshot) => {
-            const parent = route === "parent-to-child" ? senderTask : target;
-            const child = route === "parent-to-child" ? target : senderTask;
             const count = countLoopMessages(
               store.messages,
               store.userInputs,
-              parent.id,
-              child.id,
+              senderTask.id,
+              target.id,
             );
             if (count >= cap) {
               throw new Error(
-                `Message cap reached between "${child.title}" and "${parent.title}" (${cap} since the user last typed); stop and ask the user.`,
+                `Message cap reached between "${senderTask.title}" and "${target.title}" (${cap} since the user last typed); stop and ask the user.`,
               );
             }
           }
@@ -3691,15 +3718,15 @@ export class CoreManager implements CoreCommands {
         willWake: false,
         note:
           input.from.kind === "task"
-            ? "Awaiting the user's approval in the Harbormaster app; you'll get a follow-up with the result. Don't wait for it -- continue or end your turn."
-            : "Awaiting the user's approval in the Harbormaster app; no result is reported back to this session.",
+            ? `Not delivered yet: waiting for the user's approval in the Harbormaster app (a message to "${target.title}" needs it under the user's current setting). You'll get a follow-up with the result. Don't wait for it -- continue or end your turn.`
+            : "Not delivered yet: waiting for the user's approval in the Harbormaster app; no result is reported back to this session.",
       };
     }
     if (target.launch?.status === "queued") {
       return {
         message,
         willWake: false,
-        note: `"${target.title}" has a queued launch; the message will be delivered as soon as it starts.`,
+        note: `Sent directly, no approval needed. "${target.title}" has a queued launch; the message is delivered as soon as it starts.`,
       };
     }
     if ((await harness.presence(target.id)).live) {
@@ -3716,7 +3743,7 @@ export class CoreManager implements CoreCommands {
     return {
       message,
       willWake: true,
-      note: `"${target.title}" isn't running; Harbormaster will wake it and deliver the message.`,
+      note: `Sent directly, no approval needed. "${target.title}" isn't running; Harbormaster will wake it and deliver the message.`,
     };
   }
 
@@ -3975,6 +4002,11 @@ export class CoreManager implements CoreCommands {
     const reason = target
       ? (undeliverableReason(target) ?? (await this.noSessionReason(target)))
       : `Task ${message.targetTaskId} no longer exists; messages can't be delivered.`;
+    if (edits?.allowBothWays && message.sender.kind !== "task") {
+      throw new Error(
+        "Only a message from a task can be approved with both ways allowed.",
+      );
+    }
     let result: TaskMessage;
     if (reason) {
       result = (await messages.failMessage(messageId, now, reason)) ?? message;
@@ -3984,6 +4016,13 @@ export class CoreManager implements CoreCommands {
         ...(edits?.text !== undefined ? { text: edits.text } : {}),
         ...(edits?.mode ? { mode: edits.mode } : {}),
       });
+      if (edits?.allowBothWays && message.sender.kind === "task") {
+        await messages.grantPair(
+          message.sender.taskId,
+          message.targetTaskId,
+          now,
+        );
+      }
     }
     await this.sendReceipt(result, target);
     this.emitMessagesChanged(affectedTaskIds([result]));
@@ -4003,6 +4042,57 @@ export class CoreManager implements CoreCommands {
     );
     this.emitMessagesChanged(affectedTaskIds([result]));
     return result;
+  }
+
+  async listPairGrants(): Promise<PairGrant[]> {
+    const { messages } = this.requireMessaging();
+    const [store, tasks] = await Promise.all([
+      messages.readStore(),
+      this.deps.tasks.listTasks(),
+    ]);
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    return store.grants.filter((grant) =>
+      isPairGranted({ grants: store.grants, tasks: byId }, ...grant.taskIds),
+    );
+  }
+
+  async revokePairGrant(taskId: string, otherTaskId: string): Promise<void> {
+    const { messages } = this.requireMessaging();
+    if (await messages.revokePair(taskId, otherTaskId)) {
+      this.emitMessagesChanged([taskId, otherTaskId]);
+    }
+  }
+
+  /**
+   * A task went Done or was deleted: its pair grants end (docs/task-trees.md
+   * decision 15). A grant whose task is Done is inert anyway (`isPairGranted`
+   * reads task state), so a failure here is only clutter that would let a
+   * reopened task's old grant come back; never fail the transition over it.
+   */
+  private async endPairGrants(taskId: string): Promise<void> {
+    const { messages } = this.deps;
+    if (!messages) return;
+    try {
+      const others = await messages.revokeGrantsForTask(taskId);
+      if (others.length > 0) this.emitMessagesChanged([taskId, ...others]);
+    } catch {
+      /* see above */
+    }
+  }
+
+  /** The user's `messaging.directRoutes` setting plus the grants on record, over the given tasks. */
+  private async directRoutePolicy(
+    tasks: readonly Task[],
+    config: GlobalConfig,
+  ): Promise<DirectRoutePolicy> {
+    const { messages } = this.requireMessaging();
+    return {
+      directRoutes:
+        config.messaging?.directRoutes ?? DEFAULT_MESSAGE_DIRECT_ROUTES,
+      tasks: new Map(tasks.map((task) => [task.id, task])),
+      // Just the grants: the message log is large and kept forever.
+      grants: await messages.readGrants(),
+    };
   }
 
   async listTasksWithPendingMessages(): Promise<string[]> {
@@ -4050,6 +4140,7 @@ export class CoreManager implements CoreCommands {
     );
     return deriveMessagingStates({
       tasks,
+      grants: store.grants,
       messages: store.messages,
       userInputs: store.userInputs,
       liveTaskIds,
@@ -4188,6 +4279,8 @@ export class CoreManager implements CoreCommands {
   }
 
   private async publishTaskChange(task: Task): Promise<void> {
+    // Every route into Done (moveTask, toDone, rules) lands here.
+    if (task.state === "done") await this.endPairGrants(task.id);
     this.deps.events.emit("task-changed", { task });
     await this.publishBoard();
   }

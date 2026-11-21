@@ -14,12 +14,14 @@ import type {
   DeploymentPipeline,
   DeploymentStageConfig,
   GlobalConfig,
+  MessageDirectRoutes,
   RepositoryConfig,
   SourceConfig,
 } from "../contracts/model.js";
 import {
   defaultGlobalConfig,
   MAX_LAUNCH_MAX_NESTING_DEPTH,
+  MESSAGE_DIRECT_ROUTES,
   MIN_LAUNCH_MAX_NESTING_DEPTH,
 } from "../contracts/model.js";
 import type {
@@ -822,6 +824,17 @@ function normalizeMessaging(
       throw new Error("messaging.loopCap must be a positive integer");
     }
     messaging.loopCap = value.loopCap;
+  }
+  if (value.directRoutes !== undefined) {
+    if (
+      typeof value.directRoutes !== "string" ||
+      !MESSAGE_DIRECT_ROUTES.includes(value.directRoutes as MessageDirectRoutes)
+    ) {
+      throw new Error(
+        `messaging.directRoutes must be one of: ${MESSAGE_DIRECT_ROUTES.join(", ")}`,
+      );
+    }
+    messaging.directRoutes = value.directRoutes as MessageDirectRoutes;
   }
   return messaging;
 }
