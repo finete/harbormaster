@@ -12,7 +12,11 @@
 // stays pending, the existing "not delivered yet" state. Pure logic with
 // injected effects (tests/harness-delivery.test.ts).
 
-import type { HarnessDeliverCommand, TaskMessage } from "@harbormaster/core";
+import type {
+  HarnessDeliverCommand,
+  InboxFormatOptions,
+  TaskMessage,
+} from "@harbormaster/core";
 import { buildInboxMessageText } from "@harbormaster/core";
 
 /** How long a queued message may go unconfirmed before main types it instead. */
@@ -26,6 +30,8 @@ export interface QueuedDelivery {
   /** The text handed to the harness (typed as-is on fallback). */
   text: string;
   sentAt: number;
+  /** The text is the user's own submit (the Review button), not an agent's message: typing it counts as the user typing. */
+  userInput: boolean;
 }
 
 export interface HarnessDeliveryDeps {
@@ -36,6 +42,12 @@ export interface HarnessDeliveryDeps {
   claim(taskId: string, messageIds: string[]): Promise<number>;
   /** Types `text` + Enter into the task's primary pty; whether it landed. */
   type(taskId: string, text: string): Promise<boolean>;
+  /**
+   * Records "the user typed into this task" (core `recordUserInput`). Called
+   * only for the user's own submit (the Review command) once it was typed,
+   * never for an agent's message the app types on its behalf.
+   */
+  recordUserInput(taskId: string): void;
   onEvent?(event: string, details: Record<string, unknown>): void;
 }
 
@@ -45,9 +57,12 @@ export interface HarnessDeliveryDeps {
  * `inbox_claim` does, so the agent reads exactly what the hooks would
  * have handed it.
  */
-export function queueTextFor(messages: readonly TaskMessage[]): string {
+export function queueTextFor(
+  messages: readonly TaskMessage[],
+  options: InboxFormatOptions = {},
+): string {
   return messages
-    .map((message) => buildInboxMessageText(message))
+    .map((message) => buildInboxMessageText(message, options))
     .join("\n\n---\n\n");
 }
 
@@ -86,12 +101,17 @@ export class HarnessDeliveries {
     return this.inFlight.get(taskId);
   }
 
-  /** Runs `command` and tracks the delivery until confirmed; whether the harness accepted it. */
+  /**
+   * Runs `command` and tracks the delivery until confirmed; whether the
+   * harness accepted it. `options.userInput` marks the Review button's
+   * command, the only delivery that is a user action.
+   */
   async send(
     taskId: string,
     command: HarnessDeliverCommand,
     text: string,
     messageIds: string[],
+    options: { userInput?: boolean } = {},
   ): Promise<boolean> {
     if (this.has(taskId)) return false;
     this.busy.add(taskId);
@@ -107,6 +127,7 @@ export class HarnessDeliveries {
           messageIds,
           text,
           sentAt: this.deps.now(),
+          userInput: options.userInput === true,
         });
       }
       return ok;
@@ -160,6 +181,7 @@ export class HarnessDeliveries {
             return;
           }
           const typed = await this.deps.type(taskId, entry.text);
+          if (typed && entry.userInput) this.deps.recordUserInput(taskId);
           this.deps.onEvent?.("fallback-typed", { taskId, typed });
         })(),
       );

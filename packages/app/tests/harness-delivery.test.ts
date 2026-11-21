@@ -26,6 +26,7 @@ function harness(options: { run?: boolean; claimable?: number } = {}) {
   const events: string[] = [];
   const claims: string[][] = [];
   const typed: string[] = [];
+  const userInputs: string[] = [];
   const runs: string[][] = [];
   let claimable = options.claimable ?? 1;
   const deliveries = new HarnessDeliveries({
@@ -44,6 +45,7 @@ function harness(options: { run?: boolean; claimable?: number } = {}) {
       typed.push(text);
       return true;
     },
+    recordUserInput: (taskId) => userInputs.push(taskId),
     onEvent: (event) => events.push(event),
   });
   return {
@@ -51,6 +53,7 @@ function harness(options: { run?: boolean; claimable?: number } = {}) {
     events,
     claims,
     typed,
+    userInputs,
     runs,
     advance: (ms: number) => {
       now += ms;
@@ -59,6 +62,26 @@ function harness(options: { run?: boolean; claimable?: number } = {}) {
 }
 
 describe("HarnessDeliveries", () => {
+  it("does not record user input when it types an agent's message", async () => {
+    const h = harness();
+    await h.deliveries.send("t1", COMMAND, "hello", ["m1"]);
+    h.advance(QUEUE_CONFIRM_MS);
+    await h.deliveries.tick(() => ({ pane: true, atPrompt: true }));
+    expect(h.typed).toEqual(["hello"]);
+    expect(h.userInputs).toEqual([]);
+  });
+
+  it("records user input when it types the Review command (the user's own submit)", async () => {
+    const h = harness();
+    await h.deliveries.send("t1", COMMAND, "$plannotator-review", [], {
+      userInput: true,
+    });
+    h.advance(QUEUE_CONFIRM_MS);
+    await h.deliveries.tick(() => ({ pane: true, atPrompt: true }));
+    expect(h.typed).toEqual(["$plannotator-review"]);
+    expect(h.userInputs).toEqual(["t1"]);
+  });
+
   it("keeps a queued message pending until the agent's next turn confirms it", async () => {
     const h = harness();
     expect(await h.deliveries.send("t1", COMMAND, "hello", ["m1"])).toBe(true);

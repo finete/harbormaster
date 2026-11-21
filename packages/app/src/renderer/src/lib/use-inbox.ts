@@ -6,7 +6,7 @@
 // (`evaluateInboxPriority`) so the app and `harbormaster inbox` agree.
 // App calls this once and hands the model to the sidebar badge and the
 // inbox view.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   flattenBoard,
   useApprovals,
@@ -19,6 +19,7 @@ import {
 import { pushToast } from "../toast";
 import {
   assembleInbox,
+  entriesClearedByOpening,
   INBOX_LOCAL_STATE_KEY,
   type InboxEntry,
   type LocalInboxState,
@@ -44,6 +45,11 @@ export interface InboxModel {
   snooze(entry: InboxEntry, until: Date): Promise<void>;
   /** Dismiss every dismissable Other entry. */
   clearOther(): Promise<void>;
+  /**
+   * The user opened this task: hide its visible reported / done / idle
+   * entries (see `entriesClearedByOpening`). Stable identity.
+   */
+  markTaskSeen(taskId: string): void;
 }
 
 function readLocal(): LocalInboxState {
@@ -147,6 +153,23 @@ export function useInbox(): InboxModel {
     };
   }, [inputsKey]);
 
+  // Latest visible entries for `markTaskSeen`, so App's open path keeps a
+  // stable callback instead of re-registering on every presence push.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const markTaskSeen = useCallback((taskId: string): void => {
+    const cleared = entriesClearedByOpening(entriesRef.current, taskId);
+    if (cleared.length === 0) return;
+    const at = new Date().toISOString();
+    setLocal((previous) => ({
+      ...previous,
+      dismissed: {
+        ...previous.dismissed,
+        ...Object.fromEntries(cleared.map((entry) => [entry.id, at])),
+      },
+    }));
+  }, []);
+
   const runningCount = useMemo(
     () => Object.values(presence).filter((badge) => badge.runningTurn).length,
     [presence],
@@ -226,5 +249,6 @@ export function useInbox(): InboxModel {
     dismiss,
     snooze,
     clearOther,
+    markTaskSeen,
   };
 }

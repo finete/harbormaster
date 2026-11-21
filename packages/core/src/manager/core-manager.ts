@@ -3706,6 +3706,7 @@ export class CoreManager implements CoreCommands {
       route,
       text,
       requestedMode: mode,
+      ...(input.expectsReply === true ? { expectsReply: true } : {}),
       attachments,
       status: route === "approval" ? "awaiting_approval" : "pending",
       createdAt: this.deps.clock.now().toISOString(),

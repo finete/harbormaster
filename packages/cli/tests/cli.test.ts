@@ -14,6 +14,7 @@ import {
   doctorExitCode,
   HOOK_PRESENCE_STARTING,
   PiHarnessAdapter,
+  REPORT_STATUS_REMINDER,
   resolveSocketPath,
   startToolSocketServer,
   type TaskUsage,
@@ -371,6 +372,19 @@ describe("harbormaster hook codex (X1-X3, X5)", () => {
         "$plannotator-review",
       ),
     ).toBe("[Message from task]\n\nother");
+    // A task with a parent gets the report_status reminder appended; the
+    // typed review command is still the message it already carries.
+    expect(
+      codexContextText(
+        [
+          {
+            text: `[Message from the user]\n\n$plannotator-review\n\n${REPORT_STATUS_REMINDER}`,
+            details: { route: "user" },
+          },
+        ],
+        "$plannotator-review",
+      ),
+    ).toBe("");
   });
 
   it("rejects an unknown event", async () => {

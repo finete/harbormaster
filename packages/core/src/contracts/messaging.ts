@@ -19,7 +19,7 @@ export type MessageSender =
 /** Decided by core at send time from lineage; never supplied by the agent. */
 export type MessageRoute =
   | "parent-to-child" // no approval, counts toward the loop cap
-  | "child-to-parent" // no approval, a question, counts toward the loop cap
+  | "child-to-parent" // no approval, a report or (expectsReply) a question, counts toward the loop cap
   | "approval" // everything else: needs the user's approval
   | "receipt" // approval result back to a task sender
   | "user"; // sent by the user themself: no approval, no loop cap
@@ -53,6 +53,12 @@ export interface TaskMessage {
   /** The agent's original text when the user edited it on approval. */
   originalText?: string;
   requestedMode: MessageMode;
+  /**
+   * The sender asked for an answer and is waiting for it. Stored on every
+   * route; only a child-to-parent message with it set is a question (the
+   * child "waits on parent"). Absent on older messages and reports.
+   */
+  expectsReply?: boolean;
   /** What the target harness actually used; set on delivery. */
   deliveredMode?: MessageMode;
   attachments: MessageAttachment[];
@@ -81,6 +87,8 @@ export interface SendTaskMessageInput {
   targetTaskId: string;
   text: string;
   mode?: MessageMode;
+  /** The sender ends its turn to wait for an answer (default false: a report or result). */
+  expectsReply?: boolean;
   /** Absolute file paths; copied by core at send time. */
   attachments?: string[];
 }
