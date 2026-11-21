@@ -88,8 +88,14 @@ function sameUsage(a: TaskUsage | undefined, b: TaskUsage): boolean {
 }
 
 export class UsageRuntime {
-  /** One computation per task at a time (a trigger mid-run joins it). */
-  private readonly inFlight = new Map<string, Promise<TaskUsage | undefined>>();
+  /**
+   * One computation per task at a time (a trigger mid-run joins it);
+   * `quiet` marks a run that may skip fresh files (`quietMs`).
+   */
+  private readonly inFlight = new Map<
+    string,
+    { run: Promise<TaskUsage | undefined>; quiet: boolean }
+  >();
   /** The backfill drain in flight (single-flight, see `drain`). */
   private draining: Promise<void> | undefined;
   /** Ready tasks already queued once for a missing `lastActivityAt` (never retried this process). */
@@ -103,11 +109,16 @@ export class UsageRuntime {
     options: UpdateUsageOptions = {},
   ): Promise<TaskUsage | undefined> {
     const running = this.inFlight.get(taskId);
-    if (running && !options.force) return running;
+    const quiet = options.quietMs !== undefined;
+    // A quiet-gated run (the tick) may skip a fresh change, so a caller
+    // without the gate (a turn end) starts its own instead of joining it.
+    if (running && !options.force && (quiet || !running.quiet)) {
+      return running.run;
+    }
     const run = this.runUpdate(taskId, options).finally(() => {
-      if (this.inFlight.get(taskId) === run) this.inFlight.delete(taskId);
+      if (this.inFlight.get(taskId)?.run === run) this.inFlight.delete(taskId);
     });
-    this.inFlight.set(taskId, run);
+    this.inFlight.set(taskId, { run, quiet });
     return run;
   }
 

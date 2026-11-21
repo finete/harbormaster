@@ -426,6 +426,28 @@ describe("usage while the agent keeps working", () => {
     expect(harness.reads).toHaveLength(reads);
   });
 
+  it("a turn end during a quiet-gated tick run still recounts (never joins the skip)", async () => {
+    const { taskId, appendTurn } = await countedTask();
+    const runtime = new UsageRuntime({
+      tasks,
+      sessions: new LocalSessionFileAccess(),
+      clock: new TestClock(),
+      logger: noopCoreLogger,
+      adapterFor: async () => harness,
+      bindingFor: (id) => bindings.getBindingForTask(id),
+      publish: async () => {},
+    });
+    await appendTurn();
+    const tick = runtime.update(taskId, { quietMs: 15_000 });
+    const stop = runtime.update(taskId);
+    await tick;
+    expect((await stop)?.totals.turns).toBe(2);
+    // Two gated callers still share one run.
+    const first = runtime.update(taskId, { quietMs: 15_000 });
+    expect(runtime.update(taskId, { quietMs: 15_000 })).toBe(first);
+    await first;
+  });
+
   it("notices a change to a file the reader counts besides the session (a running subagent)", async () => {
     const subagent = join(sessionsDir, "agent-1.jsonl");
     await writeFile(subagent, "{}\n");
