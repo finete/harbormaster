@@ -48,6 +48,7 @@ import {
   canAwait,
   canStart,
   moveTaskMutation,
+  reopenTaskMutation,
   startTaskMutation,
   toAwaitMutation,
   toDoneMutation,
@@ -282,6 +283,14 @@ export function Board({
     // move otherwise — so every backlog->working drop routes through it.
     if (row.state === "backlog" && targetState === "working") {
       void startTaskMutation(taskId);
+      return;
+    }
+
+    // Done -> Working is the Reopen verb (without its objective question):
+    // Done cleanup removed the worktree, so a bare column move would leave
+    // a Working task with nowhere to run and no conversation to resume.
+    if (row.state === "done" && targetState === "working") {
+      void reopenTaskMutation(taskId, "");
       return;
     }
 

@@ -28,6 +28,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { dragTo } from "./board-gestures";
 import { chooseWhere } from "./composer";
 import { ghGraphqlShimLine } from "./fake-gh";
 
@@ -244,20 +245,23 @@ test("the first pane pre-assigns a session id; a closed tab re-attaches to the s
   expect(launches()[1]).toEqual(["--session-id", sessionId]);
 });
 
-test("once the extension recorded the session file, reopening resumes that exact file", async () => {
-  sessionFile = path.join(root, "sessions", `s_${sessionId}.jsonl`);
-  mkdirSync(path.dirname(sessionFile), { recursive: true });
+/** Write a session file for `id` and record it for the task, exactly as the extension does on session start. */
+async function recordSession(id: string): Promise<string> {
+  const file = path.join(root, "sessions", `s_${id}.jsonl`);
+  mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(
-    sessionFile,
-    `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd: root })}\n`,
+    file,
+    `${JSON.stringify({ type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd: root })}\n`,
   );
   const recorded = await createCore({
     stateDir,
-  }).commands.recordTaskSession(taskId, {
-    sessionId,
-    sessionPath: sessionFile,
-  });
+  }).commands.recordTaskSession(taskId, { sessionId: id, sessionPath: file });
   expect(recorded).toBe(true);
+  return file;
+}
+
+test("once the extension recorded the session file, reopening resumes that exact file", async () => {
+  sessionFile = await recordSession(sessionId);
 
   await closeWorkspace();
   await killPi();
@@ -291,13 +295,15 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await expect.poll(() => existsSync(oldWorktree)).toBe(false);
   expect(bindingFor(taskId)?.sessionPath).toBe(sessionFile);
 
-  // Reopen lives in the workspace header: open the Done task (no worktree,
-  // so its pane is a plain shell — no pi launch) and reopen from there.
+  // Opening the Done task (no worktree left) runs nothing: no stray plain
+  // shell, the Resume card instead. The header's Reopen asks for an
+  // objective first.
   await openTask("Continuity");
-  await window
-    .getByTestId(`task-workspace-${taskId}`)
-    .getByTestId(`reopen-task-button-${taskId}`)
-    .click();
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  const resumeCard = workspace.getByTestId(`resume-task-${taskId}`);
+  await expect(resumeCard).toContainText("This task is done");
+  await expect(workspace.getByTestId("terminal-panel")).toHaveCount(0);
+  await workspace.getByTestId(`reopen-task-button-${taskId}`).click();
   const dialog = window.getByTestId("reopen-task-dialog");
   await expect(dialog).toBeVisible();
   await window
@@ -324,7 +330,9 @@ test("reopening a Done task restores a workspace directory and forks the previou
   expect(newSessionId).not.toBe(sessionId);
 
   // The still-open workspace picked up the new cycle's worktree and gave
-  // it a pi pane, which forked the previous conversation.
+  // it a pi pane (its only one), which forked the previous conversation.
+  await expect(resumeCard).toHaveCount(0);
+  await expect(workspace.getByTestId("terminal-panel")).toHaveCount(1);
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(4);
   expect(launches()[3]).toEqual([
     "--fork",
@@ -342,4 +350,85 @@ test("reopening a Done task restores a workspace directory and forks the previou
   await openTask("Continuity");
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(5);
   expect(launches()[4]).toEqual(["--session-id", newSessionId]);
+});
+
+test("an archived task resumes from its Resume card; a Done card dropped on Working resumes too", async () => {
+  // Cycle 2's conversation, recorded as the extension would.
+  const cycleTwo = bindingFor(taskId);
+  const cycleTwoFile = await recordSession(cycleTwo?.sessionId ?? "");
+
+  // Archive it from the board (e): Done and off the board in one step.
+  await closeWorkspace();
+  await window.getByTestId("board-button").click();
+  const card = cardLocator("Continuity");
+  await expect(card).toHaveAttribute("data-selected", "true");
+  await window.keyboard.press("e");
+  await expect(window.getByTestId("confirm-dialog")).toContainText("Archive?");
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(card).toHaveCount(0);
+  await expect.poll(() => existsSync(cycleTwo?.worktreePath ?? "")).toBe(false);
+
+  // Its card (behind "show archived") opens the Resume card, already
+  // focused: Enter resumes it.
+  await window
+    .getByTestId("column-done")
+    .getByTestId("toggle-archived-button")
+    .click();
+  await openTask("Continuity");
+  const workspace = window.getByTestId(`task-workspace-${taskId}`);
+  const resumeCard = workspace.getByTestId(`resume-task-${taskId}`);
+  await expect(resumeCard).toContainText("This task is archived");
+  await expect(workspace.getByTestId("terminal-panel")).toHaveCount(0);
+  await expect(
+    workspace.getByTestId(`resume-task-button-${taskId}`),
+  ).toBeFocused();
+  await window.keyboard.press("Enter");
+
+  // Back in Working in a fresh worktree; the first pane forks cycle 2's
+  // conversation (no new objective).
+  await expect(resumeCard).toHaveCount(0);
+  await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(6);
+  const cycleThree = bindingFor(taskId);
+  expect(existsSync(cycleThree?.worktreePath ?? "")).toBe(true);
+  expect(launches()[5]).toEqual([
+    "--fork",
+    cycleTwoFile,
+    "--session-id",
+    cycleThree?.sessionId,
+  ]);
+  const resumed = await window.evaluate(
+    (id) => window.harbormaster.core.getTask(id),
+    taskId,
+  );
+  expect(resumed?.state).toBe("working");
+  expect(resumed?.archivedAt).toBeUndefined();
+
+  // Done again, then its card dragged back to Working: the same reopen
+  // (a bare move would leave it in Working with no worktree).
+  const cycleThreeFile = await recordSession(cycleThree?.sessionId ?? "");
+  await closeWorkspace();
+  await window.getByTestId("board-button").click();
+  await expect(card).toHaveAttribute("data-selected", "true");
+  await window.keyboard.press("x");
+  await window.getByTestId("confirm-dialog-confirm").click();
+  await expect(
+    window
+      .getByTestId("column-done-cards")
+      .locator(`[data-testid="card-${taskId}"]`),
+  ).toBeVisible();
+  await expect
+    .poll(() => existsSync(cycleThree?.worktreePath ?? ""))
+    .toBe(false);
+  await dragTo(window, card, window.getByTestId("column-working"));
+  await expect(
+    window
+      .getByTestId("column-working-cards")
+      .locator(`[data-testid="card-${taskId}"]`),
+  ).toBeVisible();
+  const cycleFour = bindingFor(taskId);
+  expect(cycleFour?.worktreePath).not.toBe(cycleThree?.worktreePath);
+  expect(existsSync(cycleFour?.worktreePath ?? "")).toBe(true);
+  expect(cycleFour?.forkFromSessionPath).toBe(cycleThreeFile);
+  await expect(window.getByTestId("toast-error")).toHaveCount(0);
+  await expect(window.getByTestId("toast-warning")).toHaveCount(0);
 });
