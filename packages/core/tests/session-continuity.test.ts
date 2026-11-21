@@ -702,6 +702,24 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     });
   });
 
+  it("leaves a scratch task Done and parked when the reopen's task write fails", async () => {
+    const f = await fixture();
+    const scratch = await f.manager.createTask({
+      title: "Scratch",
+      initialPrompt: "",
+      start: true,
+    });
+    await f.manager.toDone(scratch.id, { force: { confirmed: true } });
+    const parked = await f.manager.getTaskWorkspace(scratch.id);
+
+    f.failNext("replaceTask");
+    await expect(f.manager.reopenTask(scratch.id)).rejects.toThrow(
+      "replaceTask unavailable",
+    );
+    expect((await f.manager.getTask(scratch.id))?.state).toBe("done");
+    expect(await f.manager.getTaskWorkspace(scratch.id)).toEqual(parked);
+  });
+
   it("gives a scratch task Done straight from Backlog a workspace when reopened", async () => {
     const f = await fixture();
     const idea = await f.manager.createTask({

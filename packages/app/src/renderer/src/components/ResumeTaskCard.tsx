@@ -45,14 +45,11 @@ export function ResumeTaskCard({ task }: { task: Task }): JSX.Element {
         {task.archivedAt ? "This task is archived" : "This task is done"}
       </p>
       <p className="max-w-sm text-xs text-muted-foreground">
-        {task.repositoryId
-          ? "Its worktree was cleaned up, so no agent runs here. "
-          : "No agent runs here. "}
-        Resume moves it back to Working in {where} and picks the conversation
-        back up.
+        No agent runs here. Resume moves it back to Working in {where} and picks
+        up where it left off.
       </p>
       <Button
-        // Opening the task (a click or Enter on the board) lands here, so a
+        // The first open (a click or Enter on the board) lands here, so a
         // second Enter resumes it.
         autoFocus
         disabled={busy || starting}
