@@ -17,7 +17,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPiSessionUsage } from "../src/access/pi-session-usage-access.js";
 import type {
   PullRequestAccess,
@@ -66,7 +66,12 @@ class UsageHarness implements HarnessAdapter {
     images: false,
   };
   reads: string[] = [];
+  /** What `extraUsageFiles` lists (stand-ins for subagent transcripts). */
+  extraFiles: string[] = [];
   readSessionUsage?: (path: string) => Promise<SessionUsage | undefined>;
+  async extraUsageFiles(): Promise<string[]> {
+    return this.extraFiles;
+  }
   constructor(
     private readonly sessionsDir: string,
     withReader = true,
@@ -357,6 +362,108 @@ describe("usage snapshots", () => {
       status: "unavailable",
       reason: "unsupported",
     });
+  });
+});
+
+describe("usage while the agent keeps working", () => {
+  /** Backdate `path` before the test clock: its writer has gone quiet. */
+  const quiet = (path: string) => {
+    const past = new Date("2026-11-15T00:00:00.000Z");
+    return utimes(path, past, past);
+  };
+  /** A started task counted once (1 turn), its session file, and an appender. */
+  async function countedTask() {
+    const { taskId, sessionId } = await startedTask();
+    const sessionPath = join(sessionsDir, `2026_${sessionId}.jsonl`);
+    await writeFile(sessionPath, piSession([["claude-opus-5-5", 5, 0.5]]));
+    await quiet(sessionPath);
+    await manager.endPresence(taskId, { pid: 1 });
+    expect((await manager.getTask(taskId))?.usage?.totals.turns).toBe(1);
+    let turn = 0;
+    const appendTurn = () =>
+      appendFile(
+        sessionPath,
+        `${JSON.stringify(assistant("claude-opus-5-5", 5, 0.5, ++turn))}\n`,
+      );
+    return { taskId, sessionPath, appendTurn };
+  }
+  const turns = async (taskId: string) =>
+    (await manager.getTask(taskId))?.usage?.totals.turns;
+
+  it("recounts when a turn ends (a stop boundary), not on other boundaries", async () => {
+    const { taskId, appendTurn } = await countedTask();
+    await appendTurn();
+    await manager.reportTurnBoundary(taskId, { kind: "prompt" });
+    await manager.reportTurnBoundary(taskId, { kind: "tool" });
+    expect(harness.reads).toHaveLength(1);
+
+    await manager.reportTurnBoundary(taskId, { kind: "stop" });
+    await vi.waitFor(async () => expect(await turns(taskId)).toBe(2));
+  });
+
+  it("recounts open tasks on the refresh tick once their files go quiet, re-parsing only changed files", async () => {
+    const { taskId, sessionPath, appendTurn } = await countedTask();
+    await refreshed();
+    expect(harness.reads).toHaveLength(1);
+
+    // Still being written (fresh mtime): the tick leaves the count alone.
+    await appendTurn();
+    await refreshed();
+    expect(await turns(taskId)).toBe(1);
+    expect(harness.reads).toHaveLength(1);
+
+    await quiet(sessionPath);
+    await refreshed();
+    expect(await turns(taskId)).toBe(2);
+    expect(harness.reads).toHaveLength(2);
+
+    // Done is final: its own snapshot, never re-checked by the tick.
+    await manager.toDone(taskId, { force: { confirmed: true } });
+    const reads = harness.reads.length;
+    await appendTurn();
+    await quiet(sessionPath);
+    await refreshed();
+    expect(harness.reads).toHaveLength(reads);
+  });
+
+  it("a turn end during a quiet-gated tick run still recounts (never joins the skip)", async () => {
+    const { taskId, appendTurn } = await countedTask();
+    const runtime = new UsageRuntime({
+      tasks,
+      sessions: new LocalSessionFileAccess(),
+      clock: new TestClock(),
+      logger: noopCoreLogger,
+      adapterFor: async () => harness,
+      bindingFor: (id) => bindings.getBindingForTask(id),
+      publish: async () => {},
+    });
+    await appendTurn();
+    const tick = runtime.update(taskId, { quietMs: 15_000 });
+    const stop = runtime.update(taskId);
+    await tick;
+    expect((await stop)?.totals.turns).toBe(2);
+    // Two gated callers still share one run.
+    const first = runtime.update(taskId, { quietMs: 15_000 });
+    expect(runtime.update(taskId, { quietMs: 15_000 })).toBe(first);
+    await first;
+  });
+
+  it("notices a change to a file the reader counts besides the session (a running subagent)", async () => {
+    const subagent = join(sessionsDir, "agent-1.jsonl");
+    await writeFile(subagent, "{}\n");
+    harness.extraFiles = [subagent];
+    await quiet(subagent);
+    const { taskId } = await countedTask();
+    await refreshed();
+    expect(harness.reads).toHaveLength(1);
+
+    await appendFile(subagent, "{}\n");
+    await quiet(subagent);
+    await refreshed();
+    expect(harness.reads).toHaveLength(2);
+    expect((await manager.getTask(taskId))?.usage?.fingerprint).toContain(
+      subagent,
+    );
   });
 });
 

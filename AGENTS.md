@@ -44,10 +44,13 @@ Utility) that `packages/core` follows. Pi-home's `src/` layout
 ## Identity
 
 Which GitHub account works on this repository is each developer's local
-setup, never named here: commits use the repo-local `user.name` /
-`user.email`, and the account for `gh` is the repo-local
-`harbormaster.ghUser` (`git config harbormaster.ghUser <account>`). Agents
-never change either.
+setup, never named here: it is the repo-local `harbormaster.ghUser`
+(`git config harbormaster.ghUser <account>`), and agents never change it.
+Commits are authored as that account with its GitHub noreply address, so
+no `user.email` needs setting:
+`git -c user.name="$u" -c user.email="$(GH_TOKEN="$t" gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"')" commit …`
+(`u` and `t` as below). A repo-local `user.name` / `user.email`, when set,
+is used as is.
 
 Every `gh` command here runs as that account:
 `u=$(git config harbormaster.ghUser) && t=$(gh auth token --user "$u") && GH_TOKEN="$t" gh …`.

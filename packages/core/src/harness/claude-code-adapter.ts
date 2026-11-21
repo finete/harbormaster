@@ -31,7 +31,10 @@ import {
   claudeConfigDir,
   LocalClaudeTranscriptAccess,
 } from "../access/claude-code-access.js";
-import { readClaudeSessionUsage } from "../access/claude-session-usage-access.js";
+import {
+  claudeSubagentFiles,
+  readClaudeSessionUsage,
+} from "../access/claude-session-usage-access.js";
 import { ClaudeSlashCommandAccess } from "../access/local-slash-command-access.js";
 import {
   type BuildLaunchSpecInput,
@@ -400,6 +403,11 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
    */
   readSessionUsage(sessionPath: string): Promise<SessionUsage | undefined> {
     return readClaudeSessionUsage(sessionPath);
+  }
+
+  /** The subagent transcripts `readSessionUsage` also counts. */
+  extraUsageFiles(sessionPath: string): Promise<string[]> {
+    return claudeSubagentFiles(sessionPath);
   }
 
   async defaults(): Promise<
