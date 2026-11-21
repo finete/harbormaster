@@ -159,7 +159,20 @@ async function clickGuardReleased(window: Page): Promise<void> {
  * this returns, since rows hide/collapse at drag start.
  */
 async function beginDrag(window: Page, source: Locator): Promise<Drag> {
-  const box = await source.boundingBox();
+  // Rows above can still grow right after they render (a session's agent
+  // line arriving), which moves the source down: press only once its box
+  // holds still across frames, or the press lands on the row above.
+  let box = await source.boundingBox();
+  await expect
+    .poll(async () => {
+      await nextFrames(window);
+      const next = await source.boundingBox();
+      const still =
+        !!box && !!next && next.y === box.y && next.height === box.height;
+      box = next;
+      return still;
+    })
+    .toBe(true);
   if (!box) throw new Error("drag source not visible");
   const startX = box.x + box.width * 0.4;
   const startY = box.y + box.height / 2;
