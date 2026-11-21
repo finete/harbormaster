@@ -721,6 +721,12 @@ export interface HarbormasterApi {
     getUpdate(): Promise<UpdateInfo | null>;
     /** Main's update check found a newer release (startup, then every 6h). */
     onUpdateAvailable(listener: (update: UpdateInfo) => void): () => void;
+    /** A newer copy of the app installed over this running one, or `null`. */
+    getInstalledUpdate(): Promise<InstalledUpdate | null>;
+    /** Main noticed the installed app was replaced (checked on window focus and every 5 s). */
+    onInstalledUpdate(listener: (update: InstalledUpdate) => void): () => void;
+    /** Quits and relaunches into the installed app. */
+    restartToUpdate(): Promise<void>;
     /** Writes `text` to the system clipboard via main (works without window focus). */
     copyText(text: string): Promise<void>;
     /** "Export diagnostics": asks where to save, writes the zip; resolves its path or `null` when cancelled. */
@@ -805,4 +811,11 @@ export interface UpdateInfo {
   version: string;
   /** The command that upgrades the installed app (`brew update && brew upgrade --cask harbormaster`). */
   command: string;
+}
+
+/** The app on disk was replaced while this copy runs (see main/app-bundle-guard.ts). */
+export interface InstalledUpdate {
+  /** The installed version, or `null` when unreadable. */
+  version: string | null;
+  runningVersion: string;
 }

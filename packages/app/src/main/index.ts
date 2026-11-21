@@ -76,6 +76,7 @@ import {
   utilityProcess,
 } from "electron";
 import type {
+  InstalledUpdate,
   MessagingChangedPayload,
   PresenceChangedPayload,
   PresenceSnapshot,
@@ -90,6 +91,7 @@ import {
   resolvePiExtensionSource,
   type ToolingLocations,
 } from "./agent-tooling";
+import { createAppBundleGuard, replacedAppPrompt } from "./app-bundle-guard";
 import { appClipboard } from "./app-clipboard";
 import { createAppLog, installConsoleTee } from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
@@ -2259,6 +2261,9 @@ function createWindow(): void {
   win.once("ready-to-show", () =>
     offscreen ? win.showInactive() : win.show(),
   );
+  win.on("focus", () => {
+    checkInstalledUpdate();
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   // Cmd+W (mac) or Ctrl+W (other) closes the focused task workspace, not the
@@ -2676,6 +2681,90 @@ function startUpdateChecks(): void {
   updateChecker.start();
 }
 
+// e2e stamps a scratch "bundle" instead (HARBORMASTER_BUNDLE_EXECUTABLE);
+// the app never sets it.
+const bundleExecutable =
+  process.env.HARBORMASTER_BUNDLE_EXECUTABLE ??
+  (app.isPackaged ? process.execPath : undefined);
+const appBundleGuard = bundleExecutable
+  ? createAppBundleGuard({
+      executablePath: bundleExecutable,
+      infoPlistPath: join(dirname(bundleExecutable), "..", "Info.plist"),
+    })
+  : undefined;
+let installedUpdate: InstalledUpdate | undefined;
+
+/**
+ * Whether the installed app was replaced since launch (see
+ * app-bundle-guard.ts). The first time it was, every window is told so its
+ * update card offers a restart while the window still works.
+ */
+function checkInstalledUpdate(): InstalledUpdate | undefined {
+  if (installedUpdate) return installedUpdate;
+  const replaced = appBundleGuard?.replacement();
+  if (!replaced) return undefined;
+  installedUpdate = {
+    version: replaced.installedVersion ?? null,
+    runningVersion: app.getVersion(),
+  };
+  console.log(
+    `[main] app replaced on disk (running ${installedUpdate.runningVersion}, installed ${installedUpdate.version ?? "unknown"})`,
+  );
+  for (const win of BrowserWindow.getAllWindows()) {
+    safeSend(win.webContents, "app:installed-update", installedUpdate);
+  }
+  return installedUpdate;
+}
+
+/** One stat every 5 s: the upgrade usually runs while the window already has focus (a pane's shell). */
+const INSTALLED_UPDATE_POLL_MS = 5_000;
+
+function startInstalledUpdateWatch(): void {
+  if (!appBundleGuard) return;
+  const timer = setInterval(() => {
+    if (checkInstalledUpdate()) clearInterval(timer);
+  }, INSTALLED_UPDATE_POLL_MS);
+  timer.unref();
+}
+
+function restartIntoInstalledApp(): void {
+  if (process.env.HARBORMASTER_WINDOW_OFFSCREEN) {
+    console.log("[main] restart requested (test instance: quit only)");
+  } else {
+    console.log("[main] restarting into the installed app");
+    app.relaunch();
+  }
+  app.quit();
+}
+
+/**
+ * A window about to load (dock click with none open, Reload) would render
+ * garbage from a replaced app, and there is no working window to show the
+ * update card in: asks natively instead (`replacedAppPrompt`). Returns
+ * `true` when the caller must not load the window.
+ */
+function restartIfBundleReplaced(): boolean {
+  const update = checkInstalledUpdate();
+  if (!update) return false;
+  const prompt = replacedAppPrompt(update, runningTaskIds.size);
+  const choice =
+    prompt.choices[
+      dialog.showMessageBoxSync({
+        type: "info",
+        message: prompt.message,
+        detail: prompt.detail,
+        buttons: prompt.buttons,
+        defaultId: prompt.defaultId,
+        cancelId: prompt.cancelId,
+        noLink: true,
+      })
+    ];
+  if (choice === "restart") restartIntoInstalledApp();
+  else if (choice === "quit") app.quit();
+  else console.log("[main] restart cancelled: agents are mid-turn");
+  return true;
+}
+
 /** Best-effort `harbormaster rules list` for the diagnostics bundle. */
 function rulesListOutput(): Promise<string> {
   const cli = cliPathForTools();
@@ -2973,7 +3062,15 @@ function installApplicationMenu(): void {
     {
       label: "View",
       submenu: [
-        { role: "reload" },
+        {
+          id: "reload",
+          label: "Reload",
+          accelerator: "CmdOrCtrl+R",
+          click: (_item, win) => {
+            if (restartIfBundleReplaced()) return;
+            if (win instanceof BrowserWindow) win.webContents.reload();
+          },
+        },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
@@ -3019,6 +3116,11 @@ function registerReleaseIpc(): void {
   ipcMain.handle("app:getUpdate", (): UpdateInfo | null => {
     return updateChecker.latest() ?? null;
   });
+  ipcMain.handle(
+    "app:getInstalledUpdate",
+    (): InstalledUpdate | null => checkInstalledUpdate() ?? null,
+  );
+  ipcMain.handle("app:restartToUpdate", () => restartIntoInstalledApp());
   ipcMain.handle("app:copyText", (_event, text: unknown): void => {
     if (typeof text === "string") appClipboard.writeText(text);
   });
@@ -3152,6 +3254,7 @@ app.whenReady().then(async () => {
   startPresencePolling();
   startRefreshLoop();
   startUpdateChecks();
+  startInstalledUpdateWatch();
   wireSleepWakeGating();
   wireWakeLog();
   // Queued launches (from a previous run, or a launch_task call
@@ -3160,7 +3263,10 @@ app.whenReady().then(async () => {
   void backgroundLauncher.runPass();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (restartIfBundleReplaced()) return;
+      createWindow();
+    }
     startPresencePolling();
     startRefreshLoop();
   });
@@ -3183,7 +3289,12 @@ app.on("window-all-closed", () => {
   // launches are marked interrupted first, exactly like a real quit.
   void interruptMidTurnLaunches()
     .catch(() => {})
-    .finally(() => disposeAllSessions());
+    .finally(() => {
+      disposeAllSessions();
+      // Polling stops with the last window; a dock click's restart question
+      // must not count agents that were just stopped.
+      runningTaskIds = new Set();
+    });
 });
 
 /**

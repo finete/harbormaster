@@ -630,4 +630,28 @@ describe("LocalOnboardingProbeAccess", () => {
       timedOut: true,
     });
   });
+
+  it("never lets an inherited IDE terminal route a --version probe to the Cursor IDE", async () => {
+    const agent = await script(
+      'if [ -n "$CURSOR_CLI$CURSOR_CLI_MODE" ]; then echo "opened the IDE"; exit 1; fi\necho 2026.11.13-eacade1',
+    );
+    const saved = {
+      CURSOR_CLI: process.env.CURSOR_CLI,
+      CURSOR_CLI_MODE: process.env.CURSOR_CLI_MODE,
+    };
+    process.env.CURSOR_CLI = "/Applications/Cursor.app/Contents/MacOS/Cursor";
+    process.env.CURSOR_CLI_MODE = "local";
+    try {
+      expect(
+        await new LocalOnboardingProbeAccess({}).runVersion(agent, [
+          "--version",
+        ]),
+      ).toMatchObject({ ok: true, output: "2026.11.13-eacade1" });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });
