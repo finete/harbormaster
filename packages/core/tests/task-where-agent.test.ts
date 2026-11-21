@@ -76,8 +76,14 @@ const noGithub = new Proxy({} as PullRequestAccess & VersionAccess, {
   },
 });
 
+/** What the fixture's Pi `/` menu access was asked for (`cwd` per call); `slashFailure` makes it throw. */
+const slashCalls: (string | undefined)[] = [];
+let slashFailure: Error | undefined;
+
 const roots: string[] = [];
 afterEach(async () => {
+  slashCalls.length = 0;
+  slashFailure = undefined;
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
@@ -131,6 +137,13 @@ async function fixture(config: Record<string, unknown> = {}): Promise<{
     versions: noGithub,
     harness: new PiHarnessAdapter({
       stateDir,
+      slashCommands: {
+        listSlashCommands: async (cwd) => {
+          slashCalls.push(cwd);
+          if (slashFailure) throw slashFailure;
+          return [{ command: "/review", kind: "command", source: "user" }];
+        },
+      },
       models: {
         defaults: async () => ({
           defaultModel: "anthropic/opus",
@@ -245,6 +258,36 @@ describe.skipIf(!gitAvailable)("agent fields", () => {
     expect(catalog?.models.map((model) => model.id)).toEqual([
       "anthropic/opus",
     ]);
+  });
+});
+
+describe.skipIf(!gitAvailable)("listSlashCommands", () => {
+  it("asks the agent in the workspace a task would run in, and reports a failure as the catalog's error", async () => {
+    const f = await fixture();
+    const folder = join(f.root, "notes");
+    await mkdir(folder);
+    const commands = f.core.commands;
+
+    expect(
+      await commands.listSlashCommands({ repositoryId: f.repositoryId }),
+    ).toEqual({
+      harness: "pi",
+      label: "Pi",
+      commands: [{ command: "/review", kind: "command", source: "user" }],
+    });
+    await commands.listSlashCommands({ folderPath: folder });
+    await commands.listSlashCommands({ harness: "pi" });
+    // An unknown repository (removed since) falls back to user-level only.
+    await commands.listSlashCommands({ repositoryId: "github.com/acme/gone" });
+    expect(slashCalls).toEqual([f.checkout, folder, undefined, undefined]);
+
+    slashFailure = new Error("unreadable skills dir");
+    expect(await commands.listSlashCommands({})).toEqual({
+      harness: "pi",
+      label: "Pi",
+      commands: [],
+      error: "unreadable skills dir",
+    });
   });
 });
 

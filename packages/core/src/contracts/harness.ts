@@ -57,6 +57,55 @@ export interface HarnessModelCatalogAccess {
 }
 
 /**
+ * One entry of the composer's `/` menu (docs/new-task-composer.md "Slash
+ * commands"): a skill or custom command the harness runs when a prompt
+ * starts with it.
+ */
+export interface SlashCommand {
+  /**
+   * What the prompt starts with to run it, trigger included, exactly as the
+   * harness expects it: `/review`, `/caveman:caveman` (a Claude plugin's),
+   * `/skill:pdf-tools` (Pi), `$plannotator-review` (Codex).
+   */
+  command: string;
+  /** What it does (its `description`, else its first line); absent = none written. */
+  description?: string;
+  /** The arguments it takes, as written (`argument-hint`: `[focus]`). */
+  argumentHint?: string;
+  /** A skill (`SKILL.md`) or a command / prompt template (a `.md` file). */
+  kind: "skill" | "command";
+  /** Where it was found: the user's own config, the workspace, or a plugin. */
+  source: "user" | "project" | "plugin";
+  /** The plugin's name, for `source: "plugin"`. */
+  plugin?: string;
+}
+
+/** The `/` menu for one harness and workspace (`CoreCommands.listSlashCommands`). */
+export interface SlashCommandCatalog {
+  /** The harness the list is for (`Task.harness`). */
+  harness: string;
+  /** Its display label (`"Claude Code"`). */
+  label: string;
+  commands: SlashCommand[];
+  /** Why the list is empty or partial (a plugin listing failed), for the menu to show. */
+  error?: string;
+}
+
+/**
+ * Resource Access behind a harness's `/` menu: reads the harness's own
+ * skill and command files (read-only).
+ */
+export interface HarnessSlashCommandAccess {
+  /**
+   * Every skill and command the harness would offer in `cwd` (the
+   * workspace a task would run in; project ones come from there), the
+   * user's own always. Absent `cwd` = user-level only. Missing directories
+   * and unreadable files are skipped, never thrown.
+   */
+  listSlashCommands(cwd?: string): Promise<SlashCommand[]>;
+}
+
+/**
  * Which conversation a task pane should open, as decided by core's
  * `claimSessionLaunch` from the task's workspace binding. The adapter maps
  * each mode to its harness's own CLI flags.
@@ -354,6 +403,14 @@ export interface HarnessAdapter {
   defaults(): Promise<
     Pick<HarnessModelCatalog, "defaultModel" | "defaultThinking">
   >;
+
+  /**
+   * The skills and commands a prompt can start with (the composer's `/`
+   * menu; see `HarnessSlashCommandAccess.listSlashCommands`). May reject on
+   * an unexpected failure; core reports it as the catalog's `error`.
+   * Absent = this harness has no discoverable commands (the menu says so).
+   */
+  listSlashCommands?(cwd?: string): Promise<SlashCommand[]>;
 
   /** What this harness can deliver to a task's session (see `docs/task-messaging.md`): core resolves the actual message mode from this. */
   readonly messaging: HarnessMessagingCapabilities;

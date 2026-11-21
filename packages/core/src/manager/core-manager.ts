@@ -13,6 +13,7 @@ import type {
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
+  ListSlashCommandsInput,
   MoveTaskOptions,
   OrphanWorktreeReport,
   PresenceReport,
@@ -48,6 +49,7 @@ import type {
   ProgramStatusReading,
   ReviewTarget,
   SessionLaunch,
+  SlashCommandCatalog,
 } from "../contracts/harness.js";
 import type {
   InboxAccess,
@@ -586,6 +588,39 @@ export class CoreManager implements CoreCommands {
           : undefined) ?? catalog.defaultModel;
       return { ...catalog, ...(defaultModel ? { defaultModel } : {}) };
     });
+  }
+
+  async listSlashCommands(
+    input: ListSlashCommandsInput,
+  ): Promise<SlashCommandCatalog> {
+    const config = await this.deps.config.load();
+    const harness = input.harness || config.launch?.defaultHarness;
+    const adapter = await this.harnessFor(
+      harness ? { harness } : undefined,
+      config,
+    );
+    const empty = { harness: adapter.id, label: adapter.label, commands: [] };
+    if (!adapter.listSlashCommands) return empty;
+    // The workspace a task there would run in: a repository's primary
+    // checkout (its worktree is cut from it), or the folder itself.
+    let cwd: string | undefined;
+    if (input.repositoryId) {
+      cwd = (
+        await this.findRepository(input.repositoryId, config).catch(
+          () => undefined,
+        )
+      )?.root;
+    } else if (input.folderPath) {
+      cwd = input.folderPath;
+    }
+    try {
+      return { ...empty, commands: await adapter.listSlashCommands(cwd) };
+    } catch (error) {
+      return {
+        ...empty,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /** Every registered agent (built-ins, then the config's custom agents). */

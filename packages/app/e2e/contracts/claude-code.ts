@@ -32,11 +32,11 @@ export const CLAUDE_CODE_CONTRACT = defineContract(
       kind: "command",
       needsModel: false,
       detail:
-        "Review support reads Plannotator's plugin version from it: `[]` when none; an installed plugin is `{ id: '<plugin>@<marketplace>', version, enabled, ... }`.",
+        "Review support reads Plannotator's plugin version from it, and the composer's `/` menu the enabled plugins' `installPath` (their skills and commands live there): `[]` when none; an installed plugin is `{ id: '<plugin>@<marketplace>', version, enabled, installPath, ... }`.",
       facts: {
         args: ["plugin", "list", "--json"],
         none: "[]",
-        entryKeys: ["id", "version", "enabled"],
+        entryKeys: ["id", "version", "enabled", "installPath"],
         plannotatorId: "plannotator@plannotator",
         plannotatorVersion: "0.28.66",
       },

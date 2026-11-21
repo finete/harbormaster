@@ -218,11 +218,11 @@ export interface RunOutcome {
 export async function runOutcome(
   command: string,
   args: string[],
-  options?: RunOptions,
+  options?: RunOptions & { cwd?: string },
 ): Promise<RunOutcome> {
   try {
     const result = await activeRunner(
-      request(command, args, undefined, options),
+      request(command, args, options?.cwd, options),
     );
     return {
       ok: true,
