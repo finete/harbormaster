@@ -2317,6 +2317,10 @@ function createWindow(): void {
   const webContentsId = win.webContents.id;
 
   if (offscreen) {
+    // The constructor's size is still clamped to a small display (a CI
+    // runner's): set it again now that enableLargerThanScreen applies, so
+    // every spec starts at 1280x800 like on a developer's machine.
+    win.setBounds({ x: -4200, y: -4200, width: 1280, height: 800 });
     // Test mode is fully invisible, not just off to the side: macOS may
     // clamp an offscreen window back onto the screen. Opacity 0 keeps it
     // composited (frames, rAF, screenshots all work) but unseen, and
