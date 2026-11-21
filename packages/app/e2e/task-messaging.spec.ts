@@ -275,6 +275,9 @@ test("Approve and allow both ways delivers the message and makes the pair direct
   }
 
   // "Stop direct messages with <title>" in the task's sidebar menu removes the grant.
+  // Opening the task from its board card puts its row on the rail.
+  await window.getByTestId("board-button").click();
+  await window.getByTestId(`card-${senderId}`).click();
   const row = window.getByTestId(`sidebar-task-row-${senderId}`);
   await expect(row).toBeVisible();
   await row.click({ button: "right" });
