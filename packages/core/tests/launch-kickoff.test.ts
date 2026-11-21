@@ -58,7 +58,7 @@ describe("buildLaunchKickoffPrompt", () => {
     });
     expect(text).toMatch(/5\. If you are genuinely blocked/);
     expect(text).toContain(
-      "ask your parent task (parent-1) with the Harbormaster `send_to_task` tool and then end your turn",
+      "ask your parent task (parent-1) with the Harbormaster `send_to_task` tool (set expectsReply: true) and then end your turn",
     );
     expect(text).toMatch(
       /Product or scope decisions, or a parent that is unavailable/,

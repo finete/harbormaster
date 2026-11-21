@@ -54,6 +54,7 @@ import {
   HarbormasterNotRunningError,
   type InboxClaimDetails,
   NOT_RUNNING_MESSAGE,
+  REPORT_STATUS_REMINDER,
   socketPathFromEnv,
   type TaskUsage,
   type TaskUsageRow,
@@ -374,16 +375,18 @@ export function codexHookOutput(event: CodexHookEvent, text: string): unknown {
  * submitted prompt already is: the app's `codex queue` delivery (X5) makes
  * a message the prompt itself, and this claim is what settles it as
  * delivered; repeating it as context would hand it to the model twice. A
- * Review command travels without its inbox header (route `user`).
+ * Review command travels without its inbox header (route `user`), and
+ * without the report_status reminder every delivered text may end with.
  */
 export function codexContextText(
   messages: readonly { text: string; details?: { route?: string } }[],
   prompt: string,
 ): string {
   const body = (message: { text: string; details?: { route?: string } }) =>
-    message.details?.route === "user"
+    (message.details?.route === "user"
       ? message.text.replace(/^\[Message from the user\]\n\n/, "")
-      : message.text;
+      : message.text
+    ).replace(`\n\n${REPORT_STATUS_REMINDER}`, "");
   return messages
     .filter(
       (message) => !prompt.trim() || !prompt.includes(body(message).trim()),

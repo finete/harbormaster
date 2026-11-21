@@ -12,7 +12,11 @@
 // stays pending, the existing "not delivered yet" state. Pure logic with
 // injected effects (tests/harness-delivery.test.ts).
 
-import type { HarnessDeliverCommand, TaskMessage } from "@harbormaster/core";
+import type {
+  HarnessDeliverCommand,
+  InboxFormatOptions,
+  TaskMessage,
+} from "@harbormaster/core";
 import { buildInboxMessageText } from "@harbormaster/core";
 
 /** How long a queued message may go unconfirmed before main types it instead. */
@@ -53,9 +57,12 @@ export interface HarnessDeliveryDeps {
  * `inbox_claim` does, so the agent reads exactly what the hooks would
  * have handed it.
  */
-export function queueTextFor(messages: readonly TaskMessage[]): string {
+export function queueTextFor(
+  messages: readonly TaskMessage[],
+  options: InboxFormatOptions = {},
+): string {
   return messages
-    .map((message) => buildInboxMessageText(message))
+    .map((message) => buildInboxMessageText(message, options))
     .join("\n\n---\n\n");
 }
 

@@ -5,6 +5,7 @@ import {
   buildInboxMessageContent,
   buildInboxMessageText,
   formatInboxMessage,
+  REPORT_STATUS_REMINDER,
   TRUST_LINE,
 } from "../src/tools/inbox-format.js";
 
@@ -31,16 +32,18 @@ describe("buildInboxHeader", () => {
     );
   });
 
-  it("calls a child's message a question", () => {
+  it("calls a child's message a question only when it expects a reply", () => {
+    const fromChild = {
+      route: "child-to-parent",
+      sender: { kind: "task", taskId: "c-9" },
+      senderLabel: "Child work",
+    } as const;
     expect(
-      buildInboxHeader(
-        message({
-          route: "child-to-parent",
-          sender: { kind: "task", taskId: "c-9" },
-          senderLabel: "Child work",
-        }),
-      ),
+      buildInboxHeader(message({ ...fromChild, expectsReply: true })),
     ).toBe('[Question from your child task "Child work" (c-9)]');
+    expect(buildInboxHeader(message(fromChild))).toBe(
+      '[Message from your child task "Child work" (c-9)]',
+    );
   });
 
   it("marks approved task and session messages", () => {
@@ -100,6 +103,7 @@ describe("buildInboxMessageText", () => {
         sender: { kind: "task", taskId: "c-9" },
         senderLabel: "Child work",
         text: "Which DB?",
+        expectsReply: true,
       }),
     );
     expect(text).toContain(TRUST_LINE);
@@ -107,6 +111,50 @@ describe("buildInboxMessageText", () => {
       "Reply with the send_to_task tool to c-9 only if your brief or context settles it; product or scope decisions go to the user (ask them, then relay the answer).",
     );
     expect(buildInboxMessageText(message())).not.toContain("Reply with");
+    // A child's report needs no answer.
+    expect(
+      buildInboxMessageText(
+        message({
+          route: "child-to-parent",
+          sender: { kind: "task", taskId: "c-9" },
+          senderLabel: "Child work",
+          text: "Posted the review: <url>",
+        }),
+      ),
+    ).not.toContain("Reply with");
+  });
+
+  it("reminds a receiver with a parent to report again, whoever sent it", () => {
+    const withParent = { receiverHasParent: true };
+    const text = buildInboxMessageText(message(), withParent);
+    expect(text).toBe(
+      `${buildInboxMessageText(message())}\n\n${REPORT_STATUS_REMINDER}`,
+    );
+    expect(text).toContain("report_status");
+    // After the trust line, which stays as it was.
+    expect(text.indexOf(TRUST_LINE)).toBeLessThan(
+      text.indexOf(REPORT_STATUS_REMINDER),
+    );
+    // Sender-independent: a user message and a receipt get it too.
+    expect(
+      buildInboxMessageText(
+        message({ route: "user", sender: { kind: "user" } }),
+        withParent,
+      ),
+    ).toContain(REPORT_STATUS_REMINDER);
+    expect(
+      buildInboxMessageText(
+        message({ route: "receipt", sender: { kind: "harbormaster" } }),
+        withParent,
+      ),
+    ).toContain(REPORT_STATUS_REMINDER);
+    // No parent (or no option): nothing is added.
+    expect(buildInboxMessageText(message())).not.toContain(
+      REPORT_STATUS_REMINDER,
+    );
+    expect(
+      buildInboxMessageText(message(), { receiverHasParent: false }),
+    ).not.toContain(REPORT_STATUS_REMINDER);
   });
 
   it("omits the trust line for receipts", () => {
@@ -192,6 +240,16 @@ describe("formatInboxMessage", () => {
       sender: { kind: "task", taskId: "p-1" },
       senderLabel: "Parent work",
     });
+  });
+
+  it("adds the report_status reminder to the text and content when the receiver has a parent", async () => {
+    const formatted = await formatInboxMessage(
+      message(),
+      async () => ({ base64: "" }),
+      { receiverHasParent: true },
+    );
+    expect(formatted.text).toContain(REPORT_STATUS_REMINDER);
+    expect(formatted.content).toEqual([{ type: "text", text: formatted.text }]);
   });
 
   it("defaults an unresolved mode to followUp", async () => {

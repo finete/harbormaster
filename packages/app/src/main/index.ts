@@ -23,6 +23,7 @@ import type {
   BoardColumn,
   CreateTaskActionInput,
   CreateTaskInput,
+  InboxFormatOptions,
   InboxPriorityInput,
   LaunchTaskInput,
   ListEventsFilter,
@@ -702,7 +703,13 @@ async function runHarnessDeliveryPass(
         await core.commands.listMessages({ taskId }),
       );
       if (messages.length === 0) continue;
-      const text = queueTextFor(messages);
+      // Decided by the receiver: a task with a parent is reminded to report.
+      const format = {
+        receiverHasParent: Boolean(
+          (await core.commands.getTask(taskId))?.parentTaskId,
+        ),
+      };
+      const text = queueTextFor(messages, format);
       const deliver = await core.commands.harnessDeliverCommand(
         taskId,
         "wakeIdle",
@@ -712,7 +719,7 @@ async function runHarnessDeliveryPass(
         // No deliver command, but the harness takes a message typed at
         // its prompt (Cursor, docs/harness-additions.md C4; Claude Code):
         // claim, type.
-        await typeIdleMessages(taskId, messages, text);
+        await typeIdleMessages(taskId, messages, text, format);
         continue;
       }
       await harnessDeliveries.send(
@@ -740,6 +747,7 @@ async function typeIdleMessages(
   taskId: string,
   messages: readonly { id: string }[],
   text: string,
+  format: InboxFormatOptions,
 ): Promise<void> {
   const adapter = await harnessForTask(taskId).catch(() => undefined);
   if (adapter?.capabilities.delivery.channels.wakeIdle !== PTY_TYPING_CHANNEL) {
@@ -754,7 +762,7 @@ async function typeIdleMessages(
   if (claimed.length === 0) return;
   const typed = await typeText(
     (data) => writeToPrimarySession(taskId, data),
-    claimed.length === messages.length ? text : queueTextFor(claimed),
+    claimed.length === messages.length ? text : queueTextFor(claimed, format),
   );
   console.log(
     `[delivery] typed ${JSON.stringify({ taskId, messages: claimed.length, typed })}`,

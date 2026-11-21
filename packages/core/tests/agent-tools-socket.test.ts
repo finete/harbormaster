@@ -17,6 +17,7 @@ import {
   NOT_RUNNING_MESSAGE,
   PiHarnessAdapter,
   probeSocketOwner,
+  REPORT_STATUS_REMINDER,
   resolveSocketPath,
   sendSocketRequest,
   startToolSocketServer,
@@ -181,6 +182,36 @@ describe("tool socket", () => {
       '[Message from your parent task "Parent work"',
     );
     expect(claimed.text).toContain("Use the new API");
+    // The child has a parent: the delivered text reminds it to report again...
+    expect(messages[0]?.text).toContain(REPORT_STATUS_REMINDER);
+    // ...but the stored message keeps the original text.
+    const stored = await core.commands.listMessages({ taskId: childId });
+    expect(stored.map((m) => m.text)).toEqual(["Use the new API"]);
+
+    // A task without a parent gets no reminder, and expectsReply is accepted.
+    await expect(
+      callTool(
+        socketPath,
+        "send_to_task",
+        { taskId: parentId, message: "q", expectsReply: "yes" },
+        { taskId: childId },
+      ),
+    ).rejects.toThrow("expectsReply must be a boolean");
+    await core.commands.reportPresence(parentId, { state: "idle", pid: 4243 });
+    await callTool(
+      socketPath,
+      "send_to_task",
+      { taskId: parentId, message: "which db?", expectsReply: true },
+      { taskId: childId },
+    );
+    const parentClaim = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: parentId },
+    );
+    expect(parentClaim.text).toContain("[Question from your child task");
+    expect(parentClaim.text).not.toContain(REPORT_STATUS_REMINDER);
   });
 
   it("validates arguments with agent-readable errors", async () => {
