@@ -168,7 +168,7 @@ describe("Claude Code readSessionUsage", () => {
 
   it("lists the session's subagent transcripts for the change check", async () => {
     await expect(
-      claude.sessionUsageFiles(join(FIXTURES, "claude", `${SID}.jsonl`)),
+      claude.extraUsageFiles(join(FIXTURES, "claude", `${SID}.jsonl`)),
     ).resolves.toEqual([
       join(
         FIXTURES,
@@ -179,7 +179,7 @@ describe("Claude Code readSessionUsage", () => {
       ),
     ]);
     await expect(
-      claude.sessionUsageFiles(join(FIXTURES, "claude", "missing.jsonl")),
+      claude.extraUsageFiles(join(FIXTURES, "claude", "missing.jsonl")),
     ).resolves.toEqual([]);
   });
 

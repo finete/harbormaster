@@ -66,10 +66,10 @@ class UsageHarness implements HarnessAdapter {
     images: false,
   };
   reads: string[] = [];
-  /** What `sessionUsageFiles` lists (stand-ins for subagent transcripts). */
+  /** What `extraUsageFiles` lists (stand-ins for subagent transcripts). */
   extraFiles: string[] = [];
   readSessionUsage?: (path: string) => Promise<SessionUsage | undefined>;
-  async sessionUsageFiles(): Promise<string[]> {
+  async extraUsageFiles(): Promise<string[]> {
     return this.extraFiles;
   }
   constructor(
@@ -366,11 +366,17 @@ describe("usage snapshots", () => {
 });
 
 describe("usage while the agent keeps working", () => {
+  /** Backdate `path` before the test clock: its writer has gone quiet. */
+  const quiet = (path: string) => {
+    const past = new Date("2026-11-15T00:00:00.000Z");
+    return utimes(path, past, past);
+  };
   /** A started task counted once (1 turn), its session file, and an appender. */
   async function countedTask() {
     const { taskId, sessionId } = await startedTask();
     const sessionPath = join(sessionsDir, `2026_${sessionId}.jsonl`);
     await writeFile(sessionPath, piSession([["claude-opus-5-5", 5, 0.5]]));
+    await quiet(sessionPath);
     await manager.endPresence(taskId, { pid: 1 });
     expect((await manager.getTask(taskId))?.usage?.totals.turns).toBe(1);
     let turn = 0;
@@ -395,12 +401,18 @@ describe("usage while the agent keeps working", () => {
     await vi.waitFor(async () => expect(await turns(taskId)).toBe(2));
   });
 
-  it("recounts open tasks on every refresh tick, re-parsing only changed files", async () => {
-    const { taskId, appendTurn } = await countedTask();
+  it("recounts open tasks on the refresh tick once their files go quiet, re-parsing only changed files", async () => {
+    const { taskId, sessionPath, appendTurn } = await countedTask();
     await refreshed();
     expect(harness.reads).toHaveLength(1);
 
+    // Still being written (fresh mtime): the tick leaves the count alone.
     await appendTurn();
+    await refreshed();
+    expect(await turns(taskId)).toBe(1);
+    expect(harness.reads).toHaveLength(1);
+
+    await quiet(sessionPath);
     await refreshed();
     expect(await turns(taskId)).toBe(2);
     expect(harness.reads).toHaveLength(2);
@@ -409,6 +421,7 @@ describe("usage while the agent keeps working", () => {
     await manager.toDone(taskId, { force: { confirmed: true } });
     const reads = harness.reads.length;
     await appendTurn();
+    await quiet(sessionPath);
     await refreshed();
     expect(harness.reads).toHaveLength(reads);
   });
@@ -417,11 +430,13 @@ describe("usage while the agent keeps working", () => {
     const subagent = join(sessionsDir, "agent-1.jsonl");
     await writeFile(subagent, "{}\n");
     harness.extraFiles = [subagent];
+    await quiet(subagent);
     const { taskId } = await countedTask();
     await refreshed();
     expect(harness.reads).toHaveLength(1);
 
     await appendFile(subagent, "{}\n");
+    await quiet(subagent);
     await refreshed();
     expect(harness.reads).toHaveLength(2);
     expect((await manager.getTask(taskId))?.usage?.fingerprint).toContain(

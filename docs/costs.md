@@ -137,12 +137,17 @@ transcripts without a `recordTaskSession` call. Socket ops `usage` and
      the report);
    - on every refresh tick, for every task not Done (`pending`, or
      `ready` and not Done): only a `stat` per file unless one changed.
-     This also covers a transcript flushed after its Stop hook, and
-     harnesses with no Stop hook. Done stays final.
+     A counted task's changed files are re-parsed only once the newest
+     has been quiet for 15 s (`TICK_QUIET_MS`): a working agent's
+     transcript changes on nearly every tick, and the parse is
+     synchronous on the app's main process (measured ~2.5 ms per MB,
+     ~100 ms for 44 MB, against the pty batcher's 16 ms). This also
+     covers a transcript flushed after its Stop hook, and harnesses with
+     no Stop hook. Done stays final.
 
    The change check (`fingerprint`, and `lastActivityAt`) also stats the
    files the reader counts besides the session file
-   (`HarnessAdapter.sessionUsageFiles`: Claude Code's
+   (`HarnessAdapter.extraUsageFiles`: Claude Code's
    `<sessionId>/subagents/**/agent-*.jsonl`), so a subagent running while
    the main transcript is quiet still counts as a change.
 

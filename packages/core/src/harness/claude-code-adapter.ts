@@ -389,7 +389,7 @@ export class ClaudeCodeHarnessAdapter implements HarnessAdapter {
   }
 
   /** The subagent transcripts `readSessionUsage` also counts. */
-  sessionUsageFiles(sessionPath: string): Promise<string[]> {
+  extraUsageFiles(sessionPath: string): Promise<string[]> {
     return claudeSubagentFiles(sessionPath);
   }
 

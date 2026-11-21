@@ -413,7 +413,7 @@ export interface HarnessAdapter {
    * Code's subagent transcripts), so core's change check notices a running
    * subagent while the main file is quiet. Absent = the session file alone.
    */
-  sessionUsageFiles?(sessionPath: string): Promise<string[]>;
+  extraUsageFiles?(sessionPath: string): Promise<string[]>;
 
   /**
    * Keeps one turn's tokens a hook reported (`CoreCommands.recordTurnUsage`)
