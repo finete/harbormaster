@@ -57,7 +57,6 @@ import {
   type EvaluationContext,
   matchRules,
   moveRefusal,
-  moveRefusalReason,
   type PlannedRuleAction,
   planActions,
   type ResolvedMove,
@@ -849,8 +848,8 @@ export class RulesRuntime {
           if (refusal) {
             return {
               outcome: "skipped",
-              detail: refusal,
-              reason: moveRefusalReason(refusal),
+              detail: refusal.detail,
+              reason: refusal.reason,
             };
           }
           return await input.executor.move(

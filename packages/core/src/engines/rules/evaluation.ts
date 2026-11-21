@@ -276,8 +276,8 @@ export async function planActions(
           with: rendered,
           move,
           status: "skipped",
-          detail: refusal,
-          reason: moveRefusalReason(refusal),
+          detail: refusal.detail,
+          reason: refusal.reason,
         });
         continue;
       }
@@ -399,30 +399,37 @@ export function resolveMove(
   }
 }
 
-/** The short reason label for a {@link moveRefusal} message. */
-export function moveRefusalReason(refusal: string): string {
-  return refusal.startsWith("already ") ? "already there" : "move not allowed";
+/** Why a move was refused: the long sentence and the short label, set where the cause is known. */
+export interface MoveRefusal {
+  detail: string;
+  reason: string;
 }
 
 /** Why a resolved move cannot (or need not) apply to the task as it is now. */
 export function moveRefusal(
   task: Task,
   move: ResolvedMove,
-): string | undefined {
+): MoveRefusal | undefined {
   if (!isAllowedTransition(task.state, move.state)) {
-    return `illegal move from ${task.state} to ${move.state}`;
+    return {
+      detail: `illegal move from ${task.state} to ${move.state}`,
+      reason: "move not allowed",
+    };
   }
   try {
     assertMayReturnToWorking(task.state, task.awaiting, move.state);
   } catch (error) {
-    return describe(error);
+    return { detail: describe(error), reason: "move not allowed" };
   }
   if (
     task.state === move.state &&
     (move.state !== "awaiting" ||
       JSON.stringify(task.awaiting) === JSON.stringify(move.awaiting))
   ) {
-    return `already ${describeState(move)}`;
+    return {
+      detail: `already ${describeState(move)}`,
+      reason: "already there",
+    };
   }
   return undefined;
 }
