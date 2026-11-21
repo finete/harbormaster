@@ -156,7 +156,7 @@ const reportStatus: ToolDefinition = {
   name: "report_status",
   title: "Harbormaster report status",
   description:
-    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary: do not report done while a child is unfinished. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
+    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
   inputSchema: {
     type: "object",
     properties: {
