@@ -1,3 +1,7 @@
+import {
+  descendantsOf,
+  subtreeHeight,
+} from "@harbormaster/core/dist/engines/task-tree.js";
 import { describe, expect, it } from "vitest";
 import type { BoardColumn, Task } from "../src/preload/api";
 import {
@@ -6,10 +10,12 @@ import {
 } from "../src/renderer/src/lib/board-selection";
 import {
   buildLineageIndex,
+  deeperTreesNote,
   hiddenNestedChildIds,
   hoistChildrenIntoParentGroups,
   layoutLineageRows,
   parentCandidates,
+  taskDepth,
 } from "../src/renderer/src/lib/task-lineage";
 
 const T0 = "2025-01-01T00:00:00.000Z";
@@ -415,15 +421,189 @@ describe("parentCandidates", () => {
   const index = buildLineageIndex(pool);
   const ids = (tasks: Task[]) => tasks.map((t) => t.id);
 
-  it("offers every standalone, non-archived task but itself", () => {
-    expect(ids(parentCandidates(loose, pool, index))).toEqual(["p", "o"]);
+  it("offers every non-archived task that is not itself, in depth range", () => {
+    // Default max 3: a child (depth 2) is a fine parent for a leaf.
+    expect(ids(parentCandidates(loose, pool, index))).toEqual(["p", "c", "o"]);
   });
 
   it("skips a child's current parent", () => {
     expect(ids(parentCandidates(child, pool, index))).toEqual(["l", "o"]);
   });
 
-  it("offers nothing to a task that has children (one level only)", () => {
-    expect(parentCandidates(parent, pool, index)).toEqual([]);
+  it("moves a task with its subtree: its own descendants are never offered and the subtree must fit", () => {
+    // p (height 2): not under c (its own child); under l/o: 1 + 2 = 3 fits.
+    expect(ids(parentCandidates(parent, pool, index))).toEqual(["l", "o"]);
+    // With max depth 2, a height-2 subtree only fits under nothing deeper than depth 0.
+    expect(ids(parentCandidates(parent, pool, index, 2))).toEqual([]);
+    // A leaf under a depth-2 task needs max 3; max 2 offers only top-level tasks.
+    expect(ids(parentCandidates(loose, pool, index, 2))).toEqual(["p", "o"]);
+    // Max 1 means no nesting at all.
+    expect(ids(parentCandidates(loose, pool, index, 1))).toEqual([]);
+  });
+});
+
+describe("task trees (several levels)", () => {
+  // root ─ kid ─ grand ─ great
+  const root = task({ id: "root", createdAt: "2025-01-01T00:00:00.000Z" });
+  const kid = task({ id: "kid", parentTaskId: "root" });
+  const grand = task({ id: "grand", parentTaskId: "kid" });
+  const great = task({ id: "great", parentTaskId: "grand" });
+  const all = [root, kid, grand, great];
+  const index = buildLineageIndex(all);
+  const rowsOf = (items: Task[], collapsed: string[] = [], opts = {}) =>
+    layoutLineageRows(
+      items.map((t) => ({ task: t })),
+      index,
+      new Set(collapsed),
+      opts,
+    );
+
+  it("measures depth and subtree height through core's tree engine", () => {
+    expect(taskDepth(root, index)).toBe(1);
+    expect(taskDepth(great, index)).toBe(4);
+    expect(subtreeHeight("root", index.childrenByParent)).toBe(4);
+    expect(subtreeHeight("great", index.childrenByParent)).toBe(1);
+    expect(
+      descendantsOf("root", index.childrenByParent).map((t) => t.id),
+    ).toEqual(["kid", "grand", "great"]);
+  });
+
+  it("words the Settings note for deeper trees", () => {
+    expect(deeperTreesNote(0)).toBeUndefined();
+    expect(deeperTreesNote(1)).toBe(
+      "1 task tree is deeper than this; it's left as it is",
+    );
+    expect(deeperTreesNote(3)).toBe(
+      "3 task trees are deeper than this; they're left as they are",
+    );
+  });
+
+  it("draws one indent per level, depth first", () => {
+    const rows = rowsOf(all);
+    expect(rows.map((r) => [r.item.task.id, r.indent])).toEqual([
+      ["root", 0],
+      ["kid", 1],
+      ["grand", 2],
+      ["great", 3],
+    ]);
+    expect(rows.map((r) => r.nested)).toEqual([false, true, true, true]);
+    expect(rows[1]?.children).toEqual({
+      count: 1,
+      collapsed: false,
+      nestedHere: true,
+    });
+    expect(rows[3]?.children).toBeUndefined();
+  });
+
+  it("keeps siblings under their own parent and the parent's subtree together", () => {
+    const sib = task({ id: "sib", parentTaskId: "root" });
+    const idx = buildLineageIndex([...all, sib]);
+    const rows = layoutLineageRows(
+      [root, sib, kid, grand, great].map((t) => ({ task: t })),
+      idx,
+      new Set(),
+    );
+    // Siblings oldest first; kid's whole subtree stays before the next sibling.
+    expect(rows.map((r) => r.item.task.id)).toEqual([
+      "root",
+      "kid",
+      "grand",
+      "great",
+      "sib",
+    ]);
+  });
+
+  it("each parent collapses on its own: a collapsed parent hides everything below it only", () => {
+    expect(rowsOf(all, ["kid"]).map((r) => r.item.task.id)).toEqual([
+      "root",
+      "kid",
+    ]);
+    const mid = rowsOf(all, ["grand"]);
+    expect(mid.map((r) => r.item.task.id)).toEqual(["root", "kid", "grand"]);
+    expect(mid[2]?.children?.collapsed).toBe(true);
+    expect(
+      hiddenNestedChildIds(
+        all.map((t) => ({ task: t })),
+        new Set(["kid"]),
+      ),
+    ).toEqual(new Set(["grand", "great"]));
+  });
+
+  it("applies the parent-elsewhere rule per link: a grandchild whose parent is in another column keeps its place with a parent line", () => {
+    const rows = rowsOf([root, grand, great]);
+    // `kid` is elsewhere: grand is a top-level row with "↳ kid", great nests under it.
+    expect(rows.map((r) => [r.item.task.id, r.indent, r.parentTitle])).toEqual([
+      ["root", 0, undefined],
+      ["grand", 0, "kid"],
+      ["great", 1, undefined],
+    ]);
+  });
+
+  it("a detached middle task stays top-level with its parent line and still hosts its own children", () => {
+    const rows = rowsOf(all, [], { detachedIds: new Set(["kid"]) });
+    expect(rows.map((r) => [r.item.task.id, r.indent, r.parentTitle])).toEqual([
+      ["root", 0, undefined],
+      ["kid", 0, "root"],
+      ["grand", 1, undefined],
+      ["great", 2, undefined],
+    ]);
+  });
+
+  it("caps the indent at three levels even for a deeper (corrupt) chain", () => {
+    const deep = task({ id: "deep", parentTaskId: "great" });
+    const idx = buildLineageIndex([...all, deep]);
+    const rows = layoutLineageRows(
+      [...all, deep].map((t) => ({ task: t })),
+      idx,
+      new Set(),
+    );
+    expect(rows.map((r) => r.indent)).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it("never loses rows to a parent loop", () => {
+    const a = task({ id: "a", parentTaskId: "b" });
+    const b = task({ id: "b", parentTaskId: "a" });
+    const idx = buildLineageIndex([a, b]);
+    const rows = layoutLineageRows(
+      [a, b].map((t) => ({ task: t })),
+      idx,
+      new Set(),
+    );
+    expect(rows.map((r) => r.item.task.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("hoists a whole chain into the root's group, each task following its parent", () => {
+    const groups = [
+      { name: "alpha", tasks: [root] },
+      { name: "beta", tasks: [kid] },
+      { name: "gamma", tasks: [grand, great] },
+    ];
+    const result = hoistChildrenIntoParentGroups(groups, {
+      items: (g) => g.tasks,
+      task: (t) => t,
+      withItems: (g, tasks) => ({ ...g, tasks }),
+    });
+    expect(result.map((g) => [g.name, g.tasks.map((t) => t.id)])).toEqual([
+      ["alpha", ["root", "kid", "grand", "great"]],
+    ]);
+  });
+
+  it("a chain broken by another scope stays apart: only same-scope links hoist", () => {
+    // kid is in another scope (e.g. another Awaiting kind): grand/great follow kid, not root.
+    const groups = [
+      { name: "alpha", scope: "working", tasks: [root] },
+      { name: "beta", scope: "review", tasks: [kid] },
+      { name: "gamma", scope: "review", tasks: [grand, great] },
+    ];
+    const result = hoistChildrenIntoParentGroups(groups, {
+      items: (g) => g.tasks,
+      task: (t) => t,
+      withItems: (g, tasks) => ({ ...g, tasks }),
+      scope: (g) => g.scope,
+    });
+    expect(result.map((g) => [g.name, g.tasks.map((t) => t.id)])).toEqual([
+      ["alpha", ["root"]],
+      ["beta", ["kid", "grand", "great"]],
+    ]);
   });
 });

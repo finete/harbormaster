@@ -14,6 +14,8 @@ export interface LaunchKickoffInput {
   pullRequest?: { number: number; role: "author" | "reviewer" };
   /** A chat: runs directly in the user's folder/checkout, no worktree. */
   inPlace?: boolean;
+  /** Set (to `launch.maxNestingDepth`) when the task sits AT the max nesting depth: it cannot launch subtasks (docs/task-trees.md decision 8). */
+  atMaxNestingDepth?: number;
 }
 
 /**
@@ -23,7 +25,9 @@ export interface LaunchKickoffInput {
  * decide, final report) always present; the middle two (commit/push, open a
  * draft PR) only for a repository-backed task. A PR-bound launch swaps
  * them for "push to the existing PR" (author) or "never push" (reviewer);
- * a chat (in place) states that edits land in the user's folder. The tool name in point 6 is
+ * a chat (in place) states that edits land in the user's folder. A task AT
+ * the max nesting depth gets one more point saying it cannot launch
+ * subtasks. The tool name in point 6 is
  * the catalog's `report_status` (see `tools/catalog.ts`).
  */
 export function buildLaunchKickoffPrompt(input: LaunchKickoffInput): string {
@@ -62,6 +66,11 @@ export function buildLaunchKickoffPrompt(input: LaunchKickoffInput): string {
       input.dependencyBranch
         ? `Open a DRAFT pull request (\`gh pr create --draft\`) targeting the default branch. Your worktree is based on "${input.dependencyBranch}" (another task's branch, not yet merged) -- state that dependency at the top of the PR description.`
         : "Open a DRAFT pull request (`gh pr create --draft`) targeting the default branch. If you based on / merged another task's branch, state the dependency at the top of the PR description.",
+    );
+  }
+  if (input.atMaxNestingDepth !== undefined) {
+    points.push(
+      `You are at the max nesting depth (${input.atMaxNestingDepth}), so you cannot launch subtasks: do the work yourself, or launch standalone tasks.`,
     );
   }
   points.push(

@@ -114,6 +114,8 @@ export interface ChildStatusEntry {
   pr?: { number: number; state: TaskPullRequest["state"]; url?: string };
   runState: ChildRunState;
   outcome?: ChildOutcome;
+  /** Tasks below this child (any depth) that are not Done yet; absent when none. */
+  activeBelow?: number;
   waitingOnUser?: ChildOpenQuestion;
 }
 
@@ -121,6 +123,7 @@ export interface ChildStatusEntry {
 export function buildChildStatusEntry(
   task: Task,
   presence: PresenceStatus,
+  activeBelow = 0,
 ): ChildStatusEntry {
   const outcome = deriveChildOutcome(presence);
   const waitingOnUser = deriveWaitingOnUser(presence);
@@ -147,11 +150,19 @@ export function buildChildStatusEntry(
       : {}),
     runState: deriveChildRunState(task, presence),
     ...(outcome ? { outcome } : {}),
+    ...(activeBelow > 0 ? { activeBelow } : {}),
     ...(waitingOnUser ? { waitingOnUser } : {}),
   };
 }
 
-/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · waiting on the user: <question>]`. */
+/** How many of `descendants` (every task below a child, any depth) are not Done. */
+export function countActiveTasks(
+  descendants: readonly Pick<Task, "state">[],
+): number {
+  return descendants.filter((task) => task.state !== "done").length;
+}
+
+/** One child line: `"<title>" (<id>) · <column[ (awaiting <label>)]> · <run state>[ · PR #n <state> <url>][ · outcome: <status>[ — <note>]][ · N tasks below not done yet][ · waiting on the user: <question>]`. */
 export function formatChildStatusLine(entry: ChildStatusEntry): string {
   const parts: string[] = [`"${entry.title}" (${entry.id})`];
   const column = entry.awaiting
@@ -167,6 +178,11 @@ export function formatChildStatusLine(entry: ChildStatusEntry): string {
   if (entry.outcome) {
     parts.push(
       `outcome: ${entry.outcome.status}${entry.outcome.note ? ` — ${entry.outcome.note}` : ""}`,
+    );
+  }
+  if (entry.activeBelow) {
+    parts.push(
+      `${entry.activeBelow} task${entry.activeBelow === 1 ? "" : "s"} below not done yet`,
     );
   }
   if (entry.waitingOnUser) {

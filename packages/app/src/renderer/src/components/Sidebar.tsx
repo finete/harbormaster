@@ -52,6 +52,7 @@ import {
   usePresenceMap,
   useUnreadTaskIds,
 } from "../core-client";
+import { useMaxNestingDepth } from "../lib/config-values";
 import { defaultOpenInApp } from "../lib/open-in";
 import {
   boardShortcutLabel,
@@ -432,6 +433,7 @@ export function Sidebar({
   onHide: () => void;
 }): JSX.Element {
   const columns = useBoard();
+  const maxNestingDepth = useMaxNestingDepth();
   const inboxTitle =
     inboxCount > 0
       ? `Inbox: ${inboxCount} need${inboxCount === 1 ? "s" : ""} you (${modKeyLabel()}I)`
@@ -443,6 +445,13 @@ export function Sidebar({
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const messagingStates = useMessagingStates();
+  const taskTitles = useMemo(
+    () =>
+      new Map(
+        flattenBoard(columns).map((row) => [row.task.id, row.task.title]),
+      ),
+    [columns],
+  );
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   const [query, setQuery] = useState("");
   // Saved group-collapse state (Orca polish item 2): same localStorage
@@ -764,11 +773,13 @@ export function Sidebar({
         },
       },
     ];
-    // Re-parent among the tasks open on the rail (one level only).
+    // Re-parent among the tasks open on the rail: the task moves with its
+    // whole subtree, and only where that still fits under the max depth.
     const candidates = parentCandidates(
       task,
       rows.map((row) => row.task),
       lineageIndex,
+      maxNestingDepth,
     );
     items.push({
       key: "move-under",
@@ -787,6 +798,17 @@ export function Sidebar({
         key: "remove-parent",
         label: "Remove from parent",
         onSelect: () => setParent(task.id, null),
+      });
+    }
+    // Pair grants ("Approve and allow both ways"): removable from either task.
+    for (const otherId of messagingStates.get(task.id)?.grantedWith ?? []) {
+      items.push({
+        key: `stop-direct-${otherId}`,
+        label: `Stop direct messages with ${taskTitles.get(otherId) ?? "that task"}`,
+        onSelect: () =>
+          void window.harbormaster.core
+            .revokePairGrant(task.id, otherId)
+            .catch((error: unknown) => pushToast(describeThrown(error))),
       });
     }
     if (contextMenu?.worktreePath) {
@@ -1079,6 +1101,7 @@ export function Sidebar({
     section: string,
     lineage: {
       nested: boolean;
+      indent: number;
       parentTitle?: string | undefined;
       children?:
         | { count: number; collapsed: boolean; nestedHere: boolean }
@@ -1115,6 +1138,9 @@ export function Sidebar({
           onContextMenu: openContextMenu,
           rowRef: setRowRef,
           nested,
+          // While dragging, the placeholder shows the projected attachment
+          // (one level in when attached; a flat row when detached).
+          indent: nested ? Math.max(lineage.indent, 1) : 0,
           ...(lineage.parentTitle ? { parentTitle: lineage.parentTitle } : {}),
           ...(provenanceTitle ? { provenanceTitle } : {}),
           ...(lineage.children
@@ -1157,8 +1183,13 @@ export function Sidebar({
         items={shown.map((entry) => taskSortableId(entry.item.task.id))}
         strategy={verticalListSortingStrategy}
       >
-        {shown.map(({ item, nested, children, parentTitle }) =>
-          renderRow(item, isPinned, section, { nested, parentTitle, children }),
+        {shown.map(({ item, nested, indent, children, parentTitle }) =>
+          renderRow(item, isPinned, section, {
+            nested,
+            indent,
+            parentTitle,
+            children,
+          }),
         )}
       </SortableContext>
     );

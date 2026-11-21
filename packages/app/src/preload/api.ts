@@ -180,8 +180,10 @@ export interface MessagingChangedPayload {
 export interface ToDoneForce {
   /** Answers the single "Mark done?" question: Done is final, the app owns the cleanup. */
   confirmed?: boolean;
-  /** Answers the `activeChildren` confirmation: complete the parent anyway, leaving its children running and nested under it. */
+  /** Answers the `activeChildren` confirmation: complete the task anyway, leaving every task below it running and nested under it. */
   leaveChildren?: boolean;
+  /** Answers it too, and also stops the agents of the active tasks below. App-level only: main stops the agents when the Done is confirmed (core hears `leaveChildren`), names any it could not stop in the result's `warning`; the tasks stay on the board, worktrees untouched. */
+  stopDescendants?: boolean;
 }
 
 /**
@@ -518,7 +520,7 @@ export interface HarbormasterApi {
     launchTask(input: LaunchTaskInput): Promise<Task>;
     /** Every task launched as a child of `parentTaskId`, any state, oldest first. See `CoreCommands.listChildren`. */
     listChildren(parentTaskId: string): Promise<Task[]>;
-    /** Nest an existing task under `parentTaskId`, or make it standalone with `null` (one level only). See `CoreCommands.setTaskParent`. */
+    /** Nest an existing task under `parentTaskId`, or make it standalone with `null`, with its whole subtree. See `CoreCommands.setTaskParent`. */
     setTaskParent(taskId: string, parentTaskId: string | null): Promise<Task>;
     /** Every task with computed usage, filtered by `query`, most tokens first; parents carry their children's roll-up (docs/costs.md). See `CoreCommands.listTaskUsage`. */
     listTaskUsage(query?: TaskUsageQuery): Promise<TaskUsageRow[]>;
@@ -578,12 +580,15 @@ export interface HarbormasterApi {
      * Approve a message awaiting approval, optionally with the user's edited
      * text and/or switched delivery mode (sent only when changed). Rejects
      * when the message is no longer awaiting approval. See
-     * `CoreCommands.approveMessage`.
+     * `CoreCommands.approveMessage`. `allowBothWays` ("Approve and allow both
+     * ways", task senders only) also lets the pair message each other directly and releases their other waiting messages (`releasedCount`).
      */
     approveMessage(
       messageId: string,
-      edits?: { text?: string; mode?: MessageMode },
-    ): Promise<TaskMessage>;
+      edits?: { text?: string; mode?: MessageMode; allowBothWays?: boolean },
+    ): Promise<TaskMessage & { releasedCount?: number }>;
+    /** Stop direct messages between two tasks (removes their pair grant). See `CoreCommands.revokePairGrant`. */
+    revokePairGrant(taskId: string, otherTaskId: string): Promise<void>;
     /** Reject a message awaiting approval. See `CoreCommands.rejectMessage`. */
     rejectMessage(messageId: string): Promise<TaskMessage>;
     /** Derived per-task chip state (approvals waiting, waiting on parent, ...). See `CoreCommands.getMessagingStates`. */

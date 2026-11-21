@@ -1115,6 +1115,25 @@ function retireSession(id: string): void {
   releasePty(session.process);
 }
 
+/**
+ * Stops a task's agent: signals its primary pty's process and lets the
+ * process's own exit path finish the job (tell an attached pane, report the
+ * agent gone, retire the session). Nothing about the task, its worktree or
+ * its uncommitted changes is touched. `false` when the task has no live
+ * primary pty.
+ */
+export function stopTaskAgent(taskId: string): boolean {
+  const sessionId = primaryTaskSessions.get(taskId);
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session) return false;
+  try {
+    session.process.kill();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function disposeAllSessions(): void {
   for (const id of [...sessions.keys()]) {
     disposeSession(id);

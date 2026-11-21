@@ -14,10 +14,16 @@ import type {
   DeploymentPipeline,
   DeploymentStageConfig,
   GlobalConfig,
+  MessageDirectRoutes,
   RepositoryConfig,
   SourceConfig,
 } from "../contracts/model.js";
-import { defaultGlobalConfig } from "../contracts/model.js";
+import {
+  defaultGlobalConfig,
+  MAX_LAUNCH_MAX_NESTING_DEPTH,
+  MESSAGE_DIRECT_ROUTES,
+  MIN_LAUNCH_MAX_NESTING_DEPTH,
+} from "../contracts/model.js";
 import type {
   ConfigAccess,
   ConfigAccessSnapshot,
@@ -691,6 +697,19 @@ function normalizeLaunch(value: unknown): GlobalConfig["launch"] | undefined {
     }
     launch.maxConcurrent = value.maxConcurrent;
   }
+  if (value.maxNestingDepth !== undefined) {
+    if (
+      typeof value.maxNestingDepth !== "number" ||
+      !Number.isInteger(value.maxNestingDepth) ||
+      value.maxNestingDepth < MIN_LAUNCH_MAX_NESTING_DEPTH ||
+      value.maxNestingDepth > MAX_LAUNCH_MAX_NESTING_DEPTH
+    ) {
+      throw new Error(
+        `launch.maxNestingDepth must be an integer from ${MIN_LAUNCH_MAX_NESTING_DEPTH} to ${MAX_LAUNCH_MAX_NESTING_DEPTH}`,
+      );
+    }
+    launch.maxNestingDepth = value.maxNestingDepth;
+  }
   if (value.defaultModel !== undefined) {
     if (typeof value.defaultModel !== "string" || !value.defaultModel.trim()) {
       throw new Error("launch.defaultModel must be a non-empty string");
@@ -805,6 +824,17 @@ function normalizeMessaging(
       throw new Error("messaging.loopCap must be a positive integer");
     }
     messaging.loopCap = value.loopCap;
+  }
+  if (value.directRoutes !== undefined) {
+    if (
+      typeof value.directRoutes !== "string" ||
+      !MESSAGE_DIRECT_ROUTES.includes(value.directRoutes as MessageDirectRoutes)
+    ) {
+      throw new Error(
+        `messaging.directRoutes must be one of: ${MESSAGE_DIRECT_ROUTES.join(", ")}`,
+      );
+    }
+    messaging.directRoutes = value.directRoutes as MessageDirectRoutes;
   }
   return messaging;
 }

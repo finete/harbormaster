@@ -254,11 +254,12 @@ export interface Task {
    * Set for a `child`-launched task (see `CoreCommands.launchTask`): the
    * launching task's id; `createTask`'s `parentTaskId` and
    * `CoreCommands.setTaskParent` set (or clear) it too. Nested under the parent on the board; the parent
-   * can poll it (`listChildren`) and a Done parent with active children
-   * asks for confirmation (`toDone`'s `activeChildren` case). One level
-   * only — a task with `parentTaskId` set can never itself become a parent
-   * (`launchTask` rejects a `child` relation from it, `setTaskParent` a
-   * parent that is itself a child or a task that has children).
+   * can poll it (`listChildren`) and a Done parent with active tasks below
+   * it asks for confirmation (`toDone`'s `activeChildren` case). Trees nest
+   * up to `GlobalConfig.launch.maxNestingDepth` levels (default 3; see
+   * `/docs/task-trees.md`): `launchTask` refuses a `child` relation from a
+   * task already at the max depth, `setTaskParent` moves a task with its
+   * whole subtree and refuses a result deeper than the max or a cycle.
    */
   parentTaskId?: string;
   /**
@@ -495,6 +496,8 @@ export interface GlobalConfig {
   /** Background-task-launch settings (see `/docs/design-decisions.md "Launching tasks from an agent"`). */
   launch?: {
     maxConcurrent?: number;
+    /** Deepest task tree a launch or re-parent may build, 1 to 4 (a top-level task is depth 1; 1 = no children); absent = `DEFAULT_LAUNCH_MAX_NESTING_DEPTH`. */
+    maxNestingDepth?: number;
     /** Applies only to tasks on the default agent (`defaultHarness`); other agents start on their own default. */
     defaultModel?: string;
     /** Agent (harness id) for new tasks (decision R8); absent = `DEFAULT_HARNESS_ID`. */
@@ -505,7 +508,12 @@ export interface GlobalConfig {
   /** Agents beyond the built-in Pi and Claude Code. */
   agents?: { custom?: CustomAgentConfig[] };
   /** Task-messaging settings (see `/docs/task-messaging.md`); defaults apply at read time. */
-  messaging?: { parentReplyTimeoutMinutes?: number; loopCap?: number };
+  messaging?: {
+    parentReplyTimeoutMinutes?: number;
+    loopCap?: number;
+    /** Which task → task sends skip approval (see `MessageDirectRoutes`); absent = `DEFAULT_MESSAGE_DIRECT_ROUTES`. */
+    directRoutes?: MessageDirectRoutes;
+  };
   /**
    * Inbox settings (docs/release-plan.md "Inbox"). `priorityFilter` is an
    * optional CEL expression over `item` (`kind`, `source`, `taskId`,
@@ -531,14 +539,43 @@ export interface GlobalConfig {
 /** `launch.maxConcurrent` default when unset: launched tasks whose agent is *running* (see `GlobalConfig.launch`). */
 export const DEFAULT_LAUNCH_MAX_CONCURRENT = 6;
 
+/** `launch.maxNestingDepth` default when unset (docs/task-trees.md decision 7): children and grandchildren. */
+export const DEFAULT_LAUNCH_MAX_NESTING_DEPTH = 3;
+
+/** `launch.maxNestingDepth` bounds (inclusive). */
+export const MIN_LAUNCH_MAX_NESTING_DEPTH = 1;
+export const MAX_LAUNCH_MAX_NESTING_DEPTH = 4;
+
 /** `launch.bypassPermissions` default (decision R7): launched tasks skip permission prompts. */
 export const DEFAULT_LAUNCH_BYPASS_PERMISSIONS = true;
 
 /** `messaging.parentReplyTimeoutMinutes` default: how long a child's question may wait on its parent (counted from delivery) before the child shows amber. */
 export const DEFAULT_PARENT_REPLY_TIMEOUT_MINUTES = 30;
 
-/** `messaging.loopCap` default: autonomous parent↔child messages per pair since the user last typed into either task. */
+/** `messaging.loopCap` default: directly delivered task → task messages per pair (both directions) since the user last typed into either task. */
 export const DEFAULT_MESSAGE_LOOP_CAP = 8;
+
+/**
+ * `messaging.directRoutes` (docs/task-trees.md decision 1): which task → task
+ * sends skip the user's approval. A task and its own parent are always
+ * direct; `parent-and-child` allows nothing more, `same-task-tree` any two
+ * tasks under the same top-level task, `any-task` any two tasks.
+ */
+export type MessageDirectRoutes =
+  | "parent-and-child"
+  | "same-task-tree"
+  | "any-task";
+
+/** Every `messaging.directRoutes` value, narrowest first. */
+export const MESSAGE_DIRECT_ROUTES: readonly MessageDirectRoutes[] = [
+  "parent-and-child",
+  "same-task-tree",
+  "any-task",
+];
+
+/** `messaging.directRoutes` default. */
+export const DEFAULT_MESSAGE_DIRECT_ROUTES: MessageDirectRoutes =
+  "same-task-tree";
 
 /** Written to a fresh config file. Automation rules live in `<stateDir>/rules/rules.yaml`. */
 export const defaultGlobalConfig = (): GlobalConfig => ({

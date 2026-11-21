@@ -45,6 +45,7 @@ inherited or locked.
 | Agents | Default model | `launch.defaultModel` | applies to the default agent only |
 | Agents | Skip permission prompts for launched tasks | `launch.bypassPermissions` | "overridden in N repos" |
 | Agents | Max tasks running at once | `launch.maxConcurrent` | default 6 |
+| Agents | Max nesting depth | `launch.maxNestingDepth` | 1 to 4, default 3; note when deeper trees exist (`docs/task-trees.md`) |
 | Agents | Custom agents | `agents.custom[]` | list only (S9) |
 | Code review | Plannotator status per agent | — | `CodeReviewSettings` |
 | Code review | Open agents' local pages in the app | `captureAgentBrowser` | |
@@ -52,8 +53,9 @@ inherited or locked.
 | GitHub & sources | GitHub on/off | `sources.github.enabled` | |
 | GitHub & sources | Review requests / mentions / interval | `sources.github.settings.*` | interval shown in minutes |
 | GitHub & sources | Add-on sources | `sources.<id>.*` | automatic forms |
+| Inbox & messaging | Messages between tasks | `messaging.directRoutes` | Parent and child / Same task tree / Any task; default Same task tree |
 | Inbox & messaging | Parent reply timeout | `messaging.parentReplyTimeoutMinutes` | default 30 |
-| Inbox & messaging | Message loop cap | `messaging.loopCap` | default 8 |
+| Inbox & messaging | Message loop cap | `messaging.loopCap` | default 8; per pair of tasks talking directly |
 | Inbox & messaging | Priority filter | `inbox.priorityFilter` | "Edit in config.json" only |
 | (Notifications) | Desktop notifications | new (e.g. `notifications.enabled`) | section: General unless a better home emerges |
 

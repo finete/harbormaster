@@ -189,7 +189,7 @@ describe("createCore", () => {
     expect(updated.state).toBe("backlog");
   });
 
-  it("setTaskParent nests an existing task, un-nests it, and keeps one level", async () => {
+  it("setTaskParent nests an existing task, un-nests it, and refuses cycles and too-deep trees", async () => {
     const make = (title: string) =>
       core.commands.createTask({ title, initialPrompt: title });
     const parent = await make("Parent");
@@ -207,28 +207,33 @@ describe("createCore", () => {
       nested,
     );
 
-    // One level only, both directions, and never self.
-    await expect(
-      core.commands.setTaskParent(other.id, loose.id),
-    ).rejects.toThrow(/itself a child/);
+    // Deeper nesting is allowed (default max depth 3): a grandchild.
+    const grandchild = await core.commands.setTaskParent(other.id, loose.id);
+    expect(grandchild.parentTaskId).toBe(loose.id);
+    // Never a cycle (under itself or its own descendant), nor an unknown task.
     await expect(
       core.commands.setTaskParent(parent.id, other.id),
-    ).rejects.toThrow(/children of its own/);
+    ).rejects.toThrow(/own subtask/);
     await expect(
       core.commands.setTaskParent(other.id, other.id),
     ).rejects.toThrow(/its own parent/);
     await expect(
       core.commands.setTaskParent(other.id, "missing"),
     ).rejects.toThrow(/Task not found/);
+    // A fourth level is past the default max depth of 3.
+    const extra = await make("Extra");
+    await expect(
+      core.commands.setTaskParent(extra.id, other.id),
+    ).rejects.toThrow(/max nesting depth is 3/);
 
-    // Move under another parent, then back to standalone.
+    // Back to standalone, then under another parent.
+    const freed = await core.commands.setTaskParent(other.id, null);
+    expect(freed.parentTaskId).toBeUndefined();
+    expect("parentTaskId" in freed).toBe(false);
     const moved = await core.commands.setTaskParent(loose.id, other.id);
     expect(moved.parentTaskId).toBe(other.id);
     expect(await core.commands.listChildren(parent.id)).toEqual([]);
-    const freed = await core.commands.setTaskParent(loose.id, null);
-    expect(freed.parentTaskId).toBeUndefined();
-    expect("parentTaskId" in freed).toBe(false);
-    expect(await core.commands.listChildren(other.id)).toEqual([]);
+    expect(await core.commands.listChildren(other.id)).toEqual([moved]);
   });
 
   it("deleteTask removes the task from the board", async () => {

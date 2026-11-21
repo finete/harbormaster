@@ -46,6 +46,18 @@ describe("buildInboxHeader", () => {
     );
   });
 
+  it("names a direct task-to-task sender without claiming approval", () => {
+    expect(
+      buildInboxHeader(
+        message({
+          route: "task-to-task",
+          sender: { kind: "task", taskId: "s-1" },
+          senderLabel: "Sibling work",
+        }),
+      ),
+    ).toBe('[Message from task "Sibling work" (s-1)]');
+  });
+
   it("marks approved task and session messages", () => {
     expect(
       buildInboxHeader(
