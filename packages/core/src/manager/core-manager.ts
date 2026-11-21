@@ -145,11 +145,12 @@ import type {
   TaskUsageQuery,
   TaskUsageRow,
 } from "../contracts/usage.js";
-import type {
-  GitRepositoryAccess,
-  GitWorktreeAccess,
-  RepositoryInfo,
-  WorktreeInfo,
+import {
+  DirtyWorktreeError,
+  type GitRepositoryAccess,
+  type GitWorktreeAccess,
+  type RepositoryInfo,
+  type WorktreeInfo,
 } from "../contracts/workspace.js";
 import { detectedAgent } from "../engines/agent-version.js";
 import {
@@ -2811,13 +2812,21 @@ export class CoreManager implements CoreCommands {
           warnings.push(
             `${task.title}: deployed and ready to land — mark it Done (${result.warning})`,
           );
-          return { outcome: "stayed", detail: result.warning ?? "" };
+          return {
+            outcome: "stayed",
+            detail: result.warning ?? "",
+            ...(result.reason ? { reason: result.reason } : {}),
+          };
         }
         if (result.warning) warnings.push(`${task.title}: ${result.warning}`);
         return { outcome: "applied" };
       }
       default:
-        return { outcome: "skipped", detail: `cannot move to ${move.state}` };
+        return {
+          outcome: "skipped",
+          detail: `cannot move to ${move.state}`,
+          reason: "move not supported",
+        };
     }
   }
 
@@ -2836,6 +2845,8 @@ export class CoreManager implements CoreCommands {
   ): Promise<{
     task?: Task;
     warning?: string;
+    /** Short cause when `stayed` (AuditActionEntry.reason). */
+    reason?: string;
     stayed?: boolean;
   }> {
     const start = performance.now();
@@ -2892,6 +2903,8 @@ export class CoreManager implements CoreCommands {
   ): Promise<{
     task?: Task;
     warning?: string;
+    /** Short cause when `stayed` (AuditActionEntry.reason). */
+    reason?: string;
     stayed?: boolean;
   }> {
     let warning: string | undefined;
@@ -2911,7 +2924,11 @@ export class CoreManager implements CoreCommands {
       try {
         repo = await this.findRepository(task.repositoryId);
       } catch (error) {
-        return { stayed: true, warning: describeError(error) };
+        return {
+          stayed: true,
+          warning: describeError(error),
+          reason: "repository unavailable",
+        };
       }
       const binding = await this.deps.bindings.getBindingForTask(task.id);
       if (binding?.worktreePath) {
@@ -2922,6 +2939,7 @@ export class CoreManager implements CoreCommands {
           return {
             stayed: true,
             warning: `worktree left in place: it is open in a live session (${path})`,
+            reason: "worktree in use",
           };
         }
         try {
@@ -2930,6 +2948,10 @@ export class CoreManager implements CoreCommands {
           return {
             stayed: true,
             warning: `worktree left in place: ${describeError(error)}`,
+            reason:
+              error instanceof DirtyWorktreeError
+                ? "uncommitted changes"
+                : "git error",
           };
         }
         await this.parkBinding(binding);

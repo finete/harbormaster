@@ -221,3 +221,13 @@ export interface GitWorktreeAccess {
 // `branchPrefix` optionally namespaces every branch Harbormaster creates
 // (default `""`, meaning no prefix). json-config-access.ts validates and
 // defaults both on load.
+
+/** `removeWorktree` refused (without force) because the worktree has uncommitted changes. */
+export class DirtyWorktreeError extends Error {
+  constructor(path: string) {
+    super(
+      `Refusing to remove dirty worktree: ${path} (pass force to override)`,
+    );
+    this.name = "DirtyWorktreeError";
+  }
+}

@@ -89,6 +89,8 @@ import { UuidGenerator } from "../utilities/defaults.js";
 export interface ActionResult {
   outcome: "applied" | "stayed" | "skipped";
   detail?: string;
+  /** Short plain-words cause when not applied (AuditActionEntry.reason). */
+  reason?: string;
 }
 
 /** Provenance handed to every executed action. */
@@ -814,11 +816,13 @@ export class RulesRuntime {
   ): Promise<{
     outcome: AuditActionEntry["outcome"];
     detail?: string;
+    reason?: string;
   }> {
     if (action.status !== "run") {
       return {
         outcome: action.status,
         ...(action.detail ? { detail: action.detail } : {}),
+        ...(action.reason ? { reason: action.reason } : {}),
       };
     }
     const provenance: ActionProvenance = {
@@ -834,10 +838,20 @@ export class RulesRuntime {
             ? tasksById.get(action.candidate.taskId)
             : undefined;
           if (!task || !action.move) {
-            return { outcome: "skipped", detail: "no task" };
+            return {
+              outcome: "skipped",
+              detail: "no task",
+              reason: "no task",
+            };
           }
           const refusal = moveRefusal(task, action.move);
-          if (refusal) return { outcome: "skipped", detail: refusal };
+          if (refusal) {
+            return {
+              outcome: "skipped",
+              detail: refusal.detail,
+              reason: refusal.reason,
+            };
+          }
           return await input.executor.move(
             task,
             action.move,
@@ -864,6 +878,7 @@ export class RulesRuntime {
           return {
             outcome: "skipped",
             detail: `unknown action ${action.action}`,
+            reason: "unknown action",
           };
       }
     } catch (error) {
@@ -874,7 +889,7 @@ export class RulesRuntime {
       warnings.push(
         `Rule ${action.candidate.rule.id}${task ? ` (${task.title})` : ""}: ${action.action} failed: ${detail}`,
       );
-      return { outcome: "failed", detail };
+      return { outcome: "failed", detail, reason: "action error" };
     }
   }
 
@@ -945,7 +960,11 @@ function pendingKey(ruleId: string, taskId: string): string {
 
 function actionEntry(
   action: PlannedRuleAction,
-  result: { outcome: AuditActionEntry["outcome"]; detail?: string },
+  result: {
+    outcome: AuditActionEntry["outcome"];
+    detail?: string;
+    reason?: string;
+  },
   time: string,
   from?: AuditActionEntry["from"],
 ): AuditActionEntry {
@@ -969,6 +988,7 @@ function actionEntry(
     ...(from ? { from } : {}),
     outcome: result.outcome,
     ...(result.detail ? { detail: result.detail } : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
   };
 }
 

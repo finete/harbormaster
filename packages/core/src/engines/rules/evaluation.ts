@@ -69,6 +69,8 @@ export interface PlannedRuleAction {
   /** `run` = execute; the rest are already decided no-ops. */
   status: "run" | "superseded" | "skipped" | "failed";
   detail?: string;
+  /** Short plain-words cause of a non-`run` status (see AuditActionEntry.reason). */
+  reason?: string;
 }
 
 export interface RuleWarning {
@@ -217,6 +219,7 @@ export async function planActions(
           with: spec.with ?? {},
           status: "failed",
           detail: `template failed: ${describe(error)}`,
+          reason: "template error",
         });
         continue;
       }
@@ -233,6 +236,7 @@ export async function planActions(
           with: rendered,
           status: "skipped",
           detail: "move needs a task-bound event",
+          reason: "no task",
         });
         continue;
       }
@@ -249,6 +253,7 @@ export async function planActions(
           with: rendered,
           status: "failed",
           detail: describe(error),
+          reason: "invalid move",
         });
         continue;
       }
@@ -260,6 +265,7 @@ export async function planActions(
           move,
           status: "superseded",
           detail: `rule ${winner} moves this task this tick`,
+          reason: "an earlier rule won",
         });
         continue;
       }
@@ -270,7 +276,8 @@ export async function planActions(
           with: rendered,
           move,
           status: "skipped",
-          detail: refusal,
+          detail: refusal.detail,
+          reason: refusal.reason,
         });
         continue;
       }
@@ -315,6 +322,7 @@ async function expandActions(
         with: spec.with ?? {},
         status: "failed",
         detail: describe(error),
+        reason: "script error",
       });
     }
   }
@@ -391,25 +399,37 @@ export function resolveMove(
   }
 }
 
+/** Why a move was refused: the long sentence and the short label, set where the cause is known. */
+export interface MoveRefusal {
+  detail: string;
+  reason: string;
+}
+
 /** Why a resolved move cannot (or need not) apply to the task as it is now. */
 export function moveRefusal(
   task: Task,
   move: ResolvedMove,
-): string | undefined {
+): MoveRefusal | undefined {
   if (!isAllowedTransition(task.state, move.state)) {
-    return `illegal move from ${task.state} to ${move.state}`;
+    return {
+      detail: `illegal move from ${task.state} to ${move.state}`,
+      reason: "move not allowed",
+    };
   }
   try {
     assertMayReturnToWorking(task.state, task.awaiting, move.state);
   } catch (error) {
-    return describe(error);
+    return { detail: describe(error), reason: "move not allowed" };
   }
   if (
     task.state === move.state &&
     (move.state !== "awaiting" ||
       JSON.stringify(task.awaiting) === JSON.stringify(move.awaiting))
   ) {
-    return `already ${describeState(move)}`;
+    return {
+      detail: `already ${describeState(move)}`,
+      reason: "already there",
+    };
   }
   return undefined;
 }

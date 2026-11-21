@@ -11,10 +11,7 @@ import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import type { AuditEntry } from "../../../preload/api";
 import {
-  auditActionVerb,
-  auditActionWhy,
-  auditAge,
-  auditRuleLabel,
+  auditHeaderLine,
   historyLines,
   lastRuleAction,
 } from "../lib/audit-lines";
@@ -56,30 +53,33 @@ export function TaskAudit({
 
   if (entries.length === 0) return null;
   const last = lastRuleAction(entries);
+  const header = last ? auditHeaderLine(last, now) : undefined;
   const lines = historyLines(entries, now, {
     limit: HISTORY_LIMIT,
     includeEvents: showEvents,
   });
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      {last ? (
+      {header ? (
         <div
           className="flex min-w-0 flex-1 items-center gap-2 text-xs"
           data-testid="task-audit-last"
-          title={`${auditActionVerb(last)} ${auditAge(last.at, now)}\n${auditActionWhy(last)}`}
+          data-tone={header.tone}
+          title={header.title}
         >
-          <span className="shrink-0 font-medium text-foreground">
-            {auditActionVerb(last)}
-          </span>
-          <span className="shrink-0 text-muted-foreground">
-            · {auditAge(last.at, now)}
-          </span>
-          <Badge
-            variant="neutral"
-            className="min-w-0 truncate px-1.5 py-0 text-[11px]"
+          <span
+            className={cn(
+              "min-w-0 truncate font-medium",
+              header.tone === "warn"
+                ? "text-status-needsYou"
+                : header.tone === "muted"
+                  ? "text-muted-foreground"
+                  : "text-foreground",
+            )}
           >
-            {auditRuleLabel(last)}
-          </Badge>
+            {header.text}
+          </span>
+          <span className="shrink-0 text-muted-foreground">· {header.age}</span>
         </div>
       ) : (
         <div className="flex-1" />

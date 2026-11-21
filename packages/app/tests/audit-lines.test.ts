@@ -3,6 +3,7 @@ import type { AuditActionEntry, AuditEntry } from "../src/preload/api";
 import {
   auditActionVerb,
   auditActionWhy,
+  auditHeaderLine,
   auditRuleLabel,
   describeAuditAction,
   historyLines,
@@ -78,7 +79,7 @@ describe("audit lines", () => {
         outcome: "stayed",
         detail: "dirty worktree",
       }),
-    ).toBe("Tried Done, stayed (dirty worktree)");
+    ).toBe("Didn't move to Done (dirty worktree)");
     expect(auditActionVerb({ ...move, action: "inbox", with: {} })).toBe(
       "Added an inbox item",
     );
@@ -142,5 +143,94 @@ describe("audit lines", () => {
         (line) => line.text,
       ),
     ).toContain("github.pr.reviewDecisionChanged");
+  });
+});
+
+describe("auditHeaderLine", () => {
+  const stayed: AuditActionEntry = {
+    ...move,
+    with: { to: "done" },
+    from: { state: "awaiting", awaitingKind: "deploy" },
+    outcome: "stayed",
+    detail:
+      "worktree left in place: it is open in a live session (/Users/me/worktrees/x)",
+    reason: "worktree in use",
+  };
+
+  it("shows a successful move plainly with its compact age", () => {
+    expect(auditHeaderLine(move, now)).toMatchObject({
+      text: "Review → Working",
+      age: "4m",
+      tone: "ok",
+    });
+  });
+
+  it("shortens a stayed move to the action and the reason, never the detail", () => {
+    const line = auditHeaderLine(stayed, now);
+    expect(line).toMatchObject({
+      text: "Didn't move to Done: worktree in use",
+      tone: "warn",
+    });
+    expect(line.text).not.toContain("/Users");
+  });
+
+  it("keeps the full sentence, the rule and the why in the hover title", () => {
+    const { title } = auditHeaderLine(stayed, now);
+    expect(title).toContain("(/Users/me/worktrees/x)");
+    expect(title).toContain("Rule: Needs changes");
+    expect(title).toContain("rules.yaml:12");
+  });
+
+  it("reads an older entry without a reason as just the action", () => {
+    const { reason: _reason, ...old } = stayed;
+    expect(auditHeaderLine(old, now).text).toBe("Didn't move to Done");
+  });
+
+  it("drops a multi-line git error from the line", () => {
+    const line = auditHeaderLine(
+      {
+        ...stayed,
+        outcome: "failed",
+        detail: "fatal: boom\nhint: more",
+        reason: "git error",
+      },
+      now,
+    );
+    expect(line.text).toBe("Failed to move to Done: git error");
+    expect(line.tone).toBe("warn");
+  });
+
+  it("words skipped moves and non-move actions, and mutes a superseded move", () => {
+    expect(
+      auditHeaderLine(
+        {
+          ...move,
+          outcome: "skipped",
+          detail: "already in working",
+          reason: "already there",
+        },
+        now,
+      ).text,
+    ).toBe("Skipped move to Working: already there");
+    expect(
+      auditHeaderLine(
+        {
+          ...move,
+          action: "message",
+          outcome: "failed",
+          reason: "action error",
+        },
+        now,
+      ).text,
+    ).toBe("Failed: sent a message (action error)");
+    expect(
+      auditHeaderLine(
+        { ...move, outcome: "superseded", reason: "an earlier rule won" },
+        now,
+      ),
+    ).toMatchObject({
+      text: "Would move to Working (an earlier rule won)",
+      tone: "muted",
+    });
   });
 });
