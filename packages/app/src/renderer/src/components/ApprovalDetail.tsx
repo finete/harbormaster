@@ -60,6 +60,11 @@ export async function decideApproval(
       );
       // Core re-checks the target on approval: if it can no longer receive,
       // the message is failed (and no grant is written). Say so.
+      if (result.status !== "failed" && result.releasedCount) {
+        pushToast(
+          `Also released ${result.releasedCount} waiting message${result.releasedCount === 1 ? "" : "s"} between them.`,
+        );
+      }
       if (result.status === "failed") {
         pushToast(
           `Not delivered: ${result.failureReason ?? "the task can no longer receive it"}.${

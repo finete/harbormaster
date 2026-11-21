@@ -22,6 +22,7 @@ import type {
 } from "./inbox.js";
 import type {
   ApproveMessageEdits,
+  ApproveMessageResult,
   FindTasksOptions,
   PairGrant,
   SendTaskMessageInput,
@@ -878,12 +879,15 @@ export interface CoreCommands {
    * `failureReason`) instead. A task sender that can receive gets a
    * `receipt` follow-up with the result. `edits.allowBothWays` ("Approve
    * and allow both ways", task → task approvals only) also records a pair
-   * grant: the two tasks message each other directly from then on.
+   * grant: the two tasks message each other directly from then on, and every
+   * other message from either task still awaiting approval to the other is
+   * approved too (its own text and mode kept, receipts sent; `releasedCount`
+   * says how many). Plain approve releases nothing extra.
    */
   approveMessage(
     messageId: string,
     edits?: ApproveMessageEdits,
-  ): Promise<TaskMessage>;
+  ): Promise<ApproveMessageResult>;
   /** Reject a message awaiting approval; a task sender that can receive gets a `receipt` follow-up. */
   rejectMessage(messageId: string): Promise<TaskMessage>;
   /** Pair grants in force (both tasks exist and neither is Done). A grant ends when either task goes Done or is deleted, or via `revokePairGrant`. */

@@ -260,7 +260,11 @@ const inboxResolve: OpDefinition = {
           text:
             message.status === "failed"
               ? `Not delivered: ${message.failureReason ?? "the target can no longer receive it"}. No direct messages were allowed.`
-              : `Approved (${message.status}); the two tasks may now message each other directly`,
+              : `Approved (${message.status}); the two tasks may now message each other directly${
+                  message.releasedCount
+                    ? `; also released ${message.releasedCount} waiting message${message.releasedCount === 1 ? "" : "s"} between them`
+                    : ""
+                }`,
           details: { message },
         };
       }
