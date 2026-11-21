@@ -156,7 +156,7 @@ const reportStatus: ToolDefinition = {
   name: "report_status",
   title: "Harbormaster report status",
   description:
-    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
+    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary: do not report done while a child is unfinished. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
   inputSchema: {
     type: "object",
     properties: {
@@ -427,7 +427,7 @@ const subtaskStatus: ToolDefinition = {
   name: "subtask_status",
   title: "Harbormaster subtask status",
   description:
-    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), and the reported outcome. Only valid inside a Harbormaster task session.',
+    'List this task\'s child tasks (launched with relation "child"): title, id, board column (plus the awaiting reason), PR info when opened, run state (queued / interrupted / running / your move / not running), the reported outcome, and the question a child is waiting on the user to answer ("waiting on the user"). Check it before report_status and name any such child in your summary. Only valid inside a Harbormaster task session.',
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async handler(_args, { commands, caller }) {
     const taskId = requireTaskCaller(caller, "subtask_status");
