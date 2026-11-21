@@ -1,5 +1,6 @@
 // Settings → Inbox & messaging (docs/settings.md "Settings in v1"): the
-// parent reply timeout and the message loop cap as described rows, and the
+// messages-between-tasks choice, the parent reply timeout and the message
+// loop cap as described rows, and the
 // inbox priority filter, a CEL expression that stays in config.json (S1):
 // the row only says whether a custom filter is set.
 
@@ -28,6 +29,11 @@ export function InboxSection({
   const filterValue = snapshot.values["inbox.priorityFilter"];
   return (
     <SettingsCard>
+      <DescribedSetting
+        model={model}
+        snapshot={snapshot}
+        settingKey="messaging.directRoutes"
+      />
       <DescribedSetting
         model={model}
         snapshot={snapshot}

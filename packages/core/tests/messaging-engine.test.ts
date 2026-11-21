@@ -149,9 +149,7 @@ describe("route classification and modes", () => {
   });
 
   it("a pair grant makes that pair direct both ways, and nobody else", () => {
-    const grants: PairGrant[] = [
-      { taskIds: ["a", "x"], grantedAt: at(0) },
-    ];
+    const grants: PairGrant[] = [{ taskIds: ["a", "x"], grantedAt: at(0) }];
     expect(route("parent-and-child", a, x, grants)).toBe("task-to-task");
     expect(route("parent-and-child", x, a, grants)).toBe("task-to-task");
     expect(route("parent-and-child", a, b, grants)).toBe("approval");
@@ -175,15 +173,15 @@ describe("route classification and modes", () => {
 
   it("non-task senders (sessions, rules, Harbormaster) always need approval, even under any-task", () => {
     const policy = policyFor("any-task", all);
-    expect(classifyRoute({ kind: "session", cwd: "/x" }, undefined, a1, policy)).toBe(
-      "approval",
-    );
-    expect(classifyRoute({ kind: "rule", ruleId: "r1" }, undefined, a, policy)).toBe(
-      "approval",
-    );
-    expect(classifyRoute({ kind: "harbormaster" }, undefined, root, policy)).toBe(
-      "approval",
-    );
+    expect(
+      classifyRoute({ kind: "session", cwd: "/x" }, undefined, a1, policy),
+    ).toBe("approval");
+    expect(
+      classifyRoute({ kind: "rule", ruleId: "r1" }, undefined, a, policy),
+    ).toBe("approval");
+    expect(
+      classifyRoute({ kind: "harbormaster" }, undefined, root, policy),
+    ).toBe("approval");
     expect(classifyRoute({ kind: "user" }, undefined, a, policy)).toBe("user");
   });
 
@@ -346,7 +344,10 @@ describe("deriveMessagingStates", () => {
     ];
     expect(state({ messages: [], grants }, "c")?.grantedWith).toEqual(["p"]);
     expect(state({ messages: [], grants }, "p")?.grantedWith).toEqual(["c"]);
-    const doneTasks = [task("p"), task("c", { parentTaskId: "p", state: "done" })];
+    const doneTasks = [
+      task("p"),
+      task("c", { parentTaskId: "p", state: "done" }),
+    ];
     expect(
       state({ messages: [], grants, tasks: doneTasks }, "p"),
     ).toBeUndefined();

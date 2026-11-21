@@ -448,7 +448,7 @@ const findTasks: ToolDefinition = {
   name: "find_tasks",
   title: "Harbormaster find tasks",
   description:
-    "Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated), whether a message from this task would be \"direct\" (delivered at once) or \"needs approval\" (waits for the user), and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.",
+    'Find Harbormaster tasks by plain words (title, repository, branch, PR number like #412, or id prefix; every word must match). Use it to resolve a task the user names to its exact id before send_to_task. Each match shows id, title, board column, run state, relation to this task (self / parent / child / sibling / unrelated), whether a message from this task would be "direct" (delivered at once) or "needs approval" (waits for the user), and repository/branch/PR when present. Finished (Done) tasks are left out unless includeDone is true.',
   inputSchema: {
     type: "object",
     properties: {

@@ -348,7 +348,9 @@ describe("send-time rules", () => {
       status: "pending",
       requestedMode: "steer",
     });
-    expect(sibling.note).toMatch(/^Delivered to the inbox of "Kid 2" \(steer\)/);
+    expect(sibling.note).toMatch(
+      /^Delivered to the inbox of "Kid 2" \(steer\)/,
+    );
     // Deeper trees are covered by the engine's routing matrix: this branch
     // cannot launch grandchildren yet (nesting depth is a separate change).
     // The other tree still needs the user.
@@ -383,7 +385,9 @@ describe("send-time rules", () => {
     const a = await mk("A");
     const b = await mk("B");
     const result = await send(a, b);
-    expect(result.note).toMatch(/^Not delivered yet: waiting for the user's approval/);
+    expect(result.note).toMatch(
+      /^Not delivered yet: waiting for the user's approval/,
+    );
   });
 
   it("a non-task sender always goes through approval, even to a child", async () => {
@@ -500,7 +504,9 @@ describe("direct messages between tasks", () => {
     expect((await stateOf(k2))?.loopCapReached?.otherTaskId).toBe(k1);
     // Another pair is unaffected, and so is the parent link.
     await expect(send(k1, k3)).resolves.toBeDefined();
-    await expect(send(k1, p)).resolves.toBeDefined().catch(() => {});
+    await expect(send(k1, p))
+      .resolves.toBeDefined()
+      .catch(() => {});
     // The user typing into either task resets the pair.
     await c().recordUserInput(k2);
     await expect(send(k2, k1)).resolves.toBeDefined();
@@ -514,9 +520,9 @@ describe("direct messages between tasks", () => {
     const k2 = await child(p, "Shared kid 2");
     const found = async (from?: string) =>
       Object.fromEntries(
-        (
-          await c().findTasks("shared", from ? { fromTaskId: from } : {})
-        ).map((r) => [r.id, r.send]),
+        (await c().findTasks("shared", from ? { fromTaskId: from } : {})).map(
+          (r) => [r.id, r.send],
+        ),
       );
     expect(await found(k1)).toEqual({
       [p]: "direct",
@@ -601,7 +607,9 @@ describe("direct messages between tasks", () => {
 
     it("counts toward the loop cap like any direct pair", async () => {
       const { a, b } = await granted();
-      await boot({ messaging: { directRoutes: "parent-and-child", loopCap: 2 } });
+      await boot({
+        messaging: { directRoutes: "parent-and-child", loopCap: 2 },
+      });
       await send(a, b);
       await send(b, a);
       await expect(send(a, b)).rejects.toThrow(/Message cap reached/);

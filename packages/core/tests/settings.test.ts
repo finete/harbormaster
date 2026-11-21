@@ -135,8 +135,10 @@ describe("validateSettingsPatch", () => {
       ).toEqual([]);
     }
     expect(
-      validateSettingsPatch({ "messaging.directRoutes": "everyone" }, context)
-        .problems.join("\n"),
+      validateSettingsPatch(
+        { "messaging.directRoutes": "everyone" },
+        context,
+      ).problems.join("\n"),
     ).toMatch(/must be one of: parent-and-child, same-task-tree, any-task/);
   });
 

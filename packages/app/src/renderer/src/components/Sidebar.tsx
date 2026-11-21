@@ -425,6 +425,13 @@ export function Sidebar({
   const presence = usePresenceMap();
   const now = useNow(CLOCK_TICK_MS);
   const messagingStates = useMessagingStates();
+  const taskTitles = useMemo(
+    () =>
+      new Map(
+        flattenBoard(columns).map((row) => [row.task.id, row.task.title]),
+      ),
+    [columns],
+  );
   const unreadTaskIds = useUnreadTaskIds(focusedTaskId);
   const [query, setQuery] = useState("");
   // Saved group-collapse state (Orca polish item 2): same localStorage
@@ -753,6 +760,17 @@ export function Sidebar({
         key: "remove-parent",
         label: "Remove from parent",
         onSelect: () => setParent(task.id, null),
+      });
+    }
+    // Pair grants ("Approve and allow both ways"): removable from either task.
+    for (const otherId of messagingStates.get(task.id)?.grantedWith ?? []) {
+      items.push({
+        key: `stop-direct-${otherId}`,
+        label: `Stop direct messages with ${taskTitles.get(otherId) ?? "that task"}`,
+        onSelect: () =>
+          void window.harbormaster.core
+            .revokePairGrant(task.id, otherId)
+            .catch((error: unknown) => pushToast(describeThrown(error))),
       });
     }
     if (contextMenu?.worktreePath) {

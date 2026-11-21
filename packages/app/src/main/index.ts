@@ -1325,13 +1325,23 @@ function registerCoreIpc(): void {
     async (
       _event,
       messageId: string,
-      edits?: { text?: string; mode?: MessageMode },
+      edits?: { text?: string; mode?: MessageMode; allowBothWays?: boolean },
     ) => {
       try {
         return await core.commands.approveMessage(messageId, edits);
       } finally {
         void messagingPusher.push();
         void backgroundLauncher.runPass();
+      }
+    },
+  );
+  ipcMain.handle(
+    "core:revokePairGrant",
+    async (_event, taskId: string, otherTaskId: string) => {
+      try {
+        await core.commands.revokePairGrant(taskId, otherTaskId);
+      } finally {
+        void messagingPusher.push();
       }
     },
   );

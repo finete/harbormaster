@@ -274,7 +274,8 @@ export class JsonMessageAccess implements MessageAccess {
   ): Promise<void> {
     const taskIds = pairOf(taskA, taskB);
     await this.mutate((state) => {
-      const grants = (state.grants ??= []);
+      state.grants ??= [];
+      const grants = state.grants;
       if (!grants.some((grant) => samePair(grant.taskIds, taskIds))) {
         grants.push({ taskIds, grantedAt });
       }
@@ -286,7 +287,8 @@ export class JsonMessageAccess implements MessageAccess {
     const taskIds = pairOf(taskA, taskB);
     let removed = false;
     await this.mutate((state) => {
-      const before = (state.grants ??= []).length;
+      state.grants ??= [];
+      const before = state.grants.length;
       state.grants = state.grants.filter(
         (grant) => !samePair(grant.taskIds, taskIds),
       );
@@ -306,7 +308,9 @@ export class JsonMessageAccess implements MessageAccess {
     await this.mutate((state) => {
       state.grants = (state.grants ?? []).filter((grant) => {
         if (!grant.taskIds.includes(taskId)) return true;
-        others.push(grant.taskIds[0] === taskId ? grant.taskIds[1] : grant.taskIds[0]);
+        others.push(
+          grant.taskIds[0] === taskId ? grant.taskIds[1] : grant.taskIds[0],
+        );
         return false;
       });
       return [];

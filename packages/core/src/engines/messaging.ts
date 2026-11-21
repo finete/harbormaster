@@ -181,7 +181,8 @@ export function countLoopMessages(
     if (!countsTowardCap(message) || message.sender.kind !== "task") continue;
     const from = message.sender.taskId;
     const to = message.targetTaskId;
-    const inPair = (from === taskA && to === taskB) || (from === taskB && to === taskA);
+    const inPair =
+      (from === taskA && to === taskB) || (from === taskB && to === taskA);
     if (inPair && ms(message.createdAt) > since) count += 1;
   }
   return count;
@@ -279,8 +280,10 @@ export function deriveMessagingStates(
   for (const grant of grants) {
     const [a, b] = grant.taskIds;
     if (!isPairGranted({ grants, tasks: byId }, a, b)) continue;
-    (stateOf(a).grantedWith ??= []).push(b);
-    (stateOf(b).grantedWith ??= []).push(a);
+    const first = stateOf(a);
+    first.grantedWith = [...(first.grantedWith ?? []), b];
+    const second = stateOf(b);
+    second.grantedWith = [...(second.grantedWith ?? []), a];
   }
 
   for (const child of input.tasks) {

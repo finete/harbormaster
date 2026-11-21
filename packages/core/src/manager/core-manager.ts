@@ -3975,7 +3975,11 @@ export class CoreManager implements CoreCommands {
         ...(edits?.mode ? { mode: edits.mode } : {}),
       });
       if (edits?.allowBothWays && message.sender.kind === "task") {
-        await messages.grantPair(message.sender.taskId, message.targetTaskId, now);
+        await messages.grantPair(
+          message.sender.taskId,
+          message.targetTaskId,
+          now,
+        );
       }
     }
     await this.sendReceipt(result, target);

@@ -31,7 +31,9 @@ describe("formatTaskSearchLine", () => {
       '"Fix login" (t-1) · Working · running · child · direct',
     );
     expect(
-      formatTaskSearchLine(result({ relation: "none", send: "needs-approval" })),
+      formatTaskSearchLine(
+        result({ relation: "none", send: "needs-approval" }),
+      ),
     ).toBe(
       '"Fix login" (t-1) · Working · running · unrelated · needs approval',
     );

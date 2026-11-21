@@ -47,7 +47,7 @@ type Config = {
   automation?: boolean;
   launch?: { maxConcurrent?: number };
   notifications?: { enabled?: boolean };
-  messaging?: { loopCap?: number };
+  messaging?: { loopCap?: number; directRoutes?: string };
   inbox?: { priorityFilter?: string };
   sources?: Record<
     string,
@@ -350,6 +350,18 @@ test("GitHub & sources: account, toggles, minutes stored as ms, add-on form", as
 
 test("Inbox & messaging and desktop notifications save", async () => {
   await openSettings("inbox");
+  // "Messages between tasks": default is the same task tree; picking another option saves it.
+  const routes = window.getByTestId("setting-input-messaging.directRoutes");
+  await expect(routes).toContainText("Same task tree");
+  await routes.click();
+  await window
+    .getByTestId("setting-input-messaging.directRoutes-option")
+    .filter({ hasText: "Parent and child" })
+    .click();
+  await expect(routes).toContainText("Parent and child");
+  await expect
+    .poll(() => readConfig().messaging?.directRoutes)
+    .toBe("parent-and-child");
   const loopCap = window.getByTestId("setting-input-messaging.loopCap");
   await expect(loopCap).toHaveValue("8");
   await loopCap.fill("12");
