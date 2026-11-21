@@ -2482,13 +2482,13 @@ export class CoreManager implements CoreCommands {
       changed = true;
     }
     if (await this.archiveDoneTasks()) changed = true;
-    // Usage (docs/costs.md): still-pending tasks are re-checked on every
-    // tick; tasks never computed are drained in the background (all of
-    // them, in batches, one board push per batch), never blocking the
-    // tick. Never on a manager without agents.
+    // Usage (docs/costs.md): tasks not Done (pending or counted) are
+    // re-checked on every tick; tasks never computed are drained in the
+    // background (all of them, in batches, one board push per batch),
+    // never blocking the tick. Never on a manager without agents.
     if (this.deps.harness || this.deps.harnesses) {
       const usageChanged = await this.usage
-        .recheckPending(await this.deps.tasks.listTasks(), bindingFor)
+        .recheckOpen(await this.deps.tasks.listTasks(), bindingFor)
         .catch(() => false);
       if (usageChanged) changed = true;
       void this.usage.drain(
@@ -3735,6 +3735,9 @@ export class CoreManager implements CoreCommands {
     const before = this.turnTracking.get(taskId);
     const next = trackBoundary(before, boundary.kind);
     this.turnTracking.set(taskId, next);
+    // A turn ended: recount its usage (docs/costs.md follow-up 6). Not
+    // awaited: the agent's Stop hook waits on this report. Never throws.
+    if (boundary.kind === "stop") void this.usage.update(taskId);
     const pid = before?.pid;
     const reading = before?.reading;
     if (pid === undefined || !reading) return;

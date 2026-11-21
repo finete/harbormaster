@@ -127,6 +127,35 @@ transcripts without a `recordTaskSession` call. Socket ops `usage` and
    (what you see is what you export). Esc in the box clears it (Esc
    elsewhere still leaves the page); no match shows "0 tasks".
 
+6. **Fresh while the agent works (2026-11-21).** A Claude Code task
+   showed 86k for a session that had spent ~976k (5 web-fetch subagents):
+   the figure was the snapshot taken after its first two requests, and an
+   interactive session that goes idle never exits, so nothing recounted
+   it. Still no live tail (decision 4); the count now also refreshes:
+   - when a turn ends: a `stop` turn boundary (Claude Code's and Codex's
+     Stop hooks) starts `usage.update`, not awaited (the hook waits on
+     the report);
+   - on every refresh tick, for every task not Done (`pending`, or
+     `ready` and not Done): only a `stat` per file unless one changed.
+     This also covers a transcript flushed after its Stop hook, and
+     harnesses with no Stop hook. Done stays final.
+
+   The change check (`fingerprint`, and `lastActivityAt`) also stats the
+   files the reader counts besides the session file
+   (`HarnessAdapter.sessionUsageFiles`: Claude Code's
+   `<sessionId>/subagents/**/agent-*.jsonl`), so a subagent running while
+   the main transcript is quiet still counts as a change.
+
+   **Known gap, not closed:** Claude Code's WebSearch tool makes its own
+   model requests, and those are never written to the transcript (only
+   `repl_main_thread` requests are; `server_tool_use.web_search_requests`
+   stays 0, and the tool result carries only `durationSeconds` /
+   `searchCount`). Nothing that reads transcripts can count them (ccusage
+   and Orca can't either). Paseo reads Claude Code's own running total
+   (`total_cost_usd`) through the Agent SDK. Sources that could cover
+   WebSearch: the totals Claude Code writes on a normal exit, its status
+   line, or its OpenTelemetry metrics. None is used yet.
+
 ## Harness file facts (verified on disk 2026-11-16)
 
 - **Pi** `~/.pi/agent/sessions/<cwd-slug>/<ts>_<uuid>.jsonl`: assistant messages carry `usage: { input, output, cacheRead, cacheWrite, totalTokens, cost: { input, output, cacheRead, cacheWrite, total } }` and a `model`. `cost` is Pi's own list-price estimate (`pi-ai` `calculateCost`).

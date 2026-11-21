@@ -409,6 +409,13 @@ export interface HarnessAdapter {
   readSessionUsage?(sessionPath: string): Promise<SessionUsage | undefined>;
 
   /**
+   * The files besides `sessionPath` whose changes move its usage (Claude
+   * Code's subagent transcripts), so core's change check notices a running
+   * subagent while the main file is quiet. Absent = the session file alone.
+   */
+  sessionUsageFiles?(sessionPath: string): Promise<string[]>;
+
+  /**
    * Keeps one turn's tokens a hook reported (`CoreCommands.recordTurnUsage`)
    * where `readSessionUsage` finds them: for a harness that writes no
    * usage into its transcript (Cursor). Absent = such reports are ignored.

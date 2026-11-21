@@ -100,16 +100,23 @@ export class UsageRuntime {
   }
 
   /**
-   * One refresh tick's re-check of tasks still `pending` (a session being
-   * written; cheap). Awaited by the refresh. Resolves with whether any
-   * task changed. Never-computed tasks are the drain's (see `drain`).
+   * One refresh tick's re-check of tasks still being worked on: `pending`
+   * ones (a session not written yet) and `ready` ones not Done (the agent
+   * may have run turns since the last count, docs/costs.md follow-up 6).
+   * Cheap: unchanged files are only stat'ed, never re-parsed. Awaited by
+   * the refresh. Resolves with whether any task changed. Never-computed
+   * tasks are the drain's (see `drain`).
    */
-  async recheckPending(
+  async recheckOpen(
     tasks: readonly Task[],
     bindingFor: (taskId: string) => Promise<WorkspaceBinding | undefined>,
   ): Promise<boolean> {
-    const pending = tasks.filter((task) => task.usage?.status === "pending");
-    return this.computeAll(pending, bindingFor);
+    const open = tasks.filter(
+      (task) =>
+        task.usage?.status === "pending" ||
+        (task.usage?.status === "ready" && task.state !== "done"),
+    );
+    return this.computeAll(open, bindingFor);
   }
 
   /**
@@ -255,8 +262,22 @@ export class UsageRuntime {
         : { kind: "none" };
     }
 
+    // The change check also covers files the reader counts besides the
+    // sessions (Claude Code's subagent transcripts): a subagent can run
+    // for minutes while the main transcript stays quiet.
+    const extra = adapter.sessionUsageFiles
+      ? (
+          await Promise.all(
+            paths.map((path) =>
+              (adapter.sessionUsageFiles?.(path) ?? Promise.resolve([])).catch(
+                (): string[] => [],
+              ),
+            ),
+          )
+        ).flat()
+      : [];
     const stats = await Promise.all(
-      paths.map(async (sessionPath) => ({
+      [...paths, ...extra].map(async (sessionPath) => ({
         sessionPath,
         stat: this.deps.sessions.stat
           ? await this.deps.sessions.stat(sessionPath).catch(() => undefined)

@@ -196,6 +196,20 @@ export function parseClaudeSessionUsage(
 }
 
 /**
+ * The current-layout subagent transcripts of one session
+ * (`<projectDir>/<sessionId>/subagents/**\/agent-*.jsonl`), for core's
+ * change check. Older sibling `agent-*.jsonl` files are left out: telling
+ * which session owns one means reading it, and that layout is no longer
+ * written.
+ */
+export function claudeSubagentFiles(sessionPath: string): Promise<string[]> {
+  if (!sessionPath) return Promise.resolve([]);
+  return agentFilesUnder(
+    join(dirname(sessionPath), basename(sessionPath, ".jsonl"), "subagents"),
+  );
+}
+
+/**
  * Read one Claude Code session (`<projectDir>/<sessionId>.jsonl`) plus its
  * subagent transcripts; `undefined` when the main file is missing.
  */
