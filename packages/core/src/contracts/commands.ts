@@ -715,6 +715,17 @@ export interface CoreCommands {
    */
   toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
   /**
+   * Take a task off the board (`task.archivedAt`). Always asks once first
+   * (`requiresConfirmation: "done"`, answered with `force.confirmed`). A
+   * Done task's question has no lines (nothing else happens to it). Any
+   * other task is completed on the way, exactly like `toDone` (same
+   * confirmations and lines, same `force` flags, same cleanup), and lands
+   * in Done already archived, in a single move. An already-archived task comes back unchanged. Archived
+   * tasks stay listed (the board shows them only on request); reopening one
+   * clears the flag.
+   */
+  archiveTask(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult>;
+  /**
    * Run a Done task's forced cleanup (`task.cleanup.mode === "forced"`)
    * right now, ignoring the sweep's backoff (the inbox item's Retry).
    * Resolves with the task as persisted afterwards; a failure is recorded on

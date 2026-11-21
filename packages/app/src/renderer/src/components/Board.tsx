@@ -43,6 +43,8 @@ import {
 } from "../lib/sidebar-persistence";
 import { buildLineageIndex } from "../lib/task-lineage";
 import {
+  archiveTaskMutation,
+  canArchive,
   canAwait,
   canStart,
   moveTaskMutation,
@@ -466,6 +468,12 @@ export function Board({
             void toDoneMutation(selectedTask.id);
           }
           return;
+        case "e":
+          if (selectedTask && canArchive(selectedTask)) {
+            event.preventDefault();
+            void archiveTaskMutation(selectedTask.id);
+          }
+          return;
         case "r":
           // Muscle-memory fast path: opens the Await… picker with review
           // preselected (r, Enter) — never a hardwired kind.
@@ -521,7 +529,7 @@ export function Board({
           announcements,
           screenReaderInstructions: {
             draggable:
-              "Drag with a pointer to move this task to another column; Escape cancels. From the keyboard, arrow keys select a card and s, r, x start, await or finish it.",
+              "Drag with a pointer to move this task to another column; Escape cancels. From the keyboard, arrow keys select a card and s, r, x, e start, await, finish or archive it.",
           },
         }}
         onDragStart={handleDragStart}

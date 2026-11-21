@@ -1176,11 +1176,13 @@ function registerCoreIpc(): void {
     core.commands.startTask(taskId),
   );
   // Main owns the ptys, so it (not the renderer) supplies the live pane
-  // cwds core must never remove a worktree out from under.
-  ipcMain.handle(
-    "core:toDone",
+  // cwds core must never remove a worktree out from under. Archive is the
+  // same verb for a task not yet Done (it completes on the way), so both
+  // share this path.
+  const completeTask =
+    (verb: "toDone" | "archiveTask") =>
     async (
-      _event,
+      _event: unknown,
       taskId: string,
       options: { force?: ToDoneForce } | undefined,
     ) => {
@@ -1195,8 +1197,20 @@ function registerCoreIpc(): void {
         const warm = new Set(
           warmSessions.ids().filter((id) => getSession(id)?.taskId === taskId),
         );
-        return core.commands.toDone(taskId, {
+        return core.commands[verb](taskId, {
           protectedPaths: activeSessionCwds({ excludeIds: warm }),
+          force,
+        });
+      }
+      const [task, binding] = await Promise.all([
+        core.commands.getTask(taskId).catch(() => undefined),
+        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
+      ]);
+      // Archiving a task already Done only flags it: its Done cleanup ran
+      // (or keeps retrying) on its own, so nothing in its worktree ends here.
+      if (verb === "archiveTask" && task?.state === "done") {
+        return core.commands.archiveTask(taskId, {
+          protectedPaths: activeSessionCwds(),
           force,
         });
       }
@@ -1205,21 +1219,18 @@ function registerCoreIpc(): void {
       // renderer closes the task's panes too) so nothing keeps the worktree
       // "open in a live session"; core then lands the task and force-cleans.
       warmSessions.disposeForTask(taskId);
-      const [task, binding] = await Promise.all([
-        core.commands.getTask(taskId).catch(() => undefined),
-        core.commands.getTaskWorkspace(taskId).catch(() => undefined),
-      ]);
       // Only a repository worktree is removed: a scratch dir or a folder
       // task's own folder stays, and so do the panes running in it.
       if (task?.repositoryId && binding?.worktreePath) {
         disposeSessionsUnder(binding.worktreePath);
       }
-      return core.commands.toDone(taskId, {
+      return core.commands[verb](taskId, {
         protectedPaths: activeSessionCwds(),
         force,
       });
-    },
-  );
+    };
+  ipcMain.handle("core:toDone", completeTask("toDone"));
+  ipcMain.handle("core:archiveTask", completeTask("archiveTask"));
   ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>
     core.commands.retryDoneCleanup(taskId, {
       protectedPaths: activeSessionCwds(),

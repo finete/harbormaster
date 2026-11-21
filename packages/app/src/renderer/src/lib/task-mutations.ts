@@ -1,6 +1,6 @@
 // Shared task-action rules + mutations: the pure "is this action allowed"
 // checks and the IPC-calling mutations behind the three workflow verbs
-// (Start/todev, Await…/toawait, Done/todone) plus Reopen (see
+// (Start/todev, Await…/toawait, Done/todone) plus Reopen and Archive (see
 // TaskActions.tsx), extracted so Board.tsx's single-key shortcuts (s/r/x)
 // and drag gestures drive the exact same path the buttons do — no second
 // implementation to drift out of sync. Awaiting *kinds* (review, Slack,
@@ -37,6 +37,11 @@ export function canDone(task: Pick<Task, "state">): boolean {
 
 export function canReopen(task: Pick<Task, "state">): boolean {
   return task.state === "done";
+}
+
+/** Any task still on the board can be archived (one not yet Done completes on the way). */
+export function canArchive(task: Pick<Task, "archivedAt">): boolean {
+  return !task.archivedAt;
 }
 
 /** A plain column move (drag-and-drop); a rejected move surfaces as an error toast. */
@@ -98,6 +103,16 @@ export const DONE_QUESTION = {
 } as const;
 
 /**
+ * Archiving always asks: the Done question (its lines, if the task is not
+ * Done yet), worded as an archive, led by what archiving itself does.
+ */
+export const ARCHIVE_QUESTION = {
+  title: "Archive?",
+  confirmLabel: "Archive",
+  line: "It leaves the board; the sidebar's Archived section and Done's “show archived” still list it.",
+} as const;
+
+/**
  * Move a task to Done (button, `x`, a drop on Done, an inbox action). One
  * small question, its lines computed by core up front (worktree removed,
  * uncommitted changes discarded, unmerged branch deleted, pane closed);
@@ -107,7 +122,27 @@ export const DONE_QUESTION = {
  * the app's (core records `task.cleanup` and retries it), so nothing here
  * ever warns about it.
  */
-export async function toDoneMutation(taskId: string): Promise<void> {
+export function toDoneMutation(taskId: string): Promise<void> {
+  return completeTaskMutation(taskId, "toDone");
+}
+
+/**
+ * Archive a task (header button, a card's ×, `e` on the board, the
+ * rail's menu): off the board, kept in the sidebar's Archived section and
+ * behind Done's "show archived"; its workspace closes (App.tsx).
+ * Always one question (Enter confirms); a task not yet Done gets the Done
+ * question's lines too and is completed exactly like `toDoneMutation`,
+ * landing archived.
+ */
+export function archiveTaskMutation(taskId: string): Promise<void> {
+  return completeTaskMutation(taskId, "archiveTask");
+}
+
+async function completeTaskMutation(
+  taskId: string,
+  verb: "toDone" | "archiveTask",
+): Promise<void> {
+  const question = verb === "toDone" ? DONE_QUESTION : ARCHIVE_QUESTION;
   try {
     const force: ToDoneForce = {};
     // A live review in the task's workspace closes with it; its unsent
@@ -115,7 +150,7 @@ export async function toDoneMutation(taskId: string): Promise<void> {
     const reviewUrl = reviewUrlFor(taskId);
     const unsent = await unsentReviewComments(reviewUrl);
     for (;;) {
-      const result = await window.harbormaster.core.toDone(taskId, { force });
+      const result = await window.harbormaster.core[verb](taskId, { force });
       // Landed. Cleanup outcomes live on `task.cleanup` (inbox item after
       // repeated failures), never in a toast.
       if (!("requiresConfirmation" in result)) return;
@@ -139,14 +174,15 @@ export async function toDoneMutation(taskId: string): Promise<void> {
         return;
       }
       const confirmed = await requestConfirm({
-        title: DONE_QUESTION.title,
+        title: question.title,
         message: "",
         lines: [
+          ...(verb === "archiveTask" ? [ARCHIVE_QUESTION.line] : []),
           ...(result.lines ?? []),
           ...(unsent > 0 ? [doneLosesCommentsLine(unsent)] : []),
         ],
         enterConfirms: true,
-        confirmLabel: DONE_QUESTION.confirmLabel,
+        confirmLabel: question.confirmLabel,
       });
       if (!confirmed) return;
       // Before Done ends the worktree's processes: the agent hears

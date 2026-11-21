@@ -485,6 +485,16 @@ export interface HarbormasterApi {
       taskId: string,
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult>;
+    /**
+     * Take a task off the board. A Done task is archived at once; any other
+     * task asks and completes exactly like `toDone` (same question, same
+     * `force` answers, same process teardown in main) and lands archived.
+     * See `CoreCommands.archiveTask`.
+     */
+    archiveTask(
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult>;
     /** The cleanup inbox item's Retry: force the Done task's cleanup again now. See `CoreCommands.retryDoneCleanup`. */
     retryDoneCleanup(taskId: string): Promise<Task>;
     /** The cleanup inbox item's Dismiss: give up on the Done task's cleanup. See `CoreCommands.abandonDoneCleanup`. */

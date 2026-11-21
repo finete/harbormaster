@@ -173,6 +173,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     });
 
     expect(task.state).toBe("backlog");
+    expect(task.startedAt).toBeUndefined();
     expect(task.repositoryId).toBe(f.repositoryId);
     expect(task.initialPrompt).toBe("think about it");
     expect(task.branch).toBeUndefined();
@@ -209,6 +210,7 @@ describe.skipIf(!gitAvailable)("new-task timing: park vs start now", () => {
     });
 
     expect(task.state).toBe("working");
+    expect(task.startedAt).toBe(task.createdAt);
     expect(task.branch).toMatch(/^ship-it-[a-z0-9]{6}$/);
     const binding = await commands.getTaskWorkspace(task.id);
     expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);
@@ -250,6 +252,9 @@ describe.skipIf(!gitAvailable)("startTask", () => {
     expect(started.branch).toMatch(/^later-work-[a-z0-9]{6}$/);
     expect(started.targetBranch).toBe("main");
     expect((await commands.getTask(parked.id))?.state).toBe("working");
+    expect((await commands.getTask(parked.id))?.startedAt).toBe(
+      "2026-01-01T00:00:00.000Z",
+    );
     const binding = await commands.getTaskWorkspace(parked.id);
     expect(binding?.branch).toBe(started.branch);
     expect(binding?.worktreePath?.startsWith(f.worktreesRoot)).toBe(true);

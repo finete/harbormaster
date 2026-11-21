@@ -920,6 +920,7 @@ export class CoreManager implements CoreCommands {
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
+      ...(startNow ? { startedAt: now } : {}),
     };
 
     if (startNow && repo && branch) {
@@ -1027,6 +1028,7 @@ export class CoreManager implements CoreCommands {
       targetBranch: task.targetBranch ?? repo.defaultBranch,
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: task.startedAt ?? now,
     };
     delete next.awaiting;
     await this.provisionTaskWorkspace(
@@ -1621,6 +1623,7 @@ export class CoreManager implements CoreCommands {
       state: "working",
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: task.startedAt ?? now,
     };
     delete reopened.completedAt;
     delete reopened.archivedAt;
@@ -1780,6 +1783,10 @@ export class CoreManager implements CoreCommands {
         updatedAt: now,
         stateChangedAt: stateChanged ? now : task.stateChangedAt,
         ...(state === "done" ? { completedAt: task.completedAt ?? now } : {}),
+        ...((task.state === "backlog" || task.state === "done") &&
+        state === "working"
+          ? { startedAt: task.startedAt ?? now }
+          : {}),
       };
       if (state === "awaiting" && options?.awaiting) {
         moved.awaiting = options.awaiting;
@@ -2003,7 +2010,42 @@ export class CoreManager implements CoreCommands {
     );
   }
 
-  async toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
+  toDone(taskId: string, options?: ToDoneOptions): Promise<ToDoneResult> {
+    return this.completeTask(taskId, options, false);
+  }
+
+  async archiveTask(
+    taskId: string,
+    options?: ToDoneOptions,
+  ): Promise<ToDoneResult> {
+    const task = await this.requireTask(taskId);
+    if (task.state !== "done") return this.completeTask(taskId, options, true);
+    if (task.archivedAt) return { task };
+    // Nothing else happens to a Done task (no lines), but archiving always
+    // asks once, whatever the task's state.
+    if (!options?.force?.confirmed) {
+      return { requiresConfirmation: "done", detail: task.title, lines: [] };
+    }
+    const now = this.deps.clock.now().toISOString();
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
+      if (fresh.state !== "done" || fresh.archivedAt) return undefined;
+      return { ...fresh, archivedAt: now, updatedAt: now };
+    });
+    if (!next) return { task: await this.requireTask(taskId) };
+    await this.publishTaskChange(next);
+    return { task: next };
+  }
+
+  /**
+   * The manual Done (`toDone`), and `archiveTask` for a task not yet Done:
+   * the same questions and cleanup; `archive` lands it archived in the
+   * same write, so it never shows up in Done on its way off the board.
+   */
+  private async completeTask(
+    taskId: string,
+    options: ToDoneOptions | undefined,
+    archive: boolean,
+  ): Promise<ToDoneResult> {
     const task = await this.requireTask(taskId);
     assertAllowedTransition(task.state, "done");
     const force = options?.force ?? {};
@@ -2028,7 +2070,11 @@ export class CoreManager implements CoreCommands {
     const binding = await this.deps.bindings
       .getBindingForTask(task.id)
       .catch(() => undefined);
-    const landed = await this.executeConfirmedDone(task, protectedPaths);
+    const landed = await this.executeConfirmedDone(
+      task,
+      protectedPaths,
+      archive,
+    );
     if (!landed) throw new Error(`Task not found: ${taskId}`);
     const usage = await this.usage.update(task.id, {
       ...(binding ? { binding } : {}),
@@ -2242,6 +2288,7 @@ export class CoreManager implements CoreCommands {
       createdAt: now,
       updatedAt: now,
       stateChangedAt: now,
+      startedAt: now,
     };
 
     if (repo) {
@@ -2987,11 +3034,13 @@ export class CoreManager implements CoreCommands {
   /**
    * Patch the move onto the task as persisted now (cleanup can take a
    * while, and a concurrent refresh may have updated the PR snapshot
-   * meanwhile), optionally recording the app-owned `cleanup`, and publish.
+   * meanwhile), optionally recording the app-owned `cleanup` and archiving
+   * it (`archiveTask`), and publish.
    */
   private async landInDone(
     taskId: string,
     cleanup?: TaskCleanup,
+    archive = false,
   ): Promise<Task | undefined> {
     const now = this.deps.clock.now().toISOString();
     const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
@@ -3003,6 +3052,7 @@ export class CoreManager implements CoreCommands {
         stateChangedAt: now,
         completedAt: fresh.completedAt ?? now,
         ...(cleanup ? { cleanup } : {}),
+        ...(archive ? { archivedAt: fresh.archivedAt ?? now } : {}),
       };
       delete landed.awaiting;
       return landed;
@@ -3078,6 +3128,7 @@ export class CoreManager implements CoreCommands {
   private async executeConfirmedDone(
     task: Task,
     protectedPaths: readonly string[],
+    archive: boolean,
   ): Promise<Task | undefined> {
     const binding = await this.deps.bindings
       .getBindingForTask(task.id)
@@ -3104,7 +3155,7 @@ export class CoreManager implements CoreCommands {
           }
         : { completedAt: now }),
     };
-    const landed = await this.landInDone(task.id, cleanup);
+    const landed = await this.landInDone(task.id, cleanup, archive);
     if (!landed || !repoBacked) return landed;
     return (await this.runForcedCleanup(task.id, protectedPaths)) ?? landed;
   }

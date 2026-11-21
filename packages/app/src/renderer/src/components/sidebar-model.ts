@@ -76,7 +76,10 @@ export function sidebarRows(
 }
 
 /** Case-insensitive substring match over title, branch, and repository. */
-export function matchesQuery(row: SidebarRow, query: string): boolean {
+export function matchesQuery(
+  row: Pick<SidebarRow, "task">,
+  query: string,
+): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   const haystack = [
@@ -88,6 +91,25 @@ export function matchesQuery(row: SidebarRow, query: string): boolean {
     .join("\n")
     .toLowerCase();
   return haystack.includes(needle);
+}
+
+/**
+ * The rail's "Archived" section: every archived task on the board, most
+ * recently archived first, filtered like the open rows (title, branch,
+ * repository).
+ */
+export function archivedTasks(columns: BoardColumn[], query: string): Task[] {
+  const tasks: Task[] = [];
+  for (const column of columns) {
+    for (const group of column.groups) {
+      for (const task of group.tasks) {
+        if (task.archivedAt && matchesQuery({ task }, query)) tasks.push(task);
+      }
+    }
+  }
+  return tasks.sort((a, b) =>
+    (b.archivedAt ?? "").localeCompare(a.archivedAt ?? ""),
+  );
 }
 
 /**
