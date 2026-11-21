@@ -346,11 +346,15 @@ describe("send-time rules", () => {
     expect(sibling.message).toMatchObject({
       route: "task-to-task",
       status: "pending",
-      requestedMode: "steer",
+      requestedMode: "followUp",
     });
     expect(sibling.note).toMatch(
-      /^Delivered to the inbox of "Kid 2" \(steer\)/,
+      /^Delivered to the inbox of "Kid 2" \(followUp\)/,
     );
+    // A peer may still ask to steer.
+    expect(
+      (await send(k1, k2, "now", { mode: "steer" })).message.requestedMode,
+    ).toBe("steer");
     // Deeper trees are covered by the engine's routing matrix: this branch
     // cannot launch grandchildren yet (nesting depth is a separate change).
     // The other tree still needs the user.
@@ -576,6 +580,20 @@ describe("direct messages between tasks", () => {
         (await c().findTasks("beta", { fromTaskId: a })).find((r) => r.id === b)
           ?.send,
       ).toBe("direct");
+    });
+
+    it("an approval that fails (target can no longer receive) records no grant and says so", async () => {
+      await boot({ messaging: { directRoutes: "parent-and-child" } });
+      const a = await mk("Alpha");
+      const b = await mk("Beta");
+      const sent = await send(a, b);
+      await c().moveTask(b, "done");
+      const result = await c().approveMessage(sent.message.id, {
+        allowBothWays: true,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.failureReason).toBeDefined();
+      expect(await c().listPairGrants()).toEqual([]);
     });
 
     it("plain Approve grants nothing", async () => {

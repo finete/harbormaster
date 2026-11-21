@@ -187,7 +187,7 @@ describe("route classification and modes", () => {
 
   it("defaults the mode by route", () => {
     expect(defaultMode("parent-to-child")).toBe("steer");
-    expect(defaultMode("task-to-task")).toBe("steer");
+    expect(defaultMode("task-to-task")).toBe("followUp");
     expect(defaultMode("child-to-parent")).toBe("followUp");
     expect(defaultMode("approval")).toBe("steer");
     expect(defaultMode("receipt")).toBe("followUp");

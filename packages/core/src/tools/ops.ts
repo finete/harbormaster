@@ -241,7 +241,13 @@ const inboxResolve: OpDefinition = {
       const verb = pressed?.toLowerCase();
       if (verb === "approve") {
         const message = await commands.approveMessage(messageId);
-        return { text: `Approved (${message.status})`, details: { message } };
+        return {
+          text:
+            message.status === "failed"
+              ? `Not delivered: ${message.failureReason ?? "the target can no longer receive it"}`
+              : `Approved (${message.status})`,
+          details: { message },
+        };
       }
       if (
         verb === APPROVE_BOTH_WAYS_BUTTON ||
@@ -251,7 +257,10 @@ const inboxResolve: OpDefinition = {
           allowBothWays: true,
         });
         return {
-          text: `Approved (${message.status}); the two tasks may now message each other directly`,
+          text:
+            message.status === "failed"
+              ? `Not delivered: ${message.failureReason ?? "the target can no longer receive it"}. No direct messages were allowed.`
+              : `Approved (${message.status}); the two tasks may now message each other directly`,
           details: { message },
         };
       }

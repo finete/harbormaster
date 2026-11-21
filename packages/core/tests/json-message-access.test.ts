@@ -192,6 +192,9 @@ describe("message log", () => {
       { taskIds: ["a", "b"], grantedAt: "2026-01-01T00:00:00.000Z" },
       { taskIds: ["a", "c"], grantedAt: "2026-01-03T00:00:00.000Z" },
     ]);
+    expect(await access.readGrants()).toEqual(
+      (await access.readStore()).grants,
+    );
     expect(await access.revokePair("c", "a")).toBe(true);
     expect(await access.revokePair("c", "a")).toBe(false);
     await access.grantPair("b", "d", "2026-01-04T00:00:00.000Z");

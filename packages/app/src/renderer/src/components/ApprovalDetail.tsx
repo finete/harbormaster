@@ -52,12 +52,23 @@ export async function decideApproval(
     if (kind === "approve" || kind === "approve-both-ways") {
       if (!canApprove(draft.text)) return false;
       const edits = approvalEdits(message, draft);
-      await window.harbormaster.core.approveMessage(
+      const result = await window.harbormaster.core.approveMessage(
         message.id,
         kind === "approve-both-ways"
           ? { ...edits, allowBothWays: true }
           : edits,
       );
+      // Core re-checks the target on approval: if it can no longer receive,
+      // the message is failed (and no grant is written). Say so.
+      if (result.status === "failed") {
+        pushToast(
+          `Not delivered: ${result.failureReason ?? "the task can no longer receive it"}.${
+            kind === "approve-both-ways"
+              ? " Direct messages were not allowed."
+              : ""
+          }`,
+        );
+      }
     } else {
       await window.harbormaster.core.rejectMessage(message.id);
     }

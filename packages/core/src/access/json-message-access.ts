@@ -109,6 +109,10 @@ export class JsonMessageAccess implements MessageAccess {
     return structuredClone({ messages, userInputs, grants: grants ?? [] });
   }
 
+  async readGrants(): Promise<PairGrant[]> {
+    return structuredClone((await this.cache.read()).grants ?? []);
+  }
+
   async getMessage(id: string): Promise<TaskMessage | undefined> {
     return structuredClone(
       (await this.cache.read()).messages.find((message) => message.id === id),

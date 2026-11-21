@@ -3526,7 +3526,10 @@ export class CoreManager implements CoreCommands {
     const { harness } = this.requireMessaging();
     const tasks = await this.deps.tasks.listTasks();
     const matches = matchTasks(query, tasks, options);
-    const policy = await this.directRoutePolicy(tasks);
+    const policy = await this.directRoutePolicy(
+      tasks,
+      await this.deps.config.load(),
+    );
     const searcher = options?.fromTaskId
       ? tasks.find((task) => task.id === options.fromTaskId)
       : undefined;
@@ -3590,14 +3593,15 @@ export class CoreManager implements CoreCommands {
 
     // 3. Route from lineage, the user's `messaging.directRoutes` setting and
     //    pair grants (non-task senders always need approval).
+    const config = await this.deps.config.load();
     const policy = await this.directRoutePolicy(
       await this.deps.tasks.listTasks(),
+      config,
     );
     const route = classifyRoute(input.from, senderTask, target, policy);
 
     // 4. Child → parent: the parent must be live (and not Done, above) and
     //    the child's own harness must be able to receive the answer.
-    const config = await this.deps.config.load();
     if (route === "child-to-parent") {
       if (!(await harness.presence(target.id)).live) {
         throw new Error(
@@ -4041,17 +4045,15 @@ export class CoreManager implements CoreCommands {
   /** The user's `messaging.directRoutes` setting plus the grants on record, over the given tasks. */
   private async directRoutePolicy(
     tasks: readonly Task[],
+    config: GlobalConfig,
   ): Promise<DirectRoutePolicy> {
     const { messages } = this.requireMessaging();
-    const [config, store] = await Promise.all([
-      this.deps.config.load(),
-      messages.readStore(),
-    ]);
     return {
       directRoutes:
         config.messaging?.directRoutes ?? DEFAULT_MESSAGE_DIRECT_ROUTES,
       tasks: new Map(tasks.map((task) => [task.id, task])),
-      grants: store.grants,
+      // Just the grants: the message log is large and kept forever.
+      grants: await messages.readGrants(),
     };
   }
 

@@ -494,7 +494,7 @@ const sendToTask: ToolDefinition = {
         type: "string",
         enum: ["steer", "followUp"],
         description:
-          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to a parent.",
+          "steer = after the target's current step (corrections); followUp = after it finishes its current work. Default: steer to a child, followUp to your parent or any other task.",
       },
       attachments: {
         type: "array",

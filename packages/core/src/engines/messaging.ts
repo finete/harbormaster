@@ -118,9 +118,10 @@ export function classifyRoute(
 export function defaultMode(route: MessageRoute): MessageMode {
   switch (route) {
     case "parent-to-child":
-    case "task-to-task":
       return "steer";
+    // A peer's note should not interrupt the target mid-work; the sender may still ask for steer.
     case "child-to-parent":
+    case "task-to-task":
       return "followUp";
     case "approval":
     case "user":
