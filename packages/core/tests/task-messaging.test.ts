@@ -355,11 +355,36 @@ describe("send-time rules", () => {
     expect(
       (await send(k1, k2, "now", { mode: "steer" })).message.requestedMode,
     ).toBe("steer");
-    // Deeper trees are covered by the engine's routing matrix: this branch
-    // cannot launch grandchildren yet (nesting depth is a separate change).
     // The other tree still needs the user.
     expect((await send(k1, other)).message.status).toBe("awaiting_approval");
     expect((await send(other, k1)).message.status).toBe("awaiting_approval");
+  });
+
+  it("reaches grandparents and cousins in a launched three-level tree, but only under same-task-tree", async () => {
+    // Parent ─ Kid 1 ─ Grandkid
+    //        └ Kid 2 ─ Cousin
+    const p = await mk("Parent");
+    const k1 = await child(p, "Kid 1");
+    const k2 = await child(p, "Kid 2");
+    const grandkid = await child(k1, "Grandkid");
+    const cousin = await child(k2, "Cousin");
+    for (const id of [p, k1, k2, grandkid, cousin]) harness.setLive(id);
+
+    // The direct link stays a lineage route at depth 3.
+    expect((await send(grandkid, k1)).message.route).toBe("child-to-parent");
+    for (const target of [p, cousin]) {
+      expect((await send(grandkid, target)).message).toMatchObject({
+        route: "task-to-task",
+        status: "pending",
+      });
+    }
+
+    await boot({ messaging: { directRoutes: "parent-and-child" } });
+    for (const target of [p, cousin]) {
+      expect((await send(grandkid, target)).message.status).toBe(
+        "awaiting_approval",
+      );
+    }
   });
 
   it("any-task delivers between unrelated tasks; plain sessions and rules still need approval", async () => {
