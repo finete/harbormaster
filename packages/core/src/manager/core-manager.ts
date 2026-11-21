@@ -1640,18 +1640,38 @@ export class CoreManager implements CoreCommands {
     }
 
     if (!task.repositoryId) {
-      // A folder task runs in place: point its parked binding back at the
-      // folder so the reopened cycle has somewhere to run.
-      const parked = task.folderPath
-        ? await this.deps.bindings.getBindingForTask(taskId)
-        : undefined;
-      if (task.folderPath && parked && !parked.worktreePath) {
-        await this.deps.bindings.replaceBinding({
-          ...parked,
-          worktreePath: task.folderPath,
-          inPlace: true,
-          updatedAt: now,
-        });
+      // A folder task runs in place, a scratch task in its scratch
+      // directory (still on disk: Done only parked the binding). Point the
+      // parked binding back there so the reopened cycle resumes its
+      // conversation where it ran; a task Done straight from Backlog never
+      // had one, so it gets the workspace `startTask` would have given it.
+      const parked = await this.deps.bindings.getBindingForTask(taskId);
+      if (!parked) {
+        const noop = { persist: async () => {}, undo: async () => {} };
+        if (task.folderPath) {
+          await this.provisionInPlaceWorkspace(
+            taskId,
+            task.folderPath,
+            now,
+            noop,
+          );
+        } else {
+          await this.provisionScratchWorkspace(taskId, now, noop);
+        }
+      } else if (!parked.worktreePath) {
+        const worktreePath = task.folderPath
+          ? task.folderPath
+          : parked.scratch
+            ? await this.deps.scratch.ensureScratchDirectory(taskId)
+            : undefined;
+        if (worktreePath) {
+          await this.deps.bindings.replaceBinding({
+            ...parked,
+            worktreePath,
+            ...(task.folderPath ? { inPlace: true } : {}),
+            updatedAt: now,
+          });
+        }
       }
       await this.deps.tasks.replaceTask(reopened);
       await this.publishTaskChange(reopened);
