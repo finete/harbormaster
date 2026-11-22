@@ -754,8 +754,10 @@ async function typePrompt(taskId: string, text: string): Promise<void> {
 }
 
 /**
- * Waits until the Cursor task is at rest, answering Cursor's command
- * approval ("Run this command?") like a user ("y" = Run once): an
+ * Waits until the Cursor task is at rest, answering Cursor's command and
+ * MCP tool approvals ("Run this command?", "Run this MCP tool?", e.g. the
+ * report_status a parent's message reminds a child of) like a user
+ * ("y" = Run once): an
  * interactive pane has no -f, and the prompt fires no hook, so presence
  * reads running meanwhile (open row cursor.status.blocked, annotated).
  */
@@ -769,7 +771,10 @@ async function cursorUntilAtRest(
     .poll(
       async () => {
         const text = await screenText(taskId);
-        if (/Run this command\?/.test(text) && /Run \(once\)/.test(text)) {
+        if (
+          /Run this (command|MCP tool)\?/.test(text) &&
+          /Run \(once\)/.test(text)
+        ) {
           approvals += 1;
           await workspace.locator(".xterm").first().click();
           await window.keyboard.press("y");
@@ -784,7 +789,7 @@ async function cursorUntilAtRest(
   if (approvals > 0) {
     test.info().annotations.push({
       type: "cursor-approval-prompt",
-      description: `answered ${approvals} command approval(s); presence read running meanwhile (cursor.status.blocked)`,
+      description: `answered ${approvals} command/MCP tool approval(s); presence read running meanwhile (cursor.status.blocked)`,
     });
   }
   return presenceVerdict(taskId);
