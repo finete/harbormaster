@@ -10,7 +10,7 @@
 //   4. The review page is frameable (no X-Frame-Options, no frame-ancestors).
 //   5. `GET /api/draft` reads back the page's autosaved draft (unsent
 //      comments); before there is one it answers `204` with no body
-//      (0.29+, upstream d66e287) or `200 {found: false}` (0.28.x).
+//      (0.29+, upstream d66e287) or `404 {found: false}` (0.28.x).
 //   6. `POST /api/exit` with no Origin ends the session like the page's own
 //      Close: stdout says it closed without feedback and the process exits.
 //   7. The page keeps its settings in `document.cookie` with SameSite=Lax
@@ -145,8 +145,8 @@ describe.skipIf(!binary)("Plannotator contract (real binary)", () => {
     if (none.status === 204) {
       expect(noneBody).toBe("");
     } else {
-      // Plannotator 0.28.x: 200 {"found": false}.
-      expect(none.status).toBe(200);
+      // Plannotator 0.28.x: 404 {"found": false}.
+      expect(none.status).toBe(404);
       expect(JSON.parse(noneBody)).toEqual({ found: false });
     }
     const saved = await fetch(draftUrl, {

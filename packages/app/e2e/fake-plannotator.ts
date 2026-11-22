@@ -57,7 +57,7 @@ const server = http.createServer((req, res) => {
     }
     if (draft === null) {
       // No draft yet: 204 and no body, like Plannotator 0.29+ (0.28.x sent
-      // 200 {"found": false}; the app accepts both).
+      // 404 {"found": false}; the app accepts both).
       res.statusCode = 204;
       res.end();
       return;

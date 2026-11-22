@@ -79,9 +79,9 @@ export async function probeLoopbackUrl(
  * Unsent comments in a live Plannotator review (docs/plannotator.md
  * decision 9): the page autosaves its draft to `GET /api/draft`. With no
  * draft Plannotator 0.29+ answers `204` and an empty body (upstream
- * d66e287); 0.28.x answered `200 {"found": false}`; both mean 0. `null`
- * when the server is gone or answers something else; never fetches a
- * non-loopback URL.
+ * d66e287); 0.28.x answered `404 {"found": false}`; both mean 0. `null`
+ * only when the server is gone or answers something unexpected; never
+ * fetches a non-loopback URL.
  */
 export async function countUnsentReviewComments(
   url: string,
@@ -94,6 +94,12 @@ export async function countUnsentReviewComments(
       signal: AbortSignal.timeout(options.timeoutMs ?? 2000),
     });
     if (response.status === 204) return 0;
+    if (response.status === 404) {
+      // 0.28.x: no draft is `404 {"found": false}`; any other 404 is not
+      // a Plannotator answer.
+      const body = (await response.json()) as { found?: unknown } | null;
+      return body?.found === false ? 0 : null;
+    }
     if (!response.ok) return null;
     const draft = (await response.json()) as Record<string, unknown>;
     let count = 0;

@@ -43,7 +43,7 @@ Pi `pi update npm:@plannotator/pi-extension` (install:
 2. `PLANNOTATOR_BROWSER=<path containing "/">` on macOS runs that path with the session URL as its only argument (both the binary and the Pi extension's own server).
 3. Every session prints `Plannotator session ready: <url>` on stderr before opening anything.
 4. The review page is frameable (no `X-Frame-Options`, no `frame-ancestors`).
-5. `GET /api/draft` reads back the page's autosaved draft (unsent comments: `annotations`, `codeAnnotations`, `globalAttachments`). Before there is one it answers `204` with no body on 0.29+ (upstream commit `d66e287`, "GET /api/draft with no draft answers 204, in both servers", in v0.29.0; the Pi extension's server too) and `200 {"found": false}` on 0.28.x; the app counts both as zero (`countUnsentReviewComments`). Recorded against 0.28.66 and re-checked on 0.29.1 (2026-11-22).
+5. `GET /api/draft` reads back the page's autosaved draft (unsent comments: `annotations`, `codeAnnotations`, `globalAttachments`). Before there is one it answers `204` with no body on 0.29+ (upstream commit `d66e287`, "GET /api/draft with no draft answers 204, in both servers", in v0.29.0; the Pi extension's server too) and `404 {"found": false}` on 0.28.x (v0.28.66 `handleDraftLoad`); the app counts both as zero (`countUnsentReviewComments`). Recorded against 0.28.66 and re-checked on 0.29.1 (2026-11-22).
 6. `POST /api/exit` with no `Origin` ends the session like the page's own Close: the CLI prints `Review session closed without feedback.` and exits (decision 9).
 7. The review page keeps its settings in `document.cookie` with `SameSite=Lax` (why the URL pane emulates cookies for loopback frames, decision 7; the e2e fake's page does the same).
 
