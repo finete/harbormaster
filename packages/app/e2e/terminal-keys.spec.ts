@@ -161,14 +161,17 @@ test.describe("macOS keyboard parity (darwin only)", () => {
     await expect(panel).toContainText("clear-marker-42", { timeout: 10_000 });
 
     // Cmd+K should clear the viewport (the DOM may lag xterm by a frame;
-    // the assertion retries).
+    // the assertion retries). The viewport's rows only: the panel also
+    // holds xterm's screen-reader live region, a log of recent output that
+    // only a keypress or blur empties (CI: it still held the marker).
+    const rows = panel.locator(".xterm-rows");
     await window.keyboard.press("Meta+k");
-    await expect(panel).not.toContainText("clear-marker-42");
+    await expect(rows).not.toContainText("clear-marker-42");
 
     // The shell still works after the clear, and the marker stays gone.
     await window.keyboard.type("echo after-$((1+1))");
     await window.keyboard.press("Enter");
-    await expect(panel).toContainText("after-2", { timeout: 10_000 });
-    await expect(panel).not.toContainText("clear-marker-42");
+    await expect(rows).toContainText("after-2", { timeout: 10_000 });
+    await expect(rows).not.toContainText("clear-marker-42");
   });
 });

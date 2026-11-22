@@ -8,6 +8,7 @@
   "homepage": "https://github.com/finete/harbormaster",
   "main": "./out/main/index.js",
   "scripts": {
+    "predev": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli",
     "dev": "electron-vite dev",
     "prebuild": "npm run build -w @harbormaster/core && npm run build -w @harbormaster/cli",
     "build": "electron-vite build",
