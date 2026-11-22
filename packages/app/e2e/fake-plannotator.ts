@@ -55,8 +55,15 @@ const server = http.createServer((req, res) => {
       });
       return;
     }
+    if (draft === null) {
+      // No draft yet: 204 and no body, like Plannotator 0.29+ (0.28.x sent
+      // 404 {"found": false}; the app accepts both).
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify(draft ?? { found: false }));
+    res.end(JSON.stringify(draft));
     return;
   }
   // The page's own Close (contract fact 6): refused from a browser page on
