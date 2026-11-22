@@ -98,8 +98,40 @@ export function nodeAppLogFs(): AppLogFs {
 export interface AppLog {
   /** Appends one formatted line; never throws, never blocks the caller. */
   write(level: LogLevel, args: readonly unknown[]): void;
-  /** Resolves once every write queued so far has settled (tests only). */
+  /** Resolves once every write queued so far has settled. */
   flush(): Promise<void>;
+}
+
+/**
+ * Holds the quit until `log` has written everything queued so far, then
+ * runs `exit`. Electron ends the process right after `will-quit`, so the
+ * lines logged on the way out (`[main] clean exit`) were lost whenever the
+ * disk was slow (CI). The flush runs a tick later, once every other
+ * `will-quit` listener has queued its lines, and gives up after
+ * `timeoutMs` so a stuck disk can't hang the quit.
+ */
+export function installQuitLogFlush(
+  log: Pick<AppLog, "flush">,
+  onWillQuit: (listener: (event: { preventDefault(): void }) => void) => void,
+  exit: () => void,
+  timeoutMs = 1_000,
+): void {
+  let held = false;
+  onWillQuit((event) => {
+    if (held) return;
+    held = true;
+    event.preventDefault();
+    setImmediate(() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      });
+      void Promise.race([log.flush(), timeout]).finally(() => {
+        clearTimeout(timer);
+        exit();
+      });
+    });
+  });
 }
 
 /**
