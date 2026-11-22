@@ -256,6 +256,5 @@ The 28 fake-backed e2e specs were audited against it:
 | 3 | codex-adapter | X1–X11 + its contract table, fake, e2e, T3 rows, T4 scenarios | T3 green on 0.169.0; T4 green on this machine |
 | 4 | cursor-adapter | C1–C9 + the same set | T3 green on 2026.11.13; T4 green on this machine |
 
-Workers run on short-lived branches/worktrees as transport (AGENTS.md); the
-supervisor merges to `main`. Each lane's PR-sized unit lists which decision
-rows it closes.
+Each lane lands on `main` through a pull request from its own branch/worktree
+(AGENTS.md), and its PR-sized unit lists which decision rows it closes.
