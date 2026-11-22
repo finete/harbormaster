@@ -3,6 +3,7 @@ import {
   type AppLogFs,
   createAppLog,
   formatLogLine,
+  installQuitLogFlush,
   MAX_LOG_BACKUPS,
   rotatedPath,
   rotationRenames,
@@ -128,5 +129,62 @@ describe("createAppLog", () => {
     const log = createAppLog("/logs/main.log", fs);
     expect(() => log.write("error", ["x"])).not.toThrow();
     await expect(log.flush()).resolves.toBeUndefined();
+  });
+});
+
+describe("installQuitLogFlush", () => {
+  /** Wires the flush to a fake `will-quit`; returns a trigger and the exit spy. */
+  function wire(log: { flush(): Promise<void> }, timeoutMs?: number) {
+    let listener: ((event: { preventDefault(): void }) => void) | undefined;
+    const exit = vi.fn();
+    installQuitLogFlush(log, (l) => (listener = l), exit, timeoutMs);
+    const willQuit = () => {
+      const event = { preventDefault: vi.fn() };
+      listener?.(event);
+      return event;
+    };
+    return { willQuit, exit };
+  }
+
+  it("holds the quit until lines logged by every will-quit listener are written", async () => {
+    // A disk slow enough that a line is still queued when the quit lands.
+    let release: () => void = () => {};
+    const fs = fakeFs();
+    fs.appendFile = vi.fn(
+      (path: string, data: string) =>
+        new Promise<void>((resolve) => {
+          release = () => {
+            fs.appended.push({ path, data });
+            resolve();
+          };
+        }),
+    );
+    const log = createAppLog("/logs/main.log", fs);
+    const { willQuit, exit } = wire(log);
+
+    const event = willQuit();
+    // A later will-quit listener in the same emit (the run sentinel).
+    log.write("log", ["[main] clean exit"]);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+
+    await vi.waitFor(() => expect(fs.appendFile).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(exit).not.toHaveBeenCalled();
+    release();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce());
+    expect(fs.appended[0]?.data).toMatch(/\[main] clean exit\n$/);
+  });
+
+  it("exits anyway once the timeout passes on a stuck disk", async () => {
+    const { willQuit, exit } = wire({ flush: () => new Promise(() => {}) }, 30);
+    willQuit();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce());
+  });
+
+  it("holds only the first will-quit", async () => {
+    const { willQuit, exit } = wire({ flush: async () => undefined });
+    expect(willQuit().preventDefault).toHaveBeenCalledOnce();
+    expect(willQuit().preventDefault).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce());
   });
 });

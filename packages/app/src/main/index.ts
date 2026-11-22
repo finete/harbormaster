@@ -94,7 +94,11 @@ import {
 } from "./agent-tooling";
 import { createAppBundleGuard, replacedAppPrompt } from "./app-bundle-guard";
 import { appClipboard } from "./app-clipboard";
-import { createAppLog, installConsoleTee } from "./app-log";
+import {
+  createAppLog,
+  installConsoleTee,
+  installQuitLogFlush,
+} from "./app-log";
 import { isCloseTabChord, isSidebarCycleChord } from "./app-shortcuts";
 import { createBackgroundLauncher } from "./background-launcher";
 import { resolveCliPath } from "./cli-path";
@@ -345,6 +349,12 @@ const appLog = createAppLog(
   { dedupe: createLogDedupe() },
 );
 installConsoleTee(appLog);
+// `app.exit`, not `app.quit`: every quit event has already run once.
+installQuitLogFlush(
+  appLog,
+  (listener) => app.on("will-quit", listener),
+  () => app.exit(0),
+);
 console.log(`[main] Harbormaster ${app.getVersion()} starting`);
 // IPC timing (see main-health.ts): before any handler registers. The
 // crash sentinel waits for the single-instance guard (`guardSingleInstance`):
