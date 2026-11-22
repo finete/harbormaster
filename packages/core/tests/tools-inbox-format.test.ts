@@ -264,6 +264,25 @@ describe("formatInboxMessage", () => {
     expect(formatted.content).toEqual([{ type: "text", text: formatted.text }]);
   });
 
+  it("leaves the report_status reminder off a child's automatic report, whoever receives it", async () => {
+    const report = message({ route: "child-to-parent", kind: "report" });
+    expect(
+      buildInboxMessageText(report, { receiverHasParent: true }),
+    ).not.toContain(REPORT_STATUS_REMINDER);
+    const formatted = await formatInboxMessage(
+      report,
+      async () => ({ base64: "" }),
+      { receiverHasParent: true },
+    );
+    expect(formatted.text).not.toContain(REPORT_STATUS_REMINDER);
+    // An ordinary child message still carries it.
+    expect(
+      buildInboxMessageText(message({ route: "child-to-parent" }), {
+        receiverHasParent: true,
+      }),
+    ).toContain(REPORT_STATUS_REMINDER);
+  });
+
   it("defaults an unresolved mode to followUp", async () => {
     const formatted = await formatInboxMessage(message(), async () => ({
       base64: "",

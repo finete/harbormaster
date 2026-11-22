@@ -555,6 +555,17 @@ export function matchTasks<T extends SearchableTask>(
   return matches.slice(0, options.limit ?? DEFAULT_FIND_TASKS_LIMIT);
 }
 
+/** The text a child's `report_status` sends its parent: the verdict, the note, and that no reply is needed. */
+export function buildChildReportText(input: {
+  childTitle: string;
+  childTaskId: string;
+  status: "done" | "blocked";
+  note?: string;
+}): string {
+  const note = input.note ? `: ${input.note}` : ".";
+  return `Your child task "${input.childTitle}" (${input.childTaskId}) reported ${input.status}${note}\n\nThis is a report; no reply is needed.`;
+}
+
 /** What happened to a task sender's approval-route message, for its receipt. */
 export interface ReceiptInput {
   outcome: "approved" | "rejected" | "failed";

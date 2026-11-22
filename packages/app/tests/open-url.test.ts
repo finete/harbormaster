@@ -99,10 +99,20 @@ describe("probeLoopbackUrl", () => {
 
 describe("closing a live review (decision 9)", () => {
   it("counts the draft's unsent comments and posts /api/exit with no Origin", async () => {
-    let draft: unknown = { found: false };
+    // Plannotator 0.29+ answers a missing draft with 204 and no body;
+    // 0.28.x with 404 {"found": false}. Both mean zero unsent comments.
+    let draft: unknown = null;
     const exits: (string | undefined)[] = [];
     const server = createServer((req, res) => {
       if (req.url === "/api/draft") {
+        if (draft === null) {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        if (draft && (draft as { found?: unknown }).found === false) {
+          res.statusCode = 404;
+        }
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(draft));
         return;
@@ -122,6 +132,8 @@ describe("closing a live review (decision 9)", () => {
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     try {
       expect(await countUnsentReviewComments(url)).toBe(0);
+      draft = { found: false };
+      expect(await countUnsentReviewComments(url)).toBe(0);
       draft = {
         annotations: [{ id: "a" }],
         codeAnnotations: [{ id: "b" }, { id: "c" }],
@@ -136,6 +148,19 @@ describe("closing a live review (decision 9)", () => {
     // Gone: nothing to count, nothing to close.
     expect(await countUnsentReviewComments(url, { timeoutMs: 500 })).toBeNull();
     expect(await closeReviewSession(url, { timeoutMs: 500 })).toBe(false);
+  });
+
+  it("a 404 that is not Plannotator's no-draft answer is not a count", async () => {
+    const url = "http://127.0.0.1:1/";
+    for (const response of [
+      () => new Response("", { status: 404 }),
+      () => new Response("not json", { status: 404 }),
+      () => Response.json({ error: "nope" }, { status: 404 }),
+      () => new Response("{}", { status: 500 }),
+    ]) {
+      const fetchImpl = (async () => response()) as typeof fetch;
+      expect(await countUnsentReviewComments(url, { fetchImpl })).toBeNull();
+    }
   });
 
   it("never touches a non-loopback URL", async () => {

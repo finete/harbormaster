@@ -4,7 +4,7 @@
 // the OSC 9 note that becomes a `done` report's message (X4) and the
 // typed form of a Codex skill command.
 
-import type { TaskMessage } from "@harbormaster/core";
+import { REPORT_STATUS_REMINDER, type TaskMessage } from "@harbormaster/core";
 import { describe, expect, it } from "vitest";
 import {
   deliverableMessages,
@@ -170,6 +170,19 @@ describe("queue text", () => {
     expect(text).toContain('[Message from your parent task "Parent" (p)]');
     expect(text.split("\n\n---\n\n")).toHaveLength(2);
     expect(text).toContain("not from the user");
+  });
+
+  it("a child's automatic report carries no report_status reminder, an ordinary message does", () => {
+    const options = { receiverHasParent: true };
+    expect(queueTextFor([message({ text: "hi" })], options)).toContain(
+      REPORT_STATUS_REMINDER,
+    );
+    expect(
+      queueTextFor(
+        [message({ text: "done", route: "child-to-parent", kind: "report" })],
+        options,
+      ),
+    ).not.toContain(REPORT_STATUS_REMINDER);
   });
 });
 

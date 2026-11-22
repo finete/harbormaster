@@ -70,6 +70,19 @@ describe("buildLaunchKickoffPrompt", () => {
     );
   });
 
+  it("tells a child that report_status already notifies its parent; a task without one hears nothing of it", () => {
+    const child = buildLaunchKickoffPrompt({
+      hasRepository: true,
+      parent: { title: "Fix the thing", id: "parent-1" },
+    });
+    expect(child).toContain(
+      'It already notifies your parent, so do not also send a separate "I\'m done" message.',
+    );
+    expect(buildLaunchKickoffPrompt({ hasRepository: true })).not.toContain(
+      "notifies your parent",
+    );
+  });
+
   it("states the stacked-branch dependency when based on a parent's branch", () => {
     const text = buildLaunchKickoffPrompt({
       hasRepository: true,

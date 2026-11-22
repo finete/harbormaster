@@ -152,7 +152,11 @@ describe("tool socket", () => {
       { status: "blocked", note: "need a key" },
       { taskId: childId },
     );
-    expect(reported.text).toBe("Recorded blocked: need a key");
+    // The parent is not running yet: the outcome is recorded, the tool says
+    // the parent was not told (it never fails the report).
+    expect(reported.text).toBe(
+      "Recorded blocked: need a key\nYour parent task was not notified: Your parent task is not running; stop and ask the user instead.",
+    );
     const presence = await core.commands.getPresence(childId);
     expect(presence.record?.outcome).toMatchObject({
       status: "blocked",
@@ -212,6 +216,77 @@ describe("tool socket", () => {
     );
     expect(parentClaim.text).toContain("[Question from your child task");
     expect(parentClaim.text).not.toContain(REPORT_STATUS_REMINDER);
+
+    // With the parent running, report_status notifies it as a plain report.
+    const notified = await callTool(
+      socketPath,
+      "report_status",
+      { status: "done", note: "shipped" },
+      { taskId: childId },
+    );
+    expect(notified.text).toBe(
+      "Recorded done: shipped\nYour parent task was notified.",
+    );
+    const report = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: parentId },
+    );
+    expect(report.text).toContain("[Message from your child task");
+    expect(report.text).toContain("reported done: shipped");
+  });
+
+  it("a child's report reaches a parent that has its own parent without the report_status reminder", async () => {
+    const launch = async (
+      title: string,
+      relation: "standalone" | "child",
+      taskId?: string,
+    ) => {
+      const result = await callTool(
+        socketPath,
+        "launch_task",
+        { relation, title, prompt: "p", repository: "none" },
+        taskId ? { taskId } : {},
+      );
+      return (result.details as { task: { id: string } }).task.id;
+    };
+    const grandId = await launch("Grand", "standalone");
+    const midId = await launch("Mid", "child", grandId);
+    const leafId = await launch("Leaf", "child", midId);
+    await core.commands.reportPresence(midId, { state: "idle", pid: 5001 });
+    await core.commands.reportPresence(leafId, { state: "idle", pid: 5002 });
+
+    await callTool(
+      socketPath,
+      "report_status",
+      { status: "done", note: "leaf finished" },
+      { taskId: leafId },
+    );
+    const claimed = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: midId },
+    );
+    expect(claimed.text).toContain("reported done: leaf finished");
+    // Mid has a parent, but a report must not make it report in turn.
+    expect(claimed.text).not.toContain(REPORT_STATUS_REMINDER);
+
+    // Anything else delivered to Mid still carries the reminder.
+    await callTool(
+      socketPath,
+      "send_to_task",
+      { taskId: midId, message: "carry on", mode: "steer" },
+      { taskId: grandId },
+    );
+    const other = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: midId },
+    );
+    expect(other.text).toContain(REPORT_STATUS_REMINDER);
   });
 
   it("validates arguments with agent-readable errors", async () => {

@@ -22,13 +22,18 @@ export interface ProcessRunRequest {
   maxBuffer: number;
   /** Variables of this process's environment the child must not inherit. */
   unsetEnv?: string[];
+  /** Variables set on top of this process's environment (applied after `unsetEnv`). */
+  env?: Record<string, string>;
 }
 
-function childEnv(unset: string[] | undefined): NodeJS.ProcessEnv | undefined {
-  if (!unset?.length) return undefined;
+function childEnv(
+  unset: string[] | undefined,
+  set: Record<string, string> | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (!unset?.length && !set) return undefined;
   const env = { ...process.env };
-  for (const name of unset) delete env[name];
-  return env;
+  for (const name of unset ?? []) delete env[name];
+  return set ? { ...env, ...set } : env;
 }
 
 export interface ProcessRunResult {
@@ -53,7 +58,7 @@ export const execFileRunner: ProcessRunner = (request) =>
       request.args,
       {
         cwd: request.cwd,
-        env: childEnv(request.unsetEnv),
+        env: childEnv(request.unsetEnv, request.env),
         maxBuffer: request.maxBuffer,
         timeout: request.timeoutMs,
         // SIGKILL, not the default SIGTERM: a child wedged on a prompt or in
@@ -103,6 +108,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Variables of this process's environment the child must not inherit. */
   unsetEnv?: readonly string[];
+  /** Variables set on top of this process's environment (after `unsetEnv`). */
+  env?: Readonly<Record<string, string>>;
 }
 
 function request(
@@ -118,6 +125,7 @@ function request(
     maxBuffer: MAX_BUFFER,
     timeoutMs: options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
     ...(options?.unsetEnv?.length ? { unsetEnv: [...options.unsetEnv] } : {}),
+    ...(options?.env ? { env: { ...options.env } } : {}),
   };
 }
 

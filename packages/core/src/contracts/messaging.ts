@@ -60,6 +60,14 @@ export interface TaskMessage {
    * child "waits on parent"). Absent on older messages and reports.
    */
   expectsReply?: boolean;
+  /**
+   * `report`: an automatic status report (a child's `report_status`), not
+   * a message the agent wrote. It needs no answer, so the sender's harness
+   * need not be able to receive one, and it is delivered without the
+   * "call report_status again" reminder (a report must not make its parent
+   * report in turn, up the tree). Set only by core; absent otherwise.
+   */
+  kind?: "report";
   /** What the target harness actually used; set on delivery. */
   deliveredMode?: MessageMode;
   attachments: MessageAttachment[];
@@ -90,6 +98,8 @@ export interface SendTaskMessageInput {
   mode?: MessageMode;
   /** The sender ends its turn to wait for an answer (default false: a report or result). */
   expectsReply?: boolean;
+  /** Core-internal (never exposed as a tool argument): mark the message a status report; see `TaskMessage.kind`. */
+  kind?: "report";
   /** Absolute file paths; copied by core at send time. */
   attachments?: string[];
 }
@@ -100,6 +110,21 @@ export interface SendTaskMessageResult {
   willWake: boolean;
   /** One-line, agent-facing explanation of what happens next. */
   note: string;
+}
+
+/**
+ * What `reportTaskOutcome` did about the task's parent: a task with a
+ * parent sends it the report as a child-to-parent message. A notification
+ * that could not be sent never fails the report; `reason` says why.
+ */
+export interface ReportTaskOutcomeResult {
+  /** Set only for a task with a parent. */
+  parentNotice?: {
+    parentTaskId: string;
+    notified: boolean;
+    /** Why the parent was not notified (the send's own error). */
+    reason?: string;
+  };
 }
 
 export type TaskRunState = "running" | "your-move" | "queued" | "not-running";

@@ -93,7 +93,8 @@ movers: agents never move their own card. A kickoff contract
 in the worktree, run checks, commit + push + draft PR (repository tasks),
 ask only when genuinely blocked, and finish with
 `harbormaster_report_status`, which records an `outcome` on the still-live
-presence record (the task shows "your move", not ended). Tasks can message
+presence record (the task shows "your move", not ended) and, for a task with
+a parent, tells the parent over the normal child-to-parent route. Tasks can message
 each other: see `docs/task-messaging.md`.
 
 ## Three verbs, awaiting kinds are data
@@ -291,6 +292,29 @@ difference not listed here is a bug.
   worktrees next to registered folders, where the orphan scan (which only
   looked under `codeRoot`) never saw them. Pre-0.1.2 worktrees keep their
   recorded paths, and the orphan scan still covers the legacy folders.
+- **New task branches start from the freshest default branch.** When a
+  task's base is the repository's default branch (no explicit `baseRef`,
+  or a `baseRef` that just names the default branch; not
+  `baseBranch: "parent"`, not a PR/review checkout), core first runs
+  `git fetch origin <default>` (5 s limit, never prompts: terminal,
+  credential-manager and askpass prompts are off) and then starts from the
+  newer of local `<default>` and `origin/<default>`: origin when local is a
+  strict ancestor of it (people who land work through PRs and never pull
+  `main` would otherwise start every task on stale code), local when it is
+  equal, ahead or diverged, so unpushed commits are never skipped. No
+  `origin`, no local branch, a failed or timed-out fetch: use what exists
+  (local, else the cached `origin/<default>`); a fetch never fails a launch.
+  The fetch only updates the remote-tracking ref: the user's local
+  `<default>` and checked-out tree are never moved. It runs on every launch
+  (tasks are often launched right after a PR merges), shared between
+  launches racing in one repository. Origin wins as a commit id, so the new
+  branch tracks nothing. The base chosen and why is logged per task
+  (`[core:launch] task <id> starts from origin base {"base":"origin/main@…","baseReason":"local-behind-origin; fetch ok"}`),
+  and the fetch is a timed `worktree.resolve-base` span. Lives in
+  `GitWorktreeAccess.resolveDefaultBase` (git I/O) with the pure choice in
+  `utilities/default-base.ts`. Matches Conductor (fetch, start from
+  origin/<base>) and Claude Code's `worktree.baseRef: "fresh"`, plus the
+  unpushed-commits safeguard.
 - **`codeRoot` is the repositories folder.** It is scanned for checkouts
   (so agents can launch into repositories never opened in the app) and is
   where clone-by-URL puts new clones; a clone URL whose remote is already
