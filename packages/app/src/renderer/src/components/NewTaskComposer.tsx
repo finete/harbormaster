@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -158,6 +159,21 @@ export function NewTaskComposer({
   /** Task mode's "Attach a PR…" was used (the field shows even while empty). */
   const [attachPr, setAttachPr] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Where the caret goes once the prompt shows `text` (a slash pick or an
+   * insert). Placed right after that commit, never a frame later: a key
+   * typed in between would otherwise be put behind the stale caret.
+   */
+  const pendingCaret = useRef<{ text: string; caret: number } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    const element = promptRef.current;
+    if (!pending || !element) return;
+    pendingCaret.current = null;
+    if (element.value !== pending.text) return;
+    element.focus();
+    element.setSelectionRange(pending.caret, pending.caret);
+  });
   const cloneRef = useRef<HTMLInputElement>(null);
   const prRef = useRef<HTMLInputElement>(null);
 
@@ -370,12 +386,9 @@ export function NewTaskComposer({
   function pickSlash(entry: SlashCommand): void {
     if (!slash) return;
     const { text, caret } = applySlashCommand(draft.prompt, slash, entry);
+    pendingCaret.current = { text, caret };
     onChange({ prompt: text });
     setSlash(null);
-    requestAnimationFrame(() => {
-      promptRef.current?.focus();
-      promptRef.current?.setSelectionRange(caret, caret);
-    });
   }
 
   /** The menu's keys, ahead of the composer-wide shortcuts (⌘↵ still submits). */
@@ -513,12 +526,11 @@ export function NewTaskComposer({
     const before = value.slice(0, start);
     const pad = before && !/\s$/.test(before) ? " " : "";
     const next = `${before}${pad}${text}${value.slice(end)}`;
+    pendingCaret.current = {
+      text: next,
+      caret: start + pad.length + text.length,
+    };
     onChange({ prompt: next });
-    const caret = start + pad.length + text.length;
-    requestAnimationFrame(() => {
-      element?.focus();
-      element?.setSelectionRange(caret, caret);
-    });
   }
 
   function trackAttachment(text: string): string[] {
