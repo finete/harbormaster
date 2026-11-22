@@ -478,10 +478,11 @@ describe.skipIf(!gitAvailable)("task launch through the manager", () => {
     });
   });
 
-  it("an explicit baseRef is used as given: no fetch, no resolution line", async () => {
-    const { f, checkout, commands, logger, repositoryId } = await launched();
+  it("a baseRef that names the default branch takes the fresh path too", async () => {
+    const { f, landed, checkout, commands, logger, repositoryId } =
+      await launched();
     const task = await commands.createTask({
-      title: "Pinned base",
+      title: "Named default",
       initialPrompt: "",
       repositoryId,
       baseRef: "main",
@@ -490,9 +491,34 @@ describe.skipIf(!gitAvailable)("task launch through the manager", () => {
     const workspace = await commands.getTaskWorkspace(task.id);
     if (!workspace?.worktreePath) throw new Error("expected a worktree");
     expect(await git(["rev-parse", "HEAD"], workspace.worktreePath)).toBe(
+      landed,
+    );
+    expect(await git(["rev-parse", "refs/heads/main"], checkout)).toBe(
       f.initial,
     );
+    expect(logger.find(`task ${task.id} starts from origin base`)).toHaveLength(
+      1,
+    );
+  });
+
+  it("any other explicit baseRef is used exactly as given: no fetch, no resolution line", async () => {
+    const { f, checkout, commands, logger, repositoryId } = await launched();
+    for (const baseRef of [f.initial, "origin/main"]) {
+      const task = await commands.createTask({
+        title: `Pinned ${baseRef.slice(0, 6)}`,
+        initialPrompt: "",
+        repositoryId,
+        baseRef,
+        start: true,
+      });
+      const workspace = await commands.getTaskWorkspace(task.id);
+      if (!workspace?.worktreePath) throw new Error("expected a worktree");
+      expect(await git(["rev-parse", "HEAD"], workspace.worktreePath)).toBe(
+        f.initial,
+      );
+    }
     expect(logger.find("task ")).toEqual([]);
+    // Nothing fetched: the cached origin/main is still the old tip.
     expect(await git(["rev-parse", "refs/remotes/origin/main"], checkout)).toBe(
       f.initial,
     );

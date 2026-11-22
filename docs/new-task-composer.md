@@ -154,7 +154,8 @@ launch, starting from the newer of local `<default>` and `origin/<default>`
 so a stale local `main` never means stale code (unpushed local commits are
 kept; no network or no `origin` falls back to the local branch; see
 `docs/design-decisions.md`). Any ref can be picked from the Base chip or the
-branch line (`baseRef`) and is used exactly as given, with no fetch. A PR
+branch line (`baseRef`) and is used exactly as given, with no fetch. Picking
+the default branch itself counts as no choice: it gets the same fresh start. A PR
 task's base is the PR's.
 
 ## Paste / drop

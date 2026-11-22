@@ -293,7 +293,8 @@ difference not listed here is a bug.
   recorded paths, and the orphan scan still covers the legacy folders.
 - **New task branches start from the freshest default branch.** When a
   task's base is the repository's default branch (no explicit `baseRef`,
-  not `baseBranch: "parent"`, not a PR/review checkout), core first runs
+  or a `baseRef` that just names the default branch; not
+  `baseBranch: "parent"`, not a PR/review checkout), core first runs
   `git fetch origin <default>` (5 s limit, never prompts: terminal,
   credential-manager and askpass prompts are off) and then starts from the
   newer of local `<default>` and `origin/<default>`: origin when local is a

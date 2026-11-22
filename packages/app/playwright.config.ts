@@ -34,7 +34,8 @@ if (!process.env.HARBORMASTER_TEST_NO_GIT_NETWORK) {
   process.env[`GIT_CONFIG_KEY_${count}`] = "http.proxy";
   process.env[`GIT_CONFIG_VALUE_${count}`] = "http://127.0.0.1:9";
   process.env.GIT_CONFIG_COUNT = String(count + 1);
-  process.env.GIT_SSH_COMMAND ??= "false";
+  // Always, even when a developer exports their own: a fixture remote must never be fetched over ssh.
+  process.env.GIT_SSH_COMMAND = "false";
 }
 
 // A run started inside a Harbormaster task session (an agent running the

@@ -1162,8 +1162,8 @@ export class CoreManager implements CoreCommands {
   }
 
   /**
-   * The ref a new task branch starts from: an explicit `baseRef` as given,
-   * else the default branch's freshest start (fetched, newer of local and
+   * The ref a new task branch starts from: an explicit `baseRef` as given
+   * (unless it just names the default branch), else the default branch's freshest start (fetched, newer of local and
    * origin). The choice and why are logged against the task, so a stale or
    * fallback base shows up in the logs.
    */
@@ -1173,7 +1173,8 @@ export class CoreManager implements CoreCommands {
     branch: string,
     baseRef?: string,
   ): Promise<string> {
-    if (baseRef !== undefined) return baseRef;
+    // Naming the default branch is the same ask as not naming a base.
+    if (baseRef !== undefined && baseRef !== repo.defaultBranch) return baseRef;
     const base = await this.deps.worktrees.resolveDefaultBase(repo);
     this.log.info("launch", `task ${taskId} starts from ${base.source} base`, {
       taskId,
