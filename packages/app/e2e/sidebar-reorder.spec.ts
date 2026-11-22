@@ -285,11 +285,15 @@ test.beforeAll(async () => {
   // The whole fixture rail must fit without scrolling: a drop target at the
   // list's bottom edge would trigger dnd-kit's edge auto-scroll mid-drag and
   // move the rows out from under the pointer, confounding every drop.
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setSize(1280, 1000);
-  });
+  // Re-applied while waiting: a size set before the window first shows can
+  // be reset when it does (seen on CI: still 772 px tall).
   await expect
-    .poll(() => window.evaluate(() => innerHeight))
+    .poll(async () => {
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]?.setSize(1280, 1000);
+      });
+      return window.evaluate(() => innerHeight);
+    })
     .toBeGreaterThan(900);
 
   const alphaId = `github.com/test/${ALPHA}`;
