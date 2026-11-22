@@ -99,10 +99,17 @@ describe("probeLoopbackUrl", () => {
 
 describe("closing a live review (decision 9)", () => {
   it("counts the draft's unsent comments and posts /api/exit with no Origin", async () => {
-    let draft: unknown = { found: false };
+    // Plannotator 0.29+ answers a missing draft with 204 and no body;
+    // 0.28.x with 200 {"found": false}. Both mean zero unsent comments.
+    let draft: unknown = null;
     const exits: (string | undefined)[] = [];
     const server = createServer((req, res) => {
       if (req.url === "/api/draft") {
+        if (draft === null) {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(draft));
         return;
@@ -121,6 +128,8 @@ describe("closing a live review (decision 9)", () => {
     );
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     try {
+      expect(await countUnsentReviewComments(url)).toBe(0);
+      draft = { found: false };
       expect(await countUnsentReviewComments(url)).toBe(0);
       draft = {
         annotations: [{ id: "a" }],
