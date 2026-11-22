@@ -20,6 +20,24 @@ process.env.HARBORMASTER_SKIP_ONBOARDING ??= "1";
 // app never sets it.
 process.env.HARBORMASTER_E2E_FAKE_CLIPBOARD ??= "1";
 
+// Task launches fetch `origin` (core's `resolveDefaultBase`). Fixture repos
+// carry made-up remotes (`https://github.com/test/fixture.git`,
+// `git@github.com:acme/...`) that must never reach the network: point git's
+// HTTP proxy at a closed port and its ssh at `false`, so such a fetch fails
+// at once and the launch falls back to the local branch, the same path a
+// repository without a reachable origin takes. Local-path remotes
+// (`file://`, bare repos on disk) are unaffected.
+// Idempotent: setup files and configs load once per test file / worker.
+if (!process.env.HARBORMASTER_TEST_NO_GIT_NETWORK) {
+  process.env.HARBORMASTER_TEST_NO_GIT_NETWORK = "1";
+  const count = Number.parseInt(process.env.GIT_CONFIG_COUNT ?? "0", 10) || 0;
+  process.env[`GIT_CONFIG_KEY_${count}`] = "http.proxy";
+  process.env[`GIT_CONFIG_VALUE_${count}`] = "http://127.0.0.1:9";
+  process.env.GIT_CONFIG_COUNT = String(count + 1);
+  // Always, even when a developer exports their own: a fixture remote must never be fetched over ssh.
+  process.env.GIT_SSH_COMMAND = "false";
+}
+
 // A run started inside a Harbormaster task session (an agent running the
 // suite) inherits that session's identity markers (core's
 // harness/adapter-common.ts `baseLaunchEnv`). Specs spread `process.env`

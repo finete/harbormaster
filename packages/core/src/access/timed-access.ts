@@ -8,6 +8,7 @@
 import type { PullRequestAccess } from "../contracts/github.js";
 import type { CoreLogger } from "../contracts/logger.js";
 import type {
+  DefaultBaseResolution,
   GitWorktreeAccess,
   RepositoryInfo,
   WorktreeInfo,
@@ -30,6 +31,15 @@ export function timedWorktreeAccess(
       }),
       result: (worktree: WorktreeInfo | undefined) => ({
         worktreePath: worktree?.path,
+      }),
+    },
+    resolveDefaultBase: {
+      scope: "git",
+      op: "worktree.resolve-base",
+      fields: (repo: RepositoryInfo) => ({ repositoryId: repoId(repo) }),
+      result: (base: DefaultBaseResolution | undefined) => ({
+        base: base?.ref,
+        baseReason: base?.reason,
       }),
     },
     checkoutPullRequest: {

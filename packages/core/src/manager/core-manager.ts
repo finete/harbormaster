@@ -153,6 +153,7 @@ import type {
   TaskUsageRow,
 } from "../contracts/usage.js";
 import {
+  type DefaultBaseResolution,
   DirtyWorktreeError,
   type GitRepositoryAccess,
   type GitWorktreeAccess,
@@ -400,6 +401,16 @@ const REFRESH_CONCURRENCY = 4;
 type PrefetchedPullRequest =
   | { status: PullRequestStatus | undefined }
   | { batchFailed: true };
+
+/** `origin/main@abc123def456` / `main@abc123def456` (a commit-less fallback is just the ref). */
+function describeBase(
+  defaultBranch: string,
+  base: DefaultBaseResolution,
+): string {
+  const name =
+    base.source === "origin" ? `origin/${defaultBranch}` : defaultBranch;
+  return base.commit ? `${name}@${base.commit.slice(0, 12)}` : name;
+}
 
 export class CoreManager implements CoreCommands {
   /** The running `refresh()`, joined by any call made while it runs. */
@@ -967,7 +978,7 @@ export class CoreManager implements CoreCommands {
           persist: () => this.deps.tasks.createTask(task),
           undo: () => this.deps.tasks.removeTask(id),
         },
-        baseRef ?? repo.defaultBranch,
+        baseRef,
         pr?.number,
         pr?.role,
       );
@@ -1074,7 +1085,7 @@ export class CoreManager implements CoreCommands {
         persist: () => this.deps.tasks.replaceTask(next),
         undo: () => this.deps.tasks.replaceTask(task),
       },
-      task.baseRef ?? repo.defaultBranch,
+      task.baseRef,
       // A PR-bound task (created with `pullRequest`) checks its PR head out.
       task.pr && task.branch ? task.pr.number : undefined,
     );
@@ -1152,14 +1163,43 @@ export class CoreManager implements CoreCommands {
     );
   }
 
+  /**
+   * The ref a new task branch starts from: an explicit `baseRef` as given
+   * (unless it just names the default branch), else the default branch's freshest start (fetched, newer of local and
+   * origin). The choice and why are logged against the task, so a stale or
+   * fallback base shows up in the logs.
+   */
+  private async startRef(
+    repo: RepositoryInfo,
+    taskId: string,
+    branch: string,
+    baseRef?: string,
+  ): Promise<string> {
+    // Naming the default branch is the same ask as not naming a base.
+    if (baseRef !== undefined && baseRef !== repo.defaultBranch) return baseRef;
+    const base = await this.deps.worktrees.resolveDefaultBase(repo);
+    this.log.info("launch", `task ${taskId} starts from ${base.source} base`, {
+      taskId,
+      repositoryId: repo.id,
+      branch,
+      base: describeBase(repo.defaultBranch, base),
+      baseReason: base.reason,
+    });
+    return base.ref;
+  }
+
   private async provisionTaskWorkspaceSteps(
     repo: RepositoryInfo,
     taskId: string,
     branch: string,
     now: string,
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
-    /** Branch the worktree off this ref instead of the repository's default branch (`launchTask`'s `baseBranch: "parent"`). */
-    baseRef: string = repo.defaultBranch,
+    /**
+     * Branch the worktree off this ref (an explicit `baseRef`, or `launchTask`'s
+     * `baseBranch: "parent"`). Absent: the repository's default branch, started
+     * from the newer of local and `origin/<default>` (`startRef`).
+     */
+    baseRef?: string,
     /** Check out this pull request's head as `branch` instead (PR-bound tasks). */
     pullRequestNumber?: number,
     /** A reviewer's PR checkout: the head on a detached HEAD, the branch untouched (`checkoutPullRequest`'s `detached`). */
@@ -1188,7 +1228,7 @@ export class CoreManager implements CoreCommands {
       worktree = await this.deps.worktrees.createTaskWorktree(
         repo,
         branch,
-        baseRef,
+        await this.startRef(repo, taskId, branch, baseRef),
       );
     }
     // Undo both halves of `git worktree add -b`: the directory and the
@@ -1730,7 +1770,7 @@ export class CoreManager implements CoreCommands {
     const worktree = await this.deps.worktrees.createTaskWorktree(
       repo,
       branch,
-      repo.defaultBranch,
+      await this.startRef(repo, taskId, branch),
     );
     const discardWorktree = () =>
       this.discardTaskWorktree(repo, worktree.path, branch);
@@ -2358,7 +2398,7 @@ export class CoreManager implements CoreCommands {
           persist: () => this.deps.tasks.createTask(next),
           undo: () => this.deps.tasks.removeTask(id),
         },
-        baseRef ?? repo.defaultBranch,
+        baseRef,
         bound?.pr.number,
         bound?.pr.role,
       );

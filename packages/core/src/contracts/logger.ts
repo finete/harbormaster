@@ -33,6 +33,7 @@ export type CoreOperation =
   | "branch.push"
   | "pr.ensure-open"
   | "pr.squash-merge"
+  | "worktree.resolve-base"
   | "task.provision-worktree"
   | "task.provision-scratch"
   | "task.provision-in-place"
@@ -63,6 +64,10 @@ export interface CoreLogFields {
   /** A repository's display label (`repositoryLabel`). */
   repository?: string | undefined;
   branch?: string | undefined;
+  /** The ref a new task worktree branched from (`origin/main`, `main`, or a commit). */
+  base?: string | undefined;
+  /** Why that base was chosen (e.g. `local-behind-origin; fetch ok`). */
+  baseReason?: string | undefined;
   worktreePath?: string | undefined;
   /** Wall time of a timed operation, in milliseconds. */
   ms?: number | undefined;

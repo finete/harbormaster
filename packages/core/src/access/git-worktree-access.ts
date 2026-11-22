@@ -16,13 +16,24 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  type DefaultBaseResolution,
   DirtyWorktreeError,
   type GitWorktreeAccess,
   type RepositoryInfo,
   type WorktreeInfo,
 } from "../contracts/workspace.js";
+import {
+  chooseDefaultBase,
+  type DefaultBaseFetch,
+  type DefaultBaseRelation,
+} from "../utilities/default-base.js";
 import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
-import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
+import {
+  LONG_RUN_TIMEOUT_MS,
+  run,
+  runOutcome,
+  tryRun,
+} from "../utilities/run.js";
 
 /**
  * Legacy (pre-0.1.2) task worktrees directory: a sibling of the repository
@@ -32,10 +43,33 @@ import { LONG_RUN_TIMEOUT_MS, run, tryRun } from "../utilities/run.js";
  */
 export const TASK_WORKTREES_DIRNAME = ".harbormaster-worktrees";
 
+/** How long a launch waits for `git fetch origin <default>` before using what it has. */
+export const DEFAULT_BASE_FETCH_TIMEOUT_MS = 5_000;
+
+/**
+ * Environment that makes a background fetch fail instead of asking: no
+ * terminal prompt, no credential-manager UI, no askpass dialog.
+ */
+const NON_INTERACTIVE_GIT_ENV: Readonly<Record<string, string>> = {
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "never",
+  GIT_ASKPASS: "true",
+  SSH_ASKPASS_REQUIRE: "never",
+};
+
 /** `git`-shelling-out implementation of {@link GitWorktreeAccess}. */
 export class LocalGitWorktreeAccess implements GitWorktreeAccess {
-  /** @param worktreesRoot Root for task worktrees (`StatePaths.worktreesDir`). */
-  constructor(private readonly worktreesRoot: string) {}
+  /** Fetches in flight, by primary checkout: launches racing in one repository share one fetch (concurrent fetches fight over the same ref lock). */
+  private readonly fetches = new Map<string, Promise<DefaultBaseFetch>>();
+
+  /**
+   * @param worktreesRoot Root for task worktrees (`StatePaths.worktreesDir`).
+   * @param fetchTimeoutMs Limit for the default-branch fetch (a test shortens it).
+   */
+  constructor(
+    private readonly worktreesRoot: string,
+    private readonly fetchTimeoutMs: number = DEFAULT_BASE_FETCH_TIMEOUT_MS,
+  ) {}
 
   private taskWorktreePath(repo: RepositoryInfo, branch: string): string {
     return join(
@@ -51,6 +85,135 @@ export class LocalGitWorktreeAccess implements GitWorktreeAccess {
       repo.root,
     );
     return parsePorcelain(raw);
+  }
+
+  async resolveDefaultBase(
+    repo: RepositoryInfo,
+  ): Promise<DefaultBaseResolution> {
+    const branch = repo.defaultBranch;
+    const fetch = await this.fetchDefaultBranch(repo.root, branch);
+    const [localSha, originSha] = await Promise.all([
+      this.commitOf(repo.root, `refs/heads/${branch}`),
+      this.commitOf(repo.root, `refs/remotes/origin/${branch}`),
+    ]);
+    const relation =
+      fetch === "ok" && localSha && originSha
+        ? await this.relation(repo.root, localSha, originSha)
+        : undefined;
+    const choice = chooseDefaultBase({ fetch, localSha, originSha, relation });
+    if (choice.source === "origin" && originSha) {
+      return {
+        ref: originSha,
+        source: "origin",
+        commit: originSha,
+        reason: choice.reason,
+      };
+    }
+    if (choice.source === "local" && localSha) {
+      return {
+        ref: branch,
+        source: "local",
+        commit: localSha,
+        reason: choice.reason,
+      };
+    }
+    return { ref: branch, source: "none", reason: choice.reason };
+  }
+
+  /**
+   * `git fetch origin <branch>`: updates only `refs/remotes/origin/<branch>`
+   * (never a local branch, never a working tree), bounded in time, never
+   * prompting. Never throws; the outcome says what happened.
+   */
+  private fetchDefaultBranch(
+    root: string,
+    branch: string,
+  ): Promise<DefaultBaseFetch> {
+    const inFlight = this.fetches.get(root);
+    if (inFlight) return inFlight;
+    const fetch = this.runFetch(root, branch).finally(() => {
+      this.fetches.delete(root);
+    });
+    this.fetches.set(root, fetch);
+    return fetch;
+  }
+
+  private async runFetch(
+    root: string,
+    branch: string,
+  ): Promise<DefaultBaseFetch> {
+    const origin = await tryRun("git", ["remote", "get-url", "origin"], root);
+    if (!origin) return "no-origin";
+    const outcome = await runOutcome(
+      "git",
+      [
+        // A slow HTTP server that never answers would leave git's remote
+        // helper alive after the timeout kills git; let it give up itself.
+        "-c",
+        "http.lowSpeedLimit=1",
+        "-c",
+        `http.lowSpeedTime=${Math.max(1, Math.floor(this.fetchTimeoutMs / 1000) - 1)}`,
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "maintenance.auto=false",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "origin",
+        `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      ],
+      {
+        cwd: root,
+        timeoutMs: this.fetchTimeoutMs,
+        env: NON_INTERACTIVE_GIT_ENV,
+      },
+    );
+    if (outcome.ok) return "ok";
+    return outcome.timedOut ? "timed-out" : "failed";
+  }
+
+  private async commitOf(
+    root: string,
+    ref: string,
+  ): Promise<string | undefined> {
+    const sha = await tryRun(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      root,
+    );
+    return sha || undefined;
+  }
+
+  /** How `local` relates to `origin` (both commit ids); `undefined` when git cannot say. */
+  private async relation(
+    root: string,
+    local: string,
+    origin: string,
+  ): Promise<DefaultBaseRelation | undefined> {
+    if (local === origin) return "equal";
+    const behind = await this.isAncestor(root, local, origin);
+    if (behind === undefined) return undefined;
+    if (behind) return "behind";
+    const ahead = await this.isAncestor(root, origin, local);
+    if (ahead === undefined) return undefined;
+    return ahead ? "ahead" : "diverged";
+  }
+
+  /** `git merge-base --is-ancestor`: exit 0 yes, 1 no, anything else (an error) `undefined`. */
+  private async isAncestor(
+    root: string,
+    ancestor: string,
+    descendant: string,
+  ): Promise<boolean | undefined> {
+    const outcome = await runOutcome(
+      "git",
+      ["merge-base", "--is-ancestor", ancestor, descendant],
+      { cwd: root },
+    );
+    if (outcome.ok) return true;
+    return outcome.exitCode === 1 ? false : undefined;
   }
 
   async createTaskWorktree(
