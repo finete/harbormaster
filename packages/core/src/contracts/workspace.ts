@@ -94,6 +94,17 @@ export interface GitRepositoryAccess {
   listBranches(repo: RepositoryInfo): Promise<string[]>;
 }
 
+/** Where a new task branch starts when its base is the default branch (see `GitWorktreeAccess.resolveDefaultBase`). */
+export interface DefaultBaseResolution {
+  /** What to pass as `createTaskWorktree`'s `baseRef`: a commit id when origin won (so the new branch tracks nothing), else the local branch name. */
+  ref: string;
+  source: "origin" | "local" | "none";
+  /** The commit `ref` names, when known. */
+  commit?: string;
+  /** Short log-ready explanation (`local-behind-origin; fetch ok`, `fetch timed out; using local`, ...). */
+  reason: string;
+}
+
 /**
  * Resource Access: worktree lifecycle for task execution. Task worktrees
  * live under `<stateDir>/worktrees/<repo-folder>/<branch-slug>`: one
@@ -105,6 +116,17 @@ export interface GitRepositoryAccess {
  */
 export interface GitWorktreeAccess {
   listWorktrees(repo: RepositoryInfo): Promise<WorktreeInfo[]>;
+  /**
+   * The ref a task worktree should branch from when its base is the
+   * repository's default branch (no explicit `baseRef`). Fetches
+   * `<default>` from `origin` first (short timeout, never prompts), then
+   * picks the newer of local `<default>` and `origin/<default>`: origin when
+   * local is strictly behind it, else local, so unpushed commits are never
+   * skipped. Never throws because of the network, and never moves the user's
+   * local `<default>` branch or touches a working tree (only remote-tracking
+   * refs are updated). Pass `ref` to {@link createTaskWorktree}.
+   */
+  resolveDefaultBase(repo: RepositoryInfo): Promise<DefaultBaseResolution>;
   /**
    * Create a branched worktree for task execution under the worktrees root
    * (`<root>/<repo-folder>/<branch-slug>`), branching `branch` off `baseRef`.
