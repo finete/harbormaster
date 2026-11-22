@@ -132,8 +132,13 @@ test("Clear menu item clears the terminal viewport", async () => {
   // Click "Clear".
   await window.getByTestId("terminal-context-menu-item-clear").click();
 
-  // The marker should be gone from the viewport (toContainText polls internally).
-  await expect(panel).not.toContainText("before-clear-6");
+  // The marker should be gone from the viewport (toContainText polls
+  // internally). The viewport's rows only: the panel also holds xterm's
+  // screen-reader live region, an announcement log of recent output that
+  // only a keypress or blur empties (CI: it still held the marker).
+  await expect(panel.locator(".xterm-rows")).not.toContainText(
+    "before-clear-6",
+  );
 });
 
 test("Paste menu item inserts clipboard text into the pty", async () => {
