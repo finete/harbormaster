@@ -421,6 +421,11 @@ export class CoreManager implements CoreCommands {
   private readonly cleanupWarnings = new Map<string, string>();
   /** Tasks whose forced Done cleanup is running right now (toDone vs the sweep vs Retry). */
   private readonly cleanupsInFlight = new Set<string>();
+  /** The running `reopenTask` per task, joined by any reopen of it made while it runs. */
+  private readonly reopensInFlight = new Map<
+    string,
+    Promise<{ task: Task; warning?: string }>
+  >();
   /** Registered folders resolved to repositories (see `locationEntries`). */
   private locationCache:
     | { at: number; entries: Array<{ path: string; repo?: RepositoryInfo }> }
@@ -1680,7 +1685,23 @@ export class CoreManager implements CoreCommands {
     return true;
   }
 
-  async reopenTask(
+  reopenTask(
+    taskId: string,
+    input?: ReopenTaskInput,
+  ): Promise<{ task: Task; warning?: string }> {
+    // A second reopen (a repeated drop, Resume plus the header's Reopen)
+    // would pass the Done check while the first still creates its worktree,
+    // then overwrite its binding and orphan that worktree + branch.
+    const running = this.reopensInFlight.get(taskId);
+    if (running) return running;
+    const run = this.runReopenTask(taskId, input).finally(() => {
+      this.reopensInFlight.delete(taskId);
+    });
+    this.reopensInFlight.set(taskId, run);
+    return run;
+  }
+
+  private async runReopenTask(
     taskId: string,
     input?: ReopenTaskInput,
   ): Promise<{ task: Task; warning?: string }> {

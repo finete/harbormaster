@@ -583,6 +583,29 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     });
   });
 
+  it("joins a reopen already running: one new branch + worktree, never an orphan", async () => {
+    const f = await fixture();
+    const { done } = await doneTaskWithSession(f);
+    const branchesBefore = await branches(f.checkout);
+
+    const [first, second] = await Promise.all([
+      f.manager.reopenTask(done.id),
+      f.manager.reopenTask(done.id, { objective: "ignored" }),
+    ]);
+    expect(await branches(f.checkout)).toHaveLength(branchesBefore.length + 1);
+    expect(
+      (await git(["worktree", "list", "--porcelain"], f.checkout)).match(
+        /^worktree /gm,
+      ),
+    ).toHaveLength(2);
+    expect(second).toBe(first);
+    expect((await f.manager.getTaskWorkspace(done.id))?.branch).toBe(
+      first.task.branch,
+    );
+    // Once it landed, the task is no longer Done: a later reopen refuses.
+    await expect(f.manager.reopenTask(done.id)).rejects.toThrow(/done task/);
+  });
+
   it("with no objective, never replays the old prompt", async () => {
     const f = await fixture();
     const { done } = await doneTaskWithSession(f);

@@ -15,11 +15,14 @@ import { TaskWorkspace } from "./TaskWorkspace";
  */
 export function WorkspaceView({
   focusedTaskId,
+  visible = true,
   openedTaskIds,
   onCloseTask,
   composer = null,
 }: {
   focusedTaskId: string;
+  /** The workspace view is on screen with no dialog over it (focus may move into the focused task's workspace). */
+  visible?: boolean;
   openedTaskIds: ReadonlySet<string>;
   onCloseTask: (taskId: string) => void;
   /**
@@ -65,7 +68,11 @@ export function WorkspaceView({
           className="absolute inset-0 h-full w-full"
           style={{ display: taskId === focusedTaskId ? "block" : "none" }}
         >
-          <TaskWorkspace taskId={taskId} onCloseTask={onCloseTask} />
+          <TaskWorkspace
+            taskId={taskId}
+            active={visible && taskId === focusedTaskId}
+            onCloseTask={onCloseTask}
+          />
         </div>
       ))}
       {composer && <div className="absolute inset-0 z-10 flex">{composer}</div>}

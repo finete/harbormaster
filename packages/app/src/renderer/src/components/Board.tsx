@@ -286,9 +286,11 @@ export function Board({
       return;
     }
 
-    // Done -> Working is the Reopen verb (without its objective question):
-    // Done cleanup removed the worktree, so a bare column move would leave
-    // a Working task with nowhere to run and no conversation to resume.
+    // Done -> Working is the Reopen verb (without its objective question): a
+    // Done task has no worktree (cleanup removed it, or it went Done straight
+    // from Backlog), so a bare column move would leave a Working task with
+    // nowhere to run and no conversation to resume. Core joins a reopen
+    // already in flight, so a repeated drop never starts a second cycle.
     if (row.state === "done" && targetState === "working") {
       void reopenTaskMutation(taskId, "");
       return;

@@ -4,9 +4,11 @@
 // first launch pre-assigns a session id, reopening the task resumes that
 // same id (or the exact session file once the extension recorded it), and
 // reopening a Done task restores a workspace directory and forks the
-// previous conversation into the new cycle. Real git fixture repo; the
-// extension's `recordTaskSession` call is made from the test process
-// through core's command API (exactly the extension's write path).
+// previous conversation into the new cycle. A Done or archived task's
+// workspace runs nothing until resumed (its Resume empty state, Enter), and
+// a Done card dropped on Working reopens it the same way. Real git fixture
+// repo; the extension's `recordTaskSession` call is made from the test
+// process through core's command API (exactly the extension's write path).
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -296,7 +298,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   expect(bindingFor(taskId)?.sessionPath).toBe(sessionFile);
 
   // Opening the Done task (no worktree left) runs nothing: no stray plain
-  // shell, the Resume card instead. The header's Reopen asks for an
+  // shell, the Resume empty state instead. The header's Reopen asks for an
   // objective first.
   await openTask("Continuity");
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
@@ -352,7 +354,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
   expect(launches()[4]).toEqual(["--session-id", newSessionId]);
 });
 
-test("an archived task resumes from its Resume card; a Done card dropped on Working resumes too", async () => {
+test("an archived task resumes from its workspace's Resume button; a Done card dropped on Working resumes too", async () => {
   // Cycle 2's conversation, recorded as the extension would.
   const cycleTwo = bindingFor(taskId);
   const cycleTwoFile = await recordSession(cycleTwo?.sessionId ?? "");
@@ -368,8 +370,9 @@ test("an archived task resumes from its Resume card; a Done card dropped on Work
   await expect(card).toHaveCount(0);
   await expect.poll(() => existsSync(cycleTwo?.worktreePath ?? "")).toBe(false);
 
-  // Its card (behind "show archived") opens the Resume card, already
-  // focused: Enter resumes it.
+  // Its card (behind "show archived") opens the Resume empty state with
+  // Resume focused, and again on coming back to the (still mounted, hidden
+  // meanwhile) workspace: Enter resumes it.
   await window
     .getByTestId("column-done")
     .getByTestId("toggle-archived-button")
@@ -377,11 +380,14 @@ test("an archived task resumes from its Resume card; a Done card dropped on Work
   await openTask("Continuity");
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
   const resumeCard = workspace.getByTestId(`resume-task-${taskId}`);
+  const resumeButton = workspace.getByTestId(`resume-task-button-${taskId}`);
   await expect(resumeCard).toContainText("This task is archived");
   await expect(workspace.getByTestId("terminal-panel")).toHaveCount(0);
-  await expect(
-    workspace.getByTestId(`resume-task-button-${taskId}`),
-  ).toBeFocused();
+  await expect(resumeButton).toBeFocused();
+  await window.getByTestId("board-button").click();
+  await expect(resumeButton).not.toBeFocused();
+  await openTask("Continuity");
+  await expect(resumeButton).toBeFocused();
   await window.keyboard.press("Enter");
 
   // Back in Working in a fresh worktree; the first pane forks cycle 2's

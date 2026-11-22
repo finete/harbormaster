@@ -1,22 +1,37 @@
 import { Loader2, RotateCcw } from "lucide-react";
 import type { JSX } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Task } from "../../../preload/api";
 import { reopenTaskMutation } from "../lib/task-mutations";
 import { Button } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
 /**
- * What a Done (or archived) task's workspace shows instead of a pane while
- * it has nothing to run in: Done cleanup removed its worktree (a folder or
- * scratch task's binding is parked), so there is no agent to attach to.
- * Resume is the header's Reopen without the objective question: back to
- * Working in a fresh worktree (or its folder / scratch directory), and the
- * workspace's first pane picks the previous conversation back up. Opening a
- * Done task never changes its state by itself.
+ * The workspace's empty state for a Done (or archived) task with nothing to
+ * run in: Done cleanup removed its worktree (a folder or scratch task's
+ * binding is parked), or it went Done straight from Backlog and never had
+ * one, so there is no agent to attach to. Resume is the header's Reopen
+ * without the objective question: back to Working in a fresh worktree (or
+ * its folder / scratch directory), and the workspace's first pane picks the
+ * previous conversation back up. Opening a Done task never changes its
+ * state by itself.
  */
-export function ResumeTaskCard({ task }: { task: Task }): JSX.Element {
+export function ResumeEmptyState({
+  task,
+  active,
+}: {
+  task: Task;
+  /** The workspace is on screen: Resume takes focus, so Enter resumes. */
+  active: boolean;
+}): JSX.Element {
   const [busy, setBusy] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Every time the workspace comes on screen (a click or Enter on the
+  // board, a rail row, switching back), not only on mount: hidden
+  // workspaces stay mounted.
+  useEffect(() => {
+    if (active) buttonRef.current?.focus();
+  }, [active]);
   // The reopen landed (the task left Done) and the workspace is waiting on
   // the new cycle's worktree before it starts the agent.
   const starting = task.state !== "done";
@@ -49,9 +64,7 @@ export function ResumeTaskCard({ task }: { task: Task }): JSX.Element {
         up where it left off.
       </p>
       <Button
-        // The first open (a click or Enter on the board) lands here, so a
-        // second Enter resumes it.
-        autoFocus
+        ref={buttonRef}
         disabled={busy || starting}
         onClick={() => void resume()}
         data-testid={`resume-task-button-${task.id}`}
@@ -62,7 +75,7 @@ export function ResumeTaskCard({ task }: { task: Task }): JSX.Element {
           <RotateCcw />
         )}
         {starting ? "Starting…" : "Resume"}
-        {!starting && <Kbd>⏎</Kbd>}
+        {!starting && <Kbd>↵</Kbd>}
       </Button>
     </div>
   );

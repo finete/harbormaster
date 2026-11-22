@@ -21,6 +21,7 @@ import {
 } from "../lib/task-urls";
 import { defaultTerminalTitle } from "../lib/terminal-title";
 import { cn } from "../lib/utils";
+import { firstPane } from "../lib/workspace-first-pane";
 import {
   readWorkspaceLayout,
   storeWorkspaceLayout,
@@ -28,7 +29,7 @@ import {
 } from "../lib/workspace-persistence";
 import { makeGroupHeaderActions } from "./GroupHeaderActions";
 import { OpenInButton } from "./OpenInButton";
-import { ResumeTaskCard } from "./ResumeTaskCard";
+import { ResumeEmptyState } from "./ResumeEmptyState";
 import { SidebarRevealButton } from "./SidebarReveal";
 import { TaskActions } from "./TaskActions";
 import { TaskAudit } from "./TaskAudit";
@@ -60,15 +61,20 @@ const VOID_CLICK_DRAG_THRESHOLD_PX = 4;
 
 /**
  * One task's terminal workspace: a dedicated dockview instance, started with
- * a single terminal panel. `WorkspaceView` mounts exactly one of these per
- * task (lazily, on first focus) and keeps it alive — hidden, not unmounted —
- * so ptys and dockview layout survive switching between tasks/views.
+ * a single terminal panel, or, for a Done task with nothing to run in, the
+ * Resume empty state until it is resumed (lib/workspace-first-pane).
+ * `WorkspaceView` mounts exactly one of these per task (lazily, on first
+ * focus) and keeps it alive — hidden, not unmounted — so ptys and dockview
+ * layout survive switching between tasks/views.
  */
 export const TaskWorkspace = memo(function TaskWorkspace({
   taskId,
+  active = false,
   onCloseTask,
 }: {
   taskId: string;
+  /** On screen: the focused task of the visible workspace view, no dialog over it. */
+  active?: boolean;
   /**
    * Close a task's workspace: unmounts every pane, ending their
    * ptys. Takes the task id (not a pre-bound closure) so callers can pass one
@@ -89,7 +95,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
   const piPanelCwdRef = useRef<string | undefined>(undefined);
   // Resolved per task state: the worktree path the task's terminals spawn
   // into (undefined without a live binding, falling back to the app's own
-  // cwd — see TerminalPane/ptySessions.ts). `cwdLoaded` (below)
+  // cwd — see TerminalPane/ptySessions.ts). `cwdReadFor` (below)
   // distinguishes "still loading" from "loaded, no binding" so the initial
   // panel never spawns early with the wrong cwd.
   const [cwd, setCwd] = useState<string | undefined>(undefined);
@@ -133,24 +139,14 @@ export const TaskWorkspace = memo(function TaskWorkspace({
       cancelled = true;
     };
   }, [taskId, taskState]);
-  const cwdLoaded = cwdReadFor !== null;
-  // Also waits for the task to be on the board: a workspace restored at
-  // launch can read its binding before the board store fills, and a Done
-  // task read as "no state" would get a plain shell instead of its card.
-  const cwdFresh =
-    cwdLoaded && taskState !== undefined && cwdReadFor === taskState;
-  // A Done task with nothing to run in (its worktree cleaned up) gets the
-  // Resume card instead of a first pane, and keeps it until the resumed
-  // cycle's worktree arrives. Decided before the first pane only: panes a
-  // task already has stay when it goes Done.
-  const awaitingResume =
-    !bootstrapped && cwdLoaded && !cwd && (taskState === "done" || !cwdFresh);
+  // Decided before the first pane only: panes a task already has stay when
+  // it goes Done.
+  const first = firstPane({ taskState, readFor: cwdReadFor, cwd });
 
   useEffect(() => {
-    if (!api || !cwdFresh) return;
+    if (!api) return;
     if (!initialPanelCreatedRef.current) {
-      // Nothing to run yet: the Resume card shows instead (see above).
-      if (!cwd && taskState === "done") return;
+      if (first !== "create") return;
       initialPanelCreatedRef.current = true;
       piPanelCwdRef.current = cwd;
       // Restore (task A): a saved layout replaces the single default panel
@@ -200,7 +196,7 @@ export const TaskWorkspace = memo(function TaskWorkspace({
         params: { cwd, taskId, primary: true },
       });
     }
-  }, [api, cwdFresh, cwd, taskId, taskState]);
+  }, [api, first, cwd, taskId]);
 
   // Live layout persistence (task A item 3): every panel add/remove/move
   // (splits, tab drags, closes) re-saves this task's full dockview layout,
@@ -209,8 +205,8 @@ export const TaskWorkspace = memo(function TaskWorkspace({
   // must stay current at all times. Dropped on workspace close by App.tsx's
   // `closeTask` (see lib/workspace-persistence), so a closed task never
   // resurrects a stale layout on a later reopen. Nothing is saved before the
-  // initial layout is in place: the empty dockview behind a Resume card
-  // must never overwrite a saved layout the resumed task restores.
+  // initial layout is in place: the empty dockview behind the Resume empty
+  // state must never overwrite a saved layout the resumed task restores.
   useEffect(() => {
     if (!api) return;
     const disposable = api.onDidLayoutChange(() => {
@@ -424,9 +420,9 @@ export const TaskWorkspace = memo(function TaskWorkspace({
         />
         {/* Over the (still empty) dockview, which stays mounted so its api
             is ready for the first pane the moment the task resumes. */}
-        {awaitingResume && task && (
+        {!bootstrapped && first === "resume" && task && (
           <div className="absolute inset-0 z-10">
-            <ResumeTaskCard task={task} />
+            <ResumeEmptyState task={task} active={active} />
           </div>
         )}
       </div>

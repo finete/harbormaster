@@ -282,15 +282,19 @@ difference not listed here is a bug.
   nothing in its worktree; its Done cleanup already ran or keeps retrying.
   Reopen (or any move out of Done) clears the flag.
 - **Every Done task is resumable; opening one never resumes it by
-  itself.** Done cleanup leaves nothing to run in, so a Done or archived
-  task's workspace (a card or rail row click) shows a Resume card instead
-  of a pane: no stray plain shell in the app's cwd. Resume (focused, so
-  Enter) is Reopen without the objective question: back to Working in a
+  itself.** A Done task has nothing to run in (cleanup removed its
+  worktree, or it went Done straight from Backlog), so a Done or archived
+  task's workspace (a card or rail row click) shows an empty state with a
+  Resume button instead of a pane: no stray plain shell in the app's cwd.
+  Resume (focused whenever the workspace comes on screen, so Enter) is
+  Reopen without the objective question: back to Working in a
   fresh branch + worktree (a folder task in its folder, a scratch task in
   its scratch directory, which Done only parked) and the workspace's first
   pane forks or resumes the previous conversation. A Done card dropped on
   Working is the same reopen, as Backlog → Working is Start; a bare move
-  would leave a Working task with no worktree. A Done task whose cleanup
+  would leave a Working task with no worktree. A reopen of a task already
+  being reopened joins that one, so a repeated drop (or Resume plus the
+  header's Reopen) never starts a second cycle. A Done task whose cleanup
   left its worktree in place still opens its agent there.
 - **Working → Backlog keeps the worktree.** No parking modes: a task moved back
   to Backlog keeps its branch, worktree, and session as-is.
