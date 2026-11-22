@@ -13,7 +13,13 @@ import type {
   VersionAccess,
 } from "../src/contracts/github.js";
 import type { Clock } from "../src/contracts/services.js";
-import { type Core, createCore, SessionPresenceAccess } from "../src/index.js";
+import {
+  type Core,
+  createCore,
+  REPORT_STATUS_REMINDER,
+  SessionPresenceAccess,
+} from "../src/index.js";
+import { buildInboxMessageText } from "../src/tools/inbox-format.js";
 
 class TestClock implements Clock {
   private ms = Date.parse("2026-01-01T00:00:00.000Z");
@@ -225,6 +231,66 @@ describe("report_status tells the parent", () => {
     expect(result).toEqual({});
     expect(await outcomeOf(solo)).toMatchObject({ status: "done" });
     expect(await c().listMessages()).toEqual([]);
+  });
+
+  it("a child whose agent cannot receive replies still reports (a report needs none), but still cannot ask a question", async () => {
+    await boot({
+      agents: { custom: [{ id: "any", label: "Any CLI", command: "x" }] },
+    });
+    const p = (
+      await c().createTask({ title: "Parent", initialPrompt: "", start: true })
+    ).id;
+    const k = (
+      await c().launchTask({
+        relation: "child",
+        fromTaskId: p,
+        title: "Plain CLI kid",
+        prompt: "do it",
+        repository: { none: true },
+        harness: "any",
+      })
+    ).id;
+    await c().claimPendingLaunches(5);
+    await goLive(p);
+    await goLive(k);
+
+    const result = await c().reportTaskOutcome(k, {
+      status: "done",
+      note: "ok",
+    });
+    expect(result.parentNotice).toEqual({ parentTaskId: p, notified: true });
+    const [report] = await c().listMessages({ taskId: p });
+    expect(report).toMatchObject({
+      route: "child-to-parent",
+      kind: "report",
+      status: "pending",
+    });
+    const sent = {
+      from: { kind: "task" as const, taskId: k },
+      targetTaskId: p,
+    };
+    // An ordinary message from the same child is still refused up front.
+    await expect(
+      c().sendTaskMessage({ ...sent, text: "which db?", expectsReply: true }),
+    ).rejects.toThrow(/harness can't receive replies/);
+  });
+
+  it("a report is stored as a report (anything the child writes itself is not), and formats without the report_status reminder", async () => {
+    const { p, k } = await parentAndChild();
+    await c().reportTaskOutcome(k, { status: "done", note: "n" });
+    const [report] = await c().listMessages({ taskId: p });
+    expect(report?.kind).toBe("report");
+    if (!report) throw new Error("no report");
+    expect(
+      buildInboxMessageText(report, { receiverHasParent: true }),
+    ).not.toContain(REPORT_STATUS_REMINDER);
+    // Anything the child writes itself is not marked, so it keeps the reminder.
+    const written = await c().sendTaskMessage({
+      from: { kind: "task", taskId: k },
+      targetTaskId: p,
+      text: "by hand",
+    });
+    expect(written.message.kind).toBeUndefined();
   });
 
   it("still rejects a report from a session that is not live", async () => {

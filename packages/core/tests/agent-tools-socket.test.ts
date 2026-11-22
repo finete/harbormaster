@@ -237,6 +237,58 @@ describe("tool socket", () => {
     expect(report.text).toContain("reported done: shipped");
   });
 
+  it("a child's report reaches a parent that has its own parent without the report_status reminder", async () => {
+    const launch = async (
+      title: string,
+      relation: "standalone" | "child",
+      taskId?: string,
+    ) => {
+      const result = await callTool(
+        socketPath,
+        "launch_task",
+        { relation, title, prompt: "p", repository: "none" },
+        taskId ? { taskId } : {},
+      );
+      return (result.details as { task: { id: string } }).task.id;
+    };
+    const grandId = await launch("Grand", "standalone");
+    const midId = await launch("Mid", "child", grandId);
+    const leafId = await launch("Leaf", "child", midId);
+    await core.commands.reportPresence(midId, { state: "idle", pid: 5001 });
+    await core.commands.reportPresence(leafId, { state: "idle", pid: 5002 });
+
+    await callTool(
+      socketPath,
+      "report_status",
+      { status: "done", note: "leaf finished" },
+      { taskId: leafId },
+    );
+    const claimed = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: midId },
+    );
+    expect(claimed.text).toContain("reported done: leaf finished");
+    // Mid has a parent, but a report must not make it report in turn.
+    expect(claimed.text).not.toContain(REPORT_STATUS_REMINDER);
+
+    // Anything else delivered to Mid still carries the reminder.
+    await callTool(
+      socketPath,
+      "send_to_task",
+      { taskId: midId, message: "carry on", mode: "steer" },
+      { taskId: grandId },
+    );
+    const other = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: midId },
+    );
+    expect(other.text).toContain(REPORT_STATUS_REMINDER);
+  });
+
   it("validates arguments with agent-readable errors", async () => {
     await expect(
       callTool(socketPath, "find_tasks", { query: 3 }, {}),

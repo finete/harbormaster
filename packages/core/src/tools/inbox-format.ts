@@ -77,7 +77,8 @@ export interface InboxFormatOptions {
  * The full text block: header, the message text, `Attachments:` with each
  * copied absolute path, the trust line (omitted for receipts and the user's own messages), for a
  * child's question (`expectsReply`), how the parent may answer, and, for a
- * receiver with a parent, the report_status reminder.
+ * receiver with a parent, the report_status reminder (not on a `report`
+ * message: see `TaskMessage.kind`).
  */
 export function buildInboxMessageText(
   message: TaskMessage,
@@ -102,7 +103,11 @@ export function buildInboxMessageText(
       `Reply with the send_to_task tool to ${message.sender.taskId} only if your brief or context settles it; product or scope decisions go to the user (ask them, then relay the answer).`,
     );
   }
-  if (options.receiverHasParent) sections.push(REPORT_STATUS_REMINDER);
+  // A child's automatic report must not make its parent report in turn
+  // (and so on up the task tree), so it carries no reminder.
+  if (options.receiverHasParent && message.kind !== "report") {
+    sections.push(REPORT_STATUS_REMINDER);
+  }
   return sections.join("\n\n");
 }
 
