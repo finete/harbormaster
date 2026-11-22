@@ -14,6 +14,12 @@
 //
 // Scratch (repository-less) tasks only, same no-fixture pattern as
 // e2e/keyboard.spec.ts: every column then holds a single "scratch" group.
+//
+// The app and its 17 tasks are built once (beforeAll: launching and creating
+// them per test would dominate the file's run time), but no test relies on
+// what an earlier one left behind: each starts with `arrangeBoard`, which
+// puts the board back into the shape it asserts on. One missed drop or
+// timed-out wait therefore fails that test alone, not every later count.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -135,6 +141,70 @@ async function releaseOutsideColumns(from: {
 // the board chrome is a single compact header row (more column height).
 const FILLER_COUNT = 16;
 
+/**
+ * Starts a test from the fixture's shape, whatever an earlier test (or its
+ * failure) left behind: no drag in flight, full-size window, board view up,
+ * every column and group expanded, the fillers in Backlog and "Drag Mover"
+ * in `moverIn` (Backlog as created, or Working for the lanes that need a
+ * populated Working column). Tasks move through the core command API (the
+ * same verbs a drop runs); expanding is a real click on the rail/header.
+ */
+async function arrangeBoard(moverIn: "backlog" | "working"): Promise<void> {
+  // A drag a failed test never finished: Escape cancels it (only while one
+  // is live: with none, the board would take Escape as "back to workspace").
+  if ((await window.getByTestId("drag-overlay-card").count()) > 0) {
+    await window.keyboard.press("Escape");
+  }
+  await window.mouse.up();
+  await expect(window.getByTestId("drag-overlay-card")).toHaveCount(0);
+
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(1280, 800);
+  });
+  if (!(await window.getByTestId("board-view").isVisible())) {
+    await window.getByTestId("board-button").click();
+  }
+  await expect(window.getByTestId("board-view")).toBeVisible();
+
+  await window.evaluate(
+    async ({ moverTitle, moverIn: mover }) => {
+      const core = window.harbormaster.core;
+      const tasks = (await core.listBoard()).flatMap((column) =>
+        column.groups.flatMap((group) => group.tasks),
+      );
+      for (const task of tasks) {
+        const want = task.title === moverTitle ? mover : "backlog";
+        let state = task.state;
+        if (state === want) continue;
+        // Awaiting only leaves through Working.
+        if (state === "awaiting") {
+          await core.moveTask(task.id, "working");
+          state = "working";
+        }
+        if (state !== want) await core.moveTask(task.id, want);
+      }
+    },
+    { moverTitle: "Drag Mover", moverIn },
+  );
+
+  // Expand every collapsed column rail, then every collapsed group header.
+  const rails = window.locator('[data-board-column][aria-label^="Expand"]');
+  while ((await rails.count()) > 0) await rails.first().click();
+  const groups = window.locator(
+    '[data-testid^="group-toggle-"][aria-expanded="false"]',
+  );
+  while ((await groups.count()) > 0) await groups.first().click();
+
+  const backlog = FILLER_COUNT + (moverIn === "backlog" ? 1 : 0);
+  await expect(window.getByTestId("column-backlog-count")).toHaveText(
+    String(backlog),
+  );
+  await expect(window.getByTestId("column-working-count")).toHaveText(
+    moverIn === "working" ? "1" : "0",
+  );
+  await expect(window.getByTestId("column-awaiting-count")).toHaveText("0");
+}
+
 test.beforeAll(async () => {
   stateDir = mkdtempSync(path.join(tmpdir(), "harbormaster-e2e-board-drag-"));
   await launch();
@@ -155,6 +225,7 @@ test.afterEach(() => {
 });
 
 test("empty columns show a drop hint and column counts match the cards", async () => {
+  await arrangeBoard("backlog");
   await expect(window.getByTestId("column-awaiting-empty")).toBeVisible();
   await expect(window.getByTestId("column-done-empty")).toBeVisible();
   await expect(window.getByTestId("column-backlog-empty")).toHaveCount(0);
@@ -164,6 +235,7 @@ test("empty columns show a drop hint and column counts match the cards", async (
 });
 
 test("dragging between columns renders a portaled overlay (no in-flow transform, no phantom scrollbar) and the card lands", async () => {
+  await arrangeBoard("backlog");
   const card = cardLocator("Drag Mover");
   const taskId = (await card.getAttribute("data-testid"))?.replace("card-", "");
   if (!taskId) throw new Error("card missing data-testid");
@@ -191,6 +263,7 @@ test("dragging between columns renders a portaled overlay (no in-flow transform,
 });
 
 test("the target column previews where the card lands, and Escape cancels the drag without leaving the board", async () => {
+  await arrangeBoard("working");
   const from = await beginDrag(cardLocator("Filler 03"));
   const working = await window.getByTestId("column-working").boundingBox();
   if (!working) throw new Error("working column not visible");
@@ -222,6 +295,7 @@ test("the target column previews where the card lands, and Escape cancels the dr
 });
 
 test("group headers stay pinned while their column scrolls", async () => {
+  await arrangeBoard("working");
   const scroller = window.getByTestId("column-backlog-cards");
   await scroller.evaluate((el) => {
     el.scrollTop = 240;
@@ -239,6 +313,7 @@ test("group headers stay pinned while their column scrolls", async () => {
 });
 
 test("auto-scroll reaches a column's vertical scroller while dragging near its bottom edge", async () => {
+  await arrangeBoard("working");
   const scroller = window.getByTestId("column-backlog-cards");
   const overflows = await scroller.evaluate(
     (el) => el.scrollHeight > el.clientHeight,
@@ -266,6 +341,7 @@ test("auto-scroll reaches a column's vertical scroller while dragging near its b
 });
 
 test("auto-scroll reaches the board's horizontal scroller while dragging near its right edge", async () => {
+  await arrangeBoard("working");
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(640, 800);
   });
@@ -301,6 +377,7 @@ test("auto-scroll reaches the board's horizontal scroller while dragging near it
 });
 
 test("the board row scrolls horizontally with a horizontal wheel and with shift+wheel", async () => {
+  await arrangeBoard("working");
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(640, 800);
   });
@@ -341,6 +418,7 @@ test("the board row scrolls horizontally with a horizontal wheel and with shift+
 });
 
 test("collapsing a board group hides its cards, keeps the count, and arrow navigation skips them", async () => {
+  await arrangeBoard("working");
   const toggle = window.getByTestId("group-toggle-backlog-scratch");
   const group = window.getByTestId("group-backlog-scratch");
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -381,6 +459,11 @@ test("collapsing a board group hides its cards, keeps the count, and arrow navig
 });
 
 test("the collapsed state survives an app relaunch, and expanding restores the cards", async () => {
+  await arrangeBoard("working");
+  await window.getByTestId("group-toggle-backlog-scratch").click();
+  await expect(
+    window.getByTestId("group-toggle-backlog-scratch"),
+  ).toHaveAttribute("aria-expanded", "false");
   await app.close();
   assertNoMainProcessErrors();
   await launch();
@@ -413,6 +496,7 @@ test("the collapsed state survives an app relaunch, and expanding restores the c
 });
 
 test("collapsing a column renders the slim rail (chevron, rotated title, honest count, hover tooltip) and unmounts its cards", async () => {
+  await arrangeBoard("working");
   const collapseButton = window.getByTestId("column-collapse-backlog");
   await expect(collapseButton).toBeVisible();
   await expect(window.getByTestId("column-backlog-count")).toHaveText(
@@ -439,6 +523,9 @@ test("collapsing a column renders the slim rail (chevron, rotated title, honest 
 });
 
 test("the collapsed column state survives an app relaunch, and clicking the rail expands it back", async () => {
+  await arrangeBoard("working");
+  await window.getByTestId("column-collapse-backlog").click();
+  await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
   await app.close();
   assertNoMainProcessErrors();
   await launch();
@@ -456,9 +543,9 @@ test("the collapsed column state survives an app relaunch, and clicking the rail
 });
 
 test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the task, re-collapsing once the drag ends", async () => {
-  // "Drag Mover" stays put in Working for the card-anatomy lane below; move a
-  // throwaway filler into Working first so the rail-drop has a source card that
-  // isn't load-bearing for later tests.
+  await arrangeBoard("working");
+  // Move a throwaway filler into Working first so the rail-drop has a source
+  // card ("Drag Mover" already sits in Working).
   await dragTo(
     window,
     cardLocator("Filler 02"),
@@ -509,6 +596,8 @@ test("dropping a card onto a collapsed rail peeks it open mid-drag and moves the
 });
 
 test("arrow navigation skips a collapsed column, crossing straight to the next expanded one", async () => {
+  await arrangeBoard("working");
+  await window.getByTestId("column-collapse-backlog").click();
   await expect(window.getByTestId("column-rail-backlog")).toBeVisible();
   // Backlog (collapsed) holds every filler; Working holds only "Drag Mover".
   // Left/right from it must skip straight over the collapsed column: there
@@ -524,8 +613,7 @@ test("arrow navigation skips a collapsed column, crossing straight to the next e
     window.locator('[data-testid^="card-"][data-selected="true"]'),
   ).toHaveCount(1);
 
-  // Restore backlog to expanded so later lanes (card-anatomy below) see
-  // its cards again.
+  // Clicking the rail expands the column back.
   await window.getByTestId("column-backlog").click();
   await expect(window.getByTestId("column-rail-backlog")).toHaveCount(0);
   await expect(cardLocator("Filler 01")).toBeVisible();
@@ -553,6 +641,7 @@ async function cardAnatomy(card: Locator): Promise<{
 }
 
 test("every card variant shares one top-pinned skeleton (title-only vs subline vs drag overlay)", async () => {
+  await arrangeBoard("working");
   // Give "Drag Mover" a subline: in Awaiting it shows "waiting <duration>".
   await dragTo(
     window,
