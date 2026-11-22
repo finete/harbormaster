@@ -152,7 +152,11 @@ describe("tool socket", () => {
       { status: "blocked", note: "need a key" },
       { taskId: childId },
     );
-    expect(reported.text).toBe("Recorded blocked: need a key");
+    // The parent is not running yet: the outcome is recorded, the tool says
+    // the parent was not told (it never fails the report).
+    expect(reported.text).toBe(
+      "Recorded blocked: need a key\nYour parent task was not notified: Your parent task is not running; stop and ask the user instead.",
+    );
     const presence = await core.commands.getPresence(childId);
     expect(presence.record?.outcome).toMatchObject({
       status: "blocked",
@@ -212,6 +216,25 @@ describe("tool socket", () => {
     );
     expect(parentClaim.text).toContain("[Question from your child task");
     expect(parentClaim.text).not.toContain(REPORT_STATUS_REMINDER);
+
+    // With the parent running, report_status notifies it as a plain report.
+    const notified = await callTool(
+      socketPath,
+      "report_status",
+      { status: "done", note: "shipped" },
+      { taskId: childId },
+    );
+    expect(notified.text).toBe(
+      "Recorded done: shipped\nYour parent task was notified.",
+    );
+    const report = await callTool(
+      socketPath,
+      "inbox_claim",
+      { idle: true },
+      { taskId: parentId },
+    );
+    expect(report.text).toContain("[Message from your child task");
+    expect(report.text).toContain("reported done: shipped");
   });
 
   it("validates arguments with agent-readable errors", async () => {

@@ -69,6 +69,7 @@ import type {
   MessageSender,
   MessageStoreSnapshot,
   PairGrant,
+  ReportTaskOutcomeResult,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -186,6 +187,7 @@ import {
 import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
+  buildChildReportText,
   buildReceiptText,
   canMessageDirectly,
   classifyRoute,
@@ -4012,7 +4014,7 @@ export class CoreManager implements CoreCommands {
   async reportTaskOutcome(
     taskId: string,
     outcome: { status: "done" | "blocked"; note?: string },
-  ): Promise<void> {
+  ): Promise<ReportTaskOutcomeResult> {
     const presence = this.requirePresence();
     const status = await this.getPresence(taskId);
     if (!status.live || !status.record) {
@@ -4032,6 +4034,52 @@ export class CoreManager implements CoreCommands {
       .catch(() => undefined);
     if (reported) this.logLaunch(reported, outcome.status);
     await this.usage.update(taskId);
+    return reported?.parentTaskId
+      ? {
+          parentNotice: await this.notifyParentOfOutcome(
+            reported,
+            reported.parentTaskId,
+            outcome.status,
+            outcome.note?.trim() || undefined,
+          ),
+        }
+      : {};
+  }
+
+  /**
+   * Tell a task's parent about its reported outcome over the normal
+   * child-to-parent route (`sendTaskMessage`: same route checks, queueing,
+   * inbox, loop cap). A report, not a question: no `expectsReply`, so the
+   * child is not "waiting on parent". The outcome is already recorded, so a
+   * refused send (parent gone, Done, not running, cap reached, ...) is
+   * returned, never thrown.
+   */
+  private async notifyParentOfOutcome(
+    child: Task,
+    parentTaskId: string,
+    status: "done" | "blocked",
+    note: string | undefined,
+  ): Promise<NonNullable<ReportTaskOutcomeResult["parentNotice"]>> {
+    try {
+      await this.sendTaskMessage({
+        from: { kind: "task", taskId: child.id },
+        targetTaskId: parentTaskId,
+        text: buildChildReportText({
+          childTitle: child.title,
+          childTaskId: child.id,
+          status,
+          ...(note ? { note } : {}),
+        }),
+        mode: "followUp",
+      });
+      return { parentTaskId, notified: true };
+    } catch (error) {
+      return {
+        parentTaskId,
+        notified: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async getPresence(taskId: string): Promise<PresenceStatus> {

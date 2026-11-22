@@ -102,6 +102,21 @@ export interface SendTaskMessageResult {
   note: string;
 }
 
+/**
+ * What `reportTaskOutcome` did about the task's parent: a task with a
+ * parent sends it the report as a child-to-parent message. A notification
+ * that could not be sent never fails the report; `reason` says why.
+ */
+export interface ReportTaskOutcomeResult {
+  /** Set only for a task with a parent. */
+  parentNotice?: {
+    parentTaskId: string;
+    notified: boolean;
+    /** Why the parent was not notified (the send's own error). */
+    reason?: string;
+  };
+}
+
 export type TaskRunState = "running" | "your-move" | "queued" | "not-running";
 
 export interface TaskSearchResult {

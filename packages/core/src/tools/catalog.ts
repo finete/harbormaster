@@ -157,7 +157,7 @@ const reportStatus: ToolDefinition = {
   name: "report_status",
   title: "Harbormaster report status",
   description:
-    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
+    "Report the terminal outcome of this Harbormaster task run. Call this as your FINAL action when working autonomously: status 'done' with a one-line summary of what was delivered, or 'blocked' with the concrete blocker. If this task has a parent, this also notifies it with your summary, so do not send a separate send_to_task \"I'm done\" message. If this task launched child tasks, call subtask_status first and name any child still waiting on the user in your summary. The session stays open after this call (it is not ended): the user sees your task as 'your move'. Only valid inside a session linked to a Harbormaster task.",
   inputSchema: {
     type: "object",
     properties: {
@@ -181,11 +181,18 @@ const reportStatus: ToolDefinition = {
     const status = readEnum(args, "status", ["done", "blocked"] as const, true);
     if (!status) throw new Error("status is required");
     const note = readString(args, "note")?.trim() || undefined;
-    await commands.reportTaskOutcome(taskId, {
+    const { parentNotice } = await commands.reportTaskOutcome(taskId, {
       status,
       ...(note ? { note } : {}),
     });
-    return { text: `Recorded ${status}${note ? `: ${note}` : ""}` };
+    const recorded = `Recorded ${status}${note ? `: ${note}` : ""}`;
+    if (!parentNotice) return { text: recorded };
+    return {
+      text: parentNotice.notified
+        ? `${recorded}\nYour parent task was notified.`
+        : `${recorded}\nYour parent task was not notified: ${parentNotice.reason}`,
+      details: { parentNotice },
+    };
   },
 };
 
