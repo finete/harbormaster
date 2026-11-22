@@ -77,7 +77,9 @@ export function buildLaunchKickoffPrompt(input: LaunchKickoffInput): string {
     input.parent
       ? `If you are genuinely blocked or need a decision, you may ask your parent task (${input.parent.id}) with the Harbormaster \`send_to_task\` tool (set expectsReply: true) and then end your turn; it can only answer what its brief settles. Product or scope decisions, or a parent that is unavailable (the send fails), go to the user: stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`
       : `If you are genuinely blocked or need a decision, stop and ask -- the user sees your task as "your move". Otherwise do not stop to ask; make reasonable decisions and note them.`,
-    "As your FINAL action call the Harbormaster `report_status` tool: `done` with a one-line summary, or `blocked` with the concrete blocker.",
+    input.parent
+      ? 'As your FINAL action call the Harbormaster `report_status` tool: `done` with a one-line summary, or `blocked` with the concrete blocker. It already notifies your parent, so do not also send a separate "I\'m done" message.'
+      : "As your FINAL action call the Harbormaster `report_status` tool: `done` with a one-line summary, or `blocked` with the concrete blocker.",
   );
 
   points.forEach((point, index) => {

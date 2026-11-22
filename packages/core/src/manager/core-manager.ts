@@ -69,6 +69,7 @@ import type {
   MessageSender,
   MessageStoreSnapshot,
   PairGrant,
+  ReportTaskOutcomeResult,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -186,6 +187,7 @@ import {
 import { applyInboxPriorityFilter } from "../engines/inbox-priority.js";
 import { buildLaunchKickoffPrompt } from "../engines/launch-kickoff.js";
 import {
+  buildChildReportText,
   buildReceiptText,
   canMessageDirectly,
   classifyRoute,
@@ -3712,15 +3714,19 @@ export class CoreManager implements CoreCommands {
     );
     const route = classifyRoute(input.from, senderTask, target, policy);
 
-    // 4. Child → parent: the parent must be live (and not Done, above) and
-    //    the child's own harness must be able to receive the answer.
+    // 4. Child → parent: the parent must be live (and not Done, above) and,
+    //    for anything that may be answered, the child's own harness must be
+    //    able to receive the answer. A status report needs no answer.
     if (route === "child-to-parent") {
       if (!(await harness.presence(target.id)).live) {
         throw new Error(
           "Your parent task is not running; stop and ask the user instead.",
         );
       }
-      if (!(await this.harnessFor(senderTask, config)).messaging.receive) {
+      if (
+        input.kind !== "report" &&
+        !(await this.harnessFor(senderTask, config)).messaging.receive
+      ) {
         throw new Error(
           "Your harness can't receive replies, so your parent couldn't answer; stop and ask the user instead.",
         );
@@ -3773,6 +3779,7 @@ export class CoreManager implements CoreCommands {
       text,
       requestedMode: mode,
       ...(input.expectsReply === true ? { expectsReply: true } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
       attachments,
       status: route === "approval" ? "awaiting_approval" : "pending",
       createdAt: this.deps.clock.now().toISOString(),
@@ -4012,7 +4019,7 @@ export class CoreManager implements CoreCommands {
   async reportTaskOutcome(
     taskId: string,
     outcome: { status: "done" | "blocked"; note?: string },
-  ): Promise<void> {
+  ): Promise<ReportTaskOutcomeResult> {
     const presence = this.requirePresence();
     const status = await this.getPresence(taskId);
     if (!status.live || !status.record) {
@@ -4032,6 +4039,53 @@ export class CoreManager implements CoreCommands {
       .catch(() => undefined);
     if (reported) this.logLaunch(reported, outcome.status);
     await this.usage.update(taskId);
+    return reported?.parentTaskId
+      ? {
+          parentNotice: await this.notifyParentOfOutcome(
+            reported,
+            reported.parentTaskId,
+            outcome.status,
+            outcome.note?.trim() || undefined,
+          ),
+        }
+      : {};
+  }
+
+  /**
+   * Tell a task's parent about its reported outcome over the normal
+   * child-to-parent route (`sendTaskMessage`: same route checks, queueing,
+   * inbox, loop cap). A report, not a question: no `expectsReply`, so the
+   * child is not "waiting on parent". The outcome is already recorded, so a
+   * refused send (parent gone, Done, not running, cap reached, ...) is
+   * returned, never thrown.
+   */
+  private async notifyParentOfOutcome(
+    child: Task,
+    parentTaskId: string,
+    status: "done" | "blocked",
+    note: string | undefined,
+  ): Promise<NonNullable<ReportTaskOutcomeResult["parentNotice"]>> {
+    try {
+      await this.sendTaskMessage({
+        from: { kind: "task", taskId: child.id },
+        targetTaskId: parentTaskId,
+        text: buildChildReportText({
+          childTitle: child.title,
+          childTaskId: child.id,
+          status,
+          ...(note ? { note } : {}),
+        }),
+        mode: "followUp",
+        kind: "report",
+      });
+      return { parentTaskId, notified: true };
+    } catch (error) {
+      return {
+        parentTaskId,
+        notified: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async getPresence(taskId: string): Promise<PresenceStatus> {

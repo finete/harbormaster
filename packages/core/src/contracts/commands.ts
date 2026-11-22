@@ -25,6 +25,7 @@ import type {
   ApproveMessageResult,
   FindTasksOptions,
   PairGrant,
+  ReportTaskOutcomeResult,
   SendTaskMessageInput,
   SendTaskMessageResult,
   TaskMessage,
@@ -862,12 +863,15 @@ export interface CoreCommands {
   /**
    * The agent's own done/blocked verdict (`report_status`), recorded on its
    * still-live attachment: the task shows "your move", not ended. Rejects
-   * when the task has no live agent attachment.
+   * when the task has no live agent attachment. A task with a parent also
+   * tells it, as a child-to-parent `followUp` report (no `expectsReply`; it
+   * counts toward the loop cap); when that send is refused the outcome is
+   * still recorded and the result says the parent was not notified.
    */
   reportTaskOutcome(
     taskId: string,
     outcome: { status: "done" | "blocked"; note?: string },
-  ): Promise<void>;
+  ): Promise<ReportTaskOutcomeResult>;
   /** Liveness / turn / outcome snapshot of the task's agent session. */
   getPresence(taskId: string): Promise<PresenceStatus>;
   /** Messages awaiting the user's approval, oldest first. */

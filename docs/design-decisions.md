@@ -93,7 +93,8 @@ movers: agents never move their own card. A kickoff contract
 in the worktree, run checks, commit + push + draft PR (repository tasks),
 ask only when genuinely blocked, and finish with
 `harbormaster_report_status`, which records an `outcome` on the still-live
-presence record (the task shows "your move", not ended). Tasks can message
+presence record (the task shows "your move", not ended) and, for a task with
+a parent, tells the parent over the normal child-to-parent route. Tasks can message
 each other: see `docs/task-messaging.md`.
 
 ## Three verbs, awaiting kinds are data
