@@ -78,6 +78,17 @@ async function dragTo(
   const startY = cardBox.y + 12;
   const endX = targetBox.x + targetBox.width / 2;
   const endY = targetBox.y + targetBox.height / 2;
+  // A drop point outside the window never reaches the board: say so instead
+  // of timing out on whatever the drop should have opened.
+  const [width, height] = await window.evaluate(() => [
+    innerWidth,
+    innerHeight,
+  ]);
+  if (endX >= width || endY >= height) {
+    throw new Error(
+      `drop point (${endX}, ${endY}) is outside the ${width}x${height} window`,
+    );
+  }
   await window.mouse.move(startX, startY);
   await window.mouse.down();
   const steps = 20;

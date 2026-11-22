@@ -265,7 +265,9 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
     ).toBeGreaterThan(6);
 
     // The visible pane refit (wider) while its create was in flight: its pi
-    // started at the old width and must then be resized to the new one.
+    // must end up wider than it first ran with the sidebar shown, whether
+    // the create got the new size or a WINCH followed. Measured against
+    // that first start, since same-width WINCHes (rows settling) may follow.
     const sizesFor = (worktree: string): number[] =>
       readFileSync(log, "utf8")
         .split("\n")
@@ -278,12 +280,11 @@ test("hiding a workspace produces zero SIGWINCH events; a pane mounted hidden ne
     await expect
       .poll(() => sizesFor(otherWorktree).length)
       .toBeGreaterThanOrEqual(2);
-    const otherSizes = sizesFor(otherWorktree);
-    const restartedAt = otherSizes.at(-2) as number;
-    console.log("[resize-hidden] visible pane sizes:", otherSizes);
+    const sidebarShownWidth = sizesFor(otherWorktree)[0] as number;
+    console.log("[resize-hidden] visible pane sizes:", sizesFor(otherWorktree));
     await expect
       .poll(() => sizesFor(otherWorktree).at(-1) as number, { timeout: 10_000 })
-      .toBeGreaterThan(restartedAt);
+      .toBeGreaterThan(sidebarShownWidth);
   } finally {
     await app.close();
   }

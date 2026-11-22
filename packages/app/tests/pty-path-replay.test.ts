@@ -72,6 +72,15 @@ function newestFixtureDir(harness: string): string | undefined {
 const temp = mkdtempSync(join(tmpdir(), "hm-pty-replay-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
+/**
+ * Printed after the last copy. The replay ends when it comes out, not on
+ * the process's exit: on Linux, node-pty sometimes never delivers the last
+ * read when the child exits (ubuntu CI: 22 of 23 raw chunks arrived, the
+ * final ~3.8 KB never did), which failed the intact check. The shell stays
+ * alive until the test disposes the session, so nothing races an exit.
+ */
+const DONE = "[hm-replay-done]";
+
 /** Runs `repeats` copies of `file` through a task-primary pty; resolves the elapsed ms and the characters that came out. */
 function replay(
   harness: string,
@@ -88,11 +97,16 @@ function replay(
       "i=0",
       `while [ "$i" -lt ${repeats} ]; do cat '${file}'; i=$((i+1)); done`,
       'kill "$drain" 2>/dev/null',
-      "exit 0",
+      `printf '%s' '${DONE}'`,
+      // Stay alive until the test disposes the session (see DONE).
+      "sleep 600",
     ].join("\n");
     const started = performance.now();
     let id = "";
     let chars = 0;
+    // The marker can straddle chunks; keep just enough to see it.
+    let tail = "";
+    let done = false;
     const timer = setTimeout(() => {
       if (id) disposeSession(id);
       reject(new Error(`${harness}: replay of ${repeats} copies timed out`));
@@ -104,10 +118,27 @@ function replay(
         onData: (data) => {
           chars += data.length;
           acknowledgeSessionData(id, data.length);
-        },
-        onExit: () => {
+          if (done) return;
+          const seen = tail + data;
+          if (!seen.includes(DONE)) {
+            tail = seen.slice(-(DONE.length - 1));
+            return;
+          }
+          done = true;
           clearTimeout(timer);
-          resolve({ ms: performance.now() - started, chars });
+          const ms = performance.now() - started;
+          // Every earlier byte has come through by now.
+          setImmediate(() => disposeSession(id));
+          resolve({ ms, chars: chars - DONE.length });
+        },
+        onExit: (exitCode) => {
+          if (done) return;
+          clearTimeout(timer);
+          reject(
+            new Error(
+              `${harness}: shell exited (${exitCode}) before the end marker; ${chars} chars came out`,
+            ),
+          );
         },
       },
       {

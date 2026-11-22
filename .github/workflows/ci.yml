@@ -1,7 +1,8 @@
 # Push/PR checks (docs/harness-additions.md P3): biome, typecheck, unit
 # tests for every workspace, then the keyless real-CLI tier (T3) against the
-# pinned agent CLIs. The Electron e2e suite and the real smoke (T4, needs a
-# login) stay local: `npm run gate` / `npm run gate:harness`. No secrets.
+# pinned agent CLIs (job `check`, ubuntu). The Electron e2e suite runs in its
+# own job on macOS, where the app and its specs live (job `e2e`). The real
+# smoke (T4, needs a login) stays local: `npm run gate:harness`. No secrets.
 name: CI
 
 on:
@@ -74,3 +75,50 @@ jobs:
         env:
           HARBORMASTER_REAL_CLI: "1"
         run: npx vitest run packages/app/tests/real-cli-smoke.test.ts
+
+  # The Electron e2e suite, exactly the gate's e2e step (`npm run gate --
+  # --only=e2e`: build, Playwright, and no `uncaughtException` line). macOS:
+  # the specs assume it (offscreen windows, dock, `/tmp` realpaths), and
+  # macOS runners are free on a public repo. Every spec sets
+  # HARBORMASTER_WINDOW_OFFSCREEN; playwright.config.ts sets the rest.
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same reason as in `check`: git fixtures assume new repositories
+      # start on main, whichever git the runner ships.
+      - name: Git default branch
+        run: sudo git config --system init.defaultBranch main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      # Pi downloads fd and ripgrep on its first start when they are not on
+      # PATH, which a developer's machine has: without them a spec's first
+      # Pi pane is still starting when it types.
+      - name: fd and ripgrep
+        run: brew install fd ripgrep
+
+      - name: E2E
+        run: npm run gate -- --only=e2e
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: packages/app/test-results
+          retention-days: 7

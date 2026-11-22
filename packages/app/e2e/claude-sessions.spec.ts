@@ -213,6 +213,18 @@ test("a launched Claude Code child: bypass, hooks + MCP on argv, a parent's mess
   );
   expect(hookCommand("Stop")).toContain(server?.command ?? "<none>");
 
+  // The initial prompt's turn is running (the fake reports `idle` at its
+  // prompt first): a message sent before that finds an idle child, and the
+  // app types it into the pane instead of handing it to the Stop hook.
+  await expect
+    .poll(
+      async () =>
+        (await createCore({ stateDir }).commands.getPresence(child.id)).record
+          ?.status?.state,
+      { timeout: 20_000 },
+    )
+    .toBe("working");
+
   // The parent messages its child (direct route) through the CLI.
   const sent = spawnSync(
     cliBin,

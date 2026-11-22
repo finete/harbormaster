@@ -2287,8 +2287,17 @@ function createWindow(): void {
     // that takes key focus swallows the developer's real keystrokes into
     // test fixtures (observed: stray typed chars inside an e2e task title).
     // Playwright input is CDP-synthetic and needs no OS focus.
+    // enableLargerThanScreen (macOS): a CI runner's small display must not
+    // clamp the sizes specs ask for (`setSize(1280, 1000)` came out 646 px
+    // tall), so layouts match a developer's machine.
     ...(offscreen
-      ? { x: -4200, y: -4200, skipTaskbar: true, focusable: false }
+      ? {
+          x: -4200,
+          y: -4200,
+          skipTaskbar: true,
+          focusable: false,
+          enableLargerThanScreen: true,
+        }
       : {}),
     // The --background design token (#1e1e1e): no flash before first paint.
     backgroundColor: "#1e1e1e",
@@ -2308,6 +2317,10 @@ function createWindow(): void {
   const webContentsId = win.webContents.id;
 
   if (offscreen) {
+    // The constructor's size is still clamped to a small display (a CI
+    // runner's): set it again now that enableLargerThanScreen applies, so
+    // every spec starts at 1280x800 like on a developer's machine.
+    win.setBounds({ x: -4200, y: -4200, width: 1280, height: 800 });
     // Test mode is fully invisible, not just off to the side: macOS may
     // clamp an offscreen window back onto the screen. Opacity 0 keeps it
     // composited (frames, rAF, screenshots all work) but unseen, and

@@ -146,9 +146,11 @@ test.describe("macOS keyboard parity (darwin only)", () => {
     await window.keyboard.press("Alt+Backspace");
     await expect(panel).toContainText("^[^?", { timeout: 10_000 });
     await window.keyboard.press("Control+c");
-    // Intentional fixed wait: let the shell return to canonical mode before the
-    // next test opens a new raw reader (no ready signal after Ctrl+C settles).
-    await window.waitForTimeout(200);
+    // Back at the shell with the tty restored (`stty -icanon -echo` outlives
+    // cat): the next test types into a normal, echoing line.
+    await window.keyboard.type("stty sane; echo ready-$((5+5))");
+    await window.keyboard.press("Enter");
+    await expect(panel).toContainText("ready-10", { timeout: 10_000 });
   });
 
   test("Cmd+K clears the viewport", async () => {
@@ -158,18 +160,15 @@ test.describe("macOS keyboard parity (darwin only)", () => {
     await window.keyboard.press("Enter");
     await expect(panel).toContainText("clear-marker-42", { timeout: 10_000 });
 
-    // Cmd+K should clear the viewport.
+    // Cmd+K should clear the viewport (the DOM may lag xterm by a frame;
+    // the assertion retries).
     await window.keyboard.press("Meta+k");
-    // Intentional fixed wait: xterm's clear is synchronous in the renderer but
-    // the viewport DOM update may be one frame behind; the following
-    // not.toContainText assertion has no built-in retry timeout.
-    await window.waitForTimeout(300);
+    await expect(panel).not.toContainText("clear-marker-42");
 
+    // The shell still works after the clear, and the marker stays gone.
     await window.keyboard.type("echo after-$((1+1))");
     await window.keyboard.press("Enter");
     await expect(panel).toContainText("after-2", { timeout: 10_000 });
-
-    // The cleared marker should no longer be visible.
     await expect(panel).not.toContainText("clear-marker-42");
   });
 });
