@@ -588,9 +588,10 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     const { done } = await doneTaskWithSession(f);
     const branchesBefore = await branches(f.checkout);
 
-    const [first, second] = await Promise.all([
+    const [first, plain, withObjective] = await Promise.all([
       f.manager.reopenTask(done.id),
-      f.manager.reopenTask(done.id, { objective: "ignored" }),
+      f.manager.reopenTask(done.id),
+      f.manager.reopenTask(done.id, { objective: "Now add tests" }),
     ]);
     expect(await branches(f.checkout)).toHaveLength(branchesBefore.length + 1);
     expect(
@@ -598,10 +599,17 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
         /^worktree /gm,
       ),
     ).toHaveLength(2);
-    expect(second).toBe(first);
+    expect(plain).toBe(first);
     expect((await f.manager.getTaskWorkspace(done.id))?.branch).toBe(
       first.task.branch,
     );
+    // An objective the running reopen didn't use is never dropped silently.
+    expect(withObjective.task).toBe(first.task);
+    expect(first.warning).toBeUndefined();
+    expect(withObjective.warning).toMatch(
+      /already being reopened, so your objective was not sent/,
+    );
+    expect(await f.manager.claimInitialPrompt(done.id)).toBeUndefined();
     // Once it landed, the task is no longer Done: a later reopen refuses.
     await expect(f.manager.reopenTask(done.id)).rejects.toThrow(/done task/);
   });
@@ -673,6 +681,9 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
         /^worktree /gm,
       ),
     ).toHaveLength(1);
+
+    // A failed reopen leaves nothing in flight: the next one runs.
+    expect((await f.manager.reopenTask(done.id)).task.state).toBe("working");
   });
 
   it("rolls back the new worktree + branch when the binding write fails", async () => {

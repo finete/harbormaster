@@ -421,10 +421,10 @@ export class CoreManager implements CoreCommands {
   private readonly cleanupWarnings = new Map<string, string>();
   /** Tasks whose forced Done cleanup is running right now (toDone vs the sweep vs Retry). */
   private readonly cleanupsInFlight = new Set<string>();
-  /** The running `reopenTask` per task, joined by any reopen of it made while it runs. */
+  /** The running `reopenTask` per task (and the objective it uses), joined by any reopen of it made while it runs. */
   private readonly reopensInFlight = new Map<
     string,
-    Promise<{ task: Task; warning?: string }>
+    { run: Promise<{ task: Task; warning?: string }>; objective: string }
   >();
   /** Registered folders resolved to repositories (see `locationEntries`). */
   private locationCache:
@@ -1692,12 +1692,26 @@ export class CoreManager implements CoreCommands {
     // A second reopen (a repeated drop, Resume plus the header's Reopen)
     // would pass the Done check while the first still creates its worktree,
     // then overwrite its binding and orphan that worktree + branch.
+    const objective = input?.objective?.trim() ?? "";
     const running = this.reopensInFlight.get(taskId);
-    if (running) return running;
+    if (running) {
+      if (!objective || objective === running.objective) return running.run;
+      // The joined cycle already chose its first message: say this
+      // objective was not sent instead of dropping it silently.
+      return running.run.then((result) => ({
+        ...result,
+        warning: [
+          result.warning,
+          `${result.task.title} was already being reopened, so your objective was not sent; send it to the agent once it starts`,
+        ]
+          .filter(Boolean)
+          .join("; "),
+      }));
+    }
     const run = this.runReopenTask(taskId, input).finally(() => {
       this.reopensInFlight.delete(taskId);
     });
-    this.reopensInFlight.set(taskId, run);
+    this.reopensInFlight.set(taskId, { run, objective });
     return run;
   }
 

@@ -302,8 +302,8 @@ test("reopening a Done task restores a workspace directory and forks the previou
   // objective first.
   await openTask("Continuity");
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
-  const resumeCard = workspace.getByTestId(`resume-task-${taskId}`);
-  await expect(resumeCard).toContainText("This task is done");
+  const resumeState = workspace.getByTestId(`resume-task-${taskId}`);
+  await expect(resumeState).toContainText("This task is done");
   await expect(workspace.getByTestId("terminal-panel")).toHaveCount(0);
   await workspace.getByTestId(`reopen-task-button-${taskId}`).click();
   const dialog = window.getByTestId("reopen-task-dialog");
@@ -333,7 +333,7 @@ test("reopening a Done task restores a workspace directory and forks the previou
 
   // The still-open workspace picked up the new cycle's worktree and gave
   // it a pi pane (its only one), which forked the previous conversation.
-  await expect(resumeCard).toHaveCount(0);
+  await expect(resumeState).toHaveCount(0);
   await expect(workspace.getByTestId("terminal-panel")).toHaveCount(1);
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(4);
   expect(launches()[3]).toEqual([
@@ -379,9 +379,9 @@ test("an archived task resumes from its workspace's Resume button; a Done card d
     .click();
   await openTask("Continuity");
   const workspace = window.getByTestId(`task-workspace-${taskId}`);
-  const resumeCard = workspace.getByTestId(`resume-task-${taskId}`);
+  const resumeState = workspace.getByTestId(`resume-task-${taskId}`);
   const resumeButton = workspace.getByTestId(`resume-task-button-${taskId}`);
-  await expect(resumeCard).toContainText("This task is archived");
+  await expect(resumeState).toContainText("This task is archived");
   await expect(workspace.getByTestId("terminal-panel")).toHaveCount(0);
   await expect(resumeButton).toBeFocused();
   await window.getByTestId("board-button").click();
@@ -392,7 +392,7 @@ test("an archived task resumes from its workspace's Resume button; a Done card d
 
   // Back in Working in a fresh worktree; the first pane forks cycle 2's
   // conversation (no new objective).
-  await expect(resumeCard).toHaveCount(0);
+  await expect(resumeState).toHaveCount(0);
   await expect.poll(() => launches().length, { timeout: 20_000 }).toBe(6);
   const cycleThree = bindingFor(taskId);
   expect(existsSync(cycleThree?.worktreePath ?? "")).toBe(true);

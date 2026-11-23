@@ -678,8 +678,9 @@ export interface CoreCommands {
    * have given it. Any failure rolls everything back (no branch, worktree,
    * binding, or state change survives). A missing previous conversation is
    * a `warning`, never a failure. A reopen of a task already being reopened
-   * joins that one (its `input` is ignored) instead of starting a second
-   * cycle.
+   * joins that one instead of starting a second cycle; an objective other
+   * than the running reopen's is not sent, and the joined call's result
+   * says so in its `warning`.
    */
   reopenTask(
     taskId: string,

@@ -1,7 +1,7 @@
 // What a task workspace shows before its first pane exists (TaskWorkspace):
 // nothing yet, the Resume empty state, or the first pane itself. Pure, so
-// the card-vs-pane cases (a Done task, the resume in flight, a restore
-// racing the board store) are pinned by a table test.
+// the empty-state-vs-pane cases (a Done task, the resume in flight, a
+// restore racing the board store) are pinned by a table test.
 
 import type { TaskState } from "../../../preload/api";
 
