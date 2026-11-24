@@ -1,0 +1,22 @@
+{
+  "versions": {
+    "pi": "1.5.2",
+    "claude-code": "2.1.326",
+    "codex": "0.170.0",
+    "cursor": "2026.11.22"
+  },
+  "recordedAt": "2026-11-24T16:54:41.393Z",
+  "command": "ps -axo pid=,lstart=,comm=,args=  |  lsof -a -d cwd -p <pids> -Fpn",
+  "worktree": "__ROOT__/wt",
+  "claudeRegistryFiles": 1,
+  "note": "ps is trimmed to agent-related lines; Claude's registry to the recording's own session",
+  "notes": [
+    "pi pid 5723 exited=false",
+    "answered the folder-trust dialog",
+    "claude-code pid 6053 exited=false",
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)",
+    "codex pid 6280 exited=false",
+    "cursor pid 6695 exited=false"
+  ]
+}

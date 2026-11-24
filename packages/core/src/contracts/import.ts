@@ -298,6 +298,8 @@ export interface TaskImportInfo {
   sources: ImportSourceId[];
   /** First time the user opened or changed the task after the import (a session launch, a manual move, an edit). Undo keeps such tasks. */
   touchedAt?: string;
+  /** Set on a task `undoImport` kept (it had been touched): a second undo of the batch skips it. */
+  undoneAt?: string;
 }
 
 /** Items active within this many days are listed (decision I5); older ones behind "show older". */

@@ -185,7 +185,7 @@ function isExecutable(path) {
 }
 
 /** The descriptor's binary: `--command`, an override env var, else the first non-shim PATH hit. */
-function resolveBinary(adapter, command) {
+export function resolveBinary(adapter, command) {
   if (command) return command;
   for (const name of adapter.descriptor.commandEnv) {
     if (process.env[name]) return process.env[name];
@@ -203,7 +203,7 @@ function resolveBinary(adapter, command) {
   throw new Error(`${adapter.descriptor.label}: no binary found on PATH`);
 }
 
-function cliVersion(adapter, binary) {
+export function cliVersion(adapter, binary) {
   const out = execFileSync(binary, adapter.descriptor.versionArgs, {
     encoding: "utf8",
     timeout: 30_000,
@@ -214,7 +214,7 @@ function cliVersion(adapter, binary) {
 }
 
 /** A throwaway git repository standing in for a task worktree. */
-function makeWorkspace() {
+export function makeWorkspace() {
   const dir = mkdtempSync(join(tmpdir(), "hm-status-"));
   const git = (...args) =>
     execFileSync("git", args, { cwd: dir, stdio: "ignore" });
@@ -234,7 +234,7 @@ function makeWorkspace() {
   return dir;
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * A stand-in for the `harbormaster` CLI that hook commands call
@@ -242,7 +242,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * reply}` to `log` and replies like the real hook with nothing to deliver.
  * Started as `<cli> mcp` (the plugin's MCP server) it just exits.
  */
-function writeHookLogger(dir, log) {
+export function writeHookLogger(dir, log) {
   const path = join(dir, "harbormaster-hook-logger.mjs");
   writeFileSync(
     path,
@@ -289,7 +289,7 @@ function readHookLog(log, startedAt) {
  * One pty session: raw bytes recorded, probes answered like the app, 7501
  * reports collected, the screen mirrored by a headless xterm.
  */
-function startSession({
+export function startSession({
   core,
   adapter,
   binary,
@@ -458,7 +458,7 @@ function descendants(root) {
 }
 
 /** Kills processes still running in `workspace` (a backgrounded `sleep 120` reparented to init). */
-function killStragglers(workspace) {
+export function killStragglers(workspace) {
   let pids = [];
   try {
     pids = execFileSync(
@@ -481,7 +481,7 @@ function killStragglers(workspace) {
   }
 }
 
-async function waitFor(predicate, timeoutMs, stepMs = 200) {
+export async function waitFor(predicate, timeoutMs, stepMs = 200) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return true;
@@ -491,7 +491,7 @@ async function waitFor(predicate, timeoutMs, stepMs = 200) {
 }
 
 /** Answers Claude's folder-trust dialog like a user; resolves whether it was shown. */
-async function settle(session, harness, notes) {
+export async function settle(session, harness, notes) {
   let trustDialog = false;
   const started = Date.now();
   const ready = await waitFor(async () => {
@@ -548,7 +548,7 @@ async function settle(session, harness, notes) {
 const isActive = (r) => r.state === "working" || r.state === "blocked";
 
 /** Types a prompt, then waits until the turn is over (approving permission prompts when asked). */
-async function runTurn(session, prompt, { timeoutMs, approve, notes }) {
+export async function runTurn(session, prompt, { timeoutMs, approve, notes }) {
   if (session.hooksProtocol) {
     const seen = session.hooks().length;
     session.proc.write(prompt);

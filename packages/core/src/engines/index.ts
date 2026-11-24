@@ -5,6 +5,7 @@ export * from "./cleanup.js";
 export * from "./connectivity.js";
 export * from "./deployment.js";
 export * from "./doctor.js";
+export * from "./import.js";
 export * from "./inbox-priority.js";
 export * from "./launch-kickoff.js";
 export * from "./messaging.js";

@@ -1,0 +1,7 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Tuesday, Nov 24, 2026, 6:50 PM (UTC+2)</timestamp>\n<user_query>\nReply with exactly the word ONE and nothing else.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"ONE"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Tuesday, Nov 24, 2026, 6:50 PM (UTC+2)</timestamp>\n<user_query>\nReply with exactly the word TWO and nothing else.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"TWO"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Tuesday, Nov 24, 2026, 6:50 PM (UTC+2)</timestamp>\n<user_query>\nReply with exactly the word THREE and nothing else.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"THREE"}]}}
+{"type":"turn_ended","status":"success"}

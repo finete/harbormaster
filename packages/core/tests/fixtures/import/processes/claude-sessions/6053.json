@@ -1,0 +1,25 @@
+{
+  "pid": 6053,
+  "sessionId": "ebc6422d-9ebf-4910-96e2-636085d28d52",
+  "cwd": "__ROOT__/wt",
+  "startedAt": 1795539260089,
+  "procStart": "Tue Nov 24 16:54:17 2026",
+  "version": "2.1.326",
+  "peerProtocol": 1,
+  "peerFeatures": [
+    "notify_idle",
+    "reply_across_default_dirs",
+    "artifact_yield"
+  ],
+  "kind": "interactive",
+  "entrypoint": "cli",
+  "pidDomain": "darwin",
+  "asksForConvertedSkills": false,
+  "messagingSocketPath": "/tmp/cc-socks/6053.sock",
+  "name": "wt-a1",
+  "nameSource": "derived",
+  "nameSince": 1795539260089,
+  "status": "idle",
+  "updatedAt": 1795539260149,
+  "statusUpdatedAt": 1795539260149
+}

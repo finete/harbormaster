@@ -154,6 +154,7 @@ export const CURSOR_CAPABILITIES: HarnessCapabilities = {
     },
   },
   trustPrompt: false,
+  fork: false,
   review: false,
 };
 

@@ -1,0 +1,23 @@
+{
+  "harness": "cursor",
+  "version": "2026.11.22",
+  "recordedAt": "2026-11-24T16:50:33.308Z",
+  "prompts": [
+    "Reply with exactly the word ONE and nothing else.",
+    "Reply with exactly the word TWO and nothing else.",
+    "Reply with exactly the word THREE and nothing else."
+  ],
+  "titleCommand": "(the CLI's own)",
+  "placeholders": {
+    "__ROOT__": "the temp root",
+    "__HOME__": "the home folder"
+  },
+  "worktree": "__ROOT__/wt",
+  "mainCheckout": "__ROOT__/repo",
+  "files": [
+    "chats/__CWD_HASH__/d7b41402-dffc-44a9-a90b-b13a5782afca/meta.json",
+    "chats/__CWD_HASH__/d7b41402-dffc-44a9-a90b-b13a5782afca/prompt_history.json",
+    "projects/private-__ROOT__-wt/agent-transcripts/d7b41402-dffc-44a9-a90b-b13a5782afca/d7b41402-dffc-44a9-a90b-b13a5782afca.jsonl"
+  ],
+  "notes": []
+}
