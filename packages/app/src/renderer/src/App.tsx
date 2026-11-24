@@ -7,11 +7,13 @@ import { Board } from "./components/Board";
 import { ConfirmHost } from "./components/ConfirmHost";
 import { ConnectivityBanner } from "./components/ConnectivityBanner";
 import { CostsView } from "./components/CostsView";
+import { ImportDialogHost } from "./components/ImportDialog";
 import { InboxHeaderButton, InboxView } from "./components/InboxView";
 import {
   NewTaskComposer,
   type NewTaskOutcome,
 } from "./components/NewTaskComposer";
+import { NewTaskMenu } from "./components/NewTaskMenu";
 import {
   INITIAL_RULES_PAGE,
   type RulesPageMemory,
@@ -39,6 +41,7 @@ import {
   useTaskNotifications,
   useUnreadTaskIds,
 } from "./core-client";
+import { highlightTasks } from "./lib/board-highlight";
 import { isTypingTarget } from "./lib/keyboard-guard";
 import {
   applyDraftPrefill,
@@ -793,14 +796,7 @@ export function App({
                   count={inbox.priorityCount}
                   onClick={openInbox}
                 />
-                <Button
-                  size="sm"
-                  data-testid="board-new-task-button"
-                  onClick={openDraft}
-                >
-                  + New task
-                  <Kbd>{`${modKeyLabel()}N`}</Kbd>
-                </Button>
+                <NewTaskMenu onNewTask={openDraft} />
               </div>
             </header>
             <AutomationPausedBanner onOpenRules={openRules} />
@@ -830,6 +826,10 @@ export function App({
                 onOpenTask={(taskId) => {
                   selectTask(taskId);
                   setView("workspace");
+                }}
+                onShowBoard={(taskIds) => {
+                  setView("board");
+                  highlightTasks(taskIds);
                 }}
                 onBack={leavePage}
               />
@@ -915,6 +915,7 @@ export function App({
           <UpdateBanner />
         </ToastHost>
         <ConfirmHost />
+        <ImportDialogHost />
       </div>
     </div>
   );

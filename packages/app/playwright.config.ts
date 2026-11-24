@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
 // Enable xterm's a11y mirror for the full e2e suite so `toContainText`
@@ -19,6 +22,23 @@ process.env.HARBORMASTER_SKIP_ONBOARDING ??= "1";
 // in main, and never overwrites what the developer copied. The packaged
 // app never sets it.
 process.env.HARBORMASTER_E2E_FAKE_CLIPBOARD ??= "1";
+
+// Import existing work (docs/import.md): every launch reads agent sessions
+// from an EMPTY temp home and sees no running agents, so no spec ever reads
+// the developer's real agent stores, herdr state or process table
+// (main/index.ts maps these variables to createCore's `import` options).
+// e2e/import.spec.ts points them at copies of the recorded fixtures. The
+// packaged app never sets them.
+if (!process.env.HARBORMASTER_IMPORT_HOME) {
+  const importRoot = mkdtempSync(path.join(tmpdir(), "hm-e2e-import-"));
+  process.env.HARBORMASTER_IMPORT_HOME = path.join(importRoot, "home");
+  process.env.HARBORMASTER_IMPORT_PROCESSES_FILE = path.join(
+    importRoot,
+    "processes.json",
+  );
+  mkdirSync(process.env.HARBORMASTER_IMPORT_HOME, { recursive: true });
+  writeFileSync(process.env.HARBORMASTER_IMPORT_PROCESSES_FILE, "[]");
+}
 
 // Task launches fetch `origin` (core's `resolveDefaultBase`). Fixture repos
 // carry made-up remotes (`https://github.com/test/fixture.git`,

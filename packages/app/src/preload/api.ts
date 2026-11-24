@@ -22,12 +22,16 @@ import type {
   GithubAuthStatus,
   HarnessDescriptorInfo,
   HarnessModelCatalog,
+  ImportCandidateListing,
+  ImportItemsInput,
+  ImportItemsResult,
   InboxItem,
   InboxPriorityInput,
   KnownLocation,
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListImportCandidatesInput,
   ListInboxOptions,
   ListSlashCommandsInput,
   MessageMode,
@@ -61,6 +65,7 @@ import type {
   TaskWorkspace,
   ToAwaitOptions,
   ToDoneResult,
+  UndoImportResult,
   UpdateTaskInput,
   WorktreeStatus,
 } from "@harbormaster/core";
@@ -100,6 +105,13 @@ export type {
   HarnessDescriptorInfo,
   HarnessModel,
   HarnessModelCatalog,
+  ImportCandidate,
+  ImportCandidateGroup,
+  ImportCandidateListing,
+  ImportCandidateSession,
+  ImportItemSelection,
+  ImportItemsInput,
+  ImportItemsResult,
   InboxButton,
   InboxItem,
   InboxPriorityInput,
@@ -107,6 +119,7 @@ export type {
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListImportCandidatesInput,
   ListSlashCommandsInput,
   MessageAttachment,
   MessageMode,
@@ -161,6 +174,7 @@ export type {
   ToDoneConfirmation,
   ToDoneResult,
   TokenBuckets,
+  UndoImportResult,
   UpdateTaskInput,
   WorkspaceBinding,
   WorktreeStatus,
@@ -494,6 +508,19 @@ export interface HarbormasterApi {
      * See `CoreCommands.archiveTask`.
      */
     archiveTask(
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult>;
+    /** Import existing work (docs/import.md): what can be imported. See `CoreCommands.listImportCandidates`. */
+    listImportCandidates(
+      input?: ListImportCandidatesInput,
+    ): Promise<ImportCandidateListing>;
+    /** Import the ticked rows as tasks. See `CoreCommands.importItems`. */
+    importItems(input: ImportItemsInput): Promise<ImportItemsResult>;
+    /** Undo one import batch. See `CoreCommands.undoImport`. */
+    undoImport(batchId: string): Promise<UndoImportResult>;
+    /** Remove an imported External worktree of a Done/archived task; same question/confirm protocol as `toDone`. See `CoreCommands.removeExternalWorktree`. */
+    removeExternalWorktree(
       taskId: string,
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult>;

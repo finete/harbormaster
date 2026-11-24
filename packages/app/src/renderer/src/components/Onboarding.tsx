@@ -35,6 +35,7 @@ import type {
   OnboardingState,
 } from "../../../preload/api";
 import { DEFAULT_HARNESS_ID, loadHarnessDescriptors } from "../lib/harnesses";
+import { importButtonLabel } from "../lib/import-list";
 import type { DraftPrefill } from "../lib/new-task-draft";
 import {
   type AgentChoice,
@@ -47,9 +48,11 @@ import {
 } from "../lib/onboarding";
 import { modKeyLabel } from "../lib/platform";
 import { rulesEditRequest, rulesFolder } from "../lib/rules-format";
+import { type ImportListModel, useImportList } from "../lib/use-import-list";
 import { cn } from "../lib/utils";
 import { describeThrown, pushToast } from "../toast";
 import { CodeReviewSettings } from "./CodeReviewSettings";
+import { ImportList } from "./ImportList";
 import { SetupCheckResults, useSetupCheck } from "./SetupCheck";
 import { SettingRow, SettingsCard } from "./settings/SettingRow";
 import { Button } from "./ui/button";
@@ -69,6 +72,30 @@ const stepId = (index: number): StepId | undefined =>
 /** The stepper label of step `id` (each screen's title). */
 const stepLabel = (id: StepId): string =>
   ONBOARDING_STEPS.find((entry) => entry.id === id)?.label ?? "";
+
+/**
+ * The import step (docs/import.md I4, I12): the same ImportList as the
+ * Import… dialog. The primary button lives in the wizard footer (it reads the
+ * count from `model`); nothing found = "No recent sessions found".
+ */
+function ImportStep({
+  model,
+  onSubmit,
+}: {
+  model: ImportListModel;
+  onSubmit(): void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-3" data-testid="onboarding-import">
+      <StepHeader title={stepLabel("import")}>
+        Sessions you already have in Claude Code, Codex, Pi, Cursor and herdr
+        can come onto the board as tasks, opened where they are. Your Claude
+        Code / Codex setup works as-is.
+      </StepHeader>
+      <ImportList model={model} onSubmit={onSubmit} className="max-h-[22rem]" />
+    </div>
+  );
+}
 
 /**
  * What "Start" hands back: the first composer's prefill. Start gives the
@@ -1100,11 +1127,22 @@ export function Onboarding({
     }
   };
 
+  const importModel = useImportList(stepId(step) === "import");
+  const importModelRef = useRef(importModel);
+  importModelRef.current = importModel;
+
   const next = async (): Promise<void> => {
     if (busy || !state) return;
     setBusy(true);
     try {
       await saveStep();
+      if (stepId(step) === "import" && importModelRef.current.count > 0) {
+        const result = await importModelRef.current.importSelected();
+        if (result && result.imported.length === 0) {
+          importModelRef.current.refresh();
+          throw new Error("Nothing could be imported: check the list again");
+        }
+      }
       if (step < STEP_COUNT - 1) {
         setStep(step + 1);
         return;
@@ -1163,6 +1201,13 @@ export function Onboarding({
     } finally {
       setBusy(false);
     }
+  };
+
+  /** "Skip" on the import step: on without importing anything. */
+  const skipImport = (): void => {
+    if (busy) return;
+    setError("");
+    setStep(step + 1);
   };
 
   const goTo = (index: number): void => {
@@ -1282,6 +1327,14 @@ export function Onboarding({
   }, [ghReady]);
 
   const last = step === STEP_COUNT - 1;
+  const onImportStep = stepId(step) === "import";
+  const primaryLabel = last
+    ? "Start Harbormaster"
+    : onImportStep && importModel.count > 0
+      ? importButtonLabel(importModel.count)
+      : onImportStep
+        ? "Continue"
+        : "Next";
   return (
     <div
       ref={wizardRef}
@@ -1356,6 +1409,8 @@ export function Onboarding({
                 }}
                 onRecheck={checkGithub}
               />
+            ) : stepId(step) === "import" ? (
+              <ImportStep model={importModel} onSubmit={() => void next()} />
             ) : (
               <ConceptsStep
                 busy={busy || !state}
@@ -1388,15 +1443,27 @@ export function Onboarding({
                 Back
               </Button>
             )}
+            {onImportStep && (
+              <Button
+                variant="ghost"
+                className="ml-auto"
+                data-testid="onboarding-import-skip"
+                disabled={busy}
+                title="Skip: nothing is imported"
+                onClick={skipImport}
+              >
+                Skip
+              </Button>
+            )}
             <Button
               ref={primaryRef}
-              className="ml-auto"
+              className={onImportStep ? undefined : "ml-auto"}
               data-testid={last ? "onboarding-start" : "onboarding-next"}
               disabled={busy || !state}
-              title={`${last ? "Start Harbormaster" : "Next"} (Enter)`}
+              title={`${primaryLabel} (Enter)`}
               onClick={() => void next()}
             >
-              {last ? "Start Harbormaster" : "Next"}
+              {primaryLabel}
               <Kbd>↵</Kbd>
             </Button>
           </footer>
