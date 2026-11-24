@@ -56,6 +56,9 @@ describe("tool catalog", () => {
       "find_tasks",
       "send_to_task",
       "inbox_claim",
+      "import_list",
+      "import_apply",
+      "import_undo",
     ]);
     for (const tool of TOOL_CATALOG) {
       expect(tool.inputSchema.type).toBe("object");
