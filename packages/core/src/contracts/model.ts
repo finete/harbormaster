@@ -3,6 +3,7 @@
 // pipelines, no terminal-multiplexer integration. Those return in later phases behind the same shapes
 // where it makes sense.
 
+import type { TaskImportInfo } from "./import.js";
 import type { TaskUsage } from "./usage.js";
 
 export const STATE_VERSION = 1 as const;
@@ -282,6 +283,12 @@ export interface Task {
    * one-shot backfill. Absent until first computed.
    */
   usage?: TaskUsage;
+  /**
+   * Set on a task brought in by `importItems` (docs/import.md): its import
+   * batch (for `undoImport`) and sources. Optional, so older state files
+   * load unchanged.
+   */
+  imported?: TaskImportInfo;
 }
 
 /**
@@ -409,6 +416,14 @@ export interface WorkspaceBinding {
    * git verbs, and never deleted: Done/delete only park the binding.
    */
   inPlace?: boolean;
+  /**
+   * An imported worktree Harbormaster did not create (docs/import.md
+   * decision I9): Done, Archive, the 7-day sweep, rules and undo never
+   * remove the folder or delete its branch; they only release the task's
+   * hold on the session. Removing it is the explicit
+   * `removeExternalWorktree`. Enforced in core's cleanup, not the UI.
+   */
+  external?: boolean;
   createdAt: string;
   updatedAt: string;
 }
