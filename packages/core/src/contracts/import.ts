@@ -159,14 +159,14 @@ export interface ImportCandidateSession {
   userPrompts: number;
   /** Set when this session is running outside Harbormaster. */
   running?: ImportRunningInfo;
-  /** Whether the harness can copy this session into a new one (Pi, Claude Code, Codex: yes; Cursor: no, docs/import.md F9). */
+  /** Whether the harness can copy this session into a new one the adapter's `HarnessCapabilities.fork` (Cursor: no, docs/import.md F8). */
   canFork: boolean;
 }
 
 export interface ImportRunningInfo {
   /** `herdr`: a herdr pane; `terminal`: a process found outside any orchestrator. */
   where: "herdr" | "terminal";
-  /** Session-exact (the agent published its session id) or folder-level (an agent of this harness runs in this folder). */
+  /** Session-exact (the agent published its session id) or folder-level (an agent of this harness runs in this folder: then EVERY session of that harness in the folder is marked running, docs/import.md I13). */
   precision: "session" | "folder";
   /** The row's sentence: "Running in herdr: close it there, or fork it." */
   message: string;
