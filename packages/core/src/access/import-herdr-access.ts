@@ -358,7 +358,9 @@ export class ImportHerdrAccess implements ImportSourceReader {
   constructor(options: HerdrImportAccessOptions = {}) {
     const env = options.env ?? process.env;
     const home = options.home ?? homedir();
-    const xdg = env.XDG_CONFIG_HOME;
+    // An explicit `home` (tests, e2e's fake home) wins over the user's own
+    // XDG_CONFIG_HOME, so it can never reach the real herdr state.
+    const xdg = options.home ? undefined : env.XDG_CONFIG_HOME;
     const configRoot = xdg && xdg.length > 0 ? xdg : join(home, ".config");
     this.configDir = options.configDir ?? join(configRoot, "herdr");
     this.binary = options.herdrBinary ?? "herdr";

@@ -255,11 +255,10 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
     expect(reading).toEqual({ sessions: [], orchestrations: [] });
   });
 
-  it("finds the config dir from XDG_CONFIG_HOME, else <home>/.config/herdr", async () => {
+  it("finds the config dir from XDG_CONFIG_HOME, else <home>/.config/herdr; an explicit home wins over XDG", async () => {
     const binary = join(temp, "no-such-herdr");
     const viaXdg = await new ImportHerdrAccess({
       env: { XDG_CONFIG_HOME: cfg },
-      home: join(temp, "elsewhere"),
       herdrBinary: binary,
     }).read(READ);
     expect(viaXdg.orchestrations).toHaveLength(4);
@@ -272,6 +271,14 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
       herdrBinary: binary,
     }).read(READ);
     expect(viaHome.orchestrations).toHaveLength(4);
+
+    // e2e's fake home must never reach the user's real herdr state.
+    const fakeHome = await new ImportHerdrAccess({
+      env: { XDG_CONFIG_HOME: cfg },
+      home: join(temp, "empty-home"),
+      herdrBinary: binary,
+    }).read(READ);
+    expect(fakeHome.orchestrations).toHaveLength(0);
   });
 });
 
