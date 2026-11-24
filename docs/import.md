@@ -213,8 +213,14 @@ MCP faces come for free:
   `--dry-run` prints what would be created and left out.
 - `harbormaster import undo <batchId>`.
 
-MCP tool names `harbormaster_import_list`, `harbormaster_import_apply`,
-`harbormaster_import_undo`.
+MCP tool names `harbormaster_import_list` (`includeOlder`, `includeHidden`),
+`harbormaster_import_apply` (`candidateIds`, `preselected`, `titles`
+and `sessions` as candidateId → value maps, `forks`, `dryRun`,
+`includeOlder`) and `harbormaster_import_undo` (`batchId`). They are agent
+catalog tools (not human-only ops) because decision I4 asks for MCP too;
+their descriptions tell agents to run them only when the user asked. The
+dry run is computed from a fresh listing and imports nothing; `apply`
+still goes through `importItems`, which re-validates every selection.
 
 ## Fixtures and tests
 
