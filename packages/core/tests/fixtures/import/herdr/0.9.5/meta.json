@@ -1,0 +1,6 @@
+{
+  "herdr": "0.9.5",
+  "recordedAt": "2026-11-24T16:55:36.927Z",
+  "agent": "pi",
+  "note": "temp XDG_CONFIG_HOME; absolute paths rewritten to __ROOT__ / __HOME__"
+}

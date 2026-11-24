@@ -9,6 +9,7 @@ export * from "./git-worktree-access.js";
 export * from "./github-pr-access.js";
 export * from "./harness-session-file-access.js";
 export * from "./http-version-access.js";
+export * from "./import-herdr-access.js";
 export * from "./json-config-access.js";
 export * from "./json-inbox-access.js";
 export * from "./json-message-access.js";
