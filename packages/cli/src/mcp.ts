@@ -34,7 +34,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     {
       capabilities: { tools: {} },
       instructions:
-        "Harbormaster tools for this task: report_status (final outcome), launch_task / review_pull_request / subtask_status (background tasks; review_pull_request for reviewing a PR), find_tasks / send_to_task (message other tasks).",
+        "Harbormaster tools for this task: report_status (final outcome), launch_task / review_pull_request / subtask_status (background tasks; review_pull_request for reviewing a PR), find_tasks / send_to_task (message other tasks), import_list / import_apply / import_undo (bring the USER's existing agent sessions onto the board; only when the user asked).",
     },
   );
 
