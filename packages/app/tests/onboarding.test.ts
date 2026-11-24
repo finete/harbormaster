@@ -112,12 +112,13 @@ describe("agent detection lines", () => {
     });
   });
 
-  it("labels the five steps verb-first", () => {
+  it("labels the six steps (the import one is a question)", () => {
     expect(ONBOARDING_STEPS.map((step) => step.label)).toEqual([
       "Pick your repositories folder",
       "Choose your agent",
       "Set up code review",
       "Connect GitHub",
+      "Bring in your recent work?",
       "How it works",
     ]);
   });

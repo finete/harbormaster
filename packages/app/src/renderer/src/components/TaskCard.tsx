@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { HTMLAttributes, JSX } from "react";
 import type { PresenceBadge, Task } from "../../../preload/api";
 import { useMessagingStates } from "../core-client";
+import { useTaskHighlighted } from "../lib/board-highlight";
 import { taskAgentLabel } from "../lib/task-agent";
 import { lineageIndentPx } from "../lib/task-lineage";
 import {
@@ -152,6 +153,7 @@ function TaskCardFace({
   const usageLine = isOverlay ? undefined : cardUsageLine(task.usage);
   // The hover × (never on the drag preview, nor on an archived card).
   const archivable = !isOverlay && canArchive(task);
+  const highlighted = useTaskHighlighted(task.id);
   const agentLabel = taskAgentLabel(task);
   const start = taskStartMoment(task);
   const startText = absoluteDateTime(start.iso, now);
@@ -164,6 +166,7 @@ function TaskCardFace({
         : {
             "data-testid": `card-${task.id}`,
             "data-selected": selected ? "true" : "false",
+            "data-highlighted": highlighted ? "true" : "false",
             onClick: () => onSelect?.(task.id),
           })}
       className={cn(
@@ -179,6 +182,7 @@ function TaskCardFace({
           : "cursor-grab touch-none hover:border-foreground/20 active:cursor-grabbing",
         variant === "placeholder" && "opacity-40",
         !isOverlay && selected && "border-primary hover:border-primary",
+        !isOverlay && highlighted && "border-primary ring-2 ring-primary/60",
         // Attached under its parent's card (see lib/task-lineage.ts): a
         // visible left rail + indent, pi-home-style tree attachment.
         nested && "border-l-2 border-l-primary/30",

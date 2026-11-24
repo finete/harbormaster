@@ -18,6 +18,7 @@ import type {
   HarbormasterApi,
   HarnessDescriptorInfo,
   HarnessModelCatalog,
+  ImportItemsInput,
   InboxItem,
   InboxPriorityInput,
   InstalledUpdate,
@@ -25,6 +26,7 @@ import type {
   LaunchSettings,
   LaunchTaskInput,
   ListEventsFilter,
+  ListImportCandidatesInput,
   ListSlashCommandsInput,
   MessageMode,
   MessagingChangedPayload,
@@ -201,6 +203,17 @@ const api: HarbormasterApi = {
       options?: { force?: ToDoneForce },
     ): Promise<ToDoneResult> =>
       ipcRenderer.invoke("core:archiveTask", taskId, options),
+    listImportCandidates: (input?: ListImportCandidatesInput) =>
+      ipcRenderer.invoke("core:listImportCandidates", input),
+    importItems: (input: ImportItemsInput) =>
+      ipcRenderer.invoke("core:importItems", input),
+    undoImport: (batchId: string) =>
+      ipcRenderer.invoke("core:undoImport", batchId),
+    removeExternalWorktree: (
+      taskId: string,
+      options?: { force?: ToDoneForce },
+    ): Promise<ToDoneResult> =>
+      ipcRenderer.invoke("core:removeExternalWorktree", taskId, options),
     retryDoneCleanup: (taskId: string): Promise<Task> =>
       ipcRenderer.invoke("core:retryDoneCleanup", taskId),
     abandonDoneCleanup: (taskId: string): Promise<Task> =>

@@ -137,11 +137,14 @@ export function InboxView({
   model,
   active,
   onOpenTask,
+  onShowBoard,
   onBack,
 }: {
   model: InboxModel;
   active: boolean;
   onOpenTask: (taskId: string) => void;
+  /** A `showBoard` button (import summary): open the board and highlight these tasks. */
+  onShowBoard?: (taskIds: string[]) => void;
   onBack: () => void;
 }): JSX.Element {
   const columns = useBoard();
@@ -276,6 +279,8 @@ export function InboxView({
           );
           if (button?.action === "openTask" && result.taskId) {
             onOpenTask(result.taskId);
+          } else if (button?.action === "showBoard") {
+            onShowBoard?.(result.taskIds ?? []);
           } else if (button?.action === "createTask" && result.taskId) {
             const created = result.taskId;
             pushToast(`Created: ${button.label}`, "success", {
@@ -288,7 +293,7 @@ export function InboxView({
         }
       }
     },
-    [model, onOpenTask, draftFor],
+    [model, onOpenTask, onShowBoard, draftFor],
   );
 
   const actionByKey = useCallback(
