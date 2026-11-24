@@ -1,0 +1,18 @@
+{
+  "sessions": [
+    {
+      "default": true,
+      "name": "default",
+      "running": true,
+      "session_dir": "__ROOT__/cfg/herdr",
+      "socket_path": "__ROOT__/cfg/herdr/herdr.sock"
+    },
+    {
+      "default": false,
+      "name": "scratch",
+      "running": false,
+      "session_dir": "__ROOT__/cfg/herdr/sessions/scratch",
+      "socket_path": "__ROOT__/cfg/herdr/sessions/scratch/herdr.sock"
+    }
+  ]
+}
