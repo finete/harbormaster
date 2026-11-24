@@ -872,6 +872,7 @@ export function App({
             >
               <WorkspaceView
                 focusedTaskId={visibleTaskId}
+                visible={view === "workspace" && takeover === null}
                 openedTaskIds={openedTaskIds}
                 onCloseTask={requestCloseTask}
                 composer={

@@ -672,9 +672,15 @@ export interface CoreCommands {
    * fresh branch + worktree off the repository's default branch, with the
    * previous cycle's conversation forked into the new session on its first
    * launch. If the old worktree is still on disk (cleanup was refused) it
-   * is reused as-is with its session. Any failure rolls everything back
-   * (no branch, worktree, binding, or state change survives). A missing
-   * previous conversation is a `warning`, never a failure.
+   * is reused as-is with its session. A folder task resumes in its folder
+   * and a scratch task in its scratch directory, each with its own session;
+   * one Done straight from Backlog gets the workspace `startTask` would
+   * have given it. Any failure rolls everything back (no branch, worktree,
+   * binding, or state change survives). A missing previous conversation is
+   * a `warning`, never a failure. A reopen of a task already being reopened
+   * joins that one instead of starting a second cycle; an objective other
+   * than the running reopen's is not sent, and the joined call's result
+   * says so in its `warning`.
    */
   reopenTask(
     taskId: string,

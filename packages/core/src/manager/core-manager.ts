@@ -421,6 +421,11 @@ export class CoreManager implements CoreCommands {
   private readonly cleanupWarnings = new Map<string, string>();
   /** Tasks whose forced Done cleanup is running right now (toDone vs the sweep vs Retry). */
   private readonly cleanupsInFlight = new Set<string>();
+  /** The running `reopenTask` per task (and the objective it uses), joined by any reopen of it made while it runs. */
+  private readonly reopensInFlight = new Map<
+    string,
+    { run: Promise<{ task: Task; warning?: string }>; objective: string }
+  >();
   /** Registered folders resolved to repositories (see `locationEntries`). */
   private locationCache:
     | { at: number; entries: Array<{ path: string; repo?: RepositoryInfo }> }
@@ -1680,7 +1685,37 @@ export class CoreManager implements CoreCommands {
     return true;
   }
 
-  async reopenTask(
+  reopenTask(
+    taskId: string,
+    input?: ReopenTaskInput,
+  ): Promise<{ task: Task; warning?: string }> {
+    // A second reopen (a repeated drop, Resume plus the header's Reopen)
+    // would pass the Done check while the first still creates its worktree,
+    // then overwrite its binding and orphan that worktree + branch.
+    const objective = input?.objective?.trim() ?? "";
+    const running = this.reopensInFlight.get(taskId);
+    if (running) {
+      if (!objective || objective === running.objective) return running.run;
+      // The joined cycle already chose its first message: say this
+      // objective was not sent instead of dropping it silently.
+      return running.run.then((result) => ({
+        ...result,
+        warning: [
+          result.warning,
+          `${result.task.title} was already being reopened, so your objective was not sent; send it to the agent once it starts`,
+        ]
+          .filter(Boolean)
+          .join("; "),
+      }));
+    }
+    const run = this.runReopenTask(taskId, input).finally(() => {
+      this.reopensInFlight.delete(taskId);
+    });
+    this.reopensInFlight.set(taskId, { run, objective });
+    return run;
+  }
+
+  private async runReopenTask(
     taskId: string,
     input?: ReopenTaskInput,
   ): Promise<{ task: Task; warning?: string }> {
@@ -1713,20 +1748,50 @@ export class CoreManager implements CoreCommands {
     }
 
     if (!task.repositoryId) {
-      // A folder task runs in place: point its parked binding back at the
-      // folder so the reopened cycle has somewhere to run.
-      const parked = task.folderPath
-        ? await this.deps.bindings.getBindingForTask(taskId)
-        : undefined;
-      if (task.folderPath && parked && !parked.worktreePath) {
-        await this.deps.bindings.replaceBinding({
-          ...parked,
-          worktreePath: task.folderPath,
-          inPlace: true,
-          updatedAt: now,
-        });
+      // A folder task runs in place, a scratch task in its scratch
+      // directory (still on disk: Done only parked the binding). Point the
+      // parked binding back there so the reopened cycle resumes its
+      // conversation where it ran; a task Done straight from Backlog never
+      // had one, so it gets the workspace `startTask` would have given it.
+      const parked = await this.deps.bindings.getBindingForTask(taskId);
+      if (!parked) {
+        const noop = { persist: async () => {}, undo: async () => {} };
+        if (task.folderPath) {
+          await this.provisionInPlaceWorkspace(
+            taskId,
+            task.folderPath,
+            now,
+            noop,
+          );
+        } else {
+          await this.provisionScratchWorkspace(taskId, now, noop);
+        }
+      } else if (!parked.worktreePath) {
+        const worktreePath = task.folderPath
+          ? task.folderPath
+          : parked.scratch
+            ? await this.deps.scratch.ensureScratchDirectory(taskId)
+            : undefined;
+        if (worktreePath) {
+          await this.deps.bindings.replaceBinding({
+            ...parked,
+            worktreePath,
+            ...(task.folderPath ? { inPlace: true } : {}),
+            updatedAt: now,
+          });
+        }
       }
-      await this.deps.tasks.replaceTask(reopened);
+      try {
+        await this.deps.tasks.replaceTask(reopened);
+      } catch (error) {
+        // No half-reopened task: the binding goes back to how Done left it.
+        if (parked) {
+          await this.deps.bindings.replaceBinding(parked).catch(() => {});
+        } else {
+          await this.deps.bindings.removeBinding(taskId).catch(() => {});
+        }
+        throw error;
+      }
       await this.publishTaskChange(reopened);
       return { task: reopened };
     }

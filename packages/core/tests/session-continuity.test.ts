@@ -583,6 +583,37 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     });
   });
 
+  it("joins a reopen already running: one new branch + worktree, never an orphan", async () => {
+    const f = await fixture();
+    const { done } = await doneTaskWithSession(f);
+    const branchesBefore = await branches(f.checkout);
+
+    const [first, plain, withObjective] = await Promise.all([
+      f.manager.reopenTask(done.id),
+      f.manager.reopenTask(done.id),
+      f.manager.reopenTask(done.id, { objective: "Now add tests" }),
+    ]);
+    expect(await branches(f.checkout)).toHaveLength(branchesBefore.length + 1);
+    expect(
+      (await git(["worktree", "list", "--porcelain"], f.checkout)).match(
+        /^worktree /gm,
+      ),
+    ).toHaveLength(2);
+    expect(plain).toBe(first);
+    expect((await f.manager.getTaskWorkspace(done.id))?.branch).toBe(
+      first.task.branch,
+    );
+    // An objective the running reopen didn't use is never dropped silently.
+    expect(withObjective.task).toBe(first.task);
+    expect(first.warning).toBeUndefined();
+    expect(withObjective.warning).toMatch(
+      /already being reopened, so your objective was not sent/,
+    );
+    expect(await f.manager.claimInitialPrompt(done.id)).toBeUndefined();
+    // Once it landed, the task is no longer Done: a later reopen refuses.
+    await expect(f.manager.reopenTask(done.id)).rejects.toThrow(/done task/);
+  });
+
   it("with no objective, never replays the old prompt", async () => {
     const f = await fixture();
     const { done } = await doneTaskWithSession(f);
@@ -650,6 +681,9 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
         /^worktree /gm,
       ),
     ).toHaveLength(1);
+
+    // A failed reopen leaves nothing in flight: the next one runs.
+    expect((await f.manager.reopenTask(done.id)).task.state).toBe("working");
   });
 
   it("rolls back the new worktree + branch when the binding write fails", async () => {
@@ -671,7 +705,38 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
     await expect(f.manager.reopenTask(task.id)).rejects.toThrow(/done task/);
   });
 
-  it("reopens a scratch task straight into Working", async () => {
+  it("reopens a scratch task straight into Working, back in its scratch directory with its conversation", async () => {
+    const f = await fixture();
+    const scratch = await f.manager.createTask({
+      title: "Scratch",
+      initialPrompt: "",
+      start: true,
+    });
+    const before = await f.manager.getTaskWorkspace(scratch.id);
+    expect(before?.scratch).toBe(true);
+    const first = await f.manager.claimSessionLaunch(scratch.id);
+    expect(first?.mode).toBe("new");
+    await f.manager.toDone(scratch.id, { force: { confirmed: true } });
+    expect(
+      (await f.manager.getTaskWorkspace(scratch.id))?.worktreePath,
+    ).toBeUndefined();
+
+    const result = await f.manager.reopenTask(scratch.id, {
+      objective: "Again",
+    });
+    expect(result.task.state).toBe("working");
+    expect(result.task.initialPrompt).toBe("Again");
+    expect(await f.manager.getTaskWorkspace(scratch.id)).toMatchObject({
+      worktreePath: before?.worktreePath,
+      scratch: true,
+    });
+    expect(await f.manager.claimSessionLaunch(scratch.id)).toMatchObject({
+      mode: "resume",
+      sessionId: first && "sessionId" in first ? first.sessionId : "",
+    });
+  });
+
+  it("leaves a scratch task Done and parked when the reopen's task write fails", async () => {
     const f = await fixture();
     const scratch = await f.manager.createTask({
       title: "Scratch",
@@ -679,11 +744,29 @@ describe.skipIf(!gitAvailable)("reopenTask", () => {
       start: true,
     });
     await f.manager.toDone(scratch.id, { force: { confirmed: true } });
-    const result = await f.manager.reopenTask(scratch.id, {
-      objective: "Again",
+    const parked = await f.manager.getTaskWorkspace(scratch.id);
+
+    f.failNext("replaceTask");
+    await expect(f.manager.reopenTask(scratch.id)).rejects.toThrow(
+      "replaceTask unavailable",
+    );
+    expect((await f.manager.getTask(scratch.id))?.state).toBe("done");
+    expect(await f.manager.getTaskWorkspace(scratch.id)).toEqual(parked);
+  });
+
+  it("gives a scratch task Done straight from Backlog a workspace when reopened", async () => {
+    const f = await fixture();
+    const idea = await f.manager.createTask({
+      title: "Idea",
+      initialPrompt: "",
     });
-    expect(result.task.state).toBe("working");
-    expect(result.task.initialPrompt).toBe("Again");
+    await f.manager.toDone(idea.id, { force: { confirmed: true } });
+    expect(await f.manager.getTaskWorkspace(idea.id)).toBeUndefined();
+
+    await f.manager.reopenTask(idea.id);
+    const binding = await f.manager.getTaskWorkspace(idea.id);
+    expect(binding?.scratch).toBe(true);
+    expect(binding?.worktreePath).toBeTruthy();
   });
 });
 
