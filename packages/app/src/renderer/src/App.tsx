@@ -31,7 +31,6 @@ import { TakeoverDialog } from "./components/TakeoverDialog";
 import { ToastHost } from "./components/ToastHost";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { Button } from "./components/ui/button";
-import { Kbd } from "./components/ui/kbd";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { requestConfirm } from "./confirm";
 import {
@@ -61,7 +60,6 @@ import {
   dismissOrphanWarning,
   shouldShowOrphanWarning,
 } from "./lib/orphan-warning";
-import { modKeyLabel } from "./lib/platform";
 import {
   setAppFocus,
   startRendererDiagnostics,

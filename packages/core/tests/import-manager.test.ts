@@ -596,7 +596,9 @@ describe("importItems", () => {
       buttonId: "show",
     });
     expect(shown.taskIds).toEqual([result.imported[0]?.taskId]);
-    expect(shown.item.resolvedAt).toBeDefined();
+    // Show on board leaves the item open: Undo stays one click away.
+    expect(shown.item.resolvedAt).toBeUndefined();
+    expect((await h.inbox.list())[0]?.resolvedAt).toBeUndefined();
   });
 });
 

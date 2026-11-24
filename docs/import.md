@@ -167,7 +167,8 @@ One persisted inbox item per batch (kind `import`, source `harbormaster`,
 Other tab), title "Imported N tasks from <sources>" (+ " · M left out
 (<reason>: n, …)"), body listing left-out items by reason, buttons
 **Show on board** (new action `showBoard`, `with: {taskIds}`: the app opens
-the board and highlights them) and **Undo import** (new action
+the board and highlights them; it does NOT resolve the item, so Undo stays
+one click away) and **Undo import** (new action
 `undoImport`, `with: {batchId}`; resolves the item with the undo result).
 Frontends render buttons from the item, never by kind name.
 

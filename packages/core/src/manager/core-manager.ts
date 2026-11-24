@@ -5060,6 +5060,10 @@ export class CoreManager implements CoreCommands {
         (await this.deps.tasks.listTasks()).map((task) => task.id),
       );
       taskIds = wanted.filter((id) => present.has(id));
+      // Looking at the imported tasks must not take Undo away (docs/import.md
+      // I10): the summary item stays open until Undo, Dismiss, or an undo
+      // from elsewhere resolves it.
+      return { item: existing, taskIds };
     } else if (button?.action === "undoImport") {
       if (typeof button.with?.batchId !== "string") {
         throw new Error(`Inbox item ${itemId}: undoImport needs a batchId`);

@@ -15,8 +15,8 @@ export interface InboxButton {
    * `openTask`: resolves the item and returns `taskId` for the frontend to open;
    * `createTask`: creates the pre-filled task (`with` = createTask action input);
    * `dismiss`: resolves the item; `snooze`: hides it until `with.until` (ISO) or 1 hour;
-   * `showBoard`: resolves the item and returns `with.taskIds` for the frontend to open the
-   * board and highlight (import summary); `undoImport`: runs `undoImport(with.batchId)` and
+   * `showBoard`: returns `with.taskIds` (those still on the board) for the frontend to open
+   * the board and highlight, WITHOUT resolving the item (its Undo stays available); `undoImport`: runs `undoImport(with.batchId)` and
    * resolves the item (the result comes back as `undo`).
    */
   action:
