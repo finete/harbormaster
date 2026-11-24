@@ -11,6 +11,7 @@
 //   harbormaster hook codex --event session-start|user-prompt-submit|post-tool-use|stop   (X1-X3)
 //   harbormaster hook cursor --event session-start|before-submit-prompt|post-tool-use|stop   (C2-C5)
 //   harbormaster inbox claim --task <id> [--idle true|false]
+//   harbormaster import list|apply|undo ...   (onto the import_* catalog tools)
 //   harbormaster inbox list [--priority|--other] [--json]
 //   harbormaster inbox resolve <id> [<button>]
 //   harbormaster events [--task <id>] [--rule <id> [--file <f>]] [--since <time>] [--limit <n>] [--json]
@@ -168,6 +169,10 @@ function usage(): string {
     "  inbox claim --task <id> [--idle true|false]  Claim a task's inbox messages as JSON",
     "  inbox list [--priority|--other] [--json]  Items that need you (rule items, approvals)",
     "  inbox resolve <id> [<button>]             Press an item's button (default: dismiss)",
+    "  import list [--older] [--hidden] [--json]  The user's existing agent work that could come onto the board (only when asked)",
+    "  import apply <candidateId>... [--preselected] [--title <id>=<text>] [--session <id>=<sessionId>] [--fork <id>] [--older] [--dry-run] [--json]",
+    "                                            Import listed items as tasks; --dry-run shows what would happen",
+    "  import undo <batchId> [--json]            Undo an import batch (untouched tasks are removed, touched ones kept)",
     "  events [--task <id>] [--rule <id> [--file <f>]] [--since <t>] [--limit <n>] [--json]  The rules audit log",
     "  rules list [--json]                       Rules as loaded: label, last fired, problems",
     "  rules on | rules off                      Turn the rules on or off",
@@ -966,6 +971,103 @@ async function runReview(
   return 0;
 }
 
+/** `key=value` flag value → [key, value] (the value may itself contain `=`). */
+function splitPair(flag: string, raw: string): [string, string] {
+  const eq = raw.indexOf("=");
+  if (eq <= 0) throw new UsageError(`--${flag} takes <candidateId>=<value>`);
+  return [raw.slice(0, eq), raw.slice(eq + 1)];
+}
+
+const IMPORT_USAGE =
+  "usage: import list [--older] [--hidden] [--json] | import apply <candidateId>... [--preselected] [--title <id>=<text>] [--session <id>=<sessionId>] [--fork <id>] [--older] [--dry-run] [--json] | import undo <batchId> [--json]";
+
+/** `import list|apply|undo`: shapes flags into the `import_*` tool arguments (no logic beyond that). */
+async function runImport(
+  argv: readonly string[],
+  socketPath: string,
+  caller: ToolCaller,
+  io: CliIo,
+): Promise<number> {
+  const [verb, ...rest] = argv;
+  if (verb !== "list" && verb !== "apply" && verb !== "undo") {
+    throw new UsageError(IMPORT_USAGE);
+  }
+  const positional: string[] = [];
+  const booleans = new Set<string>();
+  const titles: Record<string, string> = {};
+  const sessions: Record<string, string> = {};
+  const forks: string[] = [];
+  const booleanFlags =
+    verb === "list"
+      ? ["older", "hidden", "json"]
+      : verb === "apply"
+        ? ["older", "preselected", "dry-run", "json"]
+        : ["json"];
+  const valueFlags = verb === "apply" ? ["title", "session", "fork"] : [];
+  for (let index = 0; index < rest.length; index++) {
+    const token = rest[index] as string;
+    if (!token.startsWith("--")) {
+      positional.push(token);
+      continue;
+    }
+    const eq = token.indexOf("=");
+    const name = token.slice(2, eq === -1 ? undefined : eq);
+    if (booleanFlags.includes(name)) {
+      if (eq !== -1 && token.slice(eq + 1) !== "true") {
+        throw new UsageError(`--${name} takes no value`);
+      }
+      booleans.add(name);
+      continue;
+    }
+    if (!valueFlags.includes(name))
+      throw new UsageError(`unknown flag --${name}`);
+    const raw = eq !== -1 ? token.slice(eq + 1) : rest[++index];
+    if (raw === undefined) throw new UsageError(`--${name} needs a value`);
+    if (name === "title") {
+      const [id, text] = splitPair(name, raw);
+      titles[id] = text;
+    } else if (name === "session") {
+      const [id, sessionId] = splitPair(name, raw);
+      sessions[id] = sessionId;
+    } else forks.push(raw);
+  }
+  let tool: string;
+  let args: Record<string, unknown>;
+  if (verb === "list") {
+    if (positional.length > 0) throw new UsageError(IMPORT_USAGE);
+    tool = "import_list";
+    args = {
+      ...(booleans.has("older") ? { includeOlder: true } : {}),
+      ...(booleans.has("hidden") ? { includeHidden: true } : {}),
+    };
+  } else if (verb === "apply") {
+    if (positional.length === 0 && !booleans.has("preselected")) {
+      throw new UsageError(IMPORT_USAGE);
+    }
+    tool = "import_apply";
+    args = {
+      ...(positional.length > 0 ? { candidateIds: positional } : {}),
+      ...(booleans.has("preselected") ? { preselected: true } : {}),
+      ...(Object.keys(titles).length > 0 ? { titles } : {}),
+      ...(Object.keys(sessions).length > 0 ? { sessions } : {}),
+      ...(forks.length > 0 ? { forks } : {}),
+      ...(booleans.has("older") ? { includeOlder: true } : {}),
+      ...(booleans.has("dry-run") ? { dryRun: true } : {}),
+    };
+  } else {
+    if (positional.length !== 1) throw new UsageError(IMPORT_USAGE);
+    tool = "import_undo";
+    args = { batchId: positional[0] };
+  }
+  const result = await callTool(socketPath, tool, args, caller);
+  io.stdout(
+    booleans.has("json")
+      ? `${JSON.stringify(result.details ?? {}, null, 2)}\n`
+      : `${result.text}\n`,
+  );
+  return 0;
+}
+
 /** Runs one CLI invocation; resolves the exit code. */
 export async function main(
   argv: readonly string[],
@@ -1046,6 +1148,9 @@ export async function main(
       throw new UsageError(
         "usage: inbox claim|list|resolve (see harbormaster --help)",
       );
+    }
+    if (command === "import") {
+      return await runImport(rest, socketPath, caller, io);
     }
     if (command === "events") {
       const flags = parseFlags(rest);

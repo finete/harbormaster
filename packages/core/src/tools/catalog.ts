@@ -11,11 +11,19 @@
 // travels as `ToolCaller` next to the arguments.
 
 import type { CoreCommands, LaunchTaskInput } from "../contracts/commands.js";
+import type { ImportItemSelection } from "../contracts/import.js";
 import {
   buildChildStatusEntry,
   countActiveTasks,
   formatChildStatusText,
 } from "./child-status.js";
+import {
+  formatImportDryRunText,
+  formatImportListText,
+  formatImportResultText,
+  formatUndoImportText,
+  type ResolvedImportSelection,
+} from "./import-format.js";
 import {
   type FormattedInboxMessage,
   formatInboxMessage,
@@ -140,6 +148,22 @@ function readStringArray(
     throw new Error(`${key} must be an array of strings`);
   }
   return value as string[];
+}
+
+function readStringMap(
+  args: Record<string, unknown>,
+  key: string,
+): Record<string, string> {
+  const value = args[key];
+  if (value === undefined || value === null) return {};
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.values(value as object).some((item) => typeof item !== "string")
+  ) {
+    throw new Error(`${key} must be an object of strings`);
+  }
+  return value as Record<string, string>;
 }
 
 function requireTaskCaller(caller: ToolCaller, tool: string): string {
@@ -600,6 +624,183 @@ const inboxClaim: ToolDefinition = {
   },
 };
 
+const IMPORT_WARNING =
+  "This brings the USER's existing agent sessions (Claude Code, Codex, Pi, Cursor, herdr workspaces) onto the board as tasks. Only run it when the user asked you to import their existing work.";
+
+const importList: ToolDefinition = {
+  name: "import_list",
+  title: "Harbormaster import: list existing work",
+  description: `List the user's existing agent work that could be imported into Harbormaster, grouped by repository, newest first: one item per folder (worktree or checkout) with its sessions, branch, PR, and why an item is blocked (already on the board, running elsewhere) or hidden. Read-only. ${IMPORT_WARNING} Items are listed for the last 30 days (includeOlder for more); hidden items (tiny sessions, missing folders) only show with includeHidden.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      includeOlder: {
+        type: "boolean",
+        description: "Also list items last active more than 30 days ago.",
+      },
+      includeHidden: {
+        type: "boolean",
+        description:
+          "Also show hidden items (tiny sessions, missing folders, ...).",
+      },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, { commands }) {
+    const includeOlder = readBoolean(args, "includeOlder");
+    const includeHidden = readBoolean(args, "includeHidden");
+    const listing = await commands.listImportCandidates(
+      includeOlder ? { includeOlder: true } : {},
+    );
+    return {
+      text: formatImportListText(listing, { includeHidden: !!includeHidden }),
+      details: listing,
+    };
+  },
+};
+
+const importApply: ToolDefinition = {
+  name: "import_apply",
+  title: "Harbormaster import: import existing work as tasks",
+  description: `Import items from import_list as tasks (one folder + its sessions = one task; nothing is launched, the session resumes when the user opens the task). ${IMPORT_WARNING} Pass candidateIds (the ids import_list shows) and/or preselected=true (every pre-ticked item: active in the last 7 days, not blocked, PR not merged/closed). titles maps candidateId to a title override; sessions maps candidateId to the session id to bind (default: the most recent); forks lists candidateIds to import as a fork of the session (for a session running elsewhere; not every agent can fork). dryRun=true lists what would be created and left out without importing. The result names a batch id; import_undo reverses it.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      candidateIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "Candidate ids from import_list to import.",
+      },
+      preselected: {
+        type: "boolean",
+        description: "Also import every pre-ticked candidate.",
+      },
+      titles: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "candidateId → title override.",
+      },
+      sessions: {
+        type: "object",
+        additionalProperties: { type: "string" },
+        description: "candidateId → session id to bind.",
+      },
+      forks: {
+        type: "array",
+        items: { type: "string" },
+        description: "candidateIds to import as a fork instead of the session.",
+      },
+      dryRun: {
+        type: "boolean",
+        description: "Show what would be created and left out; import nothing.",
+      },
+      includeOlder: {
+        type: "boolean",
+        description: "Resolve ids among items older than 30 days too.",
+      },
+    },
+    additionalProperties: false,
+  },
+  async handler(args, { commands }) {
+    const ids = readStringArray(args, "candidateIds") ?? [];
+    const preselected = readBoolean(args, "preselected") === true;
+    const dryRun = readBoolean(args, "dryRun") === true;
+    const includeOlder = readBoolean(args, "includeOlder") === true;
+    const titles = readStringMap(args, "titles");
+    const sessions = readStringMap(args, "sessions");
+    const forks = new Set(readStringArray(args, "forks") ?? []);
+    if (ids.length === 0 && !preselected) {
+      throw new Error("pass candidateIds and/or preselected=true");
+    }
+    const listing = await commands.listImportCandidates(
+      includeOlder ? { includeOlder: true } : {},
+    );
+    const all = listing.groups.flatMap((group) => group.candidates);
+    const byId = new Map(all.map((candidate) => [candidate.id, candidate]));
+    const wanted = [...ids];
+    if (preselected) {
+      for (const candidate of all) {
+        if (candidate.preselected && !candidate.blocked) {
+          wanted.push(candidate.id);
+        }
+      }
+    }
+    for (const key of [
+      ...Object.keys(titles),
+      ...Object.keys(sessions),
+      ...forks,
+    ]) {
+      if (!wanted.includes(key)) {
+        throw new Error(`${key} is not among the candidates being imported`);
+      }
+    }
+    const resolved: ResolvedImportSelection[] = [];
+    for (const id of new Set(wanted)) {
+      const candidate = byId.get(id);
+      if (!candidate) {
+        throw new Error(
+          `Unknown candidate "${id}". Run import_list first${includeOlder ? "" : " (older items need includeOlder)"}.`,
+        );
+      }
+      const sessionId = sessions[id] ?? candidate.defaultSessionId;
+      if (!candidate.sessions.some((s) => s.sessionId === sessionId)) {
+        throw new Error(
+          `Candidate ${id} has no session "${sessionId}". Its sessions: ${candidate.sessions.map((s) => s.sessionId).join(", ")}`,
+        );
+      }
+      const selection: ImportItemSelection = {
+        candidateId: id,
+        sessionId,
+        title: titles[id]?.trim() || candidate.title,
+        ...(forks.has(id) ? { fork: true } : {}),
+      };
+      resolved.push({ selection, candidate });
+    }
+    if (dryRun) {
+      return {
+        text: formatImportDryRunText(listing, resolved),
+        details: { dryRun: true, items: resolved.map((r) => r.selection) },
+      };
+    }
+    const result = await commands.importItems({
+      items: resolved.map((r) => r.selection),
+      ...(includeOlder ? { includeOlder: true } : {}),
+    });
+    return {
+      text: formatImportResultText(
+        result,
+        new Map(
+          resolved.map((r) => [r.selection.candidateId, r.selection.title]),
+        ),
+      ),
+      details: result,
+    };
+  },
+};
+
+const importUndo: ToolDefinition = {
+  name: "import_undo",
+  title: "Harbormaster import: undo an import batch",
+  description:
+    "Undo an import batch (the batch id import_apply printed): tasks not opened or changed since are removed (folders, branches and sessions are never touched); touched ones are kept and listed. Only run it when the user asked to undo an import.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      batchId: {
+        type: "string",
+        description: "The batch id from import_apply.",
+      },
+    },
+    required: ["batchId"],
+    additionalProperties: false,
+  },
+  async handler(args, { commands }) {
+    const batchId = readString(args, "batchId", true);
+    const result = await commands.undoImport(batchId);
+    return { text: formatUndoImportText(result), details: result };
+  },
+};
+
 /** Every tool, in display order. The MCP server and the CLI enumerate exactly this. */
 export const TOOL_CATALOG: readonly ToolDefinition[] = [
   reportStatus,
@@ -609,6 +810,9 @@ export const TOOL_CATALOG: readonly ToolDefinition[] = [
   findTasks,
   sendToTask,
   inboxClaim,
+  importList,
+  importApply,
+  importUndo,
 ];
 
 export function findTool(name: string): ToolDefinition | undefined {

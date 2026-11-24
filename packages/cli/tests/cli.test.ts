@@ -1323,3 +1323,172 @@ describe("harbormaster mcp", () => {
     await client.close();
   });
 });
+
+describe("harbormaster import", () => {
+  it("maps the friendly verbs onto the import_* tools", async () => {
+    const calls: { name: string; args: unknown }[] = [];
+    const fakeDir = await mkdtemp(join(tmpdir(), "hm-cli-import-"));
+    const fakeServer = await startToolSocketServer({
+      socketPath: resolveSocketPath(fakeDir),
+      commands: {
+        listImportCandidates: async (input: unknown) => {
+          calls.push({ name: "list", args: input });
+          return {
+            groups: [],
+            sources: [],
+            scannedAt: "2026-11-25T00:00:00.000Z",
+          };
+        },
+        importItems: async (input: unknown) => {
+          calls.push({ name: "apply", args: input });
+          return { batchId: "b9", imported: [], skipped: [], leftOut: {} };
+        },
+        undoImport: async (id: string) => {
+          calls.push({ name: "undo", args: id });
+          return { batchId: id, removed: ["t1"], kept: [] };
+        },
+      } as never,
+    });
+    const env = { HARBORMASTER_STATE_DIR: fakeDir };
+    const run = (...argv: string[]) => {
+      const out = { ...io(env) };
+      return main(argv, out).then((code) => ({
+        code,
+        out: out.out(),
+        err: out.err(),
+      }));
+    };
+    try {
+      const list = await run("import", "list", "--older", "--hidden");
+      expect(list.out).toContain("No importable work found.");
+      expect(calls.at(-1)).toEqual({
+        name: "list",
+        args: { includeOlder: true },
+      });
+
+      const json = await run("import", "list", "--json");
+      expect(JSON.parse(json.out).groups).toEqual([]);
+
+      // Unknown candidates fail before importItems runs.
+      const bad = await run(
+        "import",
+        "apply",
+        "x1",
+        "--title",
+        "x1=A=B",
+        "--fork",
+        "x1",
+      );
+      expect(bad.code).toBe(1);
+      expect(bad.err).toContain('Unknown candidate "x1"');
+
+      const undo = await run("import", "undo", "b9");
+      expect(undo.out).toContain("removed task t1");
+      expect(calls.at(-1)).toEqual({ name: "undo", args: "b9" });
+
+      expect((await run("import", "apply")).code).toBe(64);
+      expect((await run("import", "apply", "a", "--bogus")).err).toContain(
+        "unknown flag --bogus",
+      );
+      expect(
+        (await run("import", "apply", "a", "--title", "nope")).err,
+      ).toContain("<candidateId>=<value>");
+      expect((await run("import", "undo")).code).toBe(64);
+      expect((await run("import")).code).toBe(64);
+    } finally {
+      await fakeServer.close();
+      await rm(fakeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("apply sends titles (values may contain =), sessions, forks and dry-run flags", async () => {
+    const fakeDir = await mkdtemp(join(tmpdir(), "hm-cli-import-"));
+    const cand = {
+      id: "c1",
+      folderPath: "/w/c1",
+      kind: "folder",
+      groupLabel: "g",
+      title: "T",
+      titleSource: "folder",
+      sessions: [
+        {
+          harness: "pi",
+          sessionId: "s1",
+          sessionPath: "p",
+          lastActiveAt: "2026-11-24T00:00:00.000Z",
+          userPrompts: 4,
+          canFork: true,
+        },
+        {
+          harness: "pi",
+          sessionId: "s2",
+          sessionPath: "q",
+          lastActiveAt: "2026-11-23T00:00:00.000Z",
+          userPrompts: 4,
+          canFork: true,
+        },
+      ],
+      defaultSessionId: "s1",
+      sources: ["pi"],
+      lastActiveAt: "2026-11-24T00:00:00.000Z",
+      preselected: true,
+    };
+    let imported: unknown;
+    const fakeServer = await startToolSocketServer({
+      socketPath: resolveSocketPath(fakeDir),
+      commands: {
+        listImportCandidates: async () => ({
+          groups: [{ id: "g", label: "g", candidates: [cand] }],
+          sources: [{ id: "pi", label: "Pi", found: 1 }],
+          scannedAt: "2026-11-25T00:00:00.000Z",
+        }),
+        importItems: async (input: unknown) => {
+          imported = input;
+          return {
+            batchId: "b1",
+            imported: [{ candidateId: "c1", taskId: "t1" }],
+            skipped: [],
+            leftOut: {},
+          };
+        },
+      } as never,
+    });
+    const run = async (...argv: string[]) => {
+      const out = io({ HARBORMASTER_STATE_DIR: fakeDir });
+      await main(argv, out);
+      return out.out();
+    };
+    try {
+      const dry = await run("import", "apply", "--preselected", "--dry-run");
+      expect(dry).toContain("Dry run: would import 1 task.");
+      expect(imported).toBeUndefined();
+
+      const text = await run(
+        "import",
+        "apply",
+        "c1",
+        "--title",
+        "c1=a=b",
+        "--session=c1=s2",
+        "--fork",
+        "c1",
+      );
+      expect(imported).toEqual({
+        items: [
+          { candidateId: "c1", sessionId: "s2", title: "a=b", fork: true },
+        ],
+      });
+      expect(text).toContain("Undo with: harbormaster import undo b1");
+    } finally {
+      await fakeServer.close();
+      await rm(fakeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("is in --help and exposed by the MCP server", async () => {
+    const out = io();
+    await main(["--help"], out);
+    expect(out.out()).toContain("import apply <candidateId>...");
+    expect(out.out()).toContain("import_apply");
+  });
+});
