@@ -372,6 +372,8 @@ export interface HarnessCapabilities {
   };
   /** Whether a fresh worktree shows a folder-trust dialog the user answers in the pane. */
   trustPrompt: boolean;
+  /** Whether it can copy an existing session into a new one (`--fork`); Cursor has no fork (docs/import.md F8). */
+  fork: boolean;
   /** Whether it can start a Plannotator review (`HarnessAdapter.review`). */
   review: boolean;
 }

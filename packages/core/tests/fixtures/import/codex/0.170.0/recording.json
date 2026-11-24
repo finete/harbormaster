@@ -1,0 +1,25 @@
+{
+  "harness": "codex",
+  "version": "0.170.0",
+  "recordedAt": "2026-11-24T16:50:00.446Z",
+  "prompts": [
+    "Reply with exactly the word ONE and nothing else.",
+    "Reply with exactly the word TWO and nothing else.",
+    "Reply with exactly the word THREE and nothing else."
+  ],
+  "titleCommand": "/rename Import fixture thread",
+  "placeholders": {
+    "__ROOT__": "the temp root",
+    "__HOME__": "the home folder"
+  },
+  "worktree": "__ROOT__/wt",
+  "mainCheckout": "__ROOT__/repo",
+  "files": [
+    "sessions/2026/11/24/rollout-2026-11-24T18-49-41-01a20e76-9127-7400-ba77-672ae2f7b5a7.jsonl",
+    "session_index.jsonl"
+  ],
+  "notes": [
+    "answered the folder-trust dialog",
+    "skipped Codex's hook-review dialog (Esc)"
+  ]
+}

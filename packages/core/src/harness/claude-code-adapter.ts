@@ -146,6 +146,7 @@ export const CLAUDE_CODE_CAPABILITIES: HarnessCapabilities = {
     },
   },
   trustPrompt: true,
+  fork: true,
   review: true,
 };
 

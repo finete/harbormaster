@@ -1,0 +1,19 @@
+{
+  "harness": "claude-code",
+  "version": "2.1.326",
+  "recordedAt": "2026-11-24T16:48:48.738Z",
+  "prompts": [
+    "Reply with exactly the word ONE and nothing else.",
+    "Reply with exactly the word TWO and nothing else.",
+    "Reply with exactly the word THREE and nothing else."
+  ],
+  "titleCommand": "/rename",
+  "placeholders": {
+    "__ROOT__": "the temp root",
+    "__HOME__": "the home folder"
+  },
+  "worktree": "__ROOT__/wt",
+  "mainCheckout": "__ROOT__/repo",
+  "files": ["projects/-__ROOT__-wt/9762527c-413a-4c0d-8e00-97db45b040ec.jsonl"],
+  "notes": ["answered the folder-trust dialog"]
+}

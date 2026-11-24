@@ -92,6 +92,25 @@ export interface GitRepositoryAccess {
    * `origin/HEAD` skipped), of the repository's primary checkout.
    */
   listBranches(repo: RepositoryInfo): Promise<string[]>;
+  /**
+   * What `path` is to git (import, docs/import.md F9): a linked worktree
+   * (`--git-dir` ≠ `--git-common-dir`) with its main checkout (the common
+   * dir's parent) and repository identity, a repository's main checkout, or
+   * not a git folder (a subfolder of a repository counts as a plain
+   * folder). `branch` is the checked-out branch, absent when detached.
+   * Never throws. Optional: without it everything imports as a folder task.
+   */
+  inspectFolder?(path: string): Promise<GitFolderInspection>;
+}
+
+/** `GitRepositoryAccess.inspectFolder`. */
+export interface GitFolderInspection {
+  kind: "worktree" | "checkout" | "folder";
+  /** Normalized remote identity (else the git common dir), for `worktree` / `checkout`. */
+  repositoryId?: string;
+  /** The repository's main checkout (where `addLocation` registers it). */
+  mainCheckout?: string;
+  branch?: string;
 }
 
 /** Where a new task branch starts when its base is the default branch (see `GitWorktreeAccess.resolveDefaultBase`). */

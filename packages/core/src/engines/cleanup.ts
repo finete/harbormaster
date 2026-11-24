@@ -8,7 +8,12 @@
 // Engines are pure, Managers orchestrate).
 
 import type { OrphanWorktree } from "../contracts/commands.js";
-import type { Task, TaskCleanup, TaskPullRequest } from "../contracts/model.js";
+import type {
+  Task,
+  TaskCleanup,
+  TaskPullRequest,
+  WorkspaceBinding,
+} from "../contracts/model.js";
 import { ORPHAN_WORKTREE_ERROR } from "../utilities/git-messages.js";
 
 /** Done tasks older than this many days (default) are flagged archived. */
@@ -91,6 +96,27 @@ export function orphanWorktreeWarning(
   return `${orphans.length} worktree${orphans.length === 1 ? "" : "s"} (${gb} GB) in ${root} belong to no task`;
 }
 
+/**
+ * External ownership (docs/import.md I9): the ONE guard every
+ * worktree-removal and branch-deletion path in the manager asks (Done's
+ * forced cleanup and its retries, the refresh sweep, rule landing, task
+ * delete, review-checkout reaping). A worktree Harbormaster did not create
+ * (`external`, an imported linked worktree) is never removed by anything but
+ * the explicit `removeExternalWorktree`, and its branch is never deleted.
+ */
+export function mayRemoveWorktree(
+  binding: Pick<WorkspaceBinding, "external"> | undefined,
+): boolean {
+  return binding?.external !== true;
+}
+
+/** See {@link mayRemoveWorktree}: an External worktree's branch is never Harbormaster's to delete. */
+export function mayDeleteBranch(
+  binding: Pick<WorkspaceBinding, "external"> | undefined,
+): boolean {
+  return binding?.external !== true;
+}
+
 /** What the single "Mark done?" dialog says, gathered by the manager up front. */
 export interface DoneConfirmationFacts {
   /** The task's worktree, when it has one on record. */
@@ -101,6 +127,8 @@ export interface DoneConfirmationFacts {
   unmergedBranch?: string;
   /** The worktree is open in a live pane the app will close. */
   closesPane?: boolean;
+  /** An imported External worktree (decision I9): it is kept, never removed. */
+  external?: boolean;
 }
 
 /**
@@ -110,6 +138,14 @@ export interface DoneConfirmationFacts {
  */
 export function doneConfirmationLines(facts: DoneConfirmationFacts): string[] {
   const lines: string[] = [];
+  if (facts.external && facts.worktreePath) {
+    // Never "will be removed", "changes discarded" or "branch deleted".
+    lines.push(
+      `The worktree ${facts.worktreePath} isn't Harbormaster's and will be kept.`,
+    );
+    if (facts.closesPane) lines.push("Its terminal pane will be closed.");
+    return lines;
+  }
   if (facts.worktreePath) {
     lines.push(`The worktree ${facts.worktreePath} will be removed.`);
   }
@@ -188,4 +224,23 @@ export function classifyWorktreeRemovalError(
   if (code === "ENOENT" || /\bENOENT\b/.test(message)) return "missing";
   if (ORPHAN_WORKTREE_ERROR.test(message)) return "orphan";
   return "other";
+}
+
+/** The lines of `removeExternalWorktree`'s question (decision I15): the folder goes, the branch stays. */
+export function removeExternalConfirmationLines(facts: {
+  worktreePath: string;
+  uncommittedChanges?: number;
+  branch?: string;
+  closesPane?: boolean;
+}): string[] {
+  const lines = [`The worktree ${facts.worktreePath} will be removed.`];
+  const changes = facts.uncommittedChanges ?? 0;
+  if (changes > 0) {
+    lines.push(
+      `${changes} uncommitted change${changes === 1 ? "" : "s"} will be discarded.`,
+    );
+  }
+  if (facts.branch) lines.push(`The branch ${facts.branch} is kept.`);
+  if (facts.closesPane) lines.push("Its terminal pane will be closed.");
+  return lines;
 }

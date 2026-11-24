@@ -152,6 +152,7 @@ export const CODEX_CAPABILITIES: HarnessCapabilities = {
     },
   },
   trustPrompt: true,
+  fork: true,
   review: true,
 };
 

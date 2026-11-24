@@ -264,6 +264,7 @@ describe.each(REGISTERED.map((adapter) => ({ name: adapter.id, adapter })))(
 
     it("declares capabilities consistent with its messaging", () => {
       expect(["preassign", "learned"]).toContain(capabilities.sessionId);
+      expect(typeof capabilities.fork).toBe("boolean");
       expect(["osc7501", "hooks", "none"]).toContain(
         capabilities.status.protocol,
       );

@@ -328,6 +328,7 @@ export const PI_CAPABILITIES: HarnessCapabilities = {
     },
   },
   trustPrompt: false,
+  fork: true,
   review: true,
 };
 

@@ -356,7 +356,7 @@ export class GithubPrAccess implements PullRequestAccess {
         ...aliases.map((alias) => `    ${alias}`),
         "  }",
         "}",
-        `fragment pr on PullRequest { ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
+        `fragment pr on PullRequest { title ${PR_GRAPHQL_FIELDS.replace(/\n/g, " ")} }`,
       ].join("\n");
       const output = await this.execute(
         "gh",
@@ -395,7 +395,10 @@ export class GithubPrAccess implements PullRequestAccess {
           statuses.set(branch, undefined);
           return;
         }
-        statuses.set(branch, this.fromGraphql(repositoryId, node));
+        statuses.set(branch, {
+          ...this.fromGraphql(repositoryId, node),
+          ...(node.title ? { title: node.title } : {}),
+        });
       });
     }
     return statuses;

@@ -24,6 +24,7 @@ import {
 } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type {
+  GitFolderInspection,
   GitRepositoryAccess,
   RepositoryCheckout,
   RepositoryInfo,
@@ -298,6 +299,51 @@ export class LocalGitRepositoryAccess implements GitRepositoryAccess {
       ...(remoteUrl ? { remoteUrl } : {}),
       checkouts: [{ root, isPrimary: true }],
     };
+  }
+
+  async inspectFolder(path: string): Promise<GitFolderInspection> {
+    try {
+      const topLevel = await tryRun(
+        "git",
+        ["rev-parse", "--show-toplevel"],
+        path,
+      );
+      if (!topLevel) return { kind: "folder" };
+      const [root, here] = await Promise.all([
+        realpath(topLevel),
+        realpath(path),
+      ]);
+      // A subfolder of a repository is not a worktree or checkout of its own.
+      if (root !== here) return { kind: "folder" };
+      const [commonDir, gitDir] = await Promise.all([
+        this.resolveGitPath(root, "--git-common-dir"),
+        this.resolveGitPath(root, "--git-dir"),
+      ]);
+      const remoteUrl = await tryRun(
+        "git",
+        ["remote", "get-url", "origin"],
+        root,
+      );
+      const branch = await tryRun("git", ["branch", "--show-current"], root);
+      const linked = gitDir !== commonDir;
+      // The main checkout holds `.git` (a bare repository's worktrees have none to register).
+      const mainCheckout = linked
+        ? commonDir.endsWith("/.git")
+          ? commonDir.slice(0, -"/.git".length)
+          : undefined
+        : root;
+      if (!mainCheckout) return { kind: "folder" };
+      return {
+        kind: linked ? "worktree" : "checkout",
+        repositoryId: remoteUrl
+          ? normalizeRemoteIdentity(remoteUrl)
+          : commonDir,
+        mainCheckout,
+        ...(branch ? { branch } : {}),
+      };
+    } catch {
+      return { kind: "folder" };
+    }
   }
 
   private async describeCheckout(
