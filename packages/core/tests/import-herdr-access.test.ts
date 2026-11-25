@@ -143,6 +143,7 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
       "default:billing-service",
       "default:plain-folder",
       "default:worktrees/billing-rework",
+      "default:worktrees/claude-review",
       "scratch:worktrees/scratch-notes",
     ]);
 
@@ -179,6 +180,22 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
       workspaceName: "Scratch notes",
       sessions: [{ agent: "pi", harness: "pi" }],
     });
+
+    // A real Claude Code pane: herdr records its session by id, not path.
+    const claude = find(records, "default", "worktrees/claude-review");
+    expect(claude).toMatchObject({
+      workspaceId: "w3",
+      workspaceName: "Claude review",
+    });
+    expect(claude.sessions).toHaveLength(1);
+    expect(claude.sessions[0]).toMatchObject({
+      agent: "claude",
+      harness: "claude-code",
+    });
+    expect(claude.sessions[0]?.sessionId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(claude.sessions[0]?.sessionPath).toBeUndefined();
   });
 
   it("marks a folder running from the live snapshot, matched by pane (not by workspace)", async () => {
@@ -194,6 +211,11 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
     expect(find(records, "default", "billing-service").running).toBe(false);
     expect(find(records, "default", "plain-folder").running).toBe(false);
     expect(find(records, "scratch", "worktrees/scratch-notes").running).toBe(
+      true,
+    );
+    // Claude finished its turn (herdr: `done`) but its process still holds
+    // the session in the pane: running, so import refuses to attach.
+    expect(find(records, "default", "worktrees/claude-review").running).toBe(
       true,
     );
     expect(calls().sort()).toEqual([
@@ -221,7 +243,7 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
     const reading = await reader(binary).read(READ);
 
     expect(reading.error).toBeUndefined();
-    expect(reading.orchestrations).toHaveLength(4);
+    expect(reading.orchestrations).toHaveLength(5);
     expect(reading.orchestrations.every((r) => !r.running)).toBe(true);
     expect(
       find(reading.orchestrations, "default", "worktrees/billing-rework")
@@ -242,7 +264,7 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
     }).read(READ);
 
     expect(Date.now() - started).toBeLessThan(5_000);
-    expect(reading.orchestrations).toHaveLength(4);
+    expect(reading.orchestrations).toHaveLength(5);
     expect(reading.orchestrations.every((r) => !r.running)).toBe(true);
   });
 
@@ -261,7 +283,7 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
       env: { XDG_CONFIG_HOME: cfg },
       herdrBinary: binary,
     }).read(READ);
-    expect(viaXdg.orchestrations).toHaveLength(4);
+    expect(viaXdg.orchestrations).toHaveLength(5);
 
     const home = join(temp, "someone");
     copyTree(cfg, join(home, ".config"));
@@ -270,7 +292,7 @@ describe("ImportHerdrAccess: recorded herdr 0.9.5 state", () => {
       home,
       herdrBinary: binary,
     }).read(READ);
-    expect(viaHome.orchestrations).toHaveLength(4);
+    expect(viaHome.orchestrations).toHaveLength(5);
 
     // e2e's fake home must never reach the user's real herdr state.
     const fakeHome = await new ImportHerdrAccess({
@@ -329,7 +351,7 @@ describe("ImportHerdrAccess: snapshot versions", () => {
     expect(
       reading.orchestrations.map((r) => r.orchestratorSession),
     ).not.toContain("scratch");
-    expect(reading.orchestrations).toHaveLength(3);
+    expect(reading.orchestrations).toHaveLength(4);
   });
 
   it("reports an unreadable session.json instead of throwing", async () => {

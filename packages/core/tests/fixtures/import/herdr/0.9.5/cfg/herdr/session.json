@@ -6,8 +6,8 @@
       "custom_name": "Billing rework",
       "identity_cwd": "__ROOT__/worktrees/billing-rework",
       "public_pane_numbers": {
-        "2": 2,
-        "1": 1
+        "1": 1,
+        "2": 2
       },
       "next_public_pane_number": 3,
       "public_tab_numbers": [1, 2],
@@ -27,7 +27,7 @@
                 "source": "herdr:pi",
                 "agent": "pi",
                 "kind": "path",
-                "value": "__HOME__/.pi/agent/sessions/--private-tmp-hm-herdr-vLeKYw-worktrees-billing-rework--/2026-11-24T16-55-20-692Z_01a20e7b-bf74-7798-bf9b-dd9811d00411.jsonl"
+                "value": "__HOME__/.pi/agent/sessions/--private-tmp-hm-herdr-Xegpkz-worktrees-billing-rework--/2026-11-25T09-30-22-248Z_01a2120a-b8a7-707e-a86f-e3ac3f37c39f.jsonl"
               }
             }
           },
@@ -76,6 +76,42 @@
           "zoomed": false,
           "focused": 3,
           "root_pane": 3
+        }
+      ],
+      "active_tab": 0
+    },
+    {
+      "id": "w3",
+      "custom_name": "Claude review",
+      "identity_cwd": "__ROOT__/worktrees/claude-review",
+      "public_pane_numbers": {
+        "4": 1
+      },
+      "next_public_pane_number": 2,
+      "public_tab_numbers": [1],
+      "next_public_tab_number": 2,
+      "tabs": [
+        {
+          "custom_name": null,
+          "layout": {
+            "Pane": 4
+          },
+          "panes": {
+            "4": {
+              "cwd": "__ROOT__/worktrees/claude-review",
+              "agent_name": "claude-default",
+              "managed_agent_kind": "claude",
+              "agent_session": {
+                "source": "herdr:claude",
+                "agent": "claude",
+                "kind": "id",
+                "value": "cca665d4-7233-47ef-ab16-1334ac223b12"
+              }
+            }
+          },
+          "zoomed": false,
+          "focused": 4,
+          "root_pane": 4
         }
       ],
       "active_tab": 0
