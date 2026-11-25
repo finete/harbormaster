@@ -117,6 +117,9 @@ test("a task session calls the catalog through MCP and the CLI; the CLI reports 
     "find_tasks",
     "send_to_task",
     "inbox_claim",
+    "import_list",
+    "import_apply",
+    "import_undo",
   ]);
   const byName = (name: string) =>
     log.calls.filter((call) => call.name === name).at(-1)?.result;

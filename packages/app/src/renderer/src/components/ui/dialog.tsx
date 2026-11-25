@@ -13,12 +13,15 @@ export function Dialog({
   title,
   children,
   testId,
+  className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   children: ReactNode;
   testId?: string;
+  /** Overrides on the panel (a wider dialog, say). */
+  className?: string;
 }): JSX.Element | null {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,6 +54,7 @@ export function Dialog({
         onKeyDown={onKeyDown}
         className={cn(
           "w-[360px] rounded-lg border border-border bg-card p-4 text-card-foreground",
+          className,
         )}
       >
         <h2 className="mb-3 text-base font-semibold">{title}</h2>

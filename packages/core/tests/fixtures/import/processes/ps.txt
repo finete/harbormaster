@@ -1,0 +1,19 @@
+25584 Tue Nov 17 19:04:54 2026     __HOME__/.loc __HOME__/.local/share/cursor-agent/versions/2025.09.12-4852336/node __HOME__/.local/share/cursor-agent/versions/2025.09.12-4852336/index.js worker-server
+62390 Tue Nov 24 06:43:44 2026     __HOME__/.cod __HOME__/.codex/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex app-server --listen unix:// --analytics-default-enabled --managed-daemon
+85839 Wed Nov 18 17:20:08 2026     __HOME__/.cod __HOME__/.codex/packages/app-server-daemon/releases/0.172.0-aarch64-apple-darwin/bin/codex app-server daemon pid-update-loop
+ 7982 Mon Nov 23 17:57:30 2026     pi               pi 
+58978 Sun Nov 22 14:42:14 2026     pi               pi 
+95810 Sun Nov 22 15:59:49 2026     pi               pi 
+ 4649 Tue Nov 24 18:53:58 2026     pi               pi 
+97025 Tue Nov 24 18:14:14 2026     pi               pi        
+17610 Mon Nov 23 18:00:37 2026     pi               pi   
+17810 Mon Nov 23 18:00:37 2026     claude           claude --resume 5cf7e173-0700-4f49-9a91-616b44bc7fdb --settings {"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"__HOME__/Code/harbormaster/packages/app/
+21665 Mon Nov 23 18:01:39 2026     pi               pi        
+66826 Tue Nov 24 18:42:46 2026     pi               pi        
+67442 Tue Nov 24 18:43:03 2026     pi               pi        
+ 5385 Tue Nov 24 18:54:05 2026     pi               pi 
+ 5723 Tue Nov 24 18:54:12 2026     pi               pi 
+ 6053 Tue Nov 24 18:54:17 2026     __HOME__/.loc __HOME__/.local/bin/claude
+ 6280 Tue Nov 24 18:54:22 2026     /opt/homebrew/li /opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex -c notify=[] -c check_for_update_on_startup=false -c sandbox_workspace_write.network_access=true -c tui.notifications=["agent-turn-complete","approval-requested","plan-mode-prompt","async-question"] -c tui.notification_method="osc9" -c tui.notification_condition="always" -c check_for_update_on_startup=false
+ 6695 Tue Nov 24 18:54:32 2026     __HOME__/.loc __HOME__/.local/bin/agent --disable-sigusr1 --use-system-ca __HOME__/.local/share/cursor-agent/versions/2026.11.22-e9042b2/index.js --trust --approve-mcps --plugin-dir /var/folders/h5/dxgsblhx5rv544715m7yjlbw0000gn/T/hm-import-state-8y9KEB/cursor-plugins/status-recording
+ 6911 Tue Nov 24 18:54:35 2026     __HOME__/.loc __HOME__/.local/share/cursor-agent/versions/2026.11.22-e9042b2/node __HOME__/.local/share/cursor-agent/versions/2026.11.22-e9042b2/index.js worker-server

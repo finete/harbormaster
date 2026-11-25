@@ -5,6 +5,8 @@
 // your move, ready to land, launch failed), which are recomputed, never
 // stored. Plain types; storage in access/json-inbox-access.ts.
 
+import type { UndoImportResult } from "./import.js";
+
 /** One button on an inbox item; `resolveInboxItem(id, { buttonId })` runs it. */
 export interface InboxButton {
   id: string;
@@ -12,9 +14,18 @@ export interface InboxButton {
   /**
    * `openTask`: resolves the item and returns `taskId` for the frontend to open;
    * `createTask`: creates the pre-filled task (`with` = createTask action input);
-   * `dismiss`: resolves the item; `snooze`: hides it until `with.until` (ISO) or 1 hour.
+   * `dismiss`: resolves the item; `snooze`: hides it until `with.until` (ISO) or 1 hour;
+   * `showBoard`: returns `with.taskIds` (those still on the board) for the frontend to open
+   * the board and highlight, WITHOUT resolving the item (its Undo stays available); `undoImport`: runs `undoImport(with.batchId)` and
+   * resolves the item (the result comes back as `undo`).
    */
-  action: "openTask" | "createTask" | "dismiss" | "snooze";
+  action:
+    | "openTask"
+    | "createTask"
+    | "dismiss"
+    | "snooze"
+    | "showBoard"
+    | "undoImport";
   with?: Record<string, unknown>;
 }
 
@@ -92,6 +103,10 @@ export interface ResolveInboxItemResult {
   item: InboxItem;
   /** Task the frontend should open (openTask) or the task createTask made. */
   taskId?: string;
+  /** `showBoard`: the tasks to highlight on the board. */
+  taskIds?: string[];
+  /** `undoImport`: what the undo removed and kept. */
+  undo?: UndoImportResult;
 }
 
 /** Resource Access: `<stateDir>/inbox/items.json`. */

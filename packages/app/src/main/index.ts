@@ -5,6 +5,7 @@ import {
   existsSync,
   type FSWatcher,
   mkdirSync,
+  readFileSync,
   statSync,
   watch,
   writeFileSync,
@@ -23,10 +24,13 @@ import type {
   BoardColumn,
   CreateTaskActionInput,
   CreateTaskInput,
+  ImportItemsInput,
+  ImportProcessAccess,
   InboxFormatOptions,
   InboxPriorityInput,
   LaunchTaskInput,
   ListEventsFilter,
+  ListImportCandidatesInput,
   ListInboxOptions,
   ListSlashCommandsInput,
   MessageMode,
@@ -34,6 +38,7 @@ import type {
   ReopenTaskInput,
   ResolveInboxItemOptions,
   RulesCheckInput,
+  RunningAgentProcess,
   SettingsPatch,
   Task,
   TaskState,
@@ -416,8 +421,34 @@ const versionAccess = new HttpVersionAccess(
   undefined,
   systemFetch,
 );
+// Import existing work (docs/import.md): e2e points every reader at a temp
+// home and the process table at a JSON file, so a test never reads the
+// developer's real agent stores, herdr state or processes. The packaged app
+// never sets these.
+/** `HARBORMASTER_IMPORT_PROCESSES_FILE`: a JSON array of `RunningAgentProcess`, re-read per listing so a spec can change it. */
+function staticImportProcesses(file: string): ImportProcessAccess {
+  return {
+    async listRunningAgents(): Promise<RunningAgentProcess[]> {
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+        return Array.isArray(parsed) ? (parsed as RunningAgentProcess[]) : [];
+      } catch {
+        return [];
+      }
+    },
+  };
+}
+const importHome = process.env.HARBORMASTER_IMPORT_HOME;
+const importProcessesFile = process.env.HARBORMASTER_IMPORT_PROCESSES_FILE;
+const importOptions = {
+  ...(importHome ? { home: importHome } : {}),
+  ...(importProcessesFile
+    ? { processes: staticImportProcesses(importProcessesFile) }
+    : {}),
+};
 const core = createCore({
   stateDir: activeStateDir,
+  ...(Object.keys(importOptions).length > 0 ? { import: importOptions } : {}),
   logger: consoleCoreLogger(console),
   versions: versionAccess,
   // Hand edits of config.json reach open windows (docs/settings.md S4).
@@ -1289,6 +1320,46 @@ function registerCoreIpc(): void {
       return landed;
     };
   ipcMain.handle("core:toDone", completeTask("toDone"));
+  // Import existing work (docs/import.md): thin pass-throughs.
+  ipcMain.handle(
+    "core:listImportCandidates",
+    (_event, input?: ListImportCandidatesInput) =>
+      core.commands.listImportCandidates(input),
+  );
+  ipcMain.handle("core:importItems", (_event, input: ImportItemsInput) =>
+    core.commands.importItems(input),
+  );
+  ipcMain.handle("core:undoImport", (_event, batchId: string) =>
+    core.commands.undoImport(batchId),
+  );
+  // Like Done: main owns the ptys, so it names the live cwds core must not
+  // remove a folder from under, and closes panes in the folder on confirm.
+  ipcMain.handle(
+    "core:removeExternalWorktree",
+    async (
+      _event,
+      taskId: string,
+      options: { force?: ToDoneForce } | undefined,
+    ) => {
+      const confirmed = options?.force?.confirmed === true;
+      const force = { confirmed, leaveChildren: false };
+      if (!confirmed) {
+        return core.commands.removeExternalWorktree(taskId, {
+          protectedPaths: activeSessionCwds(),
+          force,
+        });
+      }
+      warmSessions.disposeForTask(taskId);
+      const binding = await core.commands
+        .getTaskWorkspace(taskId)
+        .catch(() => undefined);
+      if (binding?.worktreePath) disposeSessionsUnder(binding.worktreePath);
+      return core.commands.removeExternalWorktree(taskId, {
+        protectedPaths: activeSessionCwds(),
+        force,
+      });
+    },
+  );
   ipcMain.handle("core:archiveTask", completeTask("archiveTask"));
   ipcMain.handle("core:retryDoneCleanup", (_event, taskId: string) =>
     core.commands.retryDoneCleanup(taskId, {

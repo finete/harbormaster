@@ -52,6 +52,15 @@ import type {
   SlashCommandCatalog,
 } from "../contracts/harness.js";
 import type {
+  ImportCandidateListing,
+  ImportItemsInput,
+  ImportItemsResult,
+  ImportProcessAccess,
+  ImportSourceReader,
+  ListImportCandidatesInput,
+  UndoImportResult,
+} from "../contracts/import.js";
+import type {
   InboxAccess,
   InboxItem,
   InboxPriorityInput,
@@ -176,8 +185,11 @@ import {
   findOrphanDirs,
   isForcedCleanupDue,
   isReviewCheckoutOf,
+  mayDeleteBranch,
+  mayRemoveWorktree,
   nextCleanupAttemptAt,
   orphanWorktreeWarning,
+  removeExternalConfirmationLines,
   shouldArchive,
   shouldDeleteBranch,
 } from "../engines/cleanup.js";
@@ -267,6 +279,7 @@ import { normalizeRemoteIdentity } from "../utilities/remote-identity.js";
 import { elapsedMs, logErrorMessage, timed } from "../utilities/timed.js";
 import { probeAgentCommand } from "./agent-probe.js";
 import { DoctorRuntime } from "./doctor-runtime.js";
+import { type ImportedTaskSpec, ImportRuntime } from "./import-runtime.js";
 import {
   type ActionResult,
   type RuleActionExecutor,
@@ -348,6 +361,14 @@ export interface CoreManagerDependencies {
   reviewProbes?: ReviewSupportProbeAccess;
   /** The host's open-url handler path (`createCore({ openUrlHandler })`), handed out by `getLaunchSettings`. */
   openUrlHandler?: string;
+  /** Import sources (agent store readers, herdr): without them `listImportCandidates` finds nothing. */
+  importReaders?: readonly ImportSourceReader[];
+  /** Agents running outside Harbormaster (`ps` + `lsof`); without it nothing is "running". */
+  importProcesses?: ImportProcessAccess;
+  /** The home folder import never treats as a project. */
+  importHome?: string;
+  /** Harbormaster's worktrees root (`<stateDir>/worktrees`): an untracked folder under it is a leftover, not importable. */
+  worktreesRoot?: string;
 }
 
 /** Where a new task runs, resolved from a create/launch input. */
@@ -378,6 +399,17 @@ const COLUMN_TITLES: Record<TaskState, string> = {
   awaiting: "Awaiting",
   done: "Done",
 };
+
+/**
+ * The first user action on an imported task stamps `imported.touchedAt`
+ * (docs/import.md "Undo"): a session launch, a manual move, an edit. Rules
+ * never touch. Returns the task unchanged for a task that was not imported
+ * or is already touched.
+ */
+function withTouch(task: Task, now: string): Task {
+  if (!task.imported || task.imported.touchedAt) return task;
+  return { ...task, imported: { ...task.imported, touchedAt: now } };
+}
 
 /** How long registered folders' repository lookups are reused. */
 const LOCATION_CACHE_TTL_MS = 30_000;
@@ -441,6 +473,8 @@ export class CoreManager implements CoreCommands {
   private readonly usage: UsageRuntime;
   /** Settings reads/writes and config change reactions (see settings-runtime.ts). */
   private readonly settings: SettingsRuntime;
+  /** Import existing work (see import-runtime.ts, docs/import.md). */
+  private readonly importer: ImportRuntime;
   /** Tasks the running refresh observes (for its completion line). */
   private refreshTaskCount = 0;
   /** Last logged safe-Done cleanup refusal per task (log dedupe). */
@@ -484,6 +518,60 @@ export class CoreManager implements CoreCommands {
       rediscover: (config) => this.allRepositories(config),
       sources: () => this.settingsSources(),
       ...(deps.onboarding ? { folders: deps.onboarding } : {}),
+    });
+    this.importer = new ImportRuntime({
+      readers: deps.importReaders ?? [],
+      ...(deps.importProcesses ? { processes: deps.importProcesses } : {}),
+      tasks: deps.tasks,
+      bindings: deps.bindings,
+      repositories: deps.repositories,
+      worktrees: deps.worktrees,
+      ...(deps.folders ? { folders: deps.folders } : {}),
+      pullRequests: deps.pullRequests,
+      clock: deps.clock,
+      ids: deps.ids,
+      logger: this.log,
+      forkCapability: async () => {
+        const config = await deps.config.load();
+        const forks = new Map(
+          this.harnessList(config).map((adapter) => [
+            adapter.id,
+            adapter.capabilities?.fork === true,
+          ]),
+        );
+        return (harness) => forks.get(harness) ?? false;
+      },
+      knownRepositories: async () =>
+        this.allRepositories(await deps.config.load()),
+      createTask: (spec) => this.createImportedTask(spec),
+      addSummary: async (fields) => {
+        const item = await this.addInboxItem({
+          kind: "import",
+          source: "harbormaster",
+          priority: false,
+          title: fields.title,
+          ...(fields.body ? { body: fields.body } : {}),
+          buttons: [
+            {
+              id: "show",
+              label: "Show on board",
+              action: "showBoard",
+              with: { taskIds: fields.taskIds },
+            },
+            {
+              id: "undo",
+              label: "Undo import",
+              action: "undoImport",
+              with: { batchId: fields.batchId },
+            },
+          ],
+        });
+        return item.id;
+      },
+      removeTask: (taskId) => this.removeImportedTask(taskId),
+      resolveSummary: (batchId) => this.resolveImportSummary(batchId),
+      ...(deps.importHome ? { homeDir: deps.importHome } : {}),
+      ...(deps.worktreesRoot ? { worktreesRoot: deps.worktreesRoot } : {}),
     });
     this.rules = deps.rules
       ? new RulesRuntime({
@@ -1109,13 +1197,22 @@ export class CoreManager implements CoreCommands {
     folderPath: string,
     now: string,
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
+    /** Extra binding fields: an imported task's session, `external` for an imported worktree. */
+    extra: Partial<WorkspaceBinding> = {},
   ): Promise<void> {
     return timed(
       this.log,
       "worktree",
       "task.provision-in-place",
       { taskId, worktreePath: folderPath },
-      () => this.provisionInPlaceWorkspaceSteps(taskId, folderPath, now, task),
+      () =>
+        this.provisionInPlaceWorkspaceSteps(
+          taskId,
+          folderPath,
+          now,
+          task,
+          extra,
+        ),
     );
   }
 
@@ -1124,6 +1221,7 @@ export class CoreManager implements CoreCommands {
     folderPath: string,
     now: string,
     task: { persist: () => Promise<void>; undo: () => Promise<void> },
+    extra: Partial<WorkspaceBinding> = {},
   ): Promise<void> {
     if (
       this.deps.folders &&
@@ -1139,6 +1237,7 @@ export class CoreManager implements CoreCommands {
         worktreePath: folderPath,
         inPlace: true,
         detached: false,
+        ...extra,
         createdAt: now,
         updatedAt: now,
       });
@@ -1479,6 +1578,15 @@ export class CoreManager implements CoreCommands {
     if (!binding?.worktreePath) return undefined;
     const now = this.deps.clock.now().toISOString();
 
+    // The first session launch after an import is the user opening the task.
+    if (task.imported && !task.imported.touchedAt) {
+      const touched = await this.deps.tasks.patchTask(taskId, (fresh) => {
+        const next = withTouch(fresh, now);
+        return next === fresh ? undefined : next;
+      });
+      if (touched) task = touched;
+    }
+
     // A task that was `interrupted` (the app quit mid-turn) clears the
     // marker on its next session launch, resume or fresh "- it never
     // auto-resumes on its own, but opening it again means it is no longer
@@ -1738,6 +1846,9 @@ export class CoreManager implements CoreCommands {
     delete reopened.archivedAt;
     delete reopened.cleanup;
     delete reopened.awaiting;
+    if (reopened.imported && !reopened.imported.touchedAt) {
+      reopened.imported = { ...reopened.imported, touchedAt: now };
+    }
     if (objective) {
       // Delivered once, as the reopened session's first message.
       reopened.initialPrompt = objective;
@@ -1805,7 +1916,16 @@ export class CoreManager implements CoreCommands {
     // instead of orphaning it next to a new cycle.
     if (previous?.worktreePath) {
       const live = await this.deps.worktrees.listWorktrees(repo);
-      if (live.some((worktree) => worktree.path === previous.worktreePath)) {
+      // An External (imported) worktree git still lists but whose folder is
+      // gone reopens like any task: a fresh Harbormaster worktree (I14).
+      const present =
+        previous.external && this.deps.folders
+          ? await this.deps.folders.isDirectory(previous.worktreePath)
+          : true;
+      if (
+        present &&
+        live.some((worktree) => worktree.path === previous.worktreePath)
+      ) {
         await this.deps.tasks.replaceTask(reopened);
         await this.publishTaskChange(reopened);
         return { task: reopened };
@@ -1899,10 +2019,20 @@ export class CoreManager implements CoreCommands {
     await this.deps.worktrees.deleteBranch(repo, branch, true).catch(() => {});
   }
 
-  async moveTask(
+  moveTask(
     id: string,
     state: TaskState,
     options?: MoveTaskOptions,
+  ): Promise<Task> {
+    return this.moveTaskCore(id, state, options, true);
+  }
+
+  /** `moveTask`; `touch: false` for a rule's move (a rule never marks an imported task as touched). */
+  private async moveTaskCore(
+    id: string,
+    state: TaskState,
+    options: MoveTaskOptions | undefined,
+    touch: boolean,
   ): Promise<Task> {
     if (state === "awaiting" && !options?.awaiting) {
       throw new Error(
@@ -1941,7 +2071,7 @@ export class CoreManager implements CoreCommands {
         // must never remove the worktree a reopened cycle runs in).
         delete moved.cleanup;
       }
-      return moved;
+      return touch ? withTouch(moved, now) : moved;
     });
     if (!next) throw new Error(`Task not found: ${id}`);
     await this.publishTaskChange(next);
@@ -1951,7 +2081,7 @@ export class CoreManager implements CoreCommands {
   async updateTaskState(id: string, patch: UpdateTaskInput): Promise<Task> {
     const task = await this.requireTask(id);
     const now = this.deps.clock.now().toISOString();
-    const next: Task = { ...task, ...patch, updatedAt: now };
+    const next: Task = withTouch({ ...task, ...patch, updatedAt: now }, now);
     await this.deps.tasks.replaceTask(next);
     await this.publishTaskChange(next);
     return next;
@@ -1964,7 +2094,14 @@ export class CoreManager implements CoreCommands {
     // nothing ever reaps, so delete takes it along unless asked not to.
     // Every refusal (live pane, dirty) throws before anything is touched,
     // leaving the task intact.
-    if (!options?.keepWorkspace && binding?.worktreePath && task.repositoryId) {
+    if (
+      !options?.keepWorkspace &&
+      binding?.worktreePath &&
+      task.repositoryId &&
+      // An External (imported) worktree stays: deleting the task only
+      // releases the board's hold on it.
+      mayRemoveWorktree(binding)
+    ) {
       const repo = await this.findRepository(task.repositoryId).catch(
         () => undefined,
       );
@@ -1988,7 +2125,7 @@ export class CoreManager implements CoreCommands {
         // Best-effort from here: the task's own worktree is gone, so the
         // delete goes through; leftovers surface in the orphan scan.
         await this.removeReviewCheckouts(repo, path, protectedPaths);
-        if (task.branch && !binding.detached) {
+        if (task.branch && !binding.detached && mayDeleteBranch(binding)) {
           await this.deleteMergedBranch(repo, task.branch, task.pr);
         }
       }
@@ -2067,10 +2204,20 @@ export class CoreManager implements CoreCommands {
     );
   }
 
-  async toAwait(
+  toAwait(
     taskId: string,
     kindId: AwaitingKindId,
     options?: ToAwaitOptions,
+  ): Promise<Task> {
+    return this.toAwaitCore(taskId, kindId, options, true);
+  }
+
+  /** `toAwait`; `touch: false` for a rule's move. */
+  private async toAwaitCore(
+    taskId: string,
+    kindId: AwaitingKindId,
+    options: ToAwaitOptions | undefined,
+    touch: boolean,
   ): Promise<Task> {
     const kind = findAwaitingKind(kindId);
     if (!kind) throw new Error(`Unknown awaiting kind: ${kindId}`);
@@ -2113,7 +2260,7 @@ export class CoreManager implements CoreCommands {
     // to the task as persisted now, not the snapshot read before it.
     const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
       assertAllowedTransition(fresh.state, "awaiting");
-      return {
+      const awaited: Task = {
         ...fresh,
         ...(entered.pullRequest
           ? {
@@ -2129,6 +2276,7 @@ export class CoreManager implements CoreCommands {
         updatedAt: now,
         stateChangedAt: fresh.state !== "awaiting" ? now : fresh.stateChangedAt,
       };
+      return touch ? withTouch(awaited, now) : awaited;
     });
     if (!next) throw new Error(`Task not found: ${taskId}`);
     await this.publishTaskChange(next);
@@ -2169,7 +2317,7 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     const next = await this.deps.tasks.patchTask(taskId, (fresh) => {
       if (fresh.state !== "done" || fresh.archivedAt) return undefined;
-      return { ...fresh, archivedAt: now, updatedAt: now };
+      return withTouch({ ...fresh, archivedAt: now, updatedAt: now }, now);
     });
     if (!next) return { task: await this.requireTask(taskId) };
     await this.publishTaskChange(next);
@@ -2536,7 +2684,7 @@ export class CoreManager implements CoreCommands {
     const now = this.deps.clock.now().toISOString();
     if (parentTaskId === null) {
       const { parentTaskId: _dropped, ...rest } = task;
-      const next: Task = { ...rest, updatedAt: now };
+      const next: Task = withTouch({ ...rest, updatedAt: now }, now);
       await this.deps.tasks.replaceTask(next);
       await this.publishTaskChange(next);
       return next;
@@ -2550,7 +2698,10 @@ export class CoreManager implements CoreCommands {
       await this.maxNestingDepth(),
     );
     if (refusal) throw new Error(refusal);
-    const next: Task = { ...task, parentTaskId: parent.id, updatedAt: now };
+    const next: Task = withTouch(
+      { ...task, parentTaskId: parent.id, updatedAt: now },
+      now,
+    );
     await this.deps.tasks.replaceTask(next);
     await this.publishTaskChange(next);
     return next;
@@ -3026,17 +3177,23 @@ export class CoreManager implements CoreCommands {
   ): Promise<ActionResult> {
     switch (move.state) {
       case "working":
-        await this.moveTask(task.id, "working");
+        await this.moveTaskCore(task.id, "working", undefined, false);
         return { outcome: "applied" };
       case "awaiting":
         if (move.enter && move.kind) {
-          await this.toAwait(task.id, move.kind, {
-            ...(move.inputs ? { inputs: move.inputs } : {}),
-          });
+          await this.toAwaitCore(
+            task.id,
+            move.kind,
+            { ...(move.inputs ? { inputs: move.inputs } : {}) },
+            false,
+          );
         } else {
-          await this.moveTask(task.id, "awaiting", {
-            ...(move.awaiting ? { awaiting: move.awaiting } : {}),
-          });
+          await this.moveTaskCore(
+            task.id,
+            "awaiting",
+            { ...(move.awaiting ? { awaiting: move.awaiting } : {}) },
+            false,
+          );
         }
         return { outcome: "applied" };
       case "done": {
@@ -3166,7 +3323,9 @@ export class CoreManager implements CoreCommands {
         };
       }
       const binding = await this.deps.bindings.getBindingForTask(task.id);
-      if (binding?.worktreePath) {
+      // An External (imported) worktree is never removed by a rule's landing:
+      // the task just lands in Done and the folder and branch stay.
+      if (binding?.worktreePath && mayRemoveWorktree(binding)) {
         const path = binding.worktreePath;
         if (isProtectedPath(path, protectedPaths)) {
           // A live pane (or other process) still has this worktree as its
@@ -3196,7 +3355,11 @@ export class CoreManager implements CoreCommands {
           protectedPaths,
         );
         if (reviewWarning) addWarning(reviewWarning);
-        if (shouldDeleteBranch(task.pr) && !binding.detached) {
+        if (
+          shouldDeleteBranch(task.pr) &&
+          !binding.detached &&
+          mayDeleteBranch(binding)
+        ) {
           const branchWarning = await this.deleteTaskBranch(repo, task.branch);
           if (branchWarning) addWarning(branchWarning);
         }
@@ -3230,7 +3393,8 @@ export class CoreManager implements CoreCommands {
         ...(archive ? { archivedAt: fresh.archivedAt ?? now } : {}),
       };
       delete landed.awaiting;
-      return landed;
+      // A manual Done (it carries a cleanup record) is the user's action; a rule's landing is not.
+      return cleanup ? withTouch(landed, now) : landed;
     });
     if (next) await this.publishTaskChange(next);
     return next;
@@ -3251,10 +3415,18 @@ export class CoreManager implements CoreCommands {
     protectedPaths: readonly string[],
   ): Promise<ToDoneConfirmation> {
     let facts: DoneConfirmationFacts = {};
-    if (task.repositoryId && task.branch) {
-      const binding = await this.deps.bindings
-        .getBindingForTask(task.id)
-        .catch(() => undefined);
+    const held = await this.deps.bindings
+      .getBindingForTask(task.id)
+      .catch(() => undefined);
+    if (held?.worktreePath && !mayRemoveWorktree(held)) {
+      // External (imported) worktree: only the keep line (decision I9).
+      facts = {
+        external: true,
+        worktreePath: held.worktreePath,
+        closesPane: isProtectedPath(held.worktreePath, protectedPaths),
+      };
+    } else if (task.repositoryId && task.branch) {
+      const binding = held;
       const repo = await this.findRepository(task.repositoryId).catch(
         () => undefined,
       );
@@ -3314,6 +3486,24 @@ export class CoreManager implements CoreCommands {
       await this.parkBinding(binding);
     }
     const now = this.deps.clock.now().toISOString();
+    if (binding?.worktreePath && !mayRemoveWorktree(binding)) {
+      // External (imported) worktree (docs/import.md I9): recorded as cleaned
+      // up without touching the folder or the branch. The binding keeps the
+      // path (and the session) for Remove worktree… and Reopen (I14); the
+      // task's launch files go like any Done task's.
+      await this.removeLaunchFiles(task.id);
+      return this.landInDone(
+        task.id,
+        {
+          mode: "forced",
+          requestedAt: now,
+          attempts: 0,
+          completedAt: now,
+          worktreePath: binding.worktreePath,
+        },
+        archive,
+      );
+    }
     const repoBacked = Boolean(task.repositoryId && task.branch);
     const cleanup: TaskCleanup = {
       mode: "forced",
@@ -3481,25 +3671,34 @@ export class CoreManager implements CoreCommands {
           const repo = await this.findRepository(task.repositoryId);
           const binding = await this.deps.bindings.getBindingForTask(task.id);
           const path = binding?.worktreePath;
-          if (path && isProtectedPath(path, protectedPaths)) {
-            // Still open in a live process: never pull a cwd out from under
-            // it; the sweep tries again once it is gone (no attempt counted).
-            return task;
-          }
-          if (binding && path) {
-            await this.removeWorktreeForced(repo, path);
-            await this.parkBinding(binding);
-          }
-          const reviewRoot = path ?? task.cleanup.worktreePath;
-          const reviewWarning = reviewRoot
-            ? await this.removeReviewCheckouts(repo, reviewRoot, protectedPaths)
-            : undefined;
-          if (reviewWarning) {
-            // Throwaway checkouts; leftovers show in the orphan scan.
-            await this.appendCleanupAudit(task.id, reviewWarning);
-          }
-          if (task.cleanup.deleteBranch) {
-            await this.deps.worktrees.deleteBranch(repo, task.branch, true);
+          if (!mayRemoveWorktree(binding)) {
+            // External (imported) worktree: not Harbormaster's. Nothing is
+            // removed, its branch stays; the cleanup just completes below.
+          } else {
+            if (path && isProtectedPath(path, protectedPaths)) {
+              // Still open in a live process: never pull a cwd out from under
+              // it; the sweep tries again once it is gone (no attempt counted).
+              return task;
+            }
+            if (binding && path) {
+              await this.removeWorktreeForced(repo, path);
+              await this.parkBinding(binding);
+            }
+            const reviewRoot = path ?? task.cleanup.worktreePath;
+            const reviewWarning = reviewRoot
+              ? await this.removeReviewCheckouts(
+                  repo,
+                  reviewRoot,
+                  protectedPaths,
+                )
+              : undefined;
+            if (reviewWarning) {
+              // Throwaway checkouts; leftovers show in the orphan scan.
+              await this.appendCleanupAudit(task.id, reviewWarning);
+            }
+            if (task.cleanup.deleteBranch && mayDeleteBranch(binding)) {
+              await this.deps.worktrees.deleteBranch(repo, task.branch, true);
+            }
           }
         }
       } catch (error) {
@@ -3664,6 +3863,8 @@ export class CoreManager implements CoreCommands {
         this.cleanupWarnings.delete(task.id);
         continue;
       }
+      // An External (imported) worktree is never retried away.
+      if (!mayRemoveWorktree(binding)) continue;
       if (isProtectedPath(binding.worktreePath, protectedPaths)) continue;
       // Narrow the race with a concurrent reopen (which reuses this very
       // worktree): only clean up a task that is still done right now.
@@ -3734,6 +3935,205 @@ export class CoreManager implements CoreCommands {
     const repo = repos.find((candidate) => candidate.id === repositoryId);
     if (!repo) throw new Error(`Repository not found: ${repositoryId}`);
     return repo;
+  }
+
+  // --- Import existing work (docs/import.md) --------------------------------
+
+  listImportCandidates(
+    input?: ListImportCandidatesInput,
+  ): Promise<ImportCandidateListing> {
+    return this.importer.list(input);
+  }
+
+  importItems(input: ImportItemsInput): Promise<ImportItemsResult> {
+    return this.importer.importItems(input);
+  }
+
+  async undoImport(batchId: string): Promise<UndoImportResult> {
+    return this.importer.undo(batchId);
+  }
+
+  /**
+   * One imported task: the same task record `createTask` writes (a started
+   * task: Working, `startedAt`, nothing to send), with the workspace
+   * provisioned through the same in-place path. A linked worktree is
+   * External (`external: true`, decision I9) and registers its repository's
+   * main checkout when unknown (I16); a checkout or plain folder is a
+   * folder task. The session is bound to resume (or to fork, I3) on the
+   * first launch; nothing is launched here.
+   */
+  private async createImportedTask(spec: ImportedTaskSpec): Promise<Task> {
+    const { candidate, session } = spec;
+    const now = this.deps.clock.now().toISOString();
+    const id = this.deps.ids.next();
+    const repo =
+      candidate.kind === "worktree"
+        ? await this.repositoryForImport(candidate.folderPath)
+        : undefined;
+    const sessionFields: Partial<WorkspaceBinding> = spec.fork
+      ? {
+          sessionId: this.deps.ids.next(),
+          forkFromSessionPath: session.sessionPath,
+        }
+      : { sessionId: session.sessionId, sessionPath: session.sessionPath };
+    const branch = repo ? candidate.branch : undefined;
+    const task: Task = {
+      id,
+      kind: repo ? "task" : "temp_task",
+      state: "working",
+      title: spec.title,
+      initialPrompt: "",
+      initialPromptDeliveredAt: now,
+      ...(repo
+        ? { repositoryId: repo.id }
+        : { folderPath: candidate.folderPath }),
+      ...(branch ? { branch } : {}),
+      ...(repo ? { targetBranch: repo.defaultBranch } : {}),
+      ...agentFields({}, session.harness),
+      createdAt: now,
+      updatedAt: now,
+      stateChangedAt: now,
+      startedAt: now,
+      imported: { batchId: spec.batchId, at: spec.at, sources: spec.sources },
+    };
+    await this.provisionInPlaceWorkspace(
+      id,
+      candidate.folderPath,
+      now,
+      {
+        persist: () => this.deps.tasks.createTask(task),
+        undo: () => this.deps.tasks.removeTask(id),
+      },
+      {
+        ...sessionFields,
+        ...(repo
+          ? {
+              external: true,
+              inPlace: false,
+              ...(branch ? { branch } : { detached: true }),
+            }
+          : {}),
+      },
+    );
+    await this.publishTaskChange(task);
+    return task;
+  }
+
+  /** The repository a worktree to import belongs to; registers its main checkout when Harbormaster does not know it (I16). */
+  private async repositoryForImport(
+    folder: string,
+  ): Promise<RepositoryInfo | undefined> {
+    const inspection = await this.deps.repositories.inspectFolder?.(folder);
+    if (inspection?.kind !== "worktree" || !inspection.mainCheckout) {
+      return undefined;
+    }
+    const main = inspection.mainCheckout;
+    const match = (repos: RepositoryInfo[]) =>
+      repos.find(
+        (repo) =>
+          repo.id === inspection.repositoryId ||
+          repo.root === main ||
+          repo.checkouts.some((checkout) => checkout.root === main),
+      );
+    const found = match(await this.listRepositories());
+    if (found) return found;
+    if (!this.deps.folders) return undefined;
+    const location = await this.addLocation(main);
+    const repos = await this.listRepositories();
+    return (
+      repos.find((repo) => repo.id === location.repositoryId) ?? match(repos)
+    );
+  }
+
+  /** Undo's removal: the task and its binding only; never the folder, branch or session. */
+  private async removeImportedTask(taskId: string): Promise<void> {
+    await this.deps.bindings.removeBinding(taskId).catch(() => {});
+    await this.deps.tasks.removeTask(taskId);
+    await this.endPairGrants(taskId);
+    await this.removeLaunchFiles(taskId);
+    await this.publishBoard();
+  }
+
+  /** After an undo the batch's summary item resolves itself. */
+  private async resolveImportSummary(batchId: string): Promise<void> {
+    const inbox = this.deps.inbox;
+    if (!inbox) return;
+    const now = this.deps.clock.now().toISOString();
+    for (const item of await inbox.list()) {
+      if (
+        item.kind !== "import" ||
+        item.resolvedAt ||
+        !item.buttons.some(
+          (button) =>
+            button.action === "undoImport" && button.with?.batchId === batchId,
+        )
+      ) {
+        continue;
+      }
+      await inbox.update(item.id, (current) => ({
+        ...current,
+        resolvedAt: now,
+      }));
+    }
+    this.deps.events.emit("inbox-changed", {});
+  }
+
+  async removeExternalWorktree(
+    taskId: string,
+    options?: ToDoneOptions,
+  ): Promise<ToDoneResult> {
+    const task = await this.requireTask(taskId);
+    const binding = await this.deps.bindings.getBindingForTask(taskId);
+    if (!binding?.external || !task.repositoryId) {
+      throw new Error(
+        `${task.title} is not an imported worktree Harbormaster can remove`,
+      );
+    }
+    if (task.state !== "done") {
+      throw new Error(`Mark ${task.title} Done before removing its worktree`);
+    }
+    const path = binding.worktreePath;
+    if (!path) {
+      throw new Error(`${task.title}'s worktree is already removed`);
+    }
+    const protectedPaths = options?.protectedPaths ?? [];
+    const closesPane = isProtectedPath(path, protectedPaths);
+    if (!options?.force?.confirmed) {
+      return {
+        requiresConfirmation: "done",
+        detail: task.title,
+        lines: removeExternalConfirmationLines({
+          worktreePath: path,
+          uncommittedChanges: await this.uncommittedChangeCount(path),
+          ...(task.branch ? { branch: task.branch } : {}),
+          closesPane,
+        }),
+        ...(closesPane ? { closesPane: true } : {}),
+      };
+    }
+    if (closesPane) {
+      throw new Error(
+        `Can't remove ${task.title}'s worktree: it is open in a live session (${path}); close it first`,
+      );
+    }
+    const repo = await this.findRepository(task.repositoryId);
+    await this.removeWorktreeForced(repo, path);
+    // The folder is Harbormaster's to manage from here: it is no longer
+    // External, and the binding parks like any Done task's (the branch stays).
+    const { external: _released, ...rest } = binding;
+    await this.parkBinding(rest);
+    const now = this.deps.clock.now().toISOString();
+    const next = await this.deps.tasks.patchTask(taskId, (fresh) => ({
+      ...fresh,
+      updatedAt: now,
+    }));
+    await this.appendCleanupAudit(
+      taskId,
+      `external worktree ${path} removed by the user; branch ${task.branch ?? "(none)"} kept`,
+    );
+    const result = next ?? task;
+    await this.publishTaskChange(result);
+    return { task: result };
   }
 
   // --- Task messaging (see /docs/task-messaging.md) ---------------------
@@ -4614,6 +5014,8 @@ export class CoreManager implements CoreCommands {
     }
     const now = this.deps.clock.now();
     let taskId: string | undefined;
+    let taskIds: string[] | undefined;
+    let undo: UndoImportResult | undefined;
     if (!button && options?.snoozeUntil) {
       if (Number.isNaN(Date.parse(options.snoozeUntil))) {
         throw new Error(`Not a time: ${options.snoozeUntil}`);
@@ -4648,6 +5050,25 @@ export class CoreManager implements CoreCommands {
         typeof button.with?.taskId === "string"
           ? button.with.taskId
           : existing.taskId;
+    } else if (button?.action === "showBoard") {
+      const wanted = Array.isArray(button.with?.taskIds)
+        ? (button.with.taskIds as unknown[]).filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+      const present = new Set(
+        (await this.deps.tasks.listTasks()).map((task) => task.id),
+      );
+      taskIds = wanted.filter((id) => present.has(id));
+      // Looking at the imported tasks must not take Undo away (docs/import.md
+      // I10): the summary item stays open until Undo, Dismiss, or an undo
+      // from elsewhere resolves it.
+      return { item: existing, taskIds };
+    } else if (button?.action === "undoImport") {
+      if (typeof button.with?.batchId !== "string") {
+        throw new Error(`Inbox item ${itemId}: undoImport needs a batchId`);
+      }
+      undo = await this.undoImport(button.with.batchId);
     }
     const item = await inbox.update(itemId, (current) => ({
       ...current,
@@ -4655,7 +5076,12 @@ export class CoreManager implements CoreCommands {
       ...(button ? { resolvedBy: button.id } : {}),
     }));
     this.deps.events.emit("inbox-changed", {});
-    return { item: item ?? existing, ...(taskId ? { taskId } : {}) };
+    return {
+      item: item ?? existing,
+      ...(taskId ? { taskId } : {}),
+      ...(taskIds ? { taskIds } : {}),
+      ...(undo ? { undo } : {}),
+    };
   }
 
   async evaluateInboxPriority(items: InboxPriorityInput[]): Promise<boolean[]> {

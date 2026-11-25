@@ -1,3 +1,4 @@
+export * from "./agent-process-access.js";
 export * from "./claude-code-access.js";
 export * from "./claude-session-usage-access.js";
 export * from "./codex-code-access.js";
@@ -9,6 +10,11 @@ export * from "./git-worktree-access.js";
 export * from "./github-pr-access.js";
 export * from "./harness-session-file-access.js";
 export * from "./http-version-access.js";
+export * from "./import-claude-sessions-access.js";
+export * from "./import-codex-sessions-access.js";
+export * from "./import-cursor-chats-access.js";
+export * from "./import-herdr-access.js";
+export * from "./import-pi-sessions-access.js";
 export * from "./json-config-access.js";
 export * from "./json-inbox-access.js";
 export * from "./json-message-access.js";

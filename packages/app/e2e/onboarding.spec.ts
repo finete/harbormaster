@@ -42,6 +42,7 @@ import {
 import { submitAs } from "./composer";
 import { writeFakeClaude } from "./fake-claude";
 import { writeVersionPi } from "./fake-pi";
+import { materializeFixture, seedWorktreeRepo } from "./import-fixtures";
 
 const mainEntry = path.join(__dirname, "..", "out", "main", "index.js");
 
@@ -143,8 +144,16 @@ test.beforeAll(() => {
   seedRepository("alpha");
   seedRepository("beta");
   fakeClaude = writeFakeClaude(root);
+  // The import step's one item: a recorded Pi session in a linked worktree
+  // (fixture copies; the packaged app and every other spec see no sessions).
+  const importHome = path.join(root, "import-home");
+  const importRoot = path.join(root, "import-work");
+  mkdirSync(importHome, { recursive: true });
+  seedWorktreeRepo(importRoot, "gamma", "feature/gamma");
+  materializeFixture("pi", importHome, importRoot);
   env = {
     ...(process.env as Record<string, string>),
+    HARBORMASTER_IMPORT_HOME: importHome,
     HOME: home,
     HARBORMASTER_SKIP_ONBOARDING: "0",
     HARBORMASTER_STATE_DIR: stateDir,
@@ -165,7 +174,7 @@ test.afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("fresh state dir: the five-screen wizard sets everything up, Start opens the composer, and a relaunch skips it", async () => {
+test("fresh state dir: the six-screen wizard sets everything up, Start opens the composer, and a relaunch skips it", async () => {
   const first = await launch();
   const { window } = first;
   try {
@@ -269,7 +278,7 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
       defaultHarness: "claude-code",
       bypassPermissions: true,
     });
-    await expect(stepper).toHaveCount(5);
+    await expect(stepper).toHaveCount(6);
     await expect(stepper.nth(2)).toHaveAttribute("data-state", "current");
 
     // Screen 3: code review, for the agent just chosen (Claude Code).
@@ -288,9 +297,24 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
       window.getByTestId("onboarding-github-enabled"),
     ).toHaveAttribute("aria-checked", "true");
     await window.getByTestId("onboarding-next").click();
-    await expect(wizard).toHaveAttribute("data-step", "concepts");
+    await expect(wizard).toHaveAttribute("data-step", "import");
     expect(readConfig().sources?.github?.enabled).toBe(true);
     expect(existsSync(path.join(stateDir, "rules", "rules.yaml"))).toBe(true);
+
+    // Import step ("Bring in your recent work?"): the recorded Pi session is
+    // listed and pre-ticked; the primary button imports it, Skip is there.
+    await expect(window.getByTestId("onboarding-import")).toContainText(
+      "Your Claude Code / Codex setup works as-is.",
+    );
+    const importRows = window.locator('[data-testid^="import-row-"]');
+    await expect(importRows).toHaveCount(1);
+    await expect(importRows).toHaveAttribute("data-checked", "true");
+    await expect(window.getByTestId("onboarding-import-skip")).toBeVisible();
+    await expect(window.getByTestId("onboarding-next")).toHaveText(
+      /Import 1 task/,
+    );
+    await window.getByTestId("onboarding-next").click();
+    await expect(wizard).toHaveAttribute("data-step", "concepts");
 
     // Screen 5 → Start: the workspace with the composer open on beta.
     await expect(window.getByTestId("onboarding-concepts")).toContainText(
@@ -334,6 +358,18 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
       repositoryId: "github.com/acme/beta",
       harness: "claude-code",
     });
+    // The wizard's import landed as a task bound to the Pi session.
+    const board = await core.commands.listBoard();
+    const imported = board
+      .flatMap((column) => column.groups.flatMap((group) => group.tasks))
+      .filter((entry) => entry.imported);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]).toMatchObject({
+      repositoryId: "github.com/acme/gamma",
+      harness: "pi",
+    });
+    // The doctor check below assumes no active task: drop the imported one.
+    await core.commands.deleteTask((imported[0] as Task).id);
   } finally {
     await first.app.close().catch(() => {});
   }
@@ -358,8 +394,13 @@ test("fresh state dir: the five-screen wizard sets everything up, Start opens th
     );
 
     // Setup screen → "Check setup": grouped doctor checks with statuses.
-    for (const step of ["agent", "review", "github", "concepts"]) {
-      await second.window.getByTestId("onboarding-next").click();
+    for (const step of ["agent", "review", "github", "import", "concepts"]) {
+      // Skip on the import step: nothing is imported again.
+      await second.window
+        .getByTestId(
+          step === "concepts" ? "onboarding-import-skip" : "onboarding-next",
+        )
+        .click();
       await expect(second.window.getByTestId("onboarding")).toHaveAttribute(
         "data-step",
         step,

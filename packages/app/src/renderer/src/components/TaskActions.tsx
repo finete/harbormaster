@@ -1,6 +1,6 @@
-import { Archive, Loader2, Play, RotateCcw } from "lucide-react";
+import { Archive, FolderMinus, Loader2, Play, RotateCcw } from "lucide-react";
 import type { JSX, MouseEvent } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Task } from "../../../preload/api";
 import {
   archiveTaskMutation,
@@ -8,6 +8,7 @@ import {
   canAwait,
   canDone,
   canReopen,
+  removeExternalWorktreeMutation,
   reopenTaskMutation,
   startTaskMutation,
   toAwaitMutation,
@@ -34,8 +35,37 @@ import { Kbd } from "./ui/kbd";
  */
 export function TaskActions({ task }: { task: Task }): JSX.Element {
   const [busy, setBusy] = useState<
-    "start" | "await" | "done" | "reopen" | "archive" | null
+    "start" | "await" | "done" | "reopen" | "archive" | "remove" | null
   >(null);
+  // Remove worktree… (docs/import.md I15): a Done/archived task whose folder
+  // is an imported External worktree still on disk. Read from the binding,
+  // re-read whenever the task changes (removal clears `external`).
+  const [externalWorktree, setExternalWorktree] = useState(false);
+  const finished = task.state === "done" || Boolean(task.archivedAt);
+  useEffect(() => {
+    // `task.updatedAt` re-runs it after a removal.
+    void task.updatedAt;
+    if (!finished) {
+      setExternalWorktree(false);
+      return;
+    }
+    let cancelled = false;
+    void window.harbormaster.core
+      .getTaskWorkspace(task.id)
+      .then((binding) => {
+        if (!cancelled) {
+          setExternalWorktree(
+            Boolean(binding?.external && binding.worktreePath),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExternalWorktree(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id, task.updatedAt, finished]);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [awaitOpen, setAwaitOpen] = useState(false);
 
@@ -124,6 +154,37 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
     </Button>
   );
 
+  async function handleRemoveWorktree(
+    event: MouseEvent<HTMLButtonElement>,
+  ): Promise<void> {
+    stopClick(event);
+    if (busy) return;
+    setBusy("remove");
+    try {
+      await removeExternalWorktreeMutation(task.id);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const removeWorktreeButton = finished && externalWorktree && (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={busy !== null}
+      onClick={handleRemoveWorktree}
+      data-testid={`remove-worktree-button-${task.id}`}
+      title="Remove the imported worktree folder (the branch is kept)"
+    >
+      {busy === "remove" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <FolderMinus className="h-3.5 w-3.5" />
+      )}
+      Remove worktree…
+    </Button>
+  );
+
   function handleReopenClick(event: MouseEvent<HTMLButtonElement>): void {
     stopClick(event);
     if (busy) return;
@@ -162,6 +223,7 @@ export function TaskActions({ task }: { task: Task }): JSX.Element {
           )}
           Reopen
         </Button>
+        {removeWorktreeButton}
         {archiveButton}
         {/* Clicks inside the dialog must not bubble to the header's hosts. */}
         {/* biome-ignore lint/a11y/noStaticElementInteractions: event-propagation boundary only, not an interactive element. */}

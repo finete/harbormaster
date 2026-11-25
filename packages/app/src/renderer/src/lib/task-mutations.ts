@@ -269,3 +269,43 @@ export async function reopenTaskMutation(
     pushToast(describeThrown(error), "error");
   }
 }
+
+/** The question behind "Remove worktree…" (docs/import.md I15); its lines are core's. */
+export const REMOVE_WORKTREE_QUESTION = {
+  title: "Remove worktree?",
+  confirmLabel: "Remove",
+} as const;
+
+/**
+ * Remove an imported External worktree of a Done/archived task (the folder
+ * only; the branch is kept). Same question/confirm protocol as Done: the
+ * first call returns core's lines, the confirmed one removes.
+ */
+export async function removeExternalWorktreeMutation(
+  taskId: string,
+): Promise<void> {
+  try {
+    const asked = await window.harbormaster.core.removeExternalWorktree(taskId);
+    if (!("requiresConfirmation" in asked)) {
+      if (asked.warning) pushToast(asked.warning, "warning");
+      return;
+    }
+    const confirmed = await requestConfirm({
+      title: REMOVE_WORKTREE_QUESTION.title,
+      message: "",
+      lines: asked.lines ?? [],
+      confirmLabel: REMOVE_WORKTREE_QUESTION.confirmLabel,
+    });
+    if (!confirmed) return;
+    const done = await window.harbormaster.core.removeExternalWorktree(taskId, {
+      force: { confirmed: true },
+    });
+    if ("requiresConfirmation" in done) {
+      pushToast(done.detail, "error");
+    } else if (done.warning) {
+      pushToast(done.warning, "warning");
+    }
+  } catch (error) {
+    pushToast(describeThrown(error), "error");
+  }
+}

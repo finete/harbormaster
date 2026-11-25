@@ -6,6 +6,7 @@
 import { FolderOpen } from "lucide-react";
 import type { JSX } from "react";
 import type { SettingsSnapshot } from "../../../../preload/api";
+import { openImportDialog } from "../../lib/import-dialog";
 import { automationLine, findSetting } from "../../lib/settings-form";
 import type { SettingsModel } from "../../lib/use-settings";
 import { Button } from "../ui/button";
@@ -63,6 +64,20 @@ export function GeneralSection({
         snapshot={snapshot}
         settingKey="notifications.enabled"
       />
+      <SettingRow
+        testId="setting-row-import"
+        title="Import existing work"
+        help="Bring sessions from Claude Code, Codex, Pi, Cursor and herdr onto the board as tasks. Nothing is copied or changed."
+      >
+        <Button
+          variant="secondary"
+          size="sm"
+          data-testid="settings-import"
+          onClick={openImportDialog}
+        >
+          Import existing work…
+        </Button>
+      </SettingRow>
       <SettingRow
         testId="setting-row-automation"
         title={automation?.title ?? "Automation"}

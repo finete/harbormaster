@@ -78,6 +78,7 @@ export function customAgentCapabilities(
     },
     delivery: { steer: false, followUp: false, wakeIdle: false, channels: {} },
     trustPrompt: false,
+    fork: false,
     review: Boolean(config.reviewCommand?.trim()),
   };
 }

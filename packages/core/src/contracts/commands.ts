@@ -13,6 +13,13 @@ import type {
   SlashCommandCatalog,
 } from "./harness.js";
 import type {
+  ImportCandidateListing,
+  ImportItemsInput,
+  ImportItemsResult,
+  ListImportCandidatesInput,
+  UndoImportResult,
+} from "./import.js";
+import type {
   InboxItem,
   InboxPriorityInput,
   ListInboxOptions,
@@ -1120,6 +1127,38 @@ export interface CoreCommands {
    * Rejects for an unknown task.
    */
   refreshTaskUsage(taskId: string): Promise<TaskUsage | undefined>;
+
+  // --- Import existing work (docs/import.md) ------------------------------
+
+  /**
+   * Everything importable from the agent session stores (and any plugged-in
+   * orchestrator reader): one candidate per folder, grouped by repository,
+   * newest first. Read-only; never opens a session.
+   */
+  listImportCandidates(
+    input?: ListImportCandidatesInput,
+  ): Promise<ImportCandidateListing>;
+  /**
+   * Import the ticked rows as tasks (decisions I1, I6-I9): re-lists, validates
+   * each selection, creates the tasks, writes the summary inbox item.
+   */
+  importItems(input: ImportItemsInput): Promise<ImportItemsResult>;
+  /**
+   * Undo one import batch: tasks not opened or changed since are removed
+   * (folders, branches and sessions are never touched); touched ones are
+   * kept and listed. Undoing twice returns an empty result.
+   */
+  undoImport(batchId: string): Promise<UndoImportResult>;
+  /**
+   * Remove an imported External worktree (decision I15) of a Done/archived
+   * task. Same question/confirm protocol as `toDone`: without
+   * `force.confirmed` it returns the confirmation lines and changes nothing.
+   * The branch is kept. Refused for a task that is not External.
+   */
+  removeExternalWorktree(
+    taskId: string,
+    options?: ToDoneOptions,
+  ): Promise<ToDoneResult>;
 }
 
 /** What `requestReview` built and how it was delivered. */

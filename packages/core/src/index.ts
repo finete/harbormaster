@@ -5,9 +5,15 @@
 // constructor-injected state directory, or process assumption leaks through
 // this boundary — it must stay daemon-ready (see /docs/design-decisions.md "Layering").
 
+import { homedir } from "node:os";
 import {
+  AgentProcessAccess,
+  ClaudeSessionsReader,
+  CodexSessionsReader,
+  CursorChatsReader,
   GithubPrAccess,
   HttpVersionAccess,
+  ImportHerdrAccess,
   JsonConfigAccess,
   JsonFolderAccess,
   JsonInboxAccess,
@@ -27,6 +33,7 @@ import {
   LocalScratchWorkspaceAccess,
   LocalSessionFileAccess,
   LocalTaskAttachmentAccess,
+  PiSessionsReader,
   SessionPresenceAccess,
   timedPullRequestAccess,
   timedWorktreeAccess,
@@ -36,6 +43,10 @@ import type { EnvironmentProbeAccess } from "./contracts/doctor.js";
 import type { CoreEvents } from "./contracts/events.js";
 import type { PullRequestAccess, VersionAccess } from "./contracts/github.js";
 import type { HarnessAdapter } from "./contracts/harness.js";
+import type {
+  ImportProcessAccess,
+  ImportSourceReader,
+} from "./contracts/import.js";
 import { type CoreLogger, noopCoreLogger } from "./contracts/logger.js";
 import type { OnboardingProbeAccess } from "./contracts/onboarding.js";
 import type {
@@ -107,6 +118,20 @@ export interface CoreOptions {
    * Stopped by `Core.close()`.
    */
   watchConfig?: boolean;
+  /**
+   * Import existing work (docs/import.md). `home` points EVERY built-in
+   * reader (Pi, Claude Code, Codex, Cursor, herdr) and the process access at
+   * one home folder instead of the user's own (tests and e2e use it; the app
+   * maps its environment variables to it). `readers` replaces the built-in
+   * reader list; `extraReaders` adds to it (a future orchestrator);
+   * `processes` replaces the `ps` / `lsof` process access.
+   */
+  import?: {
+    home?: string;
+    readers?: ImportSourceReader[];
+    extraReaders?: ImportSourceReader[];
+    processes?: ImportProcessAccess;
+  };
 }
 
 /** The transport-ready facade: commands in, state events out. */
@@ -161,6 +186,17 @@ export function createCore(options: CoreOptions = {}): Core {
       ? new HarnessRegistry([options.harness], { fallback: options.harness })
       : createHarnessRegistry({ stateDir: paths.root, clock, presence }));
 
+  const importHome = options.import?.home;
+  const homeOption = importHome ? { home: importHome } : {};
+  const importReaders = options.import?.readers ?? [
+    new PiSessionsReader(homeOption),
+    new ClaudeSessionsReader(homeOption),
+    new CodexSessionsReader(homeOption),
+    new CursorChatsReader(homeOption),
+    new ImportHerdrAccess(homeOption),
+    ...(options.import?.extraReaders ?? []),
+  ];
+
   const commands = new CoreManager({
     tasks: taskState,
     clock,
@@ -199,6 +235,11 @@ export function createCore(options: CoreOptions = {}): Core {
           : {}),
       }),
     reviewProbes: options.reviewProbes ?? new LocalReviewSupportProbeAccess(),
+    importReaders,
+    importProcesses:
+      options.import?.processes ?? new AgentProcessAccess(homeOption),
+    importHome: importHome ?? homedir(),
+    worktreesRoot: paths.worktreesDir,
     ...(options.openUrlHandler
       ? { openUrlHandler: options.openUrlHandler }
       : {}),

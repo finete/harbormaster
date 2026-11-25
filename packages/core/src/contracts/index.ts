@@ -2,6 +2,7 @@ export * from "./commands.js";
 export * from "./doctor.js";
 export * from "./events.js";
 export * from "./harness.js";
+export * from "./import.js";
 export * from "./inbox.js";
 export * from "./logger.js";
 export * from "./messaging.js";

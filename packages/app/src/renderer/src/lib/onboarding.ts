@@ -20,12 +20,13 @@ export function isBuiltinAgent(
   return builtinIds.includes(id);
 }
 
-/** The wizard's five steps, in order: id (the `data-step` value) and the verb-first label. */
+/** The wizard's six steps, in order: id (the `data-step` value) and the verb-first label. */
 export const ONBOARDING_STEPS = [
   { id: "code", label: "Pick your repositories folder" },
   { id: "agent", label: "Choose your agent" },
   { id: "review", label: "Set up code review" },
   { id: "github", label: "Connect GitHub" },
+  { id: "import", label: "Bring in your recent work?" },
   { id: "concepts", label: "How it works" },
 ] as const;
 
