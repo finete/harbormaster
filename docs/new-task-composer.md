@@ -158,6 +158,13 @@ branch line (`baseRef`) and is used exactly as given, with no fetch. Picking
 the default branch itself counts as no choice: it gets the same fresh start. A PR
 task's base is the PR's.
 
+The picker lists local branches, then remote ones, each most recently
+committed first, and searches them itself (every typed word must appear;
+an exact name, then a name or path segment starting with the first word,
+rank first). It renders only the best 50 and says how many more matched:
+a big repository has thousands of branches, and handing them all to cmdk
+froze the app (`renderer/src/lib/branch-search.ts`).
+
 ## Paste / drop
 
 Pasting or dropping into the prompt goes through the same resolver as
