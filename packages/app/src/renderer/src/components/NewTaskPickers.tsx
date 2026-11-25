@@ -21,7 +21,7 @@ import {
   MessageSquare,
   X,
 } from "lucide-react";
-import type { JSX, ReactNode } from "react";
+import { type JSX, type ReactNode, useMemo, useState } from "react";
 import type {
   HarnessModelCatalog,
   KnownLocation,
@@ -29,6 +29,7 @@ import type {
   Task,
   ThinkingLevel,
 } from "../../../preload/api";
+import { branchMatches, matchBranches } from "../lib/branch-search";
 import {
   type DraftMode,
   folderWhere,
@@ -863,35 +864,84 @@ export function BranchPicker({
   onSelect: (ref: string | null) => void;
   children: ReactNode;
 }): JSX.Element {
-  const others = (branches ?? []).filter(
-    (branch) => branch !== defaultBranch && branch !== parentBranch,
-  );
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent className="w-80" data-testid="new-task-base-ref-menu">
-        <Command>
-          <CommandInput placeholder="Search branches…" />
-          <CommandList>
-            <CommandEmpty>
-              {branches === null ? "Loading branches…" : "No branch found."}
-            </CommandEmpty>
-            <CommandGroup>
-              {parentBranch && (
-                <CommandItem
-                  value={`parent ${parentBranch}`}
-                  data-testid="new-task-base-ref-option"
-                  data-ref={parentBranch}
-                  onSelect={() => onSelect(parentBranch)}
-                >
-                  <GitBranch />
-                  <span className="truncate">{parentBranch}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    parent's branch
-                  </span>
-                  <Check4 on={value === parentBranch} />
-                </CommandItem>
-              )}
+        <BranchMenu
+          branches={branches}
+          defaultBranch={defaultBranch}
+          {...(parentBranch ? { parentBranch } : {})}
+          value={value}
+          onSelect={onSelect}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The picker's list, searched by `matchBranches` rather than cmdk (see
+ * lib/branch-search.ts). Mounted only while open, so the query starts empty.
+ */
+function BranchMenu({
+  branches,
+  defaultBranch,
+  parentBranch,
+  value,
+  onSelect,
+}: {
+  branches: readonly string[] | null;
+  defaultBranch: string;
+  parentBranch?: string;
+  value: string;
+  onSelect: (ref: string | null) => void;
+}): JSX.Element {
+  const [query, setQuery] = useState("");
+  const others = useMemo(
+    () =>
+      (branches ?? []).filter(
+        (branch) => branch !== defaultBranch && branch !== parentBranch,
+      ),
+    [branches, defaultBranch, parentBranch],
+  );
+  const { shown, hidden } = useMemo(
+    () => matchBranches(others, query),
+    [others, query],
+  );
+  // Their labels count too, as with cmdk: "default" finds the default branch.
+  const showParent =
+    parentBranch && branchMatches(`parent ${parentBranch}`, query);
+  const showDefault = branchMatches(`default ${defaultBranch}`, query);
+  return (
+    <Command shouldFilter={false}>
+      <CommandInput
+        placeholder="Search branches…"
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList>
+        <CommandEmpty>
+          {branches === null ? "Loading branches…" : "No branch found."}
+        </CommandEmpty>
+        {(showParent || showDefault) && (
+          <CommandGroup>
+            {showParent && (
+              <CommandItem
+                value={`parent ${parentBranch}`}
+                data-testid="new-task-base-ref-option"
+                data-ref={parentBranch}
+                onSelect={() => onSelect(parentBranch)}
+              >
+                <GitBranch />
+                <span className="truncate">{parentBranch}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  parent's branch
+                </span>
+                <Check4 on={value === parentBranch} />
+              </CommandItem>
+            )}
+            {showDefault && (
               <CommandItem
                 value={`default ${defaultBranch}`}
                 data-testid="new-task-base-ref-option"
@@ -905,28 +955,36 @@ export function BranchPicker({
                 </span>
                 <Check4 on={value === defaultBranch} />
               </CommandItem>
-            </CommandGroup>
-            {others.length > 0 && (
-              <CommandGroup heading="Branches">
-                {others.map((branch) => (
-                  <CommandItem
-                    key={branch}
-                    value={branch}
-                    data-testid="new-task-base-ref-option"
-                    data-ref={branch}
-                    onSelect={() => onSelect(branch)}
-                  >
-                    <GitBranch />
-                    <span className="truncate">{branch}</span>
-                    <Check4 on={value === branch} />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
             )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+          </CommandGroup>
+        )}
+        {shown.length > 0 && (
+          <CommandGroup heading="Branches">
+            {shown.map((branch) => (
+              <CommandItem
+                key={branch}
+                value={branch}
+                data-testid="new-task-base-ref-option"
+                data-ref={branch}
+                onSelect={() => onSelect(branch)}
+              >
+                <GitBranch />
+                <span className="truncate">{branch}</span>
+                <Check4 on={value === branch} />
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+        {hidden > 0 && (
+          <div
+            data-testid="new-task-base-ref-more"
+            className="px-2 py-1.5 text-[11px] text-muted-foreground"
+          >
+            {hidden} more — type to narrow
+          </div>
+        )}
+      </CommandList>
+    </Command>
   );
 }
 
