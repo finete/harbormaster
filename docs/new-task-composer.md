@@ -160,10 +160,11 @@ task's base is the PR's.
 
 The picker lists local branches, then remote ones, each most recently
 committed first, and searches them itself (every typed word must appear;
-an exact name, then a name or path segment starting with the first word,
-rank first). It renders only the best 50 and says how many more matched:
-a big repository has thousands of branches, and handing them all to cmdk
-froze the app (`renderer/src/lib/branch-search.ts`).
+a name or last path segment equal to the first word, then a name or path
+segment starting with it, rank first). It renders only the best 50 and says
+how many more matched: on a repository with ~9.6k branches, handing them all
+to cmdk blocked the renderer for ~0.5 s on open and on every keystroke
+(`renderer/src/lib/branch-search.ts`).
 
 ## Paste / drop
 

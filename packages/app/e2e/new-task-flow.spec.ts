@@ -521,8 +521,7 @@ test("typing / at the start of the prompt offers the agent's skills and commands
 });
 
 test("the Base picker on a repository with thousands of branches renders only the newest few, counts the rest, and search reaches any of them", async () => {
-  // 3,000 remote branches at one commit: git lists ties by name, so
-  // origin/bulk-2999 comes last, far past what the picker renders.
+  // 3,000 remote branches, far more than the picker renders.
   const head = git(["rev-parse", "HEAD"], repoCheckout).trim();
   const bulk = Array.from(
     { length: 3000 },
@@ -546,13 +545,16 @@ test("the Base picker on a repository with thousands of branches renders only th
     // The default branch plus the first 50: never one item per branch.
     await expect(options).toHaveCount(51);
 
-    await menu.getByPlaceholder("Search branches…").fill("bulk-2999");
+    // A middle one is never among the first 50, whichever way git breaks
+    // ties; pick it by search and the keyboard.
+    await expect(menu.locator('[data-ref="origin/bulk-1500"]')).toHaveCount(0);
+    await menu.getByPlaceholder("Search branches…").fill("bulk-1500");
     await expect(options).toHaveCount(1);
     await expect(menu.getByTestId("new-task-base-ref-more")).toHaveCount(0);
-    await options.first().click();
+    await window.keyboard.press("Enter");
     await expect(menu).toHaveCount(0);
     await expect(window.getByTestId("new-task-base-ref")).toHaveText(
-      "origin/bulk-2999",
+      "origin/bulk-1500",
     );
 
     await window.getByTestId("sidebar-draft-close").click();

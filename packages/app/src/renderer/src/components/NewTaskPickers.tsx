@@ -881,10 +881,8 @@ export function BranchPicker({
 }
 
 /**
- * The picker's searchable list. It filters itself (`shouldFilter={false}`)
- * and renders only the best matches: a big repository has thousands of
- * branches, and cmdk mounting and re-sorting one item per branch froze the
- * app. Mounted only while the popover is open, so the query starts empty.
+ * The picker's list, searched by `matchBranches` rather than cmdk (see
+ * lib/branch-search.ts). Mounted only while open, so the query starts empty.
  */
 function BranchMenu({
   branches,
@@ -911,8 +909,10 @@ function BranchMenu({
     () => matchBranches(others, query),
     [others, query],
   );
-  const showParent = parentBranch && branchMatches(parentBranch, query);
-  const showDefault = branchMatches(defaultBranch, query);
+  // Their labels count too, as with cmdk: "default" finds the default branch.
+  const showParent =
+    parentBranch && branchMatches(`parent ${parentBranch}`, query);
+  const showDefault = branchMatches(`default ${defaultBranch}`, query);
   return (
     <Command shouldFilter={false}>
       <CommandInput

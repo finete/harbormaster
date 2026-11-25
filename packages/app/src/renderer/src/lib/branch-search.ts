@@ -34,10 +34,10 @@ export function branchMatches(name: string, query: string): boolean {
 
 /**
  * The branches matching `query`, best first: every whitespace-separated word
- * must appear (case-insensitive); the name itself (or a remote's copy of
- * it) ranks first, then a name or path segment starting with the first word,
- * then any other match. Ties keep the input order, which is git's most
- * recently committed first. O(branches) per call.
+ * must appear (case-insensitive); a name or its last path segment equal to
+ * the first word ranks first (`login` finds `origin/login` too), then a name
+ * or path segment starting with it, then any other match. Ties keep the
+ * input order, git's most recently committed first. O(branches) per call.
  */
 export function matchBranches(
   branches: readonly string[],
