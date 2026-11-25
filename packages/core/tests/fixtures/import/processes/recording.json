@@ -6,6 +6,7 @@
     "cursor": "2026.11.22"
   },
   "recordedAt": "2026-11-24T16:54:41.393Z",
+  "timeZone": "Asia/Jerusalem",
   "command": "ps -axo pid=,lstart=,comm=,args=  |  lsof -a -d cwd -p <pids> -Fpn",
   "worktree": "__ROOT__/wt",
   "claudeRegistryFiles": 1,

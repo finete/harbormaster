@@ -4,7 +4,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   AgentProcessAccess,
   buildRunningAgents,
@@ -20,6 +20,17 @@ const ROOT = "/tmp/hm-recorded-root";
 const fill = (text: string) =>
   text.split("__ROOT__").join(ROOT).split("__HOME__").join("/Users/someone");
 const ps = fill(readFileSync(join(DIR, "ps.txt"), "utf8"));
+// `ps lstart` is local time, and production parses it in the same zone `ps`
+// ran in. Replay it in the recording's zone, not the runner's (CI is UTC).
+const recording = JSON.parse(
+  readFileSync(join(DIR, "recording.json"), "utf8"),
+) as { timeZone: string };
+const runnerTimeZone = process.env.TZ;
+process.env.TZ = recording.timeZone;
+afterAll(() => {
+  if (runnerTimeZone === undefined) delete process.env.TZ;
+  else process.env.TZ = runnerTimeZone;
+});
 const lsof = fill(readFileSync(join(DIR, "lsof.txt"), "utf8"));
 const registry = readdirSync(join(DIR, "claude-sessions")).map((name) =>
   parseClaudeRegistryEntry(

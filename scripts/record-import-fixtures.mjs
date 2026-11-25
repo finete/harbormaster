@@ -633,6 +633,8 @@ async function recordProcesses({ core, outDir, keepTemp }) {
         {
           versions,
           recordedAt: new Date().toISOString(),
+          // `ps lstart` is local time: the replay test parses it in this zone.
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           command:
             "ps -axo pid=,lstart=,comm=,args=  |  lsof -a -d cwd -p <pids> -Fpn",
           worktree: "__ROOT__/wt",
